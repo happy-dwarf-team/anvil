@@ -15,7 +15,7 @@ namespace {
 
 const std::set<std::string> kKnownKeys = {
     "id", "name", "version", "authors", "description", "api", "entry", "phase",
-    "affects_gameplay", "load_after", "dependencies", "game_builds", "expect",
+    "affects_gameplay", "load_after", "dependencies", "game_builds", "expect", "anvil",
 };
 
 const std::set<std::string> kKnownExpectKeys = {"build", "rva", "bytes", "name"};
@@ -153,6 +153,15 @@ ManifestResult parse_manifest_text(std::string_view text, const std::filesystem:
     }
     m.description = table["description"].value_or<std::string>("");
     m.affects_gameplay = table["affects_gameplay"].value_or(false);
+    if (table.contains("anvil")) {
+        const auto rangeText = table["anvil"].value<std::string>();
+        const auto range = rangeText ? VersionRange::parse(*rangeText) : std::nullopt;
+        if (!range) {
+            result.error = "plugin.toml: anvil must be a SemVer range string, e.g. \">=0.2.0\"";
+            return result;
+        }
+        m.anvil = *range;
+    }
 
     std::string error;
     if (!read_string_array(table.get("authors"), m.authors, error, "authors") ||

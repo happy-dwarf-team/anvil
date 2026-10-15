@@ -79,6 +79,7 @@ version = "0.1.0"                 # SemVer
 authors = ["Happy Dwarf Team"]
 description = "Faster game start-up."
 api = 1                           # Anvil plugin API major version
+anvil = ">=0.2.0"                 # optional: Anvil versions the plugin needs (SemVer range)
 entry = "eu4_startup_boost.dll"   # file name inside the plugin folder
 phase = "early"                   # "early" | "main"
 affects_gameplay = false          # true = may change simulation (multiplayer/ironman warning)
@@ -208,8 +209,9 @@ metadata, SKSE's messaging, VS Code extension APIs):
 4. Discover plugins: `anvil/plugins/*/plugin.toml` (stage 3: plus enabled
    mods' `anvil/` folders); broken manifests and missing entry DLLs are skipped
    with the error.
-5. Resolve (API version, build, duplicates — first folder in name order wins,
-   disabled ids, `[[expect]]` bytes, dependencies, cycles) and order.
+5. Resolve (API version, `anvil` version range, build, duplicates — first
+   folder in name order wins, disabled ids, `[[expect]]` bytes, dependencies,
+   cycles) and order.
 6. Restore the entry point; load `early` plugins; start the main-phase thread
    (main plugins → `anvil.plugins_loaded` → status summary → SHA-256 check) and
    the ready watcher.
@@ -272,6 +274,11 @@ antivirus heuristics look at).
 - GitHub Actions on `windows-latest`: build, tests, release zip
   (`version.dll`, `anvil/` skeleton, README, LICENSE, SHA256SUMS).
 - Versioning: SemVer for Anvil; the plugin API has its own major version.
+  Within API 1, functions and fields are only appended (`ANVIL_HOST_HAS`) and
+  manifest keys only added; a plugin that needs something added later states
+  `anvil = ">=x.y.z"`, and an older Anvil skips it with the reason instead of
+  loading it without the feature (an unknown manifest key, such as
+  `[[expect]]` on an Anvil that predates it, would otherwise be ignored).
 
 ## 12. Stages
 

@@ -369,6 +369,7 @@ void startup_impl(const std::filesystem::path& game_dir) {
     // Discovery: anvil/plugins/<folder>/plugin.toml
     ResolveInput input;
     input.host_api = ANVIL_API_VERSION;
+    input.host_version = Version::parse(kAnvilVersion);
     input.game_build = game.build_id;
     input.disabled = settings.disabled_plugins;
     // [[expect]]: compared now, before any plugin is loaded or has patched anything.
