@@ -115,7 +115,29 @@ typedef struct AnvilHost {
     AnvilResult (*subscribe)(AnvilPlugin *self, const char *event, AnvilEventCallback callback,
                              void *context);
     AnvilResult (*publish)(AnvilPlugin *self, const char *event, const void *payload);
+
+    /* --- added after API 1.0: check ANVIL_HOST_HAS(host, expect_bytes) --- */
+
+    /* Read-only check that game code or data the plugin depends on (functions
+     * it calls, vtables, globals) is what the plugin was written for. Compares
+     * (actual & mask) with (expected & mask); mask NULL compares every bit, a
+     * 0x00 mask byte skips that byte (e.g. relocated absolute addresses).
+     * Bytes already patched by other plugins are compared in their original
+     * form. Verify every dependency before the first patch: once the plugin
+     * has patches of its own, the call returns ANVIL_ERROR_WRONG_PHASE.
+     * Dependencies known in advance are better declared as [[expect]] in
+     * plugin.toml: Anvil checks those before the plugin DLL is loaded.
+     * size: 1 .. ANVIL_MAX_EXPECT_BYTES. */
+    AnvilResult (*expect_bytes)(AnvilPlugin *self, uint32_t rva, const void *expected, const void *mask,
+                                size_t size);
 } AnvilHost;
+
+/* Largest range one expect_bytes call or one [[expect]] entry may compare. */
+#define ANVIL_MAX_EXPECT_BYTES 65536
+
+/* Nonzero when the host provides `field` (appended after API 1.0). */
+#define ANVIL_HOST_HAS(host, field) \
+    ((host)->size >= offsetof(AnvilHost, field) + sizeof((host)->field))
 
 /*
  * Exported by every plugin. Called once:

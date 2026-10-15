@@ -2,6 +2,7 @@
 
 #include "manifest.hpp"
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -12,6 +13,9 @@ struct ResolveInput {
     unsigned host_api = 0;
     const char* game_build = nullptr;  // nullptr = unknown build
     std::vector<std::string> disabled;  // ids disabled in anvil.toml
+    // Optional check after the API and build checks (e.g. [[expect]] bytes);
+    // returns why the plugin must be skipped, empty = keep it.
+    std::function<std::string(const Manifest&)> verify;
 };
 
 struct Skipped {

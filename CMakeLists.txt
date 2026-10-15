@@ -27,6 +27,7 @@ FetchContent_MakeAvailable(tomlplusplus safetyhook)
 
 # Core: everything except DllMain and the proxy exports, so tests can link it.
 add_library(anvil_core STATIC
+    src/core/expectations.cpp
     src/core/game_build.cpp
     src/core/log.cpp
     src/core/manifest.cpp

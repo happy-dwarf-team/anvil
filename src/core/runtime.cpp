@@ -1,5 +1,6 @@
 #include "runtime.hpp"
 
+#include "expectations.hpp"
 #include "game_build.hpp"
 #include "log.hpp"
 #include "manifest.hpp"
@@ -13,6 +14,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <vector>
@@ -157,6 +159,21 @@ AnvilResult host_replace_import(AnvilPlugin* self, const char* module, const cha
                                                    replacement, original));
 }
 
+AnvilResult host_expect_bytes(AnvilPlugin* self, uint32_t rva, const void* expected, const void* mask, size_t size) {
+    if (!valid(self)) return ANVIL_ERROR_INVALID_ARGUMENT;
+    std::string detail;
+    const AnvilResult r =
+        g_runtime->patches->expect_bytes(self->manifest.id, rva_to_address(rva), expected, mask, size, &detail);
+    if (r == ANVIL_ERROR_BYTES_MISMATCH) {
+        char where[48];
+        std::snprintf(where, sizeof(where), "rva 0x%X, %zu B", rva, size);
+        Log::instance().write(ANVIL_LOG_WARNING, self->manifest.id,
+                              std::string("expect_bytes mismatch at ") + where + ", " + detail);
+        return r;
+    }
+    return note(self, "expect_bytes", r);
+}
+
 void* host_alloc_near_image(AnvilPlugin* self, size_t size) {
     return valid(self) ? g_runtime->patches->alloc_near(size) : nullptr;
 }
@@ -200,6 +217,7 @@ const AnvilHost kHost = {
     host_get_service,
     host_subscribe,
     host_publish,
+    host_expect_bytes,
 };
 AnvilHost g_host = kHost;
 
@@ -353,6 +371,15 @@ void startup_impl(const std::filesystem::path& game_dir) {
     input.host_api = ANVIL_API_VERSION;
     input.game_build = game.build_id;
     input.disabled = settings.disabled_plugins;
+    // [[expect]]: compared now, before any plugin is loaded or has patched anything.
+    input.verify = [&](const Manifest& m) {
+        size_t checked = 0;
+        std::string reason = check_expectations(m, game.build_id, *g_runtime->patches, identity->image_base, checked);
+        if (reason.empty() && checked > 0) {
+            log_info(m.id + ": " + std::to_string(checked) + " expected byte range(s) match");
+        }
+        return reason;
+    };
     std::error_code ec;
     const auto plugins_dir = g_runtime->anvil_dir / "plugins";
     std::vector<std::filesystem::path> folders;

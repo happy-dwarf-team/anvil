@@ -4,8 +4,8 @@
 // overwrites the first 14 bytes of the executable's entry point with an
 // absolute jump to AnvilEntry. The Windows loader finishes initializing all
 // DLLs, then the main thread reaches the entry point and jumps here — outside
-// the loader lock and before the game's C runtime starts. AnvilEntry runs the
-// plugin loader, restores the original entry bytes and continues into the game.
+// the loader lock and before the game's C runtime starts. AnvilEntry restores
+// the original entry bytes, runs the plugin loader and continues into the game.
 // In any other process (or if anything fails) the DLL is a pure proxy.
 #include "core/log.hpp"
 #include "core/patching.hpp"
@@ -34,12 +34,13 @@ bool is_game_process(const std::filesystem::path& exe) {
 }  // namespace
 
 extern "C" int __stdcall AnvilEntry(void* parameter) {
+    // Restore first, so plugins and [[expect]] checks see the unmodified image.
+    anvil::write_memory(g_entry, g_savedEntry, sizeof(g_savedEntry));
     wchar_t path[MAX_PATH * 2] = {};
     const DWORD length = GetModuleFileNameW(nullptr, path, static_cast<DWORD>(std::size(path)));
     if (length > 0 && length < std::size(path)) {
         anvil::startup(std::filesystem::path(path).parent_path());
     }
-    anvil::write_memory(g_entry, g_savedEntry, sizeof(g_savedEntry));
     return reinterpret_cast<EntryFn>(g_entry)(parameter);
 }
 

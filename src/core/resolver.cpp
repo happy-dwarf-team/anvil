@@ -122,6 +122,13 @@ ResolveResult resolve(const ResolveInput& input) {
                                                 " not supported; plugin supports: " + builds});
             continue;
         }
+        if (input.verify) {
+            std::string reason = input.verify(m);
+            if (!reason.empty()) {
+                result.skipped.push_back({m.id, std::move(reason)});
+                continue;
+            }
+        }
         candidates.emplace(m.id, m);
     }
 
