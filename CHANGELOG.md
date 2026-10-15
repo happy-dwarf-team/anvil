@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/happy-dwarf-team/anvil/compare/v0.2.0...v0.2.1) (2026-10-15)
+
+
+### Documentation
+
+* describe the public release status in the README ([#6](https://github.com/happy-dwarf-team/anvil/issues/6)) ([38d68ac](https://github.com/happy-dwarf-team/anvil/commit/38d68ac12c7a05196180d2e91f440b5ba17313c6))
+
 ## [0.2.0](https://github.com/happy-dwarf-team/anvil/compare/v0.1.0...v0.2.0) (2026-10-15)
 
 
