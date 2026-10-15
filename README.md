@@ -21,10 +21,17 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
   usual.
 - Each start writes `anvil/anvil.log`: what was loaded, what was skipped and why.
 
-## Install / uninstall (planned)
+## Install / uninstall
 
-Install: extract the release archive into the game folder (the one that
-contains `eu4.exe`). Uninstall: delete `version.dll` and the `anvil` folder.
+Download `anvil-windows-x64.zip` from the
+[Releases page](https://github.com/happy-dwarf-team/anvil/releases) (the newest
+build is always at
+[releases/latest](https://github.com/happy-dwarf-team/anvil/releases/latest)).
+`SHA256SUMS.txt` next to it holds the archive's checksum, and the archive
+contains its own `SHA256SUMS.txt` for the extracted files.
+
+Install: extract the archive into the game folder (the one that contains
+`eu4.exe`). Uninstall: delete `version.dll` and the `anvil` folder.
 `eu4.exe` is never changed, so Steam updates and "Verify integrity of game
 files" keep working.
 

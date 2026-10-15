@@ -68,3 +68,13 @@ install(TARGETS anvil RUNTIME DESTINATION . COMPONENT anvil)
 install(FILES dist/anvil.toml DESTINATION anvil COMPONENT anvil)
 install(FILES dist/plugins-README.txt DESTINATION anvil/plugins RENAME README.txt COMPONENT anvil)
 install(FILES LICENSE README.md DESTINATION anvil/docs COMPONENT anvil)
+# Third-party code compiled into version.dll: ship its license texts.
+# Zydis is declared inside SafetyHook's scope; fetch its properties here.
+FetchContent_GetProperties(zydis)
+if(NOT zydis_SOURCE_DIR)
+    message(FATAL_ERROR "Zydis sources not found (needed for its license text)")
+endif()
+install(FILES ${tomlplusplus_SOURCE_DIR}/LICENSE DESTINATION anvil/docs/third-party RENAME tomlplusplus-LICENSE.txt COMPONENT anvil)
+install(FILES ${safetyhook_SOURCE_DIR}/LICENSE DESTINATION anvil/docs/third-party RENAME safetyhook-LICENSE.txt COMPONENT anvil)
+install(FILES ${zydis_SOURCE_DIR}/LICENSE DESTINATION anvil/docs/third-party RENAME zydis-LICENSE.txt COMPONENT anvil)
+install(FILES ${zydis_SOURCE_DIR}/dependencies/zycore/LICENSE DESTINATION anvil/docs/third-party RENAME zycore-LICENSE.txt COMPONENT anvil)
