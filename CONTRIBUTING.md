@@ -22,12 +22,16 @@ Titles follow [Conventional Commits](https://www.conventionalcommits.org/):
 | `fix`      | bug fix                                             | patch     | Bug Fixes     |
 | `perf`     | faster or lighter, same behaviour                   | patch     | Performance   |
 | `revert`   | reverting an earlier change                         | patch     | Reverts       |
-| `build`    | CMake, dependencies, packaging, version resource    | none      | Build         |
-| `docs`     | documentation only                                  | none      | Documentation |
+| `build`    | CMake, dependencies, packaging, version resource    | patch     | Build         |
+| `docs`     | documentation only                                  | none      | hidden        |
 | `refactor` | code change without behaviour change                | none      | hidden        |
 | `test`     | tests only                                          | none      | hidden        |
 | `ci`       | GitHub Actions, Dependabot                          | none      | hidden        |
 | `chore`    | anything else (release pull requests use it)        | none      | hidden        |
+
+release-please proposes a release only when the changelog would get a visible
+entry, so commits of hidden types alone never start one; they ship with the
+next release.
 
 Scopes in use: `api` (plugin SDK / `AnvilHost`), `manifest`, `core` (loader,
 resolver, patch registry), `proxy` (`version.dll` exports, entry hook), `log`.
