@@ -56,17 +56,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: CMakeLists.txt
+          sparse-checkout: version.txt
           sparse-checkout-cone-mode: false
 
-      # The tag must match project(... VERSION x.y.z), which is baked into version.dll.
-      - name: Check tag matches CMake version
+      # The tag must match version.txt, which is baked into version.dll.
+      - name: Check tag matches version.txt
         run: |
-          version=$(sed -nE 's/^project\(anvil VERSION ([0-9][^ ]*) .*/\1/p' CMakeLists.txt)
+          version=$(head -n 1 version.txt | tr -d '\r')
           base=${TAG#v}
           base=${base%%-*}
           if [ -z "$version" ] || [ "$base" != "$version" ]; then
-            echo "::error::Tag $TAG does not match CMake project version $version"
+            echo "::error::Tag $TAG does not match version.txt ($version)"
             exit 1
           fi
 
