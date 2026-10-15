@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.25)
-project(anvil VERSION 0.1.0 LANGUAGES C CXX)
+# version.txt is the only place the version is written; release-please bumps it.
+file(STRINGS version.txt ANVIL_VERSION_TEXT LIMIT_COUNT 1 REGEX "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+if(NOT ANVIL_VERSION_TEXT)
+    message(FATAL_ERROR "version.txt must hold a MAJOR.MINOR.PATCH version")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS version.txt)
+project(anvil VERSION ${ANVIL_VERSION_TEXT} LANGUAGES C CXX)
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "Anvil targets 64-bit Windows only")
@@ -39,16 +45,19 @@ add_library(anvil_core STATIC
     src/core/services.cpp)
 target_include_directories(anvil_core PUBLIC include src)
 target_link_libraries(anvil_core PUBLIC tomlplusplus::tomlplusplus safetyhook::safetyhook bcrypt)
-target_compile_definitions(anvil_core PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+target_compile_definitions(anvil_core PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE
+    ANVIL_VERSION="${PROJECT_VERSION}")
 if(MSVC)
     target_compile_options(anvil_core PUBLIC /W4 /utf-8 /permissive- /EHsc)
 endif()
 
 # version.dll = proxy + loader
-add_library(anvil SHARED src/anvil_main.cpp src/proxy/version_proxy.cpp src/proxy/version.def)
+# File version shown in the DLL's Properties, from the same version.txt.
+configure_file(src/proxy/version.rc.in ${CMAKE_CURRENT_BINARY_DIR}/anvil_version.rc @ONLY)
+add_library(anvil SHARED src/anvil_main.cpp src/proxy/version_proxy.cpp src/proxy/version.def
+    ${CMAKE_CURRENT_BINARY_DIR}/anvil_version.rc)
 target_link_libraries(anvil PRIVATE anvil_core)
 set_target_properties(anvil PROPERTIES OUTPUT_NAME version)
-target_compile_definitions(anvil PRIVATE ANVIL_VERSION="${PROJECT_VERSION}")
 
 if(ANVIL_BUILD_EXAMPLES)
     add_library(hello_plugin SHARED examples/hello/hello.c)

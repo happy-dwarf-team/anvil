@@ -454,6 +454,26 @@ int main(int argc, char** argv) {
         using LangFn = DWORD(WINAPI*)(DWORD, LPWSTR, DWORD);
         wchar_t lang[64] = {};
         CHECK(reinterpret_cast<LangFn>(GetProcAddress(proxy, "VerLanguageNameW"))(0x0415, lang, 64) > 0);
+
+        // The DLL's version resource carries version.txt, like the log line.
+        using InfoFn = BOOL(WINAPI*)(LPCWSTR, DWORD, DWORD, LPVOID);
+        using QueryFn = BOOL(WINAPI*)(LPCVOID, LPCWSTR, LPVOID*, PUINT);
+        const auto info = reinterpret_cast<InfoFn>(GetProcAddress(system, "GetFileVersionInfoW"));
+        const auto query = reinterpret_cast<QueryFn>(GetProcAddress(system, "VerQueryValueW"));
+        wchar_t proxyPath[MAX_PATH] = {};
+        GetModuleFileNameW(proxy, proxyPath, MAX_PATH);
+        DWORD ignored = 0;
+        std::vector<uint8_t> block(direct(proxyPath, &ignored));
+        VS_FIXEDFILEINFO* fixed = nullptr;
+        UINT fixedSize = 0;
+        CHECK(!block.empty() && info(proxyPath, 0, static_cast<DWORD>(block.size()), block.data()) &&
+              query(block.data(), L"\\", reinterpret_cast<LPVOID*>(&fixed), &fixedSize) && fixed != nullptr);
+        const auto expected = Version::parse(ANVIL_VERSION);
+        CHECK(expected.has_value());
+        if (fixed != nullptr && expected) {
+            CHECK(HIWORD(fixed->dwFileVersionMS) == expected->major && LOWORD(fixed->dwFileVersionMS) == expected->minor &&
+                  HIWORD(fixed->dwFileVersionLS) == expected->patch);
+        }
     });
 
     std::printf("%d checks, %d failed\n", g_checks, g_failures);

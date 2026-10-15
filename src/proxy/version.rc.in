@@ -1,0 +1,32 @@
+// Version resource of version.dll (Anvil); configured by CMake from version.txt.
+#include <winver.h>
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_DLL
+FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "Happy Dwarf Team"
+            VALUE "FileDescription", "Anvil plugin loader for Europa Universalis IV (version.dll proxy)"
+            VALUE "FileVersion", "@PROJECT_VERSION@"
+            VALUE "InternalName", "anvil"
+            VALUE "LegalCopyright", "Copyright (c) 2026 Happy Dwarf Team. MIT License."
+            VALUE "OriginalFilename", "version.dll"
+            VALUE "ProductName", "Anvil"
+            VALUE "ProductVersion", "@PROJECT_VERSION@"
+            VALUE "Comments", "Unofficial community project, not affiliated with Paradox Interactive. https://github.com/happy-dwarf-team/anvil"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

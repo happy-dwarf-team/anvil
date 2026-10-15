@@ -3,7 +3,7 @@
 Anvil is a plugin loader for **Europa Universalis IV** (Windows, Steam). It lets
 native plugins improve or extend the game **without modifying `eu4.exe`**.
 
-> Status: 0.1.0, stage 1 (core loader) — not released to players yet. Design:
+> Status: stage 1 (core loader) — not released to players yet. Design:
 > [docs/design.md](docs/design.md). Plugin SDK:
 > [include/anvil/anvil_plugin.h](include/anvil/anvil_plugin.h); example:
 > [examples/hello](examples/hello).
