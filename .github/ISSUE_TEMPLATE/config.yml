@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/happy-dwarf-team/anvil/security/advisories/new
+    about: Report privately; see SECURITY.md.
+  - name: EU4 Startup Boost issues
+    url: https://github.com/happy-dwarf-team/eu4-startup-boost/issues/new/choose
+    about: Problems or ideas for the EU4 Startup Boost plugin.
+  - name: Install guide and documentation
+    url: https://anvil.happydwarf.dev
+    about: How to install Anvil and plugins.
