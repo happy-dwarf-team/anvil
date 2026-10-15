@@ -2,6 +2,8 @@
 
 #include <safetyhook.hpp>
 
+#include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <sstream>
 
@@ -49,6 +51,19 @@ bool PatchRegistry::overlaps_other_owner(const std::string& owner, uintptr_t add
     return false;
 }
 
+static bool readable(uintptr_t address, size_t size) {
+    constexpr DWORD kReadable = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ |
+                                PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+    uintptr_t current = address;
+    while (current < address + size) {
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(reinterpret_cast<const void*>(current), &mbi, sizeof(mbi)) == 0) return false;
+        if (mbi.State != MEM_COMMIT || (mbi.Protect & PAGE_GUARD) != 0 || (mbi.Protect & kReadable) == 0) return false;
+        current = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+    }
+    return true;
+}
+
 static std::string hex(uintptr_t value) {
     std::ostringstream s;
     s << "0x" << std::hex << std::uppercase << value;
@@ -71,6 +86,38 @@ AnvilResult PatchRegistry::patch_bytes(const std::string& owner, uintptr_t addre
     entry->what = "bytes rva " + hex(address - image_base_) + " (" + std::to_string(size) + " B)";
     if (!write_memory(reinterpret_cast<void*>(address), replacement, size)) return ANVIL_ERROR_INTERNAL;
     entries_.push_back(std::move(entry));
+    return ANVIL_OK;
+}
+
+AnvilResult PatchRegistry::expect_bytes(const std::string& owner, uintptr_t address, const void* expected,
+                                        const void* mask, size_t size, std::string* mismatch) const {
+    if (expected == nullptr || size == 0 || size > ANVIL_MAX_EXPECT_BYTES) return ANVIL_ERROR_INVALID_ARGUMENT;
+    std::lock_guard lock(mutex_);
+    if (!in_image(address, size) || !readable(address, size)) return ANVIL_ERROR_INVALID_ARGUMENT;
+    for (const auto& e : entries_) {
+        if (e->owner == owner) return ANVIL_ERROR_WRONG_PHASE;  // dependencies are verified before patching
+    }
+    const auto* live = reinterpret_cast<const uint8_t*>(address);
+    std::vector<uint8_t> actual(live, live + size);
+    // Compare with the game's own bytes: undo other owners' patches in the copy.
+    for (const auto& e : entries_) {
+        const auto& original = e->kind == Entry::Kind::Hook ? e->hook->original_bytes() : e->original;
+        const uintptr_t begin = std::max(address, e->address);
+        const uintptr_t end = std::min(address + size, e->address + original.size());
+        for (uintptr_t a = begin; a < end; ++a) actual[a - address] = original[a - e->address];
+    }
+    const auto* want = static_cast<const uint8_t*>(expected);
+    const auto* bits = static_cast<const uint8_t*>(mask);
+    for (size_t i = 0; i < size; ++i) {
+        const uint8_t m = bits != nullptr ? bits[i] : 0xFF;
+        if ((actual[i] & m) == (want[i] & m)) continue;
+        if (mismatch != nullptr) {
+            char text[96];
+            std::snprintf(text, sizeof(text), "byte +0x%zX: expected 0x%02X, found 0x%02X", i, want[i] & m, actual[i]);
+            *mismatch = text;
+        }
+        return ANVIL_ERROR_BYTES_MISMATCH;
+    }
     return ANVIL_OK;
 }
 

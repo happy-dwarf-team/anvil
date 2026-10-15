@@ -8,3 +8,11 @@ entry = "hello.dll"
 phase = "main"
 affects_gameplay = false
 game_builds = ["*"]
+
+# Game bytes this plugin relies on, checked before hello.dll is loaded. Real
+# plugins list the functions, vtables and globals they use, per build id.
+[[expect]]
+build = "*"                       # the PE signature is the same in every build
+rva = 0
+bytes = "4D 5A"                   # "MZ"
+name = "DOS header"

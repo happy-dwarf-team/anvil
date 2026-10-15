@@ -37,8 +37,9 @@ first. Anvil ships as `version.dll` next to `eu4.exe`:
   process is `eu4.exe` and overwrites the first 14 bytes of the executable's
   entry point with an absolute jump to Anvil. When the main thread reaches the
   entry point, every DLL is initialized and the loader lock is released, but
-  the game's C runtime has not started. Anvil loads `early` plugins there,
-  restores the 14 bytes and continues into the game. Plugins can therefore
+  the game's C runtime has not started. Anvil restores the 14 bytes first (so
+  plugins and `[[expect]]` checks see the unmodified image), loads `early`
+  plugins there and continues into the game. Plugins can therefore
   load DLLs and start threads (forbidden in `DllMain`) and still run before
   the game allocates its first heap block. Any other process, or any failure,
   leaves the DLL a pure proxy. `ANVIL_ANY_EXE=1` allows other executable
@@ -88,9 +89,38 @@ game_builds = ["eu4-1.37.5-steam-win64"]   # or ["*"] when no game addresses are
 id = "anvil-ui"
 version = ">=1.2.0, <2"           # SemVer range: comparators joined by ',', ^ ~ = > >= < <= *
 optional = false                  # optional: loaded first if present, never required
+
+[[expect]]                        # zero or more: game bytes the plugin depends on
+build = "eu4-1.37.5-steam-win64"  # the build these RVAs belong to ("*" = same bytes in every build)
+rva = 0x210000                    # TOML integer; hex allowed
+bytes = "48 89 5C 24 08 ?? ?? 57" # hex pairs, whitespace ignored, "??" = any byte (e.g. relocated addresses)
+name = "CEU4App::ResetGame"       # optional, for the log
 ```
 
 Parsing: toml++ v3.4.0 (header-only, MIT). Unknown keys are logged and ignored.
+
+### Dependency bytes `[[expect]]` (D)
+
+Patch calls already verify the bytes they overwrite. A plugin usually also
+*relies* on game code it does not patch: functions it calls by RVA, vtables,
+globals, struct layouts read through them. `[[expect]]` declares those ranges.
+
+- Entries whose `build` is the running build (plus all `"*"` entries) are
+  compared during resolution, before any plugin DLL is loaded and before any
+  plugin has patched anything; with an unknown build only `"*"` entries apply.
+  A mismatch, or a range outside the image or not readable, skips the plugin
+  with the RVA and the first differing byte in the log, and skips everything
+  that depends on it.
+- `build` must be listed in `game_builds` (unless `game_builds` contains
+  `"*"`); `rva + size` must fit in 32 bits; one entry compares at most
+  `ANVIL_MAX_EXPECT_BYTES` (64 KiB) and must contain at least one non-wildcard
+  byte.
+- Dependencies only known at run time use the host call `expect_bytes` (§6)
+  with the same semantics and an arbitrary bit mask.
+- Rationale: the EU4 Menu Patch (YozoraTempest/EU4-Menu-Patch) refuses to
+  install unless every native function it calls still has its known bytes; a
+  file hash would reject harmless edits of unrelated code, and checking only
+  the patch sites would miss a changed callee.
 
 ## 5. Game build identity (D)
 
@@ -117,9 +147,16 @@ repositories vendor a copy. Compiler-independent C ABI. Summary:
 - `AnvilHost` (function table, `size` + `api_version` for compatibility):
   `log`, `plugin_dir`, `data_dir`; patching — `patch_bytes`, `redirect_call`,
   `hook_function`, `replace_import`, `alloc_near_image`; services —
-  `register_service`, `get_service`; events — `subscribe`, `publish`.
+  `register_service`, `get_service`; events — `subscribe`, `publish`;
+  appended after API 1.0 — `expect_bytes` (check with `ANVIL_HOST_HAS`).
   `game` points to `AnvilGameInfo` (build id or NULL, image base/size, PE
   identity, `ready_signal_known`).
+- `expect_bytes(self, rva, expected, mask, size)` is a read-only dependency
+  check: `(actual & mask) == (expected & mask)`, mask NULL = every bit. Bytes
+  patched by other plugins are compared in their original form. Once the
+  calling plugin has patches of its own the call returns
+  `ANVIL_ERROR_WRONG_PHASE`: verify everything first, then patch, so that a
+  main-phase plugin never leaves the running game half-patched.
 - Plugins export `anvil_plugin_load(const AnvilHost*, AnvilPlugin*)`.
 - All patch addresses are RVAs inside `eu4.exe`. The host verifies expected
   bytes / call target / import before writing, refuses overlaps with patches of
@@ -172,8 +209,8 @@ metadata, SKSE's messaging, VS Code extension APIs):
    mods' `anvil/` folders); broken manifests and missing entry DLLs are skipped
    with the error.
 5. Resolve (API version, build, duplicates — first folder in name order wins,
-   disabled ids, dependencies, cycles) and order.
-6. Load `early` plugins; restore the entry point; start the main-phase thread
+   disabled ids, `[[expect]]` bytes, dependencies, cycles) and order.
+6. Restore the entry point; load `early` plugins; start the main-phase thread
    (main plugins → `anvil.plugins_loaded` → status summary → SHA-256 check) and
    the ready watcher.
 
@@ -225,8 +262,11 @@ antivirus heuristics look at).
   ABI at the boundary; static CRT so `version.dll` needs no redistributable.
 - Tests (`tests/test_main.cpp`): SemVer and ranges, manifest parsing and
   errors, resolver (dependencies, optional, cycles, phases, builds, API,
-  duplicates, disabled), patch registry (bytes, conflicts, rollback, call
-  redirection, SafetyHook hook, import replacement), services/events, and the
+  duplicates, disabled, verification hook), patch registry (bytes, conflicts,
+  rollback, call redirection, SafetyHook hook, import replacement,
+  `expect_bytes` with masks, bounds, unreadable pages, other owners' patches
+  and the wrong-phase rule), `[[expect]]` patterns and per-build selection,
+  services/events, and the
   built proxy forwarding all 17 exports. Game-level check (lab): vanilla copy,
   proxy without `anvil/`, empty `plugins`, example plugin.
 - GitHub Actions on `windows-latest`: build, tests, release zip

@@ -1,4 +1,5 @@
 // Unit tests for the Anvil core. Usage: anvil_tests <path-to-built-version.dll>
+#include "core/expectations.hpp"
 #include "core/manifest.hpp"
 #include "core/patching.hpp"
 #include "core/resolver.hpp"
@@ -45,6 +46,19 @@ std::string plugin_toml(const std::string& id, const std::string& extra = "", co
                         const std::string& phase = "main") {
     return "id = \"" + id + "\"\nname = \"" + id + "\"\nversion = \"" + version + "\"\napi = 1\nentry = \"" + id +
            ".dll\"\nphase = \"" + phase + "\"\ngame_builds = [\"*\"]\n" + extra;
+}
+
+// Manifest pinned to one build, for [[expect]] tests.
+std::string pinned_toml(const std::string& extra) {
+    return "id = \"p\"\nname = \"p\"\nversion = \"1.0.0\"\napi = 1\nentry = \"p.dll\"\n"
+           "game_builds = [\"eu4-1.37.5-steam-win64\"]\n" + extra;
+}
+
+std::string skip_reason(const ResolveResult& r, const std::string& id) {
+    for (const auto& s : r.skipped) {
+        if (s.id == id) return s.reason;
+    }
+    return {};
 }
 
 std::vector<std::string> ids(const ResolveResult& r) {
@@ -241,6 +255,154 @@ int main(int argc, char** argv) {
                                  nullptr) == ANVIL_ERROR_NOT_FOUND);
         CHECK(reg.rollback("a") == 1);
         CHECK(GetTickCount() - real < 60000u);
+    });
+
+    run("byte patterns", [] {
+        std::vector<uint8_t> bytes, mask;
+        std::string error;
+        CHECK(parse_byte_pattern("48 8B ?? 24", bytes, mask, error));
+        CHECK((bytes == std::vector<uint8_t>{0x48, 0x8B, 0x00, 0x24}));
+        CHECK((mask == std::vector<uint8_t>{0xFF, 0xFF, 0x00, 0xFF}));
+        CHECK(parse_byte_pattern("488b??24", bytes, mask, error) && bytes.size() == 4 && mask[2] == 0);
+        CHECK(parse_byte_pattern("48 8B\n\t?? 24\r\n", bytes, mask, error) && bytes.size() == 4);
+        CHECK(!parse_byte_pattern("", bytes, mask, error));
+        CHECK(!parse_byte_pattern("4", bytes, mask, error));      // half a byte
+        CHECK(!parse_byte_pattern("4G", bytes, mask, error));     // not hex
+        CHECK(!parse_byte_pattern("?4", bytes, mask, error));     // nibble wildcards are not supported
+        CHECK(!parse_byte_pattern("?? ??", bytes, mask, error));  // nothing to compare
+        CHECK(parse_byte_pattern(std::string(2 * ANVIL_MAX_EXPECT_BYTES, '0'), bytes, mask, error));
+        CHECK(!parse_byte_pattern(std::string(2 * ANVIL_MAX_EXPECT_BYTES + 2, '0'), bytes, mask, error));
+    });
+
+    run("manifest: [[expect]]", [] {
+        auto ok = parse_manifest_text(pinned_toml("[[expect]]\nbuild = \"eu4-1.37.5-steam-win64\"\nrva = 0x210000\n"
+                                                  "bytes = \"48 89 5C 24 ??\"\nname = \"ResetGame\"\ncomment = 1\n"
+                                                  "[[expect]]\nbuild = \"*\"\nrva = 0\nbytes = '''\n4D 5A\n'''\n"),
+                                      L"C:\\p");
+        CHECK(ok.manifest.has_value());
+        if (ok.manifest) {
+            const auto& e = ok.manifest->expectations;
+            CHECK(e.size() == 2);
+            CHECK(e[0].rva == 0x210000 && e[0].name == "ResetGame" && e[0].bytes.size() == 5 && e[0].mask[4] == 0);
+            CHECK(e[1].build == "*" && e[1].rva == 0 && e[1].bytes == (std::vector<uint8_t>{0x4D, 0x5A}));
+            CHECK(ok.manifest->notes.size() == 1);  // unknown key 'comment' inside [[expect]]
+        }
+        // Any build id is accepted when the plugin itself supports "*".
+        CHECK(parse_manifest_text(plugin_toml("any", "[[expect]]\nbuild = \"eu4-1.38.0-steam-win64\"\nrva = 1\nbytes = \"90\"\n"),
+                                  L"C:\\p").manifest);
+        auto fails = [](const std::string& expect) {
+            return !parse_manifest_text(pinned_toml(expect), L"C:\\p").manifest.has_value();
+        };
+        CHECK(fails("[[expect]]\nbuild = \"eu4-1.38.0-steam-win64\"\nrva = 1\nbytes = \"90\"\n"));  // not in game_builds
+        CHECK(fails("[[expect]]\nrva = 1\nbytes = \"90\"\n"));                                       // no build
+        CHECK(fails("[[expect]]\nbuild = \"*\"\nrva = -1\nbytes = \"90\"\n"));
+        CHECK(fails("[[expect]]\nbuild = \"*\"\nrva = \"0x10\"\nbytes = \"90\"\n"));  // rva as string
+        CHECK(fails("[[expect]]\nbuild = \"*\"\nrva = 0x100000000\nbytes = \"90\"\n"));
+        CHECK(fails("[[expect]]\nbuild = \"*\"\nrva = 0xFFFFFFFF\nbytes = \"90 90\"\n"));  // past 4 GB
+        CHECK(fails("[[expect]]\nbuild = \"*\"\nrva = 1\n"));                              // no bytes
+        CHECK(fails("[[expect]]\nbuild = \"*\"\nrva = 1\nbytes = \"9\"\n"));
+        CHECK(fails("expect = 1\n"));
+    });
+
+    run("patch registry: expect_bytes", [] {
+        Scratch s(0x2000);
+        const uintptr_t base = reinterpret_cast<uintptr_t>(s.base);
+        PatchRegistry reg(base, 0x2000);
+        const uint8_t code[] = {0x48, 0x89, 0x5C, 0x24, 0x08};
+        std::memcpy(s.base + 0x100, code, sizeof(code));
+        const uintptr_t addr = base + 0x100;
+        std::string detail;
+        CHECK(reg.expect_bytes("mine", addr, code, nullptr, sizeof(code)) == ANVIL_OK);
+        const uint8_t other[] = {0x48, 0x89, 0x5C, 0x24, 0x10};
+        CHECK(reg.expect_bytes("mine", addr, other, nullptr, sizeof(other), &detail) == ANVIL_ERROR_BYTES_MISMATCH);
+        CHECK(detail == "byte +0x4: expected 0x10, found 0x08");
+        const uint8_t wildcard[] = {0xFF, 0xFF, 0xFF, 0xFF, 0x00};
+        CHECK(reg.expect_bytes("mine", addr, other, wildcard, sizeof(other)) == ANVIL_OK);
+        const uint8_t lowNibble[] = {0xFF, 0xFF, 0xFF, 0xFF, 0x0F};  // 0x08 vs 0x18: low nibble equal
+        const uint8_t eighteen[] = {0x48, 0x89, 0x5C, 0x24, 0x18};
+        CHECK(reg.expect_bytes("mine", addr, eighteen, lowNibble, sizeof(eighteen)) == ANVIL_OK);
+
+        // Arguments, image bounds and unreadable memory.
+        CHECK(reg.expect_bytes("mine", addr, nullptr, nullptr, 4) == ANVIL_ERROR_INVALID_ARGUMENT);
+        CHECK(reg.expect_bytes("mine", addr, code, nullptr, 0) == ANVIL_ERROR_INVALID_ARGUMENT);
+        CHECK(reg.expect_bytes("mine", addr, code, nullptr, ANVIL_MAX_EXPECT_BYTES + 1) == ANVIL_ERROR_INVALID_ARGUMENT);
+        CHECK(reg.expect_bytes("mine", base + 0x1FFE, code, nullptr, 4) == ANVIL_ERROR_INVALID_ARGUMENT);
+        CHECK(VirtualFree(s.base + 0x1000, 0x1000, MEM_DECOMMIT));
+        CHECK(reg.expect_bytes("mine", base + 0x1000, code, nullptr, 1) == ANVIL_ERROR_INVALID_ARGUMENT);
+        CHECK(reg.expect_bytes("mine", base + 0xFFE, code, nullptr, 4) == ANVIL_ERROR_INVALID_ARGUMENT);
+
+        // Patches of other owners are compared in their original form.
+        const uint8_t nops[] = {0x90, 0x90};
+        CHECK(reg.patch_bytes("other", addr, code, nops, 2) == ANVIL_OK);
+        CHECK(s.base[0x100] == 0x90);
+        CHECK(reg.expect_bytes("mine", addr, code, nullptr, sizeof(code)) == ANVIL_OK);
+        const uint8_t fn[] = {0xB8, 0x01, 0x00, 0x00, 0x00, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0xC3};
+        std::memcpy(s.base + 0x200, fn, sizeof(fn));
+        FlushInstructionCache(GetCurrentProcess(), s.base + 0x200, sizeof(fn));
+        void* original = nullptr;
+        CHECK(reg.hook_function("other", base + 0x200, fn, 5, reinterpret_cast<void*>(&detour_returns_42), &original) ==
+              ANVIL_OK);
+        CHECK(std::memcmp(s.base + 0x200, fn, sizeof(fn)) != 0);
+        CHECK(reg.expect_bytes("mine", base + 0x200, fn, nullptr, sizeof(fn)) == ANVIL_OK);
+
+        // Own patches first: dependencies must be verified before patching.
+        const uint8_t cc[] = {0xCC, 0xCC};
+        CHECK(reg.patch_bytes("mine", base + 0x400, cc, nops, 2) == ANVIL_OK);
+        CHECK(reg.expect_bytes("mine", addr, code, nullptr, sizeof(code)) == ANVIL_ERROR_WRONG_PHASE);
+        CHECK(reg.expect_bytes("third", addr, code, nullptr, sizeof(code)) == ANVIL_OK);
+        CHECK(reg.rollback("mine") == 1);
+        CHECK(reg.expect_bytes("mine", addr, code, nullptr, sizeof(code)) == ANVIL_OK);
+        CHECK(reg.rollback("other") == 2);
+    });
+
+    run("expectations: per build", [] {
+        Scratch s(0x1000);
+        const uintptr_t base = reinterpret_cast<uintptr_t>(s.base);
+        PatchRegistry reg(base, 0x1000);
+        const uint8_t code[] = {0x48, 0x89, 0x5C, 0x24, 0x08};
+        std::memcpy(s.base + 0x100, code, sizeof(code));
+        auto parsed = parse_manifest_text(
+            plugin_toml("dep", "[[expect]]\nbuild = \"eu4-1.37.5-steam-win64\"\nrva = 0x100\nbytes = \"48 89 5C 24 ??\"\n"
+                               "[[expect]]\nbuild = \"eu4-1.38.0-steam-win64\"\nrva = 0x100\nbytes = \"E9\"\nname = \"Foo\"\n"
+                               "[[expect]]\nbuild = \"*\"\nrva = 0x200\nbytes = \"CC CC\"\n"),
+            L"C:\\p");
+        CHECK(parsed.manifest.has_value());
+        if (!parsed.manifest) return;
+        size_t checked = 0;
+        CHECK(check_expectations(*parsed.manifest, "eu4-1.37.5-steam-win64", reg, base, checked).empty());
+        CHECK(checked == 2);
+        const std::string reason = check_expectations(*parsed.manifest, "eu4-1.38.0-steam-win64", reg, base, checked);
+        CHECK(reason.find("Foo (rva 0x100, 1 B)") != std::string::npos);
+        CHECK(reason.find("expected 0xE9, found 0x48") != std::string::npos);
+        CHECK(check_expectations(*parsed.manifest, nullptr, reg, base, checked).empty() && checked == 1);
+        auto outside = parse_manifest_text(plugin_toml("far", "[[expect]]\nbuild = \"*\"\nrva = 0x5000\nbytes = \"CC\"\n"),
+                                           L"C:\\p");
+        CHECK(outside.manifest &&
+              check_expectations(*outside.manifest, nullptr, reg, base, checked).find("outside the game image") !=
+                  std::string::npos);
+    });
+
+    run("resolver: verify skips plugins and dependents", [] {
+        ResolveInput in;
+        in.host_api = 1;
+        in.game_build = "eu4-1.37.5-steam-win64";
+        in.manifests = {
+            manifest(plugin_toml("bad")),
+            manifest(plugin_toml("needs-bad", "[[dependencies]]\nid = \"bad\"\n")),
+            manifest(plugin_toml("fine")),
+            manifest(plugin_toml("off")),
+        };
+        in.disabled = {"off"};
+        std::vector<std::string> verified;
+        in.verify = [&](const Manifest& m) {
+            verified.push_back(m.id);
+            return m.id == "bad" ? std::string("bytes differ") : std::string();
+        };
+        auto r = resolve(in);
+        CHECK(skip_reason(r, "bad") == "bytes differ");
+        CHECK(skipped(r, "needs-bad"));
+        CHECK((ids(r) == std::vector<std::string>{"fine"}));
+        CHECK((verified == std::vector<std::string>{"bad", "needs-bad", "fine"}));  // not called for disabled plugins
     });
 
     run("services and events", [] {

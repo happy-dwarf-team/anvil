@@ -34,6 +34,14 @@ public:
                                void* replacement, void** original);
     void* alloc_near(size_t size);
 
+    // Read-only dependency check: compares (actual & mask) with (expected &
+    // mask); mask nullptr compares every bit. Bytes patched by other owners are
+    // compared in their original form. ANVIL_ERROR_WRONG_PHASE once `owner` has
+    // patches of its own; ANVIL_ERROR_INVALID_ARGUMENT outside the image or for
+    // unreadable memory. On a mismatch `mismatch` describes the first differing byte.
+    AnvilResult expect_bytes(const std::string& owner, uintptr_t address, const void* expected, const void* mask,
+                             size_t size, std::string* mismatch = nullptr) const;
+
     // Undo every patch of `owner`, newest first. Returns the number undone.
     size_t rollback(const std::string& owner);
     std::vector<std::string> describe(const std::string& owner) const;
