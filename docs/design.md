@@ -271,8 +271,15 @@ antivirus heuristics look at).
   services/events, and the
   built proxy forwarding all 17 exports. Game-level check (lab): vanilla copy,
   proxy without `anvil/`, empty `plugins`, example plugin.
-- GitHub Actions on `windows-latest`: build, tests, release zip
-  (`version.dll`, `anvil/` skeleton, README, LICENSE, SHA256SUMS).
+- GitHub Actions on `windows-2022` for every pull request and push to `main`:
+  build, tests, package zip (`version.dll`, `anvil/` skeleton, README,
+  LICENSE, SHA256SUMS). Actions are pinned to commit SHAs (Dependabot).
+- Releases (D): Conventional Commits in squash-merged pull request titles;
+  release-please maintains a release pull request that bumps `version.txt`
+  (the single version source) and `CHANGELOG.md`; merging it tags `vX.Y.Z`,
+  after which the release workflow builds the tag, attaches the zip and
+  checksums with a build provenance attestation, and triggers the website.
+  Details in `CONTRIBUTING.md`.
 - Versioning: SemVer for Anvil; the plugin API has its own major version.
   Within API 1, functions and fields are only appended (`ANVIL_HOST_HAS`) and
   manifest keys only added; a plugin that needs something added later states
