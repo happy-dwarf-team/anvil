@@ -1,0 +1,22 @@
+name: Feature request
+description: A new capability for players or plugin authors (host API, manifest, loader behaviour).
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you are trying to do and what stops you today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: How it could work. For plugin API changes, say whether existing plugins keep working (Anvil only appends to plugin API 1).
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
