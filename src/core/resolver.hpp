@@ -11,6 +11,7 @@ namespace anvil {
 struct ResolveInput {
     std::vector<Manifest> manifests;  // in discovery order
     unsigned host_api = 0;
+    std::optional<Version> host_version;  // Anvil version, checked against each plugin's "anvil" range
     const char* game_build = nullptr;  // nullptr = unknown build
     std::vector<std::string> disabled;  // ids disabled in anvil.toml
     // Optional check after the API and build checks (e.g. [[expect]] bytes);

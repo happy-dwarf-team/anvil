@@ -114,6 +114,11 @@ ResolveResult resolve(const ResolveInput& input) {
                                                 std::to_string(input.host_api)});
             continue;
         }
+        if (m.anvil && input.host_version && !m.anvil->matches(*input.host_version)) {
+            result.skipped.push_back({m.id, "requires Anvil " + m.anvil->text() + ", this is Anvil " +
+                                                input.host_version->to_string()});
+            continue;
+        }
         if (!supports_build(m, input.game_build)) {
             std::string builds;
             for (const auto& b : m.game_builds) builds += (builds.empty() ? "" : ", ") + b;

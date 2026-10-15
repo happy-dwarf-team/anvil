@@ -35,6 +35,7 @@ struct Manifest {
     std::vector<std::string> authors;
     std::string description;
     unsigned api = 0;
+    std::optional<VersionRange> anvil;  // Anvil versions the plugin needs ("anvil" key); empty = any
     std::string entry;  // DLL file name inside the plugin folder
     Phase phase = Phase::Main;
     bool affects_gameplay = false;

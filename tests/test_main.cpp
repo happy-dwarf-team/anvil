@@ -405,6 +405,29 @@ int main(int argc, char** argv) {
         CHECK((verified == std::vector<std::string>{"bad", "needs-bad", "fine"}));  // not called for disabled plugins
     });
 
+    run("manifest + resolver: minimum Anvil version", [] {
+        auto ok = parse_manifest_text(plugin_toml("needs-new", "anvil = \">=0.2.0, <1\"\n"), L"C:\\p");
+        CHECK(ok.manifest && ok.manifest->anvil && ok.manifest->anvil->text() == ">=0.2.0, <1");
+        CHECK(ok.manifest && ok.manifest->notes.empty());  // "anvil" is a known key
+        CHECK(!parse_manifest_text(plugin_toml("bad", "anvil = \">=x\"\n"), L"C:\\p").manifest);
+        CHECK(!parse_manifest_text(plugin_toml("bad", "anvil = 2\n"), L"C:\\p").manifest);
+
+        ResolveInput in;
+        in.host_api = 1;
+        in.game_build = "eu4-1.37.5-steam-win64";
+        in.manifests = {*ok.manifest, manifest(plugin_toml("any")),
+                        manifest(plugin_toml("needs-new-dep", "[[dependencies]]\nid = \"needs-new\"\n"))};
+        in.host_version = Version::parse("0.1.0");
+        auto old = resolve(in);
+        CHECK(skip_reason(old, "needs-new") == "requires Anvil >=0.2.0, <1, this is Anvil 0.1.0");
+        CHECK(skipped(old, "needs-new-dep"));
+        CHECK((ids(old) == std::vector<std::string>{"any"}));
+        in.host_version = Version::parse("0.2.3");
+        CHECK((ids(resolve(in)) == std::vector<std::string>{"any", "needs-new", "needs-new-dep"}));
+        in.host_version = Version::parse("1.0.0");
+        CHECK(skipped(resolve(in), "needs-new"));
+    });
+
     run("services and events", [] {
         ServiceBus bus;
         struct Svc { uint32_t size; int value; } svc{sizeof(Svc), 7};
