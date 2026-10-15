@@ -1,0 +1,40 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package
+        shell: pwsh
+        run: |
+          cmake --install build --config Release --component anvil --prefix dist/anvil-package
+          Copy-Item build/Release/hello.dll -Destination dist/anvil-package/anvil/docs/example-hello.dll
+          Copy-Item examples/hello/plugin.toml -Destination dist/anvil-package/anvil/docs/example-hello-plugin.toml
+          $files = Get-ChildItem dist/anvil-package -Recurse -File
+          $files | ForEach-Object {
+            $relative = [IO.Path]::GetRelativePath('dist/anvil-package', $_.FullName).Replace('\', '/')
+            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $relative
+          } | Set-Content dist/anvil-package/SHA256SUMS.txt
+          Compress-Archive -Path dist/anvil-package/* -DestinationPath dist/anvil-${{ github.sha }}.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anvil-${{ github.sha }}
+          path: dist/anvil-${{ github.sha }}.zip

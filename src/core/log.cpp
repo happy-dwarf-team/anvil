@@ -1,0 +1,148 @@
+#include "log.hpp"
+
+#include <windows.h>
+
+#include <cstdio>
+#include <mutex>
+#include <vector>
+
+namespace anvil {
+namespace {
+
+struct LogState {
+    std::mutex mutex;
+    std::vector<std::string> pending;  // lines written before open()
+    HANDLE file = INVALID_HANDLE_VALUE;
+    AnvilLogLevel minimum = ANVIL_LOG_INFO;
+    LARGE_INTEGER start{};
+    LARGE_INTEGER frequency{};
+
+    LogState() {
+        QueryPerformanceFrequency(&frequency);
+        QueryPerformanceCounter(&start);
+    }
+};
+
+LogState& state() {
+    static LogState s;
+    return s;
+}
+
+const char* level_name(AnvilLogLevel level) {
+    switch (level) {
+    case ANVIL_LOG_DEBUG:
+        return "debug";
+    case ANVIL_LOG_INFO:
+        return "info ";
+    case ANVIL_LOG_WARNING:
+        return "WARN ";
+    case ANVIL_LOG_ERROR:
+        return "ERROR";
+    }
+    return "?    ";
+}
+
+void write_raw(HANDLE file, const std::string& line) {
+    DWORD written = 0;
+    WriteFile(file, line.data(), static_cast<DWORD>(line.size()), &written, nullptr);
+}
+
+}  // namespace
+
+Log& Log::instance() {
+    static Log log;
+    return log;
+}
+
+void Log::open(const std::filesystem::path& file) {
+    LogState& s = state();
+    std::lock_guard lock(s.mutex);
+    if (s.file != INVALID_HANDLE_VALUE) {
+        return;
+    }
+    std::error_code ignored;
+    std::filesystem::create_directories(file.parent_path(), ignored);
+    std::filesystem::path previous = file;
+    previous.replace_extension(L".prev.log");
+    MoveFileExW(file.c_str(), previous.c_str(), MOVEFILE_REPLACE_EXISTING);
+    s.file = CreateFileW(file.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
+                         nullptr);
+    if (s.file == INVALID_HANDLE_VALUE) {
+        return;
+    }
+    static const char bom[] = "\xEF\xBB\xBF";
+    write_raw(s.file, bom);
+    for (const auto& line : s.pending) {
+        write_raw(s.file, line);
+    }
+    s.pending.clear();
+    s.pending.shrink_to_fit();
+}
+
+void Log::write(AnvilLogLevel level, std::string_view source, std::string_view message) {
+    LogState& s = state();
+    if (level < s.minimum) {
+        return;
+    }
+    LARGE_INTEGER now{};
+    QueryPerformanceCounter(&now);
+    const double ms = static_cast<double>(now.QuadPart - s.start.QuadPart) * 1000.0 /
+                      static_cast<double>(s.frequency.QuadPart ? s.frequency.QuadPart : 1);
+    char prefix[64];
+    std::snprintf(prefix, sizeof(prefix), "[%9.1f ms] %s ", ms, level_name(level));
+    std::string line = prefix;
+    line += '[';
+    line.append(source.data(), source.size());
+    line += "] ";
+    line.append(message.data(), message.size());
+    line += "\r\n";
+    std::lock_guard lock(s.mutex);
+    if (s.file == INVALID_HANDLE_VALUE) {
+        if (s.pending.size() < 4096) {
+            s.pending.push_back(std::move(line));
+        }
+        return;
+    }
+    write_raw(s.file, line);
+}
+
+void Log::set_min_level(AnvilLogLevel level) {
+    state().minimum = level;
+}
+
+bool Log::is_open() const {
+    return state().file != INVALID_HANDLE_VALUE;
+}
+
+void log_info(std::string_view message) { Log::instance().write(ANVIL_LOG_INFO, "anvil", message); }
+void log_warning(std::string_view message) { Log::instance().write(ANVIL_LOG_WARNING, "anvil", message); }
+void log_error(std::string_view message) { Log::instance().write(ANVIL_LOG_ERROR, "anvil", message); }
+void log_debug(std::string_view message) { Log::instance().write(ANVIL_LOG_DEBUG, "anvil", message); }
+
+std::string narrow(const std::wstring& text) {
+    if (text.empty()) {
+        return {};
+    }
+    const int bytes = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr,
+                                          nullptr);
+    std::string out(static_cast<std::size_t>(bytes > 0 ? bytes : 0), '\0');
+    if (bytes > 0) {
+        WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), bytes, nullptr,
+                            nullptr);
+    }
+    return out;
+}
+
+std::wstring widen(std::string_view text) {
+    if (text.empty()) {
+        return {};
+    }
+    const int chars = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
+    std::wstring out(static_cast<std::size_t>(chars > 0 ? chars : 0), L'\0');
+    if (chars > 0) {
+        MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), chars);
+    }
+    return out;
+}
+
+}  // namespace anvil

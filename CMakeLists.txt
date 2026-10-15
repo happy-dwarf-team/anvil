@@ -1,0 +1,70 @@
+cmake_minimum_required(VERSION 3.25)
+project(anvil VERSION 0.1.0 LANGUAGES C CXX)
+
+if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(FATAL_ERROR "Anvil targets 64-bit Windows only")
+endif()
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# Static CRT: version.dll must not depend on a redistributable being installed.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+option(ANVIL_BUILD_TESTS "Build unit tests" ON)
+option(ANVIL_BUILD_EXAMPLES "Build the example plugin" ON)
+
+include(FetchContent)
+FetchContent_Declare(tomlplusplus
+    GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git
+    GIT_TAG v3.4.0
+    GIT_SHALLOW TRUE)
+set(SAFETYHOOK_FETCH_ZYDIS ON CACHE BOOL "" FORCE)
+FetchContent_Declare(safetyhook
+    GIT_REPOSITORY https://github.com/cursey/safetyhook.git
+    GIT_TAG v0.7.0
+    GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(tomlplusplus safetyhook)
+
+# Core: everything except DllMain and the proxy exports, so tests can link it.
+add_library(anvil_core STATIC
+    src/core/game_build.cpp
+    src/core/log.cpp
+    src/core/manifest.cpp
+    src/core/patching.cpp
+    src/core/resolver.cpp
+    src/core/runtime.cpp
+    src/core/semver.cpp
+    src/core/seh_guard.cpp
+    src/core/services.cpp)
+target_include_directories(anvil_core PUBLIC include src)
+target_link_libraries(anvil_core PUBLIC tomlplusplus::tomlplusplus safetyhook::safetyhook bcrypt)
+target_compile_definitions(anvil_core PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+if(MSVC)
+    target_compile_options(anvil_core PUBLIC /W4 /utf-8 /permissive- /EHsc)
+endif()
+
+# version.dll = proxy + loader
+add_library(anvil SHARED src/anvil_main.cpp src/proxy/version_proxy.cpp src/proxy/version.def)
+target_link_libraries(anvil PRIVATE anvil_core)
+set_target_properties(anvil PROPERTIES OUTPUT_NAME version)
+target_compile_definitions(anvil PRIVATE ANVIL_VERSION="${PROJECT_VERSION}")
+
+if(ANVIL_BUILD_EXAMPLES)
+    add_library(hello_plugin SHARED examples/hello/hello.c)
+    target_include_directories(hello_plugin PRIVATE include)
+    set_target_properties(hello_plugin PROPERTIES OUTPUT_NAME hello)
+endif()
+
+if(ANVIL_BUILD_TESTS)
+    enable_testing()
+    add_executable(anvil_tests tests/test_main.cpp)
+    target_link_libraries(anvil_tests PRIVATE anvil_core)
+    add_dependencies(anvil_tests anvil)
+    add_test(NAME anvil_tests COMMAND anvil_tests $<TARGET_FILE:anvil>)
+endif()
+
+# Release layout (cmake --install ... --component anvil): <prefix>/version.dll, <prefix>/anvil/...
+install(TARGETS anvil RUNTIME DESTINATION . COMPONENT anvil)
+install(FILES dist/anvil.toml DESTINATION anvil COMPONENT anvil)
+install(FILES dist/plugins-README.txt DESTINATION anvil/plugins RENAME README.txt COMPONENT anvil)
+install(FILES LICENSE README.md DESTINATION anvil/docs COMPONENT anvil)

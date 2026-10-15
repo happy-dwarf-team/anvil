@@ -1,0 +1,10 @@
+# Anvil settings. Every key is optional.
+
+# false = load no plugins (Anvil only forwards version.dll calls).
+enabled = true
+
+# Plugin ids that should not be loaded, e.g. ["eu4-startup-boost"].
+disabled_plugins = []
+
+# "debug" | "info" | "warning" | "error"
+log_level = "info"

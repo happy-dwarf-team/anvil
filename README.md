@@ -3,8 +3,10 @@
 Anvil is a plugin loader for **Europa Universalis IV** (Windows, Steam). It lets
 native plugins improve or extend the game **without modifying `eu4.exe`**.
 
-> Status: design phase. Nothing here is ready for players yet — see
-> [docs/design.md](docs/design.md).
+> Status: 0.1.0, stage 1 (core loader) — not released to players yet. Design:
+> [docs/design.md](docs/design.md). Plugin SDK:
+> [include/anvil/anvil_plugin.h](include/anvil/anvil_plugin.h); example:
+> [examples/hello](examples/hello).
 
 ## How it works (in short)
 
@@ -25,6 +27,19 @@ Install: extract the release archive into the game folder (the one that
 contains `eu4.exe`). Uninstall: delete `version.dll` and the `anvil` folder.
 `eu4.exe` is never changed, so Steam updates and "Verify integrity of game
 files" keep working.
+
+## Building
+
+Requirements: Visual Studio 2022 (or Build Tools) with the C++ workload, CMake
+≥ 3.25, Git (dependencies are fetched at configure time: toml++ 3.4.0,
+SafetyHook 0.7.0 with Zydis 4.1.0).
+
+```powershell
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+cmake --install build --config Release --component anvil --prefix dist   # version.dll + anvil/ layout
+```
 
 ## License
 

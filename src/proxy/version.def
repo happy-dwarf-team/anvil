@@ -1,0 +1,19 @@
+LIBRARY version
+EXPORTS
+    GetFileVersionInfoA = AnvilProxy_GetFileVersionInfoA
+    GetFileVersionInfoByHandle = AnvilProxy_GetFileVersionInfoByHandle
+    GetFileVersionInfoExA = AnvilProxy_GetFileVersionInfoExA
+    GetFileVersionInfoExW = AnvilProxy_GetFileVersionInfoExW
+    GetFileVersionInfoSizeA = AnvilProxy_GetFileVersionInfoSizeA
+    GetFileVersionInfoSizeExA = AnvilProxy_GetFileVersionInfoSizeExA
+    GetFileVersionInfoSizeExW = AnvilProxy_GetFileVersionInfoSizeExW
+    GetFileVersionInfoSizeW = AnvilProxy_GetFileVersionInfoSizeW
+    GetFileVersionInfoW = AnvilProxy_GetFileVersionInfoW
+    VerFindFileA = AnvilProxy_VerFindFileA
+    VerFindFileW = AnvilProxy_VerFindFileW
+    VerInstallFileA = AnvilProxy_VerInstallFileA
+    VerInstallFileW = AnvilProxy_VerInstallFileW
+    VerLanguageNameA = AnvilProxy_VerLanguageNameA
+    VerLanguageNameW = AnvilProxy_VerLanguageNameW
+    VerQueryValueA = AnvilProxy_VerQueryValueA
+    VerQueryValueW = AnvilProxy_VerQueryValueW

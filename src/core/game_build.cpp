@@ -1,0 +1,107 @@
+#include "game_build.hpp"
+
+#include <windows.h>
+#include <bcrypt.h>
+
+#include <cstdio>
+#include <fstream>
+#include <sstream>
+#include <vector>
+
+namespace anvil {
+namespace {
+
+// Builds Anvil knows. Plugins refer to them by id in plugin.toml.
+constexpr KnownBuild kKnownBuilds[] = {
+    {"eu4-1.37.5-steam-win64", 0x66FE6AB9u, 0x25E0000u, 0x024BAF19u, 0x1A337C8u, 38462504ull,
+     "9AD3EFE1AF169F40EE577F9DAE5DEBBC87AF6FB8B5450FB345EBF110DC4D771A", 0x233FF4Eu},
+};
+
+}  // namespace
+
+std::optional<PeIdentity> read_pe_identity(const void* image_base) {
+    if (image_base == nullptr) return std::nullopt;
+    const auto* dos = static_cast<const IMAGE_DOS_HEADER*>(image_base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return std::nullopt;
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(static_cast<const uint8_t*>(image_base) + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE || nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        return std::nullopt;
+    }
+    PeIdentity id;
+    id.image_base = reinterpret_cast<uintptr_t>(image_base);
+    id.pe_timestamp = nt->FileHeader.TimeDateStamp;
+    id.size_of_image = nt->OptionalHeader.SizeOfImage;
+    id.pe_checksum = nt->OptionalHeader.CheckSum;
+    id.entry_point_rva = nt->OptionalHeader.AddressOfEntryPoint;
+    return id;
+}
+
+const KnownBuild* find_known_build(const PeIdentity& identity) {
+    for (const auto& b : kKnownBuilds) {
+        if (b.pe_timestamp == identity.pe_timestamp && b.size_of_image == identity.size_of_image &&
+            b.pe_checksum == identity.pe_checksum && b.entry_point_rva == identity.entry_point_rva) {
+            return &b;
+        }
+    }
+    return nullptr;
+}
+
+std::string sha256_file(const std::filesystem::path& file) {
+    HANDLE handle = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return {};
+    BCRYPT_ALG_HANDLE algorithm = nullptr;
+    BCRYPT_HASH_HANDLE hash = nullptr;
+    std::string result;
+    if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) == 0 &&
+        BCryptCreateHash(algorithm, &hash, nullptr, 0, nullptr, 0, 0) == 0) {
+        std::vector<uint8_t> buffer(1 << 20);
+        DWORD read = 0;
+        bool ok = true;
+        while (ReadFile(handle, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) && read > 0) {
+            if (BCryptHashData(hash, buffer.data(), read, 0) != 0) {
+                ok = false;
+                break;
+            }
+        }
+        uint8_t digest[32] = {};
+        if (ok && BCryptFinishHash(hash, digest, sizeof(digest), 0) == 0) {
+            char hex[65] = {};
+            for (int i = 0; i < 32; ++i) std::snprintf(hex + i * 2, 3, "%02X", digest[i]);
+            result = hex;
+        }
+    }
+    if (hash) BCryptDestroyHash(hash);
+    if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
+    CloseHandle(handle);
+    return result;
+}
+
+bool verify_build_file(const KnownBuild& build, const std::filesystem::path& exe, const std::filesystem::path& cache_file,
+                       std::string& actual_sha256) {
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    if (!GetFileAttributesExW(exe.c_str(), GetFileExInfoStandard, &data)) return false;
+    const uint64_t size = (static_cast<uint64_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+    const uint64_t mtime = (static_cast<uint64_t>(data.ftLastWriteTime.dwHighDateTime) << 32) | data.ftLastWriteTime.dwLowDateTime;
+    char key[64];
+    std::snprintf(key, sizeof(key), "%llu:%llu", static_cast<unsigned long long>(size), static_cast<unsigned long long>(mtime));
+
+    // Cache format: one line "<size>:<mtime> <sha256>".
+    {
+        std::ifstream in(cache_file);
+        std::string cachedKey, cachedSha;
+        if (in >> cachedKey >> cachedSha && cachedKey == key) {
+            actual_sha256 = cachedSha;
+            return cachedSha == build.sha256;
+        }
+    }
+    actual_sha256 = sha256_file(exe);
+    if (actual_sha256.empty()) return false;
+    std::error_code ignored;
+    std::filesystem::create_directories(cache_file.parent_path(), ignored);
+    std::ofstream out(cache_file, std::ios::trunc);
+    out << key << ' ' << actual_sha256 << '\n';
+    return actual_sha256 == build.sha256;
+}
+
+}  // namespace anvil

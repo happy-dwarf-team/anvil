@@ -1,6 +1,7 @@
 # Anvil — design
 
-Status: draft 1 (2026-10-15). Decisions marked **D** are agreed; **Q** are open.
+Status: draft 2 (2026-10-15), stage 1 implemented. Decisions marked **D** are
+agreed; **Q** are open.
 
 ## 1. Goals
 
@@ -29,9 +30,19 @@ first. Anvil ships as `version.dll` next to `eu4.exe`:
   and forwards all 17 exports (`GetFileVersionInfoA/W`, `…ExA/ExW`,
   `GetFileVersionInfoSizeA/W/ExA/ExW`, `VerFindFileA/W`, `VerInstallFileA/W`,
   `VerLanguageNameA/W`, `VerQueryValueA/W`, `GetFileVersionInfoByHandle`).
-- Its `DllMain(DLL_PROCESS_ATTACH)` runs before the game's CRT initializes and
-  before `main` — the same moment as an import added to the executable, which
-  is what the startup plugin needs (e.g. replacing the CRT allocator).
+- The real DLL is loaded lazily, by full path, on the first forwarded call
+  (never from `DllMain`). A bare `"version.dll"` would resolve to the proxy
+  itself, which is already loaded.
+- **Entry-point hook (D, changed from draft 1):** `DllMain` only checks that the
+  process is `eu4.exe` and overwrites the first 14 bytes of the executable's
+  entry point with an absolute jump to Anvil. When the main thread reaches the
+  entry point, every DLL is initialized and the loader lock is released, but
+  the game's C runtime has not started. Anvil loads `early` plugins there,
+  restores the 14 bytes and continues into the game. Plugins can therefore
+  load DLLs and start threads (forbidden in `DllMain`) and still run before
+  the game allocates its first heap block. Any other process, or any failure,
+  leaves the DLL a pure proxy. `ANVIL_ANY_EXE=1` allows other executable
+  names (lab/testing only).
 - `version.dll` was chosen over `winmm.dll` because its export surface is tiny
   and stable.
 
@@ -61,102 +72,110 @@ Steam at any time); everything a plugin writes goes to `data/<plugin-id>/`.
 ## 4. Plugin manifest `plugin.toml` (D, fields may grow)
 
 ```toml
-id = "eu4-startup-boost"          # [a-z0-9-]+, unique
+id = "eu4-startup-boost"          # [a-z0-9-]+, max 64, unique
 name = "EU4 Startup Boost"
 version = "0.1.0"                 # SemVer
 authors = ["Happy Dwarf Team"]
 description = "Faster game start-up."
 api = 1                           # Anvil plugin API major version
-entry = "eu4_startup_boost.dll"
+entry = "eu4_startup_boost.dll"   # file name inside the plugin folder
 phase = "early"                   # "early" | "main"
 affects_gameplay = false          # true = may change simulation (multiplayer/ironman warning)
-load_after = []                   # plugin ids
-game_builds = ["eu4-1.37.5-steam-win64"]
+load_after = []                   # ordering only, no dependency
+game_builds = ["eu4-1.37.5-steam-win64"]   # or ["*"] when no game addresses are used
+
+[[dependencies]]                  # zero or more
+id = "anvil-ui"
+version = ">=1.2.0, <2"           # SemVer range: comparators joined by ',', ^ ~ = > >= < <= *
+optional = false                  # optional: loaded first if present, never required
 ```
 
-Parsing: toml++ (header-only, MIT). Unknown keys are ignored with a log note.
+Parsing: toml++ v3.4.0 (header-only, MIT). Unknown keys are logged and ignored.
 
 ## 5. Game build identity (D)
 
 Plugins patch code at fixed addresses, so they are tied to exact builds.
 
 - At start Anvil reads the PE header of the running image (TimeDateStamp,
-  SizeOfImage, CheckSum, entry point) and the file version resource, and maps
-  them to a build id from a table compiled into Anvil (e.g.
-  `eu4-1.37.5-steam-win64` → SHA-256 `9AD3EFE1…771A`).
-- The full SHA-256 is computed only when the header identity is new and is
-  cached in `anvil/data/anvil/build-cache.toml` keyed by file size + mtime, so
-  normal starts do not hash 38 MB.
+  SizeOfImage, CheckSum, entry point) and maps it to a build id from a table
+  compiled into Anvil (`eu4-1.37.5-steam-win64` → SHA-256 `9AD3EFE1…771A`).
+  The version resource of `eu4.exe` only says "1.0", so it is not used.
+- The decision is made from the header alone (no hashing on the critical
+  path). The full SHA-256 is checked afterwards on the main-phase thread and
+  cached in `anvil/data/anvil/build-cache.txt` (key: size + mtime). A mismatch
+  is logged; every patch is still verified against expected bytes, so a wrong
+  build fails safely.
 - Unknown build → plugins that list specific builds are skipped with a clear
-  log line ("EU4 was updated; plugin X supports …"). A plugin may declare
-  `game_builds = ["*"]` if it does not depend on addresses.
+  log line ("game build unknown (EU4 updated?) not supported; plugin supports
+  …").
 
 ## 6. Plugin API (C ABI, header-only SDK) (D)
 
-The SDK is a single versioned header `include/anvil/anvil_plugin.h`; plugin
-repositories vendor a copy. Compiler-independent C ABI; plugins may be built
-with MSVC or MinGW.
+The SDK is the single header `include/anvil/anvil_plugin.h` (API 1); plugin
+repositories vendor a copy. Compiler-independent C ABI. Summary:
 
-```c
-#define ANVIL_API_VERSION 1
+- `AnvilHost` (function table, `size` + `api_version` for compatibility):
+  `log`, `plugin_dir`, `data_dir`; patching — `patch_bytes`, `redirect_call`,
+  `hook_function`, `replace_import`, `alloc_near_image`; services —
+  `register_service`, `get_service`; events — `subscribe`, `publish`.
+  `game` points to `AnvilGameInfo` (build id or NULL, image base/size, PE
+  identity, `ready_signal_known`).
+- Plugins export `anvil_plugin_load(const AnvilHost*, AnvilPlugin*)`.
+- All patch addresses are RVAs inside `eu4.exe`. The host verifies expected
+  bytes / call target / import before writing, refuses overlaps with patches of
+  other plugins (registry; both ids are logged), records originals, and rolls
+  back all patches of a plugin whose load fails (error result or structured
+  exception, caught by an SEH guard). The DLL of a failed plugin stays mapped
+  (it may have started threads) but inactive.
+- Function hooks: SafetyHook v0.7.0 (BSL-1.0; fetches Zydis 4.1.0) inside
+  Anvil, hidden behind the C API so it can be replaced (D). Requires C++23 for
+  Anvil itself only. Call redirection and byte patches are Anvil's own code;
+  stubs come from an allocator of executable memory within ±2 GB of the image
+  (no reuse of `int3` padding inside `eu4.exe`).
+- Phases:
+  - `early`: called at the executable entry point on the main thread, outside
+    the loader lock, before the game's C runtime starts (see §2). DLL loading
+    and threads are allowed; no UI.
+  - `main`: called on an Anvil thread right after the early phase, concurrently
+    with the game start-up.
 
-typedef struct AnvilHost {
-    uint32_t size;                 /* sizeof(AnvilHost) as known by the host */
-    uint32_t api_version;
-    const AnvilGameInfo *game;     /* build id, image base/size, ready marker (if known) */
-    const wchar_t *plugin_dir;     /* read-only */
-    const wchar_t *data_dir;       /* writable, created on demand */
-    void (*log)(AnvilPluginHandle, AnvilLogLevel, const char *fmt, ...);
-    /* code patching — all changes to game memory go through these */
-    AnvilResult (*patch_bytes)(AnvilPluginHandle, uintptr_t rva, const void *expected,
-                               const void *replacement, size_t size);
-    AnvilResult (*redirect_call)(AnvilPluginHandle, uintptr_t call_rva,
-                                 uintptr_t expected_target_rva, void *new_target);
-    AnvilResult (*hook_function)(AnvilPluginHandle, uintptr_t rva, const void *expected_prologue,
-                                 size_t prologue_size, void *detour, void **original);
-    AnvilResult (*replace_import)(AnvilPluginHandle, const char *module, const char *function,
-                                  void *replacement, void **original);
-    void (*on_game_ready)(AnvilPluginHandle, void (*callback)(void *), void *context);
-} AnvilHost;
+### Services and events between plugins (D)
 
-/* exported by every plugin */
-ANVIL_EXPORT AnvilResult anvil_plugin_load(const AnvilHost *host, AnvilPluginHandle self);
-ANVIL_EXPORT void anvil_plugin_unload(void);   /* optional; process exit */
-```
+Following the patterns of mature plugin systems (Fabric's dependency
+metadata, SKSE's messaging, VS Code extension APIs):
 
-Rules:
-
-- `phase = "early"`: `anvil_plugin_load` runs inside Anvil's `DllMain` (loader
-  lock held). Allowed: memory patches, IAT replacement, `VirtualAlloc`,
-  `CreateThread` (thread starts after the lock is released), reading small
-  files. Not allowed: loading DLLs that are not yet loaded, COM/shell calls,
-  waiting on other threads, UI.
-- `phase = "main"`: runs on an Anvil thread right after the loader lock is
-  released, before or concurrently with game initialization; no UI either.
-- `on_game_ready`: called once when the game reports initialization finished
-  (known builds only).
-- The host checks `expected` bytes/targets before every patch and refuses
-  patches that overlap another plugin's patch (hook registry), logging both
-  plugin ids. Patches are applied atomically per call.
-- Trampolines and stubs are allocated by the host in executable memory within
-  ±2 GB of the image (no reuse of `int3` padding inside `eu4.exe`). Function
-  hooks use a vetted library (MinHook or SafetyHook — **Q**, decide when
-  implementing).
-- A plugin returning an error, or an exception/SEH fault inside
-  `anvil_plugin_load`, marks the plugin failed; patches it already applied are
-  rolled back when possible, otherwise the plugin is marked "partially applied"
-  in the log.
+1. **Dependencies** in the manifest (above) define availability and order:
+   topological sort per phase, ties by id; missing/mismatched required
+   dependency, dependency cycle, or an early plugin depending on a main-phase
+   plugin → the plugin is skipped with a reason, and everything depending on
+   it is skipped too.
+2. **Service registry**: `register_service(self, "<own-id>.<name>", major,
+   ptr)` / `get_service(self, name, major)`. A service is a C struct of
+   function pointers whose first field is `uint32_t size`; minor additions are
+   appended (check `size`), breaking changes get a new major (both majors may be
+   registered at the same time). The providing plugin publishes the struct in
+   its own header. Services live for the process lifetime; a plugin can only
+   register under its own id prefix.
+3. **Events**: `subscribe(self, event, callback, context)` / `publish(self,
+   event, payload)`, synchronous on the publishing thread, in subscription
+   order. Built-in: `anvil.plugins_loaded` (after the main phase) and
+   `anvil.game_ready` (known builds only; Anvil polls the game's
+   initialization marker). The `anvil.` prefix is reserved for the host.
 
 ## 7. Load order and failure policy (D)
 
-1. Proxy setup (always). If anything below fails, Anvil stays a pure proxy.
-2. Read `anvil/anvil.toml` (optional), identify the game build.
-3. Discover plugins: `anvil/plugins/*/plugin.toml` (stage 3: plus enabled
-   mods' `anvil/` folders).
-4. Validate manifests (API version, build, duplicate ids, entry file present),
-   resolve `load_after` (cycles → skip the involved plugins).
-5. Load `early` plugins in order inside `DllMain`; schedule `main` plugins.
-6. Write the status summary to the log.
+1. Proxy setup (always). Entry-point hook in `eu4.exe` only.
+2. At the entry point: if `anvil/` does not exist → nothing (no files written).
+   `ANVIL_DISABLE=1` or `enabled = false` in `anvil/anvil.toml` → log only.
+3. Identify the game build (header).
+4. Discover plugins: `anvil/plugins/*/plugin.toml` (stage 3: plus enabled
+   mods' `anvil/` folders); broken manifests and missing entry DLLs are skipped
+   with the error.
+5. Resolve (API version, build, duplicates — first folder in name order wins,
+   disabled ids, dependencies, cycles) and order.
+6. Load `early` plugins; restore the entry point; start the main-phase thread
+   (main plugins → `anvil.plugins_loaded` → status summary → SHA-256 check) and
+   the ready watcher.
 
 Settings (`anvil.toml`): `enabled = true`, `disabled_plugins = []`,
 `log_level`. Environment variable `ANVIL_DISABLE=1` disables all plugins for a
@@ -168,8 +187,9 @@ single start (diagnostics).
   version, game build id (or "unknown" + header identity), per plugin
   `loaded` / `skipped (reason)` / `failed (reason)`, patch list per plugin,
   timings of discovery and loading.
-- Logging in `DllMain` uses a preallocated buffer flushed by the main-phase
-  thread.
+- Lines logged before the log file is opened (e.g. from `DllMain`) are kept
+  in memory and written when it opens at the entry point. Plugin messages are
+  tagged with the plugin id. `log_level` in `anvil.toml` filters.
 - Stage 4: in-game overlay with the same information.
 
 ## 9. Stage 3 — plugins from enabled mods / Steam Workshop (D, later)
@@ -181,9 +201,10 @@ single start (diagnostics).
   `anvil/trust.toml` as (plugin id, mod id, SHA-256 of entry DLL and manifest).
   A new version needs a new approval; until then the previously approved
   version stays (copied to `data/anvil/approved/`) or nothing runs.
-- Because early plugins run in `DllMain`, approval cannot be asked at that
-  moment: first start records the plugin as pending and asks once the game is
-  running; it loads from the next start (stage 3a). A separate "Anvil Manager"
+- Early plugins load before the game window exists, and a modal question at
+  that moment would block the start: the first start records the plugin as
+  pending and asks once the game is running; it loads from the next start
+  (stage 3a). A separate "Anvil Manager"
   for approving before launch is stage 4.
 - To verify before publishing: whether a mod containing only `anvil/` changes
   the game checksum (ironman/achievements), and Workshop/Paradox rules for
@@ -199,12 +220,15 @@ antivirus heuristics look at).
 
 ## 11. Build, test, release
 
-- CMake, MSVC (Visual Studio 2022, x64) as the reference toolchain; C++20
-  inside Anvil, C ABI at the boundary.
-- Tests: manifest parsing, build identity, load-order resolution, hook
-  registry overlap rules, export forwarding (a test executable calling the
-  proxy). Game-level check: the game starts with an empty `plugins` folder and
-  with a sample plugin (manual + lab harness).
+- CMake + Ninja or Visual Studio generator, MSVC (Visual Studio 2022 Build
+  Tools, x64) as the reference toolchain; C++23 inside Anvil (SafetyHook), C
+  ABI at the boundary; static CRT so `version.dll` needs no redistributable.
+- Tests (`tests/test_main.cpp`): SemVer and ranges, manifest parsing and
+  errors, resolver (dependencies, optional, cycles, phases, builds, API,
+  duplicates, disabled), patch registry (bytes, conflicts, rollback, call
+  redirection, SafetyHook hook, import replacement), services/events, and the
+  built proxy forwarding all 17 exports. Game-level check (lab): vanilla copy,
+  proxy without `anvil/`, empty `plugins`, example plugin.
 - GitHub Actions on `windows-latest`: build, tests, release zip
   (`version.dll`, `anvil/` skeleton, README, LICENSE, SHA256SUMS).
 - Versioning: SemVer for Anvil; the plugin API has its own major version.
@@ -212,15 +236,16 @@ antivirus heuristics look at).
 ## 12. Stages
 
 1. Core: proxy, discovery of local plugins, manifest, build identity, log,
-   patch API with registry, sample plugin.
+   patch API with registry, services/events, sample plugin. **Done** (0.1.0).
 2. First real plugin: `eu4-startup-boost` (separate repository).
 3. Plugins from enabled mods + per-version approval.
 4. In-game overlay, Anvil Manager, code signing.
 
 ## 13. Open questions (Q)
 
-- MinHook vs SafetyHook for function hooks.
-- Whether `version.dll` alone is enough for all launch paths (Steam,
-  Paradox launcher, direct start) — to be tested.
-- Should a plugin be able to expose services to other plugins (registry of
-  named interfaces) in API v1, or later?
+- Decided: SafetyHook (§6); services, dependencies and events in API 1 (§6).
+- Whether `version.dll` alone is enough for all launch paths (Steam, Paradox
+  launcher, direct start) — direct start verified in the lab; Steam/launcher
+  to be tested with a real install.
+- Mid-function hooks (SafetyHook `MidHook`) in a later API minor: needs a
+  stable C layout for the register context.

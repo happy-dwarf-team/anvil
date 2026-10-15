@@ -1,0 +1,44 @@
+#pragma once
+
+#include <cstdint>
+#include <filesystem>
+#include <optional>
+#include <string>
+
+namespace anvil {
+
+struct KnownBuild {
+    const char* id;
+    uint32_t pe_timestamp;
+    uint32_t size_of_image;
+    uint32_t pe_checksum;
+    uint32_t entry_point_rva;
+    uint64_t file_size;
+    const char* sha256;            // upper-case hex of the whole file
+    uint32_t ready_marker_rva;     // byte that becomes 1 when initialization finished; 0 = unknown
+};
+
+struct PeIdentity {
+    uintptr_t image_base = 0;
+    uint32_t pe_timestamp = 0;
+    uint32_t size_of_image = 0;
+    uint32_t pe_checksum = 0;
+    uint32_t entry_point_rva = 0;
+};
+
+// Reads the identity of a mapped PE image (the running eu4.exe).
+std::optional<PeIdentity> read_pe_identity(const void* image_base);
+
+// Header-identity match against the compiled-in table (no file hashing).
+const KnownBuild* find_known_build(const PeIdentity& identity);
+
+// SHA-256 of a file as upper-case hex (BCrypt); empty on failure.
+std::string sha256_file(const std::filesystem::path& file);
+
+// Full-file check with a cache keyed by size + last write time, stored in
+// `cache_file`. Returns true when the file hash equals build.sha256.
+// Meant to run off the critical path (it may hash ~38 MB once).
+bool verify_build_file(const KnownBuild& build, const std::filesystem::path& exe, const std::filesystem::path& cache_file,
+                       std::string& actual_sha256);
+
+}  // namespace anvil
