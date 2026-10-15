@@ -3,8 +3,9 @@ name: build
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
+  # Called by release.yml to build the package of a new release.
+  workflow_call:
 
 permissions:
   contents: read
@@ -13,7 +14,9 @@ jobs:
   windows:
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Configure
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
@@ -37,81 +40,8 @@ jobs:
           } | Set-Content dist/anvil-package/SHA256SUMS.txt
           Compress-Archive -Path dist/anvil-package/* -DestinationPath dist/anvil-${{ github.sha }}.zip
 
-      # Per-commit artifact; on tag builds it also hands the zip to the release job.
-      - uses: actions/upload-artifact@v4
+      # Per-commit artifact; for a release, release.yml attaches it to the GitHub release.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: anvil-${{ github.sha }}
           path: dist/anvil-${{ github.sha }}.zip
-
-  release:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: windows
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-      TAG: ${{ github.ref_name }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: version.txt
-          sparse-checkout-cone-mode: false
-
-      # The tag must match version.txt, which is baked into version.dll.
-      - name: Check tag matches version.txt
-        run: |
-          version=$(head -n 1 version.txt | tr -d '\r')
-          base=${TAG#v}
-          base=${base%%-*}
-          if [ -z "$version" ] || [ "$base" != "$version" ]; then
-            echo "::error::Tag $TAG does not match version.txt ($version)"
-            exit 1
-          fi
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: anvil-${{ github.sha }}
-          path: dist
-
-      - name: Prepare release assets
-        working-directory: dist
-        run: |
-          mv "anvil-${GITHUB_SHA}.zip" anvil-windows-x64.zip
-          sha256sum anvil-windows-x64.zip > SHA256SUMS.txt
-          cat SHA256SUMS.txt
-
-      # Tags with a suffix (v0.2.0-rc.1) become prereleases, so releases/latest skips them.
-      - name: Create or update release
-        working-directory: dist
-        run: |
-          flags=()
-          case "$TAG" in *-*) flags+=(--prerelease) ;; esac
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" anvil-windows-x64.zip SHA256SUMS.txt --clobber
-          else
-            gh release create "$TAG" anvil-windows-x64.zip SHA256SUMS.txt \
-              --verify-tag --title "Anvil $TAG" --generate-notes "${flags[@]}"
-          fi
-
-  notify-website:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
-    needs: release
-    runs-on: ubuntu-24.04
-    permissions: {}
-    env:
-      DISPATCH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
-    steps:
-      - name: Trigger website rebuild
-        if: env.DISPATCH_TOKEN != ''
-        env:
-          GH_TOKEN: ${{ env.DISPATCH_TOKEN }}
-        run: |
-          gh api repos/happy-dwarf-team/anvil-website/dispatches \
-            -f event_type=anvil-release \
-            -f "client_payload[tag]=${GITHUB_REF_NAME}"
-
-      - name: Skip website rebuild (no WEBSITE_DISPATCH_TOKEN)
-        if: env.DISPATCH_TOKEN == ''
-        run: echo "::notice::WEBSITE_DISPATCH_TOKEN is not set; website rebuild not triggered"

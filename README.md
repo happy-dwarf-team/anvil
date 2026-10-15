@@ -48,6 +48,9 @@ ctest --test-dir build -C Release --output-on-failure
 cmake --install build --config Release --component anvil --prefix dist   # version.dll + anvil/ layout
 ```
 
+Contributions, the commit convention and the release process: see
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Unofficial community project, not affiliated with
