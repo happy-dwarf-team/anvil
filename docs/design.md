@@ -73,14 +73,14 @@ Steam at any time); everything a plugin writes goes to `data/<plugin-id>/`.
 ## 4. Plugin manifest `plugin.toml` (D, fields may grow)
 
 ```toml
-id = "eu4-startup-boost"          # [a-z0-9-]+, max 64, unique
-name = "EU4 Startup Boost"
+id = "bellows"                    # [a-z0-9-]+, max 64, unique
+name = "Bellows"
 version = "0.1.0"                 # SemVer
 authors = ["Happy Dwarf Team"]
 description = "Faster game start-up."
 api = 1                           # Anvil plugin API major version
 anvil = ">=0.2.0"                 # optional: Anvil versions the plugin needs (SemVer range)
-entry = "eu4_startup_boost.dll"   # file name inside the plugin folder
+entry = "bellows.dll"             # file name inside the plugin folder
 phase = "early"                   # "early" | "main"
 affects_gameplay = false          # true = may change simulation (multiplayer/ironman warning)
 load_after = []                   # ordering only, no dependency
@@ -291,7 +291,7 @@ antivirus heuristics look at).
 
 1. Core: proxy, discovery of local plugins, manifest, build identity, log,
    patch API with registry, services/events, sample plugin. **Done** (0.1.0).
-2. First real plugin: `eu4-startup-boost` (separate repository).
+2. First real plugin: `bellows`, formerly `eu4-startup-boost` (separate repository).
 3. Plugins from enabled mods + per-version approval.
 4. In-game overlay, Anvil Manager, code signing.
 
