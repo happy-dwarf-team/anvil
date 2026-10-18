@@ -3,7 +3,7 @@
 # false = load no plugins (Anvil only forwards version.dll calls).
 enabled = true
 
-# Plugin ids that should not be loaded, e.g. ["eu4-startup-boost"].
+# Plugin ids that should not be loaded, e.g. ["bellows"].
 disabled_plugins = []
 
 # "debug" | "info" | "warning" | "error"
