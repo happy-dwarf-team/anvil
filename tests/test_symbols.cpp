@@ -527,7 +527,7 @@ signature = "const char* ()"
         const auto file = folder / "symbols.toml";
         {
             std::ofstream out(file, std::ios::binary);
-            out << kGoodSymbols;
+            out << "\xEF\xBB\xBF" << kGoodSymbols;  // with a UTF-8 BOM
         }
         SymbolVerification verified;
         CHECK(check_plugin_symbols(file, "test-build", patches, mapped.address(), &verified).empty());

@@ -299,7 +299,9 @@ SymbolFileResult load_symbols(const std::filesystem::path& file) {
     }
     std::stringstream buffer;
     buffer << in.rdbuf();
-    return parse_symbols_text(buffer.str());
+    std::string text = buffer.str();
+    if (text.starts_with("\xEF\xBB\xBF")) text.erase(0, 3);  // saved by Notepad
+    return parse_symbols_text(text);
 }
 
 SymbolVerification verify_symbols(const SymbolFile& file, const PeImage& image) {
