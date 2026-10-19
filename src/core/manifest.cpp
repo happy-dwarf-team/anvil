@@ -7,6 +7,7 @@
 #include <fstream>
 #include <set>
 #include <sstream>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -22,6 +23,18 @@ const std::set<std::string> kKnownKeys = {
 };
 const std::set<std::string> kKnownDependencyKeys = {"id", "version", "optional"};
 const std::set<std::string> kKnownConflictKeys = {"id", "version"};
+
+// A schema error and the line of plugin.toml it is about (0 = the whole file).
+struct Error {
+    std::string text;
+    uint32_t line = 0;
+
+    bool empty() const { return text.empty(); }
+    void set(std::string message, const toml::node* node) {
+        text = std::move(message);
+        line = node != nullptr ? static_cast<uint32_t>(node->source().begin.line) : 0;
+    }
+};
 
 size_t edit_distance(std::string_view a, std::string_view b) {
     std::vector<size_t> row(b.size() + 1);
@@ -40,7 +53,7 @@ size_t edit_distance(std::string_view a, std::string_view b) {
 
 // "unknown key 'x'" for the first key of `table` not in `known`, with the
 // closest known key as a hint; empty when every key is known.
-std::string unknown_key(const toml::table& table, const std::set<std::string>& known) {
+Error unknown_key(const toml::table& table, const std::set<std::string>& known) {
     for (const auto& [key, value] : table) {
         const std::string name(key.str());
         if (known.contains(name)) continue;
@@ -55,30 +68,30 @@ std::string unknown_key(const toml::table& table, const std::set<std::string>& k
             }
         }
         if (!best.empty()) message += " (did you mean '" + best + "'?)";
-        return message;
+        return {message, static_cast<uint32_t>(key.source().begin.line)};
     }
     return {};
 }
 
 // Optional string key; a value of another type is an error.
-bool read_string(const toml::table& table, std::string_view key, std::string& out, std::string& error) {
+bool read_string(const toml::table& table, std::string_view key, std::string& out, Error& error) {
     const toml::node* node = table.get(key);
     if (node == nullptr) return true;
     const auto value = node->value_exact<std::string>();
     if (!value) {
-        error = std::string(key) + " must be a string";
+        error.set(std::string(key) + " must be a string", node);
         return false;
     }
     out = *value;
     return true;
 }
 
-bool read_bool(const toml::table& table, std::string_view key, bool& out, std::string& error) {
+bool read_bool(const toml::table& table, std::string_view key, bool& out, Error& error) {
     const toml::node* node = table.get(key);
     if (node == nullptr) return true;
     const auto value = node->value_exact<bool>();
     if (!value) {
-        error = std::string(key) + " must be true or false";
+        error.set(std::string(key) + " must be true or false", node);
         return false;
     }
     out = *value;
@@ -86,7 +99,7 @@ bool read_bool(const toml::table& table, std::string_view key, bool& out, std::s
 }
 
 // allow_ironman / allow_multiplayer: false | "opt-in"; absent = false.
-bool read_allow(const toml::table& table, std::string_view key, Allow& out, std::string& error) {
+bool read_allow(const toml::table& table, std::string_view key, Allow& out, Error& error) {
     const toml::node* node = table.get(key);
     if (node == nullptr) return true;
     if (const auto flag = node->value_exact<bool>(); flag && !*flag) {
@@ -97,12 +110,12 @@ bool read_allow(const toml::table& table, std::string_view key, Allow& out, std:
         out = Allow::OptIn;
         return true;
     }
-    error = std::string(key) + " must be false or \"opt-in\"";
+    error.set(std::string(key) + " must be false or \"opt-in\"", node);
     return false;
 }
 
 // symbols / settings: a relative .toml path that stays inside the plugin folder.
-bool read_plugin_file(const toml::table& table, std::string_view key, std::string& out, std::string& error) {
+bool read_plugin_file(const toml::table& table, std::string_view key, std::string& out, Error& error) {
     if (!read_string(table, key, out, error)) return false;
     if (!table.contains(key)) return true;
     bool inside = !out.empty() && out.find(':') == std::string::npos && out.front() != '/' && out.front() != '\\';
@@ -113,20 +126,20 @@ bool read_plugin_file(const toml::table& table, std::string_view key, std::strin
         begin = end + 1;
     }
     if (!inside || !out.ends_with(".toml")) {
-        error = std::string(key) + " must be a .toml file inside the plugin folder";
+        error.set(std::string(key) + " must be a .toml file inside the plugin folder", table.get(key));
         return false;
     }
     return true;
 }
 
 // issues / repository: an http(s) URL without spaces.
-bool read_url(const toml::table& table, std::string_view key, std::string& out, std::string& error) {
+bool read_url(const toml::table& table, std::string_view key, std::string& out, Error& error) {
     if (!read_string(table, key, out, error)) return false;
     if (!table.contains(key)) return true;
     const size_t scheme = out.starts_with("https://") ? 8 : out.starts_with("http://") ? 7 : 0;
     const bool clean = std::none_of(out.begin(), out.end(), [](char c) { return static_cast<unsigned char>(c) <= ' '; });
     if (scheme == 0 || out.size() == scheme || !clean) {
-        error = std::string(key) + " must be an http(s) URL";
+        error.set(std::string(key) + " must be an http(s) URL", table.get(key));
         return false;
     }
     return true;
@@ -134,22 +147,22 @@ bool read_url(const toml::table& table, std::string_view key, std::string& out, 
 
 // [[dependencies]] / [[conflicts]] entry: id (required) and a version range (default "*").
 bool read_plugin_ref(const toml::node& node, const std::set<std::string>& known, std::string& id, VersionRange& range,
-                     std::string& error) {
+                     Error& error) {
     const auto* entry = node.as_table();
     if (entry == nullptr) {
-        error = "must be a table";
+        error.set("must be a table", &node);
         return false;
     }
     if (error = unknown_key(*entry, known); !error.empty()) return false;
     std::string rangeText = "*";
     if (!read_string(*entry, "id", id, error) || !read_string(*entry, "version", rangeText, error)) return false;
     if (!is_valid_plugin_id(id)) {
-        error = "id '" + id + "' must match [a-z0-9-]+ (max 64 characters)";
+        error.set("id '" + id + "' must match [a-z0-9-]+ (max 64 characters)", entry->contains("id") ? entry->get("id") : &node);
         return false;
     }
     const auto parsed = VersionRange::parse(rangeText);
     if (!parsed) {
-        error = "version '" + rangeText + "' is not a SemVer range";
+        error.set("version '" + rangeText + "' is not a SemVer range", entry->get("version"));
         return false;
     }
     range = *parsed;
@@ -163,18 +176,17 @@ int hex_digit(char c) {
     return -1;
 }
 
-bool read_string_array(const toml::node* node, std::vector<std::string>& out, std::string& error,
-                       std::string_view key) {
+bool read_string_array(const toml::node* node, std::vector<std::string>& out, Error& error, std::string_view key) {
     if (node == nullptr) return true;
     const auto* array = node->as_array();
     if (array == nullptr) {
-        error = std::string(key) + " must be an array of strings";
+        error.set(std::string(key) + " must be an array of strings", node);
         return false;
     }
     for (const auto& item : *array) {
         const auto value = item.value<std::string>();
         if (!value) {
-            error = std::string(key) + " must be an array of strings";
+            error.set(std::string(key) + " must be an array of strings", &item);
             return false;
         }
         out.push_back(*value);
@@ -231,7 +243,19 @@ bool parse_byte_pattern(std::string_view text, std::vector<uint8_t>& bytes, std:
     return true;
 }
 
-ManifestResult parse_manifest_text(std::string_view text, const std::filesystem::path& folder) {
+namespace {
+
+// The lines of the `symbols` and `settings` keys, for load_manifest's errors.
+struct FileKeyLines {
+    uint32_t symbols = 0;
+    uint32_t settings = 0;
+};
+
+uint32_t line_of(const toml::node* node) {
+    return node != nullptr ? static_cast<uint32_t>(node->source().begin.line) : 0;
+}
+
+ManifestResult parse_manifest(std::string_view text, const std::filesystem::path& folder, FileKeyLines& lines) {
     ManifestResult result;
     toml::table table;
     try {
@@ -240,66 +264,68 @@ ManifestResult parse_manifest_text(std::string_view text, const std::filesystem:
         std::ostringstream message;
         message << "plugin.toml: " << e.description() << " (line " << e.source().begin.line << ")";
         result.error = message.str();
+        result.line = static_cast<uint32_t>(e.source().begin.line);
         return result;
     }
+    auto fail = [&](const std::string& message, uint32_t line) {
+        result.error = "plugin.toml: " + message;
+        result.line = line;
+        return result;
+    };
 
     // The API comes first: an API 1 manifest fails the v2 schema anyway, and
     // its author needs to know why.
+    const uint32_t api_line = line_of(table.get("api"));
     const auto api = table["api"].value_exact<int64_t>();
-    if (!api || *api <= 0) {
-        result.error = "plugin.toml: missing or invalid 'api'";
-        return result;
-    }
+    if (!api || *api <= 0) return fail("missing or invalid 'api'", api_line);
     if (*api == 1) {
         result.error = "plugin API 1: update the plugin";
+        result.line = api_line;
         return result;
     }
     if (*api > kManifestApi) {
-        result.error = "plugin.toml: plugin API " + std::to_string(*api) + " is newer than this Anvil supports (API " +
-                       std::to_string(kManifestApi) + "): update Anvil";
-        return result;
+        return fail("plugin API " + std::to_string(*api) + " is newer than this Anvil supports (API " +
+                        std::to_string(kManifestApi) + "): update Anvil",
+                    api_line);
     }
-    if (const std::string unknown = unknown_key(table, kKnownKeys); !unknown.empty()) {
-        result.error = "plugin.toml: " + unknown;
-        return result;
-    }
+    if (const Error unknown = unknown_key(table, kKnownKeys); !unknown.empty()) return fail(unknown.text, unknown.line);
 
     Manifest m;
     m.folder = folder;
     m.api = static_cast<unsigned>(*api);
-    std::string error;
-    auto fail = [&](const std::string& message) {
-        result.error = "plugin.toml: " + message;
-        return result;
-    };
+    Error error;
     for (const auto* key : {"id", "name", "version", "entry"}) {
-        if (!table.contains(key)) return fail("missing '" + std::string(key) + "'");
+        if (!table.contains(key)) return fail("missing '" + std::string(key) + "'", 0);
     }
     std::string versionText, phase = "main";
     if (!read_string(table, "id", m.id, error) || !read_string(table, "name", m.name, error) ||
         !read_string(table, "version", versionText, error) || !read_string(table, "entry", m.entry, error) ||
         !read_string(table, "description", m.description, error) || !read_string(table, "phase", phase, error)) {
-        return fail(error);
+        return fail(error.text, error.line);
     }
-    if (m.name.empty()) return fail("name must not be empty");
-    if (!is_valid_plugin_id(m.id)) return fail("id '" + m.id + "' must match [a-z0-9-]+ (max 64 characters)");
+    if (m.name.empty()) return fail("name must not be empty", line_of(table.get("name")));
+    if (!is_valid_plugin_id(m.id)) {
+        return fail("id '" + m.id + "' must match [a-z0-9-]+ (max 64 characters)", line_of(table.get("id")));
+    }
     const auto version = Version::parse(versionText);
-    if (!version) return fail("version '" + versionText + "' is not SemVer (MAJOR.MINOR.PATCH)");
+    if (!version) {
+        return fail("version '" + versionText + "' is not SemVer (MAJOR.MINOR.PATCH)", line_of(table.get("version")));
+    }
     m.version = *version;
     if (m.entry.find_first_of("/\\:") != std::string::npos || !m.entry.ends_with(".dll")) {
-        return fail("entry must be a .dll file name inside the plugin folder");
+        return fail("entry must be a .dll file name inside the plugin folder", line_of(table.get("entry")));
     }
     if (phase == "early") m.phase = Phase::Early;
     else if (phase == "main") m.phase = Phase::Main;
-    else return fail("phase must be \"early\" or \"main\"");
+    else return fail("phase must be \"early\" or \"main\"", line_of(table.get("phase")));
     if (table.contains("anvil")) {
         const auto rangeText = table["anvil"].value_exact<std::string>();
         const auto range = rangeText ? VersionRange::parse(*rangeText) : std::nullopt;
-        if (!range) return fail("anvil must be a SemVer range string, e.g. \">=1.0.0\"");
+        if (!range) return fail("anvil must be a SemVer range string, e.g. \">=1.0.0\"", line_of(table.get("anvil")));
         m.anvil = *range;
     }
     // affects_gameplay has no default (design §13): the author must decide.
-    if (!table.contains("affects_gameplay")) return fail("missing 'affects_gameplay' (true or false)");
+    if (!table.contains("affects_gameplay")) return fail("missing 'affects_gameplay' (true or false)", 0);
     if (!read_bool(table, "affects_gameplay", m.affects_gameplay, error) ||
         !read_allow(table, "allow_ironman", m.allow_ironman, error) ||
         !read_allow(table, "allow_multiplayer", m.allow_multiplayer, error) ||
@@ -308,33 +334,46 @@ ManifestResult parse_manifest_text(std::string_view text, const std::filesystem:
         !read_url(table, "repository", m.repository, error) ||
         !read_string_array(table.get("authors"), m.authors, error, "authors") ||
         !read_string_array(table.get("load_after"), m.load_after, error, "load_after")) {
-        return fail(error);
+        return fail(error.text, error.line);
     }
+    lines.symbols = line_of(table.get("symbols"));
+    lines.settings = line_of(table.get("settings"));
 
     if (table.contains("dependencies")) {
         const auto* list = table.get_as<toml::array>("dependencies");
-        if (list == nullptr) return fail("dependencies must be an array of tables ([[dependencies]])");
+        if (list == nullptr) {
+            return fail("dependencies must be an array of tables ([[dependencies]])", line_of(table.get("dependencies")));
+        }
         for (const auto& node : *list) {
             Dependency d;
             const std::string label = "[[dependencies]] #" + std::to_string(m.dependencies.size() + 1) + ": ";
-            if (!read_plugin_ref(node, kKnownDependencyKeys, d.id, d.range, error)) return fail(label + error);
-            if (!read_bool(*node.as_table(), "optional", d.optional, error)) return fail(label + error);
+            if (!read_plugin_ref(node, kKnownDependencyKeys, d.id, d.range, error)) return fail(label + error.text, error.line);
+            if (!read_bool(*node.as_table(), "optional", d.optional, error)) return fail(label + error.text, error.line);
             m.dependencies.push_back(std::move(d));
         }
     }
     if (table.contains("conflicts")) {
         const auto* list = table.get_as<toml::array>("conflicts");
-        if (list == nullptr) return fail("conflicts must be an array of tables ([[conflicts]])");
+        if (list == nullptr) {
+            return fail("conflicts must be an array of tables ([[conflicts]])", line_of(table.get("conflicts")));
+        }
         for (const auto& node : *list) {
             Conflict c;
             const std::string label = "[[conflicts]] #" + std::to_string(m.conflicts.size() + 1) + ": ";
-            if (!read_plugin_ref(node, kKnownConflictKeys, c.id, c.range, error)) return fail(label + error);
-            if (c.id == m.id) return fail(label + "a plugin cannot conflict with itself");
+            if (!read_plugin_ref(node, kKnownConflictKeys, c.id, c.range, error)) return fail(label + error.text, error.line);
+            if (c.id == m.id) return fail(label + "a plugin cannot conflict with itself", line_of(node.as_table()->get("id")));
             m.conflicts.push_back(std::move(c));
         }
     }
     result.manifest = std::move(m);
     return result;
+}
+
+}  // namespace
+
+ManifestResult parse_manifest_text(std::string_view text, const std::filesystem::path& folder) {
+    FileKeyLines lines;
+    return parse_manifest(text, folder, lines);
 }
 
 ManifestResult load_manifest(const std::filesystem::path& folder) {
@@ -346,16 +385,17 @@ ManifestResult load_manifest(const std::filesystem::path& folder) {
     content << file.rdbuf();
     std::string text = content.str();
     if (text.starts_with("\xEF\xBB\xBF")) text.erase(0, 3);
-    ManifestResult result = parse_manifest_text(text, folder);
+    FileKeyLines lines;
+    ManifestResult result = parse_manifest(text, folder, lines);
     if (!result.manifest) return result;
-    for (const auto& [key, relative] : {std::pair{"symbols", &result.manifest->symbols},
-                                        std::pair{"settings", &result.manifest->settings}}) {
+    for (const auto& [key, relative, line] : {std::tuple{"symbols", &result.manifest->symbols, lines.symbols},
+                                              std::tuple{"settings", &result.manifest->settings, lines.settings}}) {
         if (relative->empty()) continue;
         const std::u8string name(relative->begin(), relative->end());  // plugin.toml is UTF-8
         std::error_code ec;
         if (!std::filesystem::is_regular_file(folder / std::filesystem::path(name), ec)) {
             return {std::nullopt,
-                    std::string("plugin.toml: ") + key + " file '" + *relative + "' not found in the plugin folder"};
+                    std::string("plugin.toml: ") + key + " file '" + *relative + "' not found in the plugin folder", line};
         }
     }
     return result;

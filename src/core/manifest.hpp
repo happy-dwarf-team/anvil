@@ -60,6 +60,7 @@ struct Manifest {
 struct ManifestResult {
     std::optional<Manifest> manifest;
     std::string error;  // set when manifest is empty
+    uint32_t line = 0;  // the line of plugin.toml the error is about; 0 = the whole file
 };
 
 // Parses plugin.toml v2 (design §5.1). Any unknown key or a value of the wrong
