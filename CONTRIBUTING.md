@@ -52,6 +52,10 @@ The plugin API is a separate contract from the Anvil version:
   key.
 - Removing or changing anything a plugin can see increments
   `ANVIL_API_VERSION` and is a breaking change (`feat(api)!`).
+- `sdk/rust/anvil-sys/src/bindings.rs` is generated from `anvil_plugin.h` and
+  committed. After a change to the header run `sdk/rust/regen-bindings.ps1`
+  (bindgen and libclang, see the script) and commit the result; CI fails when
+  the file differs from what the header gives.
 
 ## Versions and releases
 
@@ -66,10 +70,13 @@ Releases are automated with
    the changelog section as release notes.
 3. The release workflow then builds the tagged commit, attaches
    `anvil-windows-x64.zip` and `SHA256SUMS.txt` with a build provenance
-   attestation, and asks the website to rebuild.
+   attestation, publishes the `anvil-sys` crate to crates.io (only when the
+   `CARGO_REGISTRY_TOKEN` repository secret exists; otherwise it warns), and asks
+   the website to rebuild.
 
-`version.txt` is the only place the version is written. CMake, the `anvil.log`
-line and the DLL version resource all read it. Do not edit `version.txt` or
+`version.txt` is the only place the version is written by hand. CMake, the
+`anvil.log` line and the DLL version resource all read it, and release-please
+copies it to `sdk/rust/anvil-sys/Cargo.toml`. Do not edit `version.txt` or
 `CHANGELOG.md` by hand; to force a specific next version, put
 `Release-As: x.y.z` in the body of a commit on `main`.
 
