@@ -301,7 +301,9 @@ Decided in [Gameplay-affecting plugins in ironman, achievements and multiplayer]
 
 Decided in [Workshop distribution and trust model](https://github.com/happy-dwarf-team/anvil/issues/25). Facts: [Workshop research](https://github.com/happy-dwarf-team/anvil/issues/16).
 
-E1 showed that a mod with only `descriptor.mod` + `anvil/**` keeps the 1.37.5 checksum and allows ironman achievements. E2 (whether the uploader keeps `.dll` files) is still open (**Q**, [Run the Workshop experiments E1 and E2](https://github.com/happy-dwarf-team/anvil/issues/34)).
+[Run the Workshop experiments E1 and E2](https://github.com/happy-dwarf-team/anvil/issues/34) found:
+- **E1:** a mod with only `descriptor.mod` + `anvil/**` keeps the 1.37.5 checksum and allows ironman achievements.
+- **E2:** a private upload through the Paradox launcher delivered the DLL byte-identical, with no warnings; the launcher only adds `remote_file_id` to `descriptor.mod`.
 
 - **Discovery:** only mods enabled in the current playset (`dlc_load.json` → `.mod` → `path`), in `anvil/<plugin-id>/` folders, several per mod. This also gates a plugin on its mod being enabled.
 - **Trust:**
@@ -398,7 +400,8 @@ Plugins are native code with the game's permissions:
   - the repository layout of the standard plugins and the Manager;
   - the scope of the first release;
   - the migration of Bellows and Tongs.
-- **Q:** E2 (Workshop keeps `.dll`?); other storefront builds ([#36](https://github.com/happy-dwarf-team/anvil/issues/36)).
+- **Other storefront builds** ([#36](https://github.com/happy-dwarf-team/anvil/issues/36)): GOG ships two different `eu4.exe` builds (1.37.5.0 and 1.37.5.2), and the Microsoft Store exe is encrypted on disk. Unknown builds are skipped safely; GOG support needs a GOG binary (fog).
+- **Workshop rules:** the Paradox forum's mod rules were not readable (E3).
 - **Fog** (from the map):
   - hot reload;
   - code signing;
