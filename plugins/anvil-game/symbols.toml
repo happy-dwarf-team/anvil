@@ -1,0 +1,91 @@
+# The game code and data anvil-game reads, for EU4 1.37.5 (Steam, win64).
+# Every offset it uses is a value taken from verified bytes, so a different
+# build or a changed function skips the plugin instead of misreading memory.
+# Sources: EU4 engine lab, docs/reverse-engineering.md, and Tongs (the frame
+# hook, the session and the ironman/multiplayer gate, checked live there).
+build = "eu4-1.37.5-steam-win64"
+
+# --- the main loop ---
+
+[symbol.frame]
+rva = 0x14C25A0
+# mov [rsp+8],rbx; mov [rsp+10h],rbp; mov [rsp+18h],rsi; mov [rsp+20h],rdi; push r14; sub rsp,70h
+bytes = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 70"
+memory = "code"
+signature = "uintptr_t (void* app, uint8_t outer)"
+note = "one frame: outer = 1 from the main loop (and the first-start language loop), 0 for frames drawn inside a game update or a save load"
+
+[symbol.frame_counter]
+rva = 0x14C2A23
+bytes = "48 FF 87 20 03 00 00"                    # inc qword [rdi+320h]
+memory = "code"
+values.counter = { at = 3, size = 4 }
+note = "inside the frame function: the frame counter app+0x320, once per frame"
+
+[symbol.main_loop_frame]
+rva = 0x14C2E0E
+bytes = "B2 01 48 8B CE E8 88 F7 FF FF 44 38 B6 83 00 00 00"   # mov dl,1; mov rcx,rsi; call frame; cmp [rsi+83h],r14b
+memory = "code"
+values.quit = { at = 13, size = 4 }
+note = "main loop: frame(app, 1), then the quit flag app+0x83"
+
+[symbol.main_loop_quit]
+rva = 0x14C2DD0
+bytes = "44 38 B6 F8 02 00 00 75 48"              # cmp [rsi+2F8h],r14b; jne exit
+memory = "code"
+values.quit_request = { at = 3, size = 4 }
+note = "main loop: the second quit flag app+0x2F8, checked before each frame"
+
+# --- readiness ---
+
+[symbol.ready_store]
+rva = 0x205EED
+bytes = "48 89 1D 0C 36 14 02 C6 05 53 A0 13 02 01"   # mov [2349500h],rbx; mov byte [233FF4Eh],1
+memory = "code"
+values.ready_flag = { at = 9, rip_relative = 14, type = "uint8_t" }
+note = "end of start-up: the byte at 0x233FF4E becomes 1 (the lab's ready marker, with 'Running application')"
+
+# --- the session ---
+
+[symbol.root_and_date]
+rva = 0x14321FC
+bytes = "48 8B 05 75 DC F0 00 8B 98 D0 1D 00 00"   # mov rax,[233FE78h]; mov ebx,[rax+1DD0h]
+memory = "code"
+values.root = { at = 3, rip_relative = 7, type = "uintptr_t" }
+values.date = { at = 9, size = 4 }
+note = "top bar: the game root object, its current date (int32, hours; 43808760 = unset)"
+
+[symbol.session_of_root]
+rva = 0x848976
+bytes = "48 8B 05 FB 74 AF 01 48 8B D9 48 8B 88 00 1E 00 00 48 8B 01 FF 90 00 01 00 00"
+memory = "code"
+values.session = { at = 13, size = 4 }
+values.speed_slot = { at = 22, size = 4 }
+note = "pause command: the session at root+0x1E00, its vtable slot 0x100 (speed_object)"
+
+[symbol.session_speed_slot]
+rva = 0x1CB8560
+memory = "read"
+points_to = 0x8024D0
+note = "slot 0x100 of the game session's vtable 0x1CB8460; in the menu and while loading the session has another class"
+
+[symbol.speed_object]
+rva = 0x8024D0
+bytes = "48 8B 81 18 04 00 00 C3"                  # mov rax,[rcx+418h]; ret
+memory = "code"
+values.speed = { at = 3, size = 4 }
+note = "session vtable slot 0x100: the game-speed object at session+0x418"
+
+[symbol.ironman_gate]
+rva = 0x6E9128
+bytes = "48 8B 0D 49 6D C5 01 C6 40 18 01 48 8B 89 00 1E 00 00 E8 D1 18 00 00 48 8B 0D 32 6D C5 01 0F B6 D8 0F B6 B9 D0 24 00 00"
+memory = "code"
+values.ironman = { at = 36, size = 4 }
+note = "console registration: the multiplayer/ironman gate is is_multiplayer(session) or the root byte +0x24D0 (ironman)"
+
+[symbol.is_multiplayer]
+rva = 0x6EAA10
+bytes = "48 89 5C 24 08 57 48 83 EC 20 48 8B 01 48 8B F9 FF 90 18 03 00 00"
+memory = "code"
+signature = "bool (void* session)"
+note = "multiplayer check through session vtable slot 0x318, as the console registration calls it"

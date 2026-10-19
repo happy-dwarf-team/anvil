@@ -23,6 +23,9 @@ struct Dependency {
     std::string id;
     VersionRange range;
     bool optional = false;
+    // Added by the resolver, not written in plugin.toml: affects_gameplay =
+    // true needs anvil-game (design §13).
+    bool implied = false;
 };
 
 // [[conflicts]]: the declaring plugin is skipped while a matching one is enabled.

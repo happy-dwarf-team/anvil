@@ -229,7 +229,15 @@ AnvilResult host_subscribe(AnvilPlugin* self, const char* event, AnvilEventCallb
 
 AnvilResult host_publish(AnvilPlugin* self, const char* event, const void* payload) {
     if (!valid(self) || event == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
-    if (std::string_view(event).starts_with("anvil.")) return ANVIL_ERROR_INVALID_ARGUMENT;  // reserved
+    // "anvil." names are Anvil's; a plugin publishes "<its id>.<name>" only,
+    // as for services, so no plugin can forge another's events (Anvil acts on
+    // anvil-game's session event, design §13).
+    if (std::string_view(event).starts_with("anvil.") || !is_valid_service_name(self->manifest.id, event)) {
+        write_log(*self, ANVIL_LOG_WARNING,
+                  std::string("publish ") + event + " refused: plugins publish only events named " + self->manifest.id +
+                      ".<name>");
+        return ANVIL_ERROR_INVALID_ARGUMENT;
+    }
     self->context->bus->publish(event, payload);
     return ANVIL_OK;
 }

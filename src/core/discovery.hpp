@@ -19,6 +19,10 @@ struct AnvilSettings {
     std::vector<std::string> disabled_plugins;
     AnvilLogLevel log_level = ANVIL_LOG_INFO;
     bool profile = false;  // count calls per change, reported at exit (design §17)
+    // Plugins the player allows in ironman / multiplayer sessions (design §13);
+    // only plugins whose plugin.toml offers "opt-in" for that mode can use it.
+    std::vector<std::string> allow_ironman;
+    std::vector<std::string> allow_multiplayer;
     std::string error;
     uint32_t line = 0;
 };

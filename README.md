@@ -25,6 +25,11 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
   written for an older plugin API or an empty `plugins` folder mean the game
   simply starts as usual. The manifest format is described in
   [docs/design.md](docs/design.md#51-plugintoml-manifest-v2).
+- Anvil ships the standard plugin `anvil-game` (`anvil/plugins/anvil-game/`):
+  game readiness, a frame event, work on the main thread and game sessions
+  ([include/anvil/anvil_game.h](include/anvil/anvil_game.h)). Plugins that
+  change the simulation need it: in ironman and multiplayer games Anvil takes
+  their changes out unless the player allows them in `anvil/anvil.toml`.
 - Each start writes `anvil/anvil.log`: what was loaded, what was skipped and why.
 
 ## Install / uninstall

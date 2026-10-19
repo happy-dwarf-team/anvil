@@ -36,7 +36,7 @@ This is verified for direct starts and through the Paradox launcher (EU4 engine 
 <EU4>/version.dll                      Anvil (proxy + core)
 <EU4>/AnvilManager.exe                 player tool, also the installer (§15)
 <EU4>/anvil/
-    anvil.toml                         enabled, disabled_plugins, profile, log_level, opt-ins (§13)
+    anvil.toml                         enabled, disabled_plugins, profile, log_level, allow_ironman/allow_multiplayer (§13)
     anvil.log, anvil.prev.log
     trust.toml                         approvals of Workshop plugins (§14)
     crashes/<time>.json|.txt           last 10 crash reports (§12)
@@ -67,7 +67,7 @@ Core:
 The core never shows a blocking dialog.
 
 **Standard plugins** are library plugins maintained by the project and released with Anvil. They load, fail and can be disabled or replaced like any other plugin; dependents of a missing one are skipped with the reason.
-- `anvil-game`: game readiness, a frame event, running work on the main thread, and a session event (ironman, multiplayer).
+- `anvil-game`: game readiness, a frame event, running work on the main thread, and a session event (ironman, multiplayer). Its C interface is [`include/anvil/anvil_game.h`](../include/anvil/anvil_game.h); details in §13.1.
 - `anvil-overlay`: notifications, the panel and the settings UI (§15).
 
 Knowledge that only some plugins need (GUI tree, console, text) stays in those plugins and their services.
@@ -252,6 +252,7 @@ The C ABI is [`include/anvil/anvil_plugin.h`](../include/anvil/anvil_plugin.h) (
   - A change handle (`AnvilChange*`) is the registry's change id; ids are never reused, so a stale handle is `ANVIL_ERROR_NOT_FOUND`. While the process exits, `remove` does nothing.
   - Inside `anvil_plugin_load` the load is the plugin's group: `begin_group`/`commit_group` return `ANVIL_ERROR_WRONG_PHASE` there.
   - Results map the registry's one to one; `NOT_FOUND` and `ALREADY_EXISTS` (services) are the last two codes.
+  - Events are named like services: a plugin publishes only `<its id>.<name>`, so no plugin can forge another's events (the core acts on `anvil-game.session`, §13); `anvil.` names are Anvil's. Any plugin may subscribe to any name.
 - **Versioning:** the `size` and `api_version` fields keep it extensible; within API 2 functions are only appended (`ANVIL_HOST_HAS`) after the "end of API 2.0" line.
 - **Generated headers:** `anvil gen` produces `symbols.gen.h/.hpp` (symbol ids, typed function symbols, values) and `settings.gen.h/.hpp` (typed accessors).
 - **C++ wrapper** ([`anvil.hpp`](../include/anvil/anvil.hpp), header-only, C++20):
@@ -267,7 +268,7 @@ The C ABI is [`include/anvil/anvil_plugin.h`](../include/anvil/anvil_plugin.h) (
 
 1. The proxy is set up (always); the entry-point hook is placed in `eu4.exe` only.
 2. At the entry point: no `anvil/` folder means nothing happens. `ANVIL_DISABLE=1` or `enabled = false` means the log only.
-3. **Safe mode:** two consecutive crashes before `game_ready` (§12) mean this start loads no plugins except the standard ones the overlay needs to explain it.
+3. **Safe mode:** two consecutive crashes before the game is ready (`anvil-game.ready`, §12, §13.1) mean this start loads no plugins except the standard ones the overlay needs to explain it.
 4. The build is identified.
 5. Plugins are discovered: local `anvil/plugins/*`, and Workshop plugins in enabled mods (approved versions only, §14).
 6. Resolve and verify:
@@ -277,7 +278,7 @@ The C ABI is [`include/anvil/anvil_plugin.h`](../include/anvil/anvil_plugin.h) (
    - disabled ids;
    - the symbols (§7);
    - `conflicts` (the declaring plugin is skipped, see below);
-   - dependencies and cycles.
+   - dependencies and cycles. A plugin with `affects_gameplay = true` depends on `anvil-game` (any version) without declaring it, because only `anvil-game` tells Anvil about ironman and multiplayer (§13): without it the plugin is skipped with "affects gameplay, so it needs plugin 'anvil-game', which is not loaded".
 
    **Conflicts.** A plugin that declares a `conflicts` entry is skipped when a plugin with that id and a version in the range is among the candidates that passed the checks above; the other plugin loads normally. The log says `conflicts with <id> <version>; disable one of them`. Whatever depends on a skipped plugin is skipped by the dependency check, as usual. Edge cases are resolved the same way on every start, whatever the discovery order:
 
@@ -285,7 +286,7 @@ The C ABI is [`include/anvil/anvil_plugin.h`](../include/anvil/anvil_plugin.h) (
    - When only cycles are left, the smallest id (byte order) is skipped and the rest is resolved again. Two plugins that conflict with each other leave the one with the larger id; in `a -> b -> c -> a`, `a` is skipped, then `b` because of `c`, and `c` loads.
    - A conflict with a plugin that is absent, disabled, rejected by the API, `anvil` or symbols checks, or outside the version range is ignored.
    - A candidate that is skipped later, because its own dependency is missing or in a cycle, still counts as a conflict target: conflicts are resolved before dependencies.
-7. `early` plugins are loaded at the entry point, then `main` plugins on an Anvil thread. Each plugin's staged changes are enabled when its load returns.
+7. `early` plugins are loaded at the entry point, then `main` plugins on an Anvil thread. Each plugin's staged changes are enabled when its load returns. A plugin whose required dependency failed to load is not loaded either ("requires plugin '<id>', which failed to load").
 8. `anvil.plugins_loaded` is published and the status is recorded.
 
 ## 11. Settings
@@ -312,7 +313,7 @@ Decided in [Crash attribution to plugins](https://github.com/happy-dwarf-team/an
   - the unwound stack with every frame attributed;
   - the registers, the plugins with versions, the build, and the tail of the log.
 - **Levels:** "in plugin X's code", "in plugin X's change", "plugin X on the stack", or "no plugin involved". Never "X caused it".
-- **Next start:** a notice in the overlay with "disable X at the next start" (only on click), and safe mode after two crashes before `game_ready`. Nothing is uploaded; "copy report" plus the `issues` link.
+- **Next start:** a notice in the overlay with "disable X at the next start" (only on click), and safe mode after two crashes before the game is ready (`anvil-game.ready`). Nothing is uploaded; "copy report" plus the `issues` link.
 
 ## 13. Gameplay-affecting plugins
 
@@ -320,9 +321,33 @@ Decided in [Gameplay-affecting plugins in ironman, achievements and multiplayer]
 
 - **`affects_gameplay`** is required: `true` if the plugin can change the simulation's state or results.
 - **Suspension:** `anvil-game` publishes a session event. In ironman or multiplayer the core suspends every change of gameplay plugins (§8.4), the plugin is told so it can stop its threads, and the changes come back after the session.
-- **Opt-in:** `allow_ironman` / `allow_multiplayer = "opt-in"` let the player allow a plugin in that mode; the choice is stored in `anvil.toml`.
+- **Opt-in:** `allow_ironman` / `allow_multiplayer = "opt-in"` let the player allow a plugin in that mode; the choice is stored in `anvil.toml`:
+  ```toml
+  allow_ironman = ["my-plugin"]       # ids; only plugins whose plugin.toml offers allow_ironman = "opt-in"
+  allow_multiplayer = []
+  ```
+  A session that is both ironman and multiplayer needs both. An id listed for a mode its plugin does not offer, or for a plugin that does not affect gameplay, does nothing; the log says so when the plugin is resolved.
 - **Achievements:** with an ironman opt-in active, the overlay shows a permanent notice that achievements stay enabled but may break Paradox's rules.
 - **Multiplayer:** the overlay shows a hash of the active gameplay plugin set for players to compare by hand.
+- **Without `anvil-game`** nothing would report sessions, so gameplay plugins depend on it implicitly (§10): they are skipped when it is missing, disabled or skipped, and not loaded when it fails to load.
+
+**How the core applies it** (`src/core/gameplay_policy.cpp`):
+- The core subscribes to `anvil-game.session` before any plugin loads, so it acts before plugins hear of a session. Only `anvil-game` can publish that name (§9).
+- On a session start it computes, for each gameplay plugin in load order, whether the mode allows it, suspends the others (`anvil.suspended` after their changes are out) and logs each decision with the reason and the number of changes; plugins it allows are logged as such. On the end it resumes them (`anvil.resumed` after the changes are back). A start that follows a start (the mode changed) suspends or resumes only the difference.
+- A plugin that loads while a session runs starts suspended: its changes are enabled suspended. A plugin whose load failed is left alone.
+
+### 13.1 `anvil-game`
+
+A standard plugin (`plugins/anvil-game`, released in `anvil/plugins/anvil-game/`), `phase = "early"` so that early plugins can depend on it, `affects_gameplay = false`. Its `symbols.toml` declares every address and offset it reads (11 symbols, checked with `anvil check --exe`; the lock is committed and checked in CI). It hooks the frame function (`0x14C25A0(app, outer)`); after each frame of the main loop (`outer = 1`) on the main thread (the thread of the first such frame) while the game is not quitting (`app+0x83`, `app+0x2F8`) it does, in this order:
+
+1. **Readiness:** the first frame after the game sets its ready flag (the byte at `0x233FF4E`, set once at the end of start-up) publishes `anvil-game.ready`. The core logs `game ready at … ms` from it; the core itself no longer knows the flag.
+2. **Session:** a session runs when the root object (`0x233FE78`) holds a session of the game's class (vtable `0x1CB8460`, verified through its slot `+0x100`), that session has a game-speed object, and the date is set. Ironman is the root byte `+0x24D0`, multiplayer the game's own check `0x6EAA10(session)`, the two inputs of the console's multiplayer/ironman gate. A change of the session object, of ironman or of multiplayer ends the session and starts a new one; `anvil-game.session` carries `STARTED` or `ENDED` with the flags and a number. Reads that fault (a half-built root) change nothing. Quitting from a session publishes no `ENDED`.
+3. **Work:** what `run_on_main_thread` queued before this frame, in order.
+4. **Frame:** `anvil-game.frame` with the game's frame counter (`app+0x320`).
+
+Frames drawn inside a game update or a save load (`outer = 0`) and frames on other threads are passed on untouched. Saves load inside one frame of the main loop (a static finding of the lab), so a session should start at the end of the frame that loaded it, before the next game update; this is not yet checked in the game.
+
+Service `anvil-game.game` version 1: `ready()`, `main_thread_id()`, `frame_number()`, `run_on_main_thread(work, context)` and `session(&out)`. Queued work never runs once the game quits, and frames stop while a save loads, so callers wait with a limit.
 
 ## 14. Workshop distribution and trust
 
@@ -425,7 +450,7 @@ Decided in [Player UI: in-game overlay and Anvil Manager](https://github.com/hap
   It lies next to `plugin.toml` and is committed. `--exe` writes it also when it finds problems, so CI fails until they are fixed, but not when a file does not parse or the exe cannot be read. Without `--exe`, a plugin with `symbols` fails on a missing lock, a different digest, `result = "problems"`, an unknown key or a newer `format`.
 - **SDK:** `anvil-sdk-windows-x64.zip`, an asset of every release next to `anvil-windows-x64.zip`, in `SHA256SUMS.txt` and with the same build attestation. CI builds it with the release's own `anvil.exe` and builds the examples from it before it is published. [`sdk/`](../sdk) holds its CMake files and README.
   ```
-  include/anvil/{anvil_plugin.h, anvil.hpp, anvil_symbols.hpp}
+  include/anvil/{anvil_plugin.h, anvil.hpp, anvil_symbols.hpp, anvil_game.h}
   bin/anvil.exe
   cmake/AnvilPluginConfig.cmake, AnvilPluginConfigVersion.cmake
   CMakeLists.txt  README.md  LICENSE  version.txt  third-party/  SHA256SUMS.txt
@@ -476,7 +501,7 @@ Decided in [Performance budgets and how the lab measures them](https://github.co
   - On a CPU model without an entry the gate prints the entry to add and does not fail.
   - A baseline is raised only with a reason in the pull request.
 - **Lab:** `bench/run-lab.ps1` runs `anvil_bench` pinned to CPU4 at high priority, with ≥ 30 repetitions and EU4 closed, and checks the budgets above.
-- Start-up: `anvil.log` times everything from `AnvilEntry`: `resolved … at`, `early phase done at`, and `plugins loaded at`, which is the end of the core start-up.
+- Start-up: `anvil.log` times everything from `AnvilEntry`: `resolved … at`, `early phase done at`, and `plugins loaded at`, which is the end of the core start-up; `game ready at` follows `anvil-game.ready`.
 - Start-up follows the lab procedure, with ≥ 5 runs per variant.
 - SIMULATION A/B through Tongs, with ≥ 5 valid trials, guards only against ≥ 2% regressions.
 

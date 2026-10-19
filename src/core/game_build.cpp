@@ -14,7 +14,7 @@ namespace {
 // Builds Anvil knows. Plugins refer to them by id in plugin.toml.
 constexpr KnownBuild kKnownBuilds[] = {
     {"eu4-1.37.5-steam-win64", 0x66FE6AB9u, 0x25E0000u, 0x024BAF19u, 0x1A337C8u, 38462504ull,
-     "9AD3EFE1AF169F40EE577F9DAE5DEBBC87AF6FB8B5450FB345EBF110DC4D771A", 0x233FF4Eu},
+     "9AD3EFE1AF169F40EE577F9DAE5DEBBC87AF6FB8B5450FB345EBF110DC4D771A"},
 };
 
 }  // namespace
