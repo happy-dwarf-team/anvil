@@ -1,7 +1,8 @@
 // Change registry tests (design §8): chains, mid hooks, block replacements,
-// pointer swaps, conflicts, shared byte patches, staging, handles, rollback and
-// `*_at`, on code written into scratch memory.
+// pointer swaps, conflicts, shared byte patches, staging, handles, rollback,
+// suspension and `*_at`, on code written into scratch memory.
 #include "core/changes.hpp"
+#include "core/suspension.hpp"
 #include "test_support.hpp"
 
 #include <intrin.h>
@@ -9,6 +10,7 @@
 
 #include <cstring>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -898,5 +900,177 @@ void change_tests() {
         CHECK(traced(g, 0) == 115 && g_trace == "ab");
         CHECK(reg.rollback(a) == 1 && reg.rollback(b) == 1 && traced(g, 0) == 15);
         CHECK(std::memcmp(elsewhere.base + 0x40, kSteps.data(), kSteps.size()) == 0);
+    });
+
+    run("suspend: a middle link is skipped and comes back in place; idempotent", [] {
+        Scratch s(0x1000);
+        s.put(0x40, kAddOne);
+        const auto f = reinterpret_cast<Fn>(s.base + 0x40);
+        ChangeRegistry reg(s.at(0), 0x1000);
+        const OwnerId a = reg.add_owner("a"), b = reg.add_owner("b"), c = reg.add_owner("c");
+        for (const auto& [owner, detour, next] : {std::tuple{a, &detour_a, &g_next_a}, std::tuple{b, &detour_b, &g_next_b},
+                                                   std::tuple{c, &detour_c, &g_next_c}}) {
+            CHECK(reg.hook_function(owner, in_image(s.at(0x40)), reinterpret_cast<void*>(detour), slot(*next)) ==
+                  ChangeStatus::Ok);
+        }
+        CHECK(traced(f, 1) == 124 && g_trace == "abc");
+        bool changed = false;
+        CHECK(reg.suspend(b, &changed) == ChangeStatus::Ok && changed && reg.suspended(b));
+        CHECK(traced(f, 1) == 112 && g_trace == "ac");
+        CHECK(traced(g_next_b, 1) == 12 && g_trace == "c");  // a thread still inside b passes on
+        CHECK(reg.count(b) == 0 && reg.suspended_count(b) == 1 && reg.describe(b).empty());
+        CHECK((reg.chain_at(s.at(0x40)) == std::vector<OwnerId>{a, c}));
+        CHECK(reg.suspend(b, &changed) == ChangeStatus::Ok && !changed);
+        CHECK(traced(f, 1) == 112 && g_trace == "ac");
+        // Every link suspended: the original bytes are back.
+        CHECK(reg.suspend(a) == ChangeStatus::Ok && reg.suspend(c) == ChangeStatus::Ok);
+        CHECK(std::memcmp(s.base + 0x40, kAddOne.data(), kAddOne.size()) == 0 && traced(f, 1) == 2);
+        CHECK(reg.resume(b, &changed) == ChangeStatus::Ok && changed && !reg.suspended(b));
+        CHECK(traced(f, 1) == 4 && g_trace == "b");
+        CHECK(reg.resume(a) == ChangeStatus::Ok && reg.resume(c) == ChangeStatus::Ok);
+        CHECK(traced(f, 1) == 124 && g_trace == "abc");
+        CHECK(reg.resume(b, &changed) == ChangeStatus::Ok && !changed);
+        CHECK(reg.count(b) == 1 && reg.suspended_count(b) == 0);
+        CHECK(reg.suspend(9) == ChangeStatus::InvalidArgument && !reg.suspended(9));
+        CHECK(reg.rollback(a) == 1 && reg.rollback(b) == 1 && reg.rollback(c) == 1 && traced(f, 1) == 2);
+    });
+
+    run("suspend: a shared byte patch stays while another owner keeps it; the bytes stay reserved", [] {
+        Scratch s(0x1000);
+        ChangeRegistry reg(s.at(0), 0x1000);
+        const OwnerId a = reg.add_owner("a"), b = reg.add_owner("b"), c = reg.add_owner("c");
+        const uint8_t patch[4] = {1, 2, 3, 4};
+        const uint8_t cc[4] = {0xCC, 0xCC, 0xCC, 0xCC};
+        CHECK(reg.patch_bytes(a, in_image(s.at(0x100)), patch, 4) == ChangeStatus::Ok);
+        CHECK(reg.patch_bytes(b, in_image(s.at(0x100)), patch, 4) == ChangeStatus::Ok);
+        CHECK(reg.suspend(a) == ChangeStatus::Ok);
+        CHECK(std::memcmp(s.base + 0x100, patch, 4) == 0);  // b still has it
+        CHECK((reg.chain_at(s.at(0x100)) == std::vector<OwnerId>{b}));
+        CHECK(reg.suspend(b) == ChangeStatus::Ok);
+        CHECK(std::memcmp(s.base + 0x100, cc, 4) == 0);  // nobody acting: reverted
+        CHECK(reg.chain_at(s.at(0x100)).empty());
+        uint8_t shipped[4] = {};
+        CHECK(reg.read_original(s.at(0x100), shipped, 4) && std::memcmp(shipped, cc, 4) == 0);
+        // Suspended changes keep their bytes: other bytes there conflict, the same ones share.
+        const uint8_t other[4] = {1, 2, 3, 5};
+        CHECK(reg.patch_bytes(c, in_image(s.at(0x100)), other, 4) == ChangeStatus::Conflict);
+        CHECK(reg.patch_bytes(c, in_image(s.at(0x102)), patch, 2) == ChangeStatus::Conflict);
+        ChangeId hc = 0;
+        CHECK(reg.patch_bytes(c, in_image(s.at(0x100)), patch, 4, &hc) == ChangeStatus::Ok);
+        CHECK(std::memcmp(s.base + 0x100, patch, 4) == 0);
+        CHECK(reg.remove(c, hc) == ChangeStatus::Ok && std::memcmp(s.base + 0x100, cc, 4) == 0);
+        CHECK(reg.resume(a) == ChangeStatus::Ok && std::memcmp(s.base + 0x100, patch, 4) == 0);
+        CHECK(reg.resume(b) == ChangeStatus::Ok && reg.rollback(a) == 1);
+        CHECK(std::memcmp(s.base + 0x100, patch, 4) == 0);
+        CHECK(reg.rollback(b) == 1 && std::memcmp(s.base + 0x100, cc, 4) == 0);
+    });
+
+    run("suspend: a pointer swap in a chain leaves the slot to the others", [] {
+        Scratch s(0x2000);
+        uint64_t* const slot_ptr = reinterpret_cast<uint64_t*>(s.base + 0x1000);
+        *slot_ptr = reinterpret_cast<uint64_t>(value(0));
+        DWORD old = 0;
+        CHECK(VirtualProtect(s.base + 0x1000, 0x1000, PAGE_READONLY, &old));
+        const uintptr_t slot = s.at(0x1000);
+        const auto now = [&] { return reinterpret_cast<void*>(*slot_ptr); };
+        ChangeRegistry reg(s.at(0), 0x2000);
+        const OwnerId a = reg.add_owner("a"), b = reg.add_owner("b"), c = reg.add_owner("c");
+        CHECK(reg.swap_pointer(a, in_image(slot), 0, value(1), &g_prev_a) == ChangeStatus::Ok);
+        CHECK(reg.swap_pointer(b, in_image(slot), 0, value(2), &g_prev_b) == ChangeStatus::Ok);
+        CHECK(reg.swap_pointer(c, in_image(slot), 0, value(3), &g_prev_c) == ChangeStatus::Ok);
+        CHECK(reg.suspend(b) == ChangeStatus::Ok);
+        CHECK(now() == value(1) && g_prev_a == value(3) && g_prev_b == value(3) && g_prev_c == value(0));
+        CHECK(reg.suspend(a) == ChangeStatus::Ok);
+        CHECK(now() == value(3) && g_prev_a == value(3));
+        CHECK(reg.suspend(c) == ChangeStatus::Ok);
+        CHECK(now() == value(0) && g_prev_a == value(0) && g_prev_b == value(0));
+        CHECK(protection(s.base + 0x1000) == PAGE_READONLY);
+        CHECK(reg.resume(b) == ChangeStatus::Ok);
+        CHECK(now() == value(2) && g_prev_b == value(0) && g_prev_a == value(2));
+        CHECK(reg.resume(a) == ChangeStatus::Ok && reg.resume(c) == ChangeStatus::Ok);
+        CHECK(now() == value(1) && g_prev_a == value(2) && g_prev_b == value(3) && g_prev_c == value(0));
+        CHECK(reg.rollback(a) == 1 && reg.rollback(b) == 1 && reg.rollback(c) == 1 && now() == value(0));
+    });
+
+    run("suspend: every kind of one owner leaves the game, a suspended block keeps its range", [] {
+        Scratch s(0x2000);
+        s.put(0x40, kSteps);
+        s.put(0x80, kAddOne);
+        // int caller(int x) { return callee(x); }: sub rsp,28h; call 0x200; add rsp,28h; ret
+        s.put(0x10, {0x48, 0x83, 0xEC, 0x28, 0xE8, 0, 0, 0, 0, 0x48, 0x83, 0xC4, 0x28, 0xC3});
+        const int32_t rel = 0x200 - (0x14 + 5);
+        std::memcpy(s.base + 0x15, &rel, 4);
+        s.put(0x200, kAddOne);
+        void* const shipped_value = value(0);
+        std::memcpy(s.base + 0x1000, &shipped_value, sizeof(shipped_value));
+        const std::vector<uint8_t> shipped(s.base, s.base + 0x2000);
+        const auto f = reinterpret_cast<Fn>(s.base + 0x40);
+        const auto g = reinterpret_cast<Fn>(s.base + 0x80);
+        const auto caller = reinterpret_cast<Fn>(s.base + 0x10);
+        ChangeRegistry reg(s.at(0), 0x2000);
+        const OwnerId a = reg.add_owner("a"), b = reg.add_owner("b");
+        Probe block{'B', 0, 0, 1000}, mid{'m'};
+        const uint8_t patch[2] = {0x90, 0x90};
+        CHECK(reg.replace_block(b, in_image(s.at(0x43)), 6, 0, &probe, &block) == ChangeStatus::Ok);
+        CHECK(reg.mid_hook(b, in_image(s.at(0x43)), &probe, &mid) == ChangeStatus::Ok);
+        CHECK(reg.hook_function(b, in_image(s.at(0x80)), reinterpret_cast<void*>(&detour_b), slot(g_next_b)) ==
+              ChangeStatus::Ok);
+        CHECK(reg.redirect_call(b, in_image(s.at(0x14)), 0, reinterpret_cast<void*>(&detour_c), slot(g_next_c)) ==
+              ChangeStatus::Ok);
+        CHECK(reg.patch_bytes(b, in_image(s.at(0x300)), patch, 2) == ChangeStatus::Ok);
+        CHECK(reg.swap_pointer(b, in_image(s.at(0x1000)), 0, value(1), &g_prev_b) == ChangeStatus::Ok);
+        CHECK(traced(f, 0) == 1009 && g_trace == "mB");
+        CHECK(traced(g, 1) == 4 && traced(caller, 1) == 12);
+        CHECK(reg.count(b) == 6);
+
+        CHECK(reg.suspend(b) == ChangeStatus::Ok);
+        CHECK(reg.count(b) == 0 && reg.suspended_count(b) == 6);
+        CHECK(std::memcmp(s.base, shipped.data(), shipped.size()) == 0);  // the game as shipped
+        CHECK(traced(f, 0) == 15 && g_trace.empty() && traced(g, 1) == 2 && traced(caller, 1) == 2);
+        // The suspended block still owns its range, its site too.
+        CHECK(reg.patch_bytes(a, in_image(s.at(0x47)), patch, 1) == ChangeStatus::Conflict);
+        CHECK(reg.hook_function(a, in_image(s.at(0x43)), reinterpret_cast<void*>(&detour_a), slot(g_next_a)) ==
+              ChangeStatus::Conflict);
+        CHECK(reg.swap_pointer(a, in_image(s.at(0x1000)), 0, value(2), &g_prev_a) == ChangeStatus::Ok);  // chains
+        // Changes requested while suspended are enabled suspended.
+        ChangeId later = 0;
+        CHECK(reg.patch_bytes(b, in_image(s.at(0x400)), patch, 2, &later) == ChangeStatus::Ok);
+        CHECK(s.base[0x400] == 0xCC && reg.suspended_count(b) == 7);
+        CHECK(reg.remove(b, later) == ChangeStatus::Ok && reg.suspended_count(b) == 6);
+
+        CHECK(reg.resume(b) == ChangeStatus::Ok && reg.count(b) == 6);
+        CHECK(traced(f, 0) == 1009 && g_trace == "mB");
+        CHECK(traced(g, 1) == 4 && traced(caller, 1) == 12 && s.base[0x300] == 0x90);
+        CHECK(*reinterpret_cast<void**>(s.base + 0x1000) == value(2) && g_prev_a == value(1) && g_prev_b == value(0));
+        // Rolling back counts the enabled changes, suspended or not.
+        CHECK(reg.suspend(b) == ChangeStatus::Ok && reg.rollback(b) == 6 && reg.rollback(a) == 1);
+        CHECK(std::memcmp(s.base, shipped.data(), shipped.size()) == 0);
+    });
+
+    run("suspend_plugin and resume_plugin tell only the plugin, once per change of state", [] {
+        Scratch s(0x1000);
+        ChangeRegistry reg(s.at(0), 0x1000);
+        ServiceBus bus;
+        const OwnerId p = reg.add_owner("p");
+        reg.add_owner("q");
+        const uint8_t patch[2] = {0x90, 0x90};
+        CHECK(reg.patch_bytes(p, in_image(s.at(0x100)), patch, 2) == ChangeStatus::Ok);
+        static std::vector<std::string> events;
+        events.clear();
+        const AnvilEventCallback record = [](const char* event, const void*, void* who) {
+            events.push_back(std::string(static_cast<const char*>(who)) + ":" + event);
+        };
+        CHECK(bus.subscribe("p", kEventSuspended, record, const_cast<char*>("p")) == ANVIL_OK);
+        CHECK(bus.subscribe("p", kEventResumed, record, const_cast<char*>("p")) == ANVIL_OK);
+        CHECK(bus.subscribe("q", kEventSuspended, record, const_cast<char*>("q")) == ANVIL_OK);
+        CHECK(suspend_plugin(reg, bus, p, "p") == ChangeStatus::Ok);
+        CHECK(s.base[0x100] == 0xCC && reg.suspended(p));
+        CHECK(suspend_plugin(reg, bus, p, "p") == ChangeStatus::Ok);
+        CHECK(events == std::vector<std::string>{"p:anvil.suspended"});
+        CHECK(resume_plugin(reg, bus, p, "p") == ChangeStatus::Ok && resume_plugin(reg, bus, p, "p") == ChangeStatus::Ok);
+        CHECK(s.base[0x100] == 0x90 && !reg.suspended(p));
+        CHECK((events == std::vector<std::string>{"p:anvil.suspended", "p:anvil.resumed"}));
+        CHECK(bus.publish_to("q", kEventSuspended, nullptr) == 1 && events.back() == "q:anvil.suspended");
+        CHECK(reg.rollback(p) == 1);
     });
 }

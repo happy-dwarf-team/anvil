@@ -22,6 +22,9 @@ public:
                           void* context);
     // Calls subscribers in subscription order on the calling thread.
     size_t publish(const std::string& event, const void* payload);
+    // The same, but only the subscriptions of plugin `owner` (events about
+    // that plugin, e.g. anvil.suspended).
+    size_t publish_to(const std::string& owner, const std::string& event, const void* payload);
 
     // Drops services and subscriptions of a plugin that failed to load.
     void remove_owner(const std::string& owner);

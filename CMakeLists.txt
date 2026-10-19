@@ -64,6 +64,7 @@ add_library(anvil_loader STATIC
     src/core/runtime.cpp
     src/core/seh_guard.cpp
     src/core/services.cpp
+    src/core/suspension.cpp
     src/core/symbol_check.cpp)
 target_link_libraries(anvil_loader PUBLIC anvil_core safetyhook::safetyhook)
 

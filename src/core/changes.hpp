@@ -76,6 +76,7 @@ struct ChangeTarget {
 //    (also for the same owner); identical byte patches share ownership;
 //  - changes inside a group (begin/commit) are enabled together or not at
 //    all; outside a group each request is its own group;
+//  - the core can suspend all changes of an owner and resume them (§8.4);
 //  - executable memory (stubs, trampolines) is never freed.
 // Addresses are absolute; the host converts RVAs and symbols.
 class ChangeRegistry {
@@ -149,8 +150,21 @@ public:
     bool group_open(OwnerId owner) const;
 
     // Removes every change of `owner` (staged or enabled) and closes its group.
-    // Returns the number of changes that were enabled.
+    // Returns the number of changes that were enabled (suspended ones too).
     size_t rollback(OwnerId owner);
+
+    // --- suspension (design §8.4, §13): the game runs as if the owner's
+    // enabled changes were removed. Its links are skipped (their own next still
+    // leads on), its byte patches are reverted unless another owner shares
+    // them, its pointer swaps leave the slot to the rest of the chain. Its
+    // changes keep their bytes reserved against other changes, and changes it
+    // requests while suspended are enabled suspended. Both calls are
+    // idempotent: `changed` (optional) is false when the owner already was in
+    // that state. Internal when the game's memory could not be written at
+    // some site; the changes there keep their previous state, the rest move.
+    ChangeStatus suspend(OwnerId owner, bool* changed = nullptr);
+    ChangeStatus resume(OwnerId owner, bool* changed = nullptr);
+    bool suspended(OwnerId owner) const;
 
     // --- queries
     // Copies bytes as the game shipped them: bytes changed by any change read in
@@ -164,11 +178,13 @@ public:
     // Executable memory within rel32 reach of the image; never freed.
     void* alloc_near(size_t size);
 
-    // Enabled changes of `owner`, in request order.
+    // Enabled changes of `owner` that act on the game (not suspended), in
+    // request order.
     std::vector<std::string> describe(OwnerId owner) const;
     size_t count(OwnerId owner) const;
     size_t staged_count(OwnerId owner) const;
-    // Owners of the enabled links at `address` in chain order (outermost first).
+    size_t suspended_count(OwnerId owner) const;
+    // Owners of the acting links at `address` in chain order (outermost first).
     std::vector<OwnerId> chain_at(uintptr_t address) const;
 
 private:
@@ -194,6 +210,7 @@ private:
                           std::string label, void** next, ChangeId* out, void* user = nullptr, uintptr_t resume = 0,
                           size_t span = 0);
     ChangeStatus enable(std::vector<ChangeId> ids);
+    ChangeStatus move_links(OwnerId owner, bool suspend);
     bool relink(Site& site);
     void publish(Site& site, uintptr_t resume, const std::vector<Change*>& callbacks);
     static void point(const Change& link, uintptr_t target);
