@@ -36,7 +36,7 @@ $tolerance = [double]$base.tolerance
 $ratios = [ordered]@{}
 foreach ($case in $runs[0].cases.PSObject.Properties.Name) {
     if ($case -eq 'call') { continue }
-    $values = @($runs | ForEach-Object { [double]$_.cases.$case.ratio })
+    $values = @($runs | ForEach-Object { $_.cases.$case } | Where-Object { $_ } | ForEach-Object { [double]$_.ratio })
     $ratios[$case] = ($values | Measure-Object -Minimum).Minimum
 }
 
@@ -69,7 +69,7 @@ foreach ($case in $runner.Value.ratios.PSObject.Properties) {
         $verdict = 'faster'
         Say 'notice' ("anvil_bench: {0} is {1:P0} faster than its baseline on '{2}' ({3:N2}x vs {4:N2}x); if this holds, lower its ratio in bench/baseline-ci.json." -f $case.Name, -$change, $cpu, $now, $was)
     }
-    $rows += [pscustomobject]@{ case = $case.Name; baseline = [math]::Round($was, 3); now = [math]::Round($now, 3); change = '{0:+0.0%;-0.0%}' -f $change; verdict = $verdict }
+    $rows += [pscustomobject]@{ case = $case.Name; baseline = [math]::Round($was, 3); now = [math]::Round($now, 3); change = '{0:+0.0%;-0.0%;0.0%}' -f [math]::Round($change, 3); verdict = $verdict }
 }
 foreach ($k in $ratios.Keys) {
     if ($null -eq $runner.Value.ratios.PSObject.Properties[$k]) {
