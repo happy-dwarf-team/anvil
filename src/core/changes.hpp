@@ -79,6 +79,38 @@ struct CallCount {
 // One line of the report, e.g. "function hook rva 0x8024D0 [speed_object]: 1234 calls".
 std::string describe_call_count(const CallCount& count);
 
+// What an address is to the registry, for crash reports (design §12).
+enum class AddressRole {
+    None,          // nothing the registry changed or allocated
+    ChangedBytes,  // game bytes a change owns: stolen bytes, a block, a call, a patch, a slot
+    Stub,          // an Anvil stub: entry, next, context, call or counting stub
+    Trampoline,    // SafetyHook's copy of a hooked site's first instructions
+    StubMemory,    // Anvil's stub memory that no change uses
+};
+
+const char* address_role_name(AddressRole role);
+
+// One change an address belongs to. The strings live as long as the registry.
+struct AddressChange {
+    ChangeId id = 0;
+    OwnerId owner = 0;
+    ChangeKind kind = ChangeKind::FunctionHook;
+    const char* label = "";   // as in describe()
+    const char* symbol = "";  // the declared symbol, "" for a raw address
+};
+
+struct AddressAttribution {
+    static constexpr size_t kMaxChanges = 8;
+    AddressRole role = AddressRole::None;
+    uintptr_t site = 0;  // the address the changes act on
+    // For a stack walk through code without unwind data:
+    uintptr_t original = 0;       // in a trampoline: the game instruction it is a copy of, 0 if none
+    bool context_return = false;  // the return address of a context stub's call to its callbacks
+    size_t count = 0;             // changes listed (at most kMaxChanges)
+    size_t total = 0;             // changes found
+    AddressChange changes[kMaxChanges];
+};
+
 // All changes of game memory go through one registry (design §8):
 //  - one SafetyHook hook per address; Anvil chains the plugins itself, each
 //    link with its own `next` (a jump stub Anvil re-points atomically), so
@@ -204,6 +236,15 @@ public:
     // call. With wait = false (at process exit, where a killed thread may hold
     // the lock) false when the registry is busy.
     bool call_counts(std::vector<CallCount>& out, bool wait = true) const;
+    // The changes an address belongs to (design §12): game bytes a live
+    // change owns (its active links, or every link when none is active), or a
+    // stub or trampoline (the link it belongs to, or every link of its site).
+    // For the crash writer: it neither allocates nor waits, and returns false
+    // when the registry is busy (a crashed thread may hold its lock).
+    bool attribute(uintptr_t address, AddressAttribution& out) const;
+    // The return address inside a context stub, after its call to the
+    // callbacks; rbx then holds the saved AnvilCpuContext.
+    static size_t context_stub_return();
 
 private:
     struct Site;

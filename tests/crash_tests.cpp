@@ -1,0 +1,711 @@
+// Crash capture tests (design §10, §12): attribution of addresses to changes
+// and plugins, the stack walk through Anvil's stubs, the four levels, the
+// report text, the safe-mode start marker, and real crashes in a child
+// process (this executable with --child), which must write the report, chain
+// to the filter it set itself and, on a stack overflow, a minidump.
+//
+// Usage: anvil_crash_tests              (runs everything)
+//        anvil_crash_tests --child <mode> <dir>   (internal)
+#include "core/changes.hpp"
+#include "core/crash.hpp"
+#include "core/crash_report.hpp"
+#include "core/host.hpp"
+#include "core/log.hpp"
+#include "core/safe_mode.hpp"
+#include "test_support.hpp"
+
+#include <windows.h>
+
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <memory>
+#include <sstream>
+#include <string>
+#include <vector>
+
+namespace {
+
+using namespace anvil;
+namespace fs = std::filesystem;
+
+// Executable scratch memory standing in for eu4.exe.
+struct Scratch {
+    uint8_t* base;
+    size_t size;
+    explicit Scratch(size_t bytes) : size(bytes) {
+        base = static_cast<uint8_t*>(VirtualAlloc(nullptr, bytes, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE));
+        std::memset(base, 0xCC, bytes);
+    }
+    ~Scratch() { VirtualFree(base, 0, MEM_RELEASE); }
+    uintptr_t at(size_t offset) const { return reinterpret_cast<uintptr_t>(base) + offset; }
+    void put(size_t offset, const std::vector<uint8_t>& code) {
+        std::memcpy(base + offset, code.data(), code.size());
+        FlushInstructionCache(GetCurrentProcess(), base + offset, code.size());
+    }
+};
+
+// int f(int x) { return x + 1; }: lea eax, [rcx+1]; 9x nop; ret
+const std::vector<uint8_t> kAddOne = {0x8D, 0x41, 0x01, 0x90, 0x90, 0x90, 0x90, 0x90,
+                                      0x90, 0x90, 0x90, 0x90, 0xC3};
+using Fn = int (*)(int);
+
+ChangeTarget in_image(uintptr_t address) { return {address, true, nullptr, nullptr, 0}; }
+
+Fn g_next_a = nullptr, g_next_b = nullptr;
+int detour_a(int x) { return g_next_a(x) + 100; }
+int detour_b(int x) { return g_next_b(x) * 2; }
+
+void** slot(Fn& next) { return reinterpret_cast<void**>(&next); }
+
+uintptr_t stub_target(void* next) {
+    uintptr_t target = 0;
+    std::memcpy(&target, static_cast<uint8_t*>(next) + 8, sizeof(target));
+    return target;
+}
+
+std::unique_ptr<AnvilPlugin> plugin(const std::string& id, const std::string& extra = "", HMODULE module = nullptr) {
+    auto p = std::make_unique<AnvilPlugin>();
+    p->manifest = manifest(plugin_toml(id, extra));
+    p->module = module;
+    p->state = "loaded";
+    return p;
+}
+
+// One symbol `name` at `rva` with `size` declared bytes.
+PluginSymbols symbols(uintptr_t base, const char* name, uint32_t rva, size_t size) {
+    SymbolFile file;
+    Symbol s;
+    s.name = name;
+    s.kind = SymbolKind::Function;
+    s.rva = rva;
+    s.bytes.assign(size, 0x90);
+    s.mask.assign(size, 0xFF);
+    file.symbols.push_back(s);
+    SymbolVerification verified;
+    verified.symbols.push_back({rva, {}});
+    return PluginSymbols(file, verified, base);
+}
+
+bool contains(std::string_view text, std::string_view part) { return text.find(part) != std::string_view::npos; }
+
+// A strict enough JSON check: one value, strings, numbers, literals, nesting.
+struct Json {
+    std::string_view s;
+    size_t i = 0;
+    void ws() {
+        while (i < s.size() && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t')) ++i;
+    }
+    bool literal(std::string_view word) {
+        if (s.substr(i, word.size()) != word) return false;
+        i += word.size();
+        return true;
+    }
+    bool string() {
+        if (i >= s.size() || s[i] != '"') return false;
+        for (++i; i < s.size(); ++i) {
+            const unsigned char c = static_cast<unsigned char>(s[i]);
+            if (c == '"') return ++i, true;
+            if (c < 0x20) return false;
+            if (c == '\\') {
+                if (++i >= s.size()) return false;
+                if (s[i] == 'u') {
+                    if (i + 4 >= s.size()) return false;
+                    i += 4;
+                } else if (std::string_view("\"\\/bfnrt").find(s[i]) == std::string_view::npos) {
+                    return false;
+                }
+            }
+        }
+        return false;
+    }
+    bool number() {
+        const size_t start = i;
+        if (i < s.size() && s[i] == '-') ++i;
+        while (i < s.size() && ((s[i] >= '0' && s[i] <= '9') || s[i] == '.' || s[i] == 'e' || s[i] == 'E' || s[i] == '+')) ++i;
+        return i > start;
+    }
+    bool value() {
+        ws();
+        if (i >= s.size()) return false;
+        if (s[i] == '{') {
+            ++i;
+            ws();
+            if (i < s.size() && s[i] == '}') return ++i, true;
+            for (;;) {
+                ws();
+                if (!string()) return false;
+                ws();
+                if (i >= s.size() || s[i++] != ':') return false;
+                if (!value()) return false;
+                ws();
+                if (i < s.size() && s[i] == ',') { ++i; continue; }
+                return i < s.size() && s[i++] == '}';
+            }
+        }
+        if (s[i] == '[') {
+            ++i;
+            ws();
+            if (i < s.size() && s[i] == ']') return ++i, true;
+            for (;;) {
+                if (!value()) return false;
+                ws();
+                if (i < s.size() && s[i] == ',') { ++i; continue; }
+                return i < s.size() && s[i++] == ']';
+            }
+        }
+        if (s[i] == '"') return string();
+        if (literal("true") || literal("false") || literal("null")) return true;
+        return number();
+    }
+    static bool valid(std::string_view text) {
+        Json j{text};
+        if (!j.value()) return false;
+        j.ws();
+        return j.i == text.size();
+    }
+};
+
+std::string read_file(const fs::path& file) {
+    std::ifstream in(file, std::ios::binary);
+    std::ostringstream s;
+    s << in.rdbuf();
+    return s.str();
+}
+
+// ---- a mid hook that walks its own stack -------------------------------------
+
+Frame g_walked[32];
+size_t g_walked_count = 0;
+const CrashSources* g_walk_sources = nullptr;
+
+void walk_here(AnvilCpuContext*, void*) {
+    CONTEXT ctx{};
+    RtlCaptureContext(&ctx);
+    const auto* tib = reinterpret_cast<const NT_TIB*>(NtCurrentTeb());
+    g_walked_count = walk_stack(ctx, reinterpret_cast<uintptr_t>(tib->StackLimit),
+                                reinterpret_cast<uintptr_t>(tib->StackBase), *g_walk_sources, g_walked, 32);
+}
+
+__declspec(noinline) int call_scratch(Fn f, int x) { return f(x) + 1; }
+
+// ---- the child process ---------------------------------------------------------
+
+volatile int* volatile g_null = nullptr;
+volatile bool g_stop = false;
+fs::path g_child_dir;
+
+__declspec(noinline) void crash_here() { *g_null = 1; }
+
+__declspec(noinline) int recurse(int depth) {
+    volatile char pad[256];
+    pad[0] = static_cast<char>(depth);
+    if (g_stop) return pad[0];
+    return recurse(depth + 1) + pad[0];
+}
+
+// The game's own filter in the child: proves Anvil's filter called it.
+LONG WINAPI child_next_filter(EXCEPTION_POINTERS*) {
+    const HANDLE file = CreateFileW((g_child_dir / "next-filter.txt").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                    FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+    TerminateProcess(GetCurrentProcess(), 0xC0DE);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+int child(const std::string& mode, const fs::path& dir) {
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+    g_child_dir = dir;
+    static Scratch image(0x10000);
+    image.put(0x100, kAddOne);
+    image.put(0x200, kAddOne);
+    static ChangeRegistry registry(image.at(0), 0x10000);
+    static std::vector<std::unique_ptr<AnvilPlugin>> plugins;
+    plugins.push_back(plugin("crasher", "issues = \"https://example.org/crasher/issues\"\n", GetModuleHandleW(nullptr)));
+    plugins.push_back(plugin("patcher", "issues = \"https://example.org/patcher/issues\"\n"));
+    plugins[1]->symbols = symbols(image.at(0), "add_one", 0x200, kAddOne.size());
+    const OwnerId crasher = registry.add_owner("crasher");
+    const OwnerId patcher = registry.add_owner("patcher");
+    (void)crasher;
+    const uint8_t ud2[] = {0x0F, 0x0B};
+    if (registry.patch_bytes(patcher, in_image(image.at(0x200)), ud2, sizeof(ud2)) != ChangeStatus::Ok) return 10;
+
+    std::ofstream(dir / "anvil.log") << "[    1.0 ms] info  [anvil] line one\r\n[    2.0 ms] info  [anvil] line two\r\n";
+    crash::Setup setup;
+    setup.crash_dir = dir / "crashes";
+    setup.log_file = dir / "anvil.log";
+    setup.image = GetModuleHandleW(nullptr);
+    setup.sources.changes = &registry;
+    setup.sources.plugins = &plugins;
+    setup.sources.image_base = image.at(0);
+    setup.sources.image_size = 0x10000;
+    setup.sources.image_name = "game.exe";
+    setup.sources.build_id = "test-build";
+    setup.anvil_version = "9.9.9";
+    QueryPerformanceCounter(&setup.start);
+    setup.unfinished_starts = 1;
+    std::string error;
+    if (!crash::install(setup, error)) {
+        std::printf("install: %s\n", error.c_str());
+        return 11;
+    }
+    // As the game does after Anvil's entry: through its own import.
+    SetUnhandledExceptionFilter(child_next_filter);
+
+    DWORD (WINAPI *body)(LPVOID) = nullptr;
+    if (mode == "av") {
+        body = [](LPVOID) -> DWORD {
+            crash_here();
+            return 0;
+        };
+    } else if (mode == "change") {
+        body = [](LPVOID p) -> DWORD {
+            return static_cast<DWORD>(call_scratch(reinterpret_cast<Fn>(p), 1));
+        };
+    } else if (mode == "overflow") {
+        body = [](LPVOID) -> DWORD { return static_cast<DWORD>(recurse(0)); };
+    } else {
+        return 12;
+    }
+    // A thread of its own with the default stack guarantee, like the game's.
+    HANDLE thread = CreateThread(nullptr, 256 * 1024, body, reinterpret_cast<void*>(image.at(0x200)),
+                                 STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+    WaitForSingleObject(thread, 60000);
+    return 13;  // not reached: the crash ends the process
+}
+
+// ---- the parent side -------------------------------------------------------------
+
+struct ChildResult {
+    DWORD exit = 0;
+    std::string json, text;
+    std::vector<fs::path> reports;  // *.json in the crash folder
+    bool dump = false;
+    bool next_filter = false;
+    bool pending_left = false;
+};
+
+ChildResult run_child(const char* mode, const fs::path& dir) {
+    ChildResult r;
+    fs::remove_all(dir);
+    fs::create_directories(dir / "crashes");
+    // Older reports: the oldest go, 10 stay.
+    for (int i = 0; i < 12; ++i) {
+        char stem[32];
+        std::snprintf(stem, sizeof(stem), "2000-01-01_00-00-%02d", i);
+        std::ofstream(dir / "crashes" / (std::string(stem) + ".json")) << "{}";
+        std::ofstream(dir / "crashes" / (std::string(stem) + ".txt")) << "old";
+    }
+    wchar_t self[MAX_PATH * 2] = {};
+    GetModuleFileNameW(nullptr, self, static_cast<DWORD>(std::size(self)));
+    std::wstring command = L"\"" + std::wstring(self) + L"\" --child " + widen(mode) + L" \"" + dir.wstring() + L"\"";
+    STARTUPINFOW si{sizeof(si)};
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) return r;
+    if (WaitForSingleObject(pi.hProcess, 90000) != WAIT_OBJECT_0) TerminateProcess(pi.hProcess, 99);
+    GetExitCodeProcess(pi.hProcess, &r.exit);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    for (const auto& entry : fs::directory_iterator(dir / "crashes")) {
+        const auto name = entry.path().filename().wstring();
+        if (entry.path().extension() == L".json") r.reports.push_back(entry.path());
+        if (entry.path().extension() == L".dmp" && name.rfind(L"pending-", 0) != 0 && fs::file_size(entry.path()) > 0) {
+            r.dump = true;
+        }
+        if (name.rfind(L"pending-", 0) == 0) r.pending_left = true;
+    }
+    for (const auto& report : r.reports) {
+        if (report.filename().wstring().rfind(L"2000-", 0) == 0) continue;
+        r.json = read_file(report);
+        auto text = report;
+        r.text = read_file(text.replace_extension(L".txt"));
+    }
+    r.next_filter = fs::exists(dir / "next-filter.txt");
+    return r;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    if (argc == 4 && std::string(argv[1]) == "--child") return child(argv[2], argv[3]);
+
+    run("crash: addresses in changed bytes, next stubs and trampolines name their changes", [] {
+        Scratch image(0x10000);
+        image.put(0x100, kAddOne);
+        ChangeRegistry r(image.at(0), 0x10000);
+        const OwnerId a = r.add_owner("a"), b = r.add_owner("b");
+        ChangeTarget t = in_image(image.at(0x100));
+        t.symbol = "add_one";
+        ChangeId ia = 0, ib = 0;
+        CHECK(r.hook_function(a, t, reinterpret_cast<void*>(&detour_a), slot(g_next_a), &ia) == ChangeStatus::Ok);
+        CHECK(r.hook_function(b, t, reinterpret_cast<void*>(&detour_b), slot(g_next_b), &ib) == ChangeStatus::Ok);
+        CHECK(reinterpret_cast<Fn>(image.at(0x100))(1) == 104);
+
+        AddressAttribution at;
+        CHECK(r.attribute(image.at(0x102), at));
+        CHECK(at.role == AddressRole::ChangedBytes);
+        CHECK(at.site == image.at(0x100));
+        CHECK(at.count == 2 && at.total == 2);
+        CHECK(at.changes[0].owner == a && at.changes[0].id == ia && at.changes[1].owner == b);
+        CHECK(at.changes[0].kind == ChangeKind::FunctionHook);
+        CHECK(std::string(at.changes[0].symbol) == "add_one");
+        CHECK(contains(at.changes[0].label, "function hook"));
+
+        // A link's own next stub: that link only.
+        CHECK(r.attribute(reinterpret_cast<uintptr_t>(g_next_a) + 3, at));
+        CHECK(at.role == AddressRole::Stub && at.count == 1 && at.changes[0].owner == a);
+        CHECK(!at.context_return);
+
+        // The innermost next leads to the trampoline: the copy of 0x100.
+        const uintptr_t trampoline = stub_target(reinterpret_cast<void*>(g_next_b));
+        CHECK(r.attribute(trampoline, at));
+        CHECK(at.role == AddressRole::Trampoline && at.original == image.at(0x100) && at.count == 2);
+        CHECK(r.attribute(trampoline + 3, at));
+        CHECK(at.original == image.at(0x103));
+
+        // Outside everything.
+        CHECK(r.attribute(image.at(0x400), at));
+        CHECK(at.role == AddressRole::None && at.count == 0);
+        CHECK(r.attribute(reinterpret_cast<uintptr_t>(&detour_a), at));
+        CHECK(at.role == AddressRole::None);
+
+        // A removed link's stub stays its own; its bytes are no longer changed.
+        void* next_a = reinterpret_cast<void*>(g_next_a);
+        CHECK(r.remove(b, ib) == ChangeStatus::Ok);
+        CHECK(r.remove(a, ia) == ChangeStatus::Ok);
+        CHECK(r.attribute(reinterpret_cast<uintptr_t>(next_a), at));
+        CHECK(at.role == AddressRole::Stub && at.count == 1 && at.changes[0].owner == a);
+        CHECK(r.attribute(image.at(0x102), at));
+        CHECK(at.role == AddressRole::None);
+    });
+
+    run("crash: byte patches shared by two owners list both", [] {
+        Scratch image(0x10000);
+        image.put(0x100, kAddOne);
+        ChangeRegistry r(image.at(0), 0x10000);
+        const OwnerId a = r.add_owner("a"), b = r.add_owner("b");
+        const uint8_t nop[] = {0x90};
+        CHECK(r.patch_bytes(a, in_image(image.at(0x101)), nop, 1) == ChangeStatus::Ok);
+        CHECK(r.patch_bytes(b, in_image(image.at(0x101)), nop, 1) == ChangeStatus::Ok);
+        AddressAttribution at;
+        CHECK(r.attribute(image.at(0x101), at));
+        CHECK(at.role == AddressRole::ChangedBytes && at.count == 2);
+        CHECK(at.changes[0].kind == ChangeKind::BytePatch);
+        CHECK(r.attribute(image.at(0x102), at));
+        CHECK(at.role == AddressRole::None);
+    });
+
+    run("crash: the stack walk passes a mid hook's context stub to the hooked site and its caller", [] {
+        Scratch image(0x10000);
+        image.put(0x100, kAddOne);
+        ChangeRegistry r(image.at(0), 0x10000);
+        const OwnerId m = r.add_owner("m");
+        std::vector<std::unique_ptr<AnvilPlugin>> plugins;
+        plugins.push_back(plugin("m"));
+        plugins[0]->symbols = symbols(image.at(0), "add_one", 0x100, kAddOne.size());
+        CrashSources sources;
+        sources.changes = &r;
+        sources.plugins = &plugins;
+        sources.image_base = image.at(0);
+        sources.image_size = 0x10000;
+        g_walk_sources = &sources;
+        CHECK(r.mid_hook(m, in_image(image.at(0x100)), walk_here, nullptr) == ChangeStatus::Ok);
+        g_walked_count = 0;
+        CHECK(call_scratch(reinterpret_cast<Fn>(image.at(0x100)), 1) == 3);
+        size_t stub = g_walked_count;
+        for (size_t i = 0; i < g_walked_count; ++i) {
+            if (g_walked[i].where.change.context_return) {
+                stub = i;
+                break;
+            }
+        }
+        CHECK(stub + 2 < g_walked_count);
+        if (stub + 2 < g_walked_count) {
+            const Frame& stub_frame = g_walked[stub];
+            CHECK(stub_frame.where.change.role == AddressRole::Stub);
+            CHECK(stub_frame.where.change.count == 1 && stub_frame.where.change.changes[0].owner == m);
+            const Frame& site = g_walked[stub + 1];
+            CHECK(site.source == FrameSource::ContextStub);
+            CHECK(site.where.address == image.at(0x100));
+            CHECK(site.where.symbol != nullptr && site.where.symbol_offset == 0 && site.where.inside_symbol);
+            CHECK(site.where.change.role == AddressRole::ChangedBytes);
+            // The game's caller: call_scratch, found through the site's
+            // return address (the scratch "game" has no unwind data).
+            const Frame& caller = g_walked[stub + 2];
+            CHECK(caller.source == FrameSource::Unwind);
+            CHECK(caller.where.address > reinterpret_cast<uintptr_t>(&call_scratch) &&
+                  caller.where.address < reinterpret_cast<uintptr_t>(&call_scratch) + 64);
+        }
+        const CrashVerdict v = assess(g_walked, g_walked_count, plugins.size());
+        CHECK(v.level == CrashLevel::OnStack && v.count == 1 && v.plugins[0] == 0);
+    });
+
+    run("crash: the nearest declared symbol of any plugin", [] {
+        Scratch image(0x10000);
+        std::vector<std::unique_ptr<AnvilPlugin>> plugins;
+        plugins.push_back(plugin("a"));
+        plugins.push_back(plugin("b"));
+        plugins.push_back(plugin("c"));
+        plugins[0]->symbols = symbols(image.at(0), "low", 0x100, 8);
+        plugins[1]->symbols = symbols(image.at(0), "high", 0x200, 8);
+        plugins[2]->symbols = symbols(image.at(0), "high_too", 0x200, 4);
+        CrashSources sources;
+        sources.plugins = &plugins;
+        sources.image_base = image.at(0);
+        sources.image_size = 0x10000;
+        Located at;
+        locate(image.at(0x104), sources, at);
+        CHECK(at.module.base == image.at(0) && std::string(at.module.name) == "eu4.exe");
+        CHECK(at.symbol != nullptr && at.symbol->declaration.name == "low" && at.symbol_plugin == 0);
+        CHECK(at.symbol_offset == 4 && at.inside_symbol && at.also_declared == 0);
+        locate(image.at(0x180), sources, at);
+        CHECK(at.symbol != nullptr && at.symbol->declaration.name == "low" && !at.inside_symbol);
+        locate(image.at(0x202), sources, at);
+        CHECK(at.symbol != nullptr && at.symbol->declaration.name == "high" && at.also_declared == 1);
+        locate(image.at(0x80), sources, at);
+        CHECK(at.symbol == nullptr);
+        locate(reinterpret_cast<uintptr_t>(&detour_a), sources, at);
+        CHECK(at.symbol == nullptr && at.module.base == reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)));
+        CHECK(at.plugin == -1);
+    });
+
+    run("crash: the four levels", [] {
+        Frame frames[3];
+        frames[0].where.plugin = -1;
+        frames[1].where.plugin = -1;
+        frames[2].where.plugin = -1;
+        CHECK(assess(frames, 3, 4).level == CrashLevel::NoPlugin);
+        frames[2].where.plugin = 2;
+        CrashVerdict v = assess(frames, 3, 4);
+        CHECK(v.level == CrashLevel::OnStack && v.count == 1 && v.plugins[0] == 2);
+        frames[1].where.change.role = AddressRole::Stub;
+        frames[1].where.change.count = 1;
+        frames[1].where.change.changes[0].owner = 3;
+        v = assess(frames, 3, 4);
+        CHECK(v.level == CrashLevel::OnStack && v.count == 2 && v.plugins[0] == 3 && v.plugins[1] == 2);
+        frames[0].where.change.role = AddressRole::ChangedBytes;
+        frames[0].where.change.count = 2;
+        frames[0].where.change.changes[0].owner = 1;
+        frames[0].where.change.changes[1].owner = 0;
+        v = assess(frames, 3, 4);
+        CHECK(v.level == CrashLevel::InChange && v.count == 2 && v.plugins[0] == 1 && v.plugins[1] == 0);
+        frames[0].where.plugin = 2;
+        v = assess(frames, 3, 4);
+        CHECK(v.level == CrashLevel::InCode && v.count == 1 && v.plugins[0] == 2);
+        CHECK(std::string(crash_level_key(CrashLevel::InCode)) == "in_plugin_code");
+        CHECK(std::string(crash_level_key(CrashLevel::NoPlugin)) == "no_plugin");
+
+        std::vector<std::unique_ptr<AnvilPlugin>> plugins;
+        for (const char* id : {"p0", "p1", "p2", "p3"}) plugins.push_back(plugin(id));
+        CrashSources sources;
+        sources.plugins = &plugins;
+        char text[128];
+        TextBuffer out(text, sizeof(text));
+        frames[0].where.plugin = -1;
+        describe_verdict(assess(frames, 3, 4), sources, out);
+        CHECK(out.view() == "in plugin p1's change (also p0)");
+        out.clear();
+        describe_verdict(CrashVerdict{}, sources, out);
+        CHECK(out.view() == "no plugin involved");
+    });
+
+    run("crash: the report in JSON and text, with issues, plugins, registers and the log", [] {
+        Scratch image(0x10000);
+        image.put(0x100, kAddOne);
+        ChangeRegistry r(image.at(0), 0x10000);
+        std::vector<std::unique_ptr<AnvilPlugin>> plugins;
+        plugins.push_back(plugin("quiet"));
+        plugins.push_back(plugin("patcher", "issues = \"https://example.org/p\\\"q/issues\"\n"));
+        plugins[1]->symbols = symbols(image.at(0), "add_one", 0x100, kAddOne.size());
+        r.add_owner("quiet");
+        const OwnerId p = r.add_owner("patcher");
+        const uint8_t ud2[] = {0x0F, 0x0B};
+        CHECK(r.patch_bytes(p, in_image(image.at(0x103)), ud2, 2) == ChangeStatus::Ok);
+        CrashSources sources;
+        sources.changes = &r;
+        sources.plugins = &plugins;
+        sources.image_base = image.at(0);
+        sources.image_size = 0x10000;
+        sources.build_id = "eu4-test";
+        EXCEPTION_RECORD record{};
+        record.ExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION;
+        record.ExceptionAddress = reinterpret_cast<void*>(image.at(0x103));
+        CONTEXT ctx{};
+        RtlCaptureContext(&ctx);
+        ctx.Rip = image.at(0x103);
+        SeenException seen{EXCEPTION_ACCESS_VIOLATION, 7, image.at(0x10), {0, 0}, 2, 0};
+        ReportInput in;
+        in.record = &record;
+        in.context = &ctx;
+        in.thread = 42;
+        in.sources = &sources;
+        in.anvil_version = "1.2.3";
+        in.time.wYear = 2026, in.time.wMonth = 10, in.time.wDay = 19;
+        in.seen = &seen;
+        in.seen_count = 1;
+        in.log_tail = "[ 1.0 ms] info  [anvil] \"quoted\" line\r\n[ 2.0 ms] WARN  [x] tab\there\r\n";
+        static char json_data[256 * 1024], text_data[192 * 1024];
+        TextBuffer json(json_data, sizeof(json_data)), text(text_data, sizeof(text_data));
+        const CrashVerdict v = build_report(in, json, text);
+        CHECK(v.level == CrashLevel::InChange && v.count == 1 && v.plugins[0] == 1);
+        CHECK(!json.truncated() && !text.truncated());
+        CHECK(Json::valid(json.view()));
+        const std::string_view j = json.view(), t = text.view();
+        CHECK(contains(j, "\"level\": \"in_plugin_change\""));
+        CHECK(contains(j, "\"summary\": \"in plugin patcher's change\""));
+        CHECK(contains(j, "\"code\": \"0xC000001D\""));
+        CHECK(contains(j, "\"game_build\": \"eu4-test\""));
+        CHECK(contains(j, "{\"plugin\": \"patcher\", \"url\": \"https://example.org/p\\\"q/issues\"}"));
+        CHECK(contains(j, "\"role\": \"changed bytes\""));
+        CHECK(contains(j, "\"kind\": \"byte patch\""));
+        CHECK(contains(j, "\"symbol\": {\"name\": \"add_one\", \"offset\": \"0x3\", \"declared_by\": \"patcher\""));
+        CHECK(contains(j, "\"module\": \"eu4.exe\", \"offset\": \"0x103\""));
+        CHECK(contains(j, "\"rip\": \"0x"));
+        CHECK(contains(j, "{\"id\": \"quiet\", \"version\": \"1.0.0\", \"state\": \"loaded\""));
+        CHECK(contains(j, "\"earlier_exceptions\": [{\"code\": \"0xC0000005\", \"thread\": 7"));
+        CHECK(contains(j, "\"[ 1.0 ms] info  [anvil] \\\"quoted\\\" line\""));
+        CHECK(contains(j, "tab\\there"));
+        CHECK(contains(t, "Verdict: in plugin patcher's change."));
+        CHECK(contains(t, "Exception: 0xC000001D illegal instruction"));
+        CHECK(contains(t, "Address: eu4.exe+0x103"));
+        CHECK(contains(t, "Nearest declared symbol: add_one+0x3 (declared by patcher, inside its declared bytes)"));
+        CHECK(contains(t, "Report it to patcher: https://example.org/p\"q/issues"));
+        CHECK(contains(t, "changed bytes of patcher's byte patch rva 0x103 (2 B)"));
+        CHECK(contains(t, "  quiet 1.0.0, loaded, main phase"));
+        CHECK(contains(t, "End of anvil.log:"));
+
+        // An access violation in code of no plugin, a plugin on the stack.
+        record.ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
+        record.NumberParameters = 2;
+        record.ExceptionInformation[0] = 1;
+        record.ExceptionInformation[1] = 0x10;
+        record.ExceptionAddress = reinterpret_cast<void*>(image.at(0x400));
+        ctx.Rip = image.at(0x400);
+        json.clear();
+        text.clear();
+        in.context = nullptr;  // only the address
+        const CrashVerdict none = build_report(in, json, text);
+        CHECK(none.level == CrashLevel::NoPlugin);
+        CHECK(Json::valid(json.view()));
+        CHECK(contains(json.view(), "\"access\": \"write\", \"access_address\": \"0x10\""));
+        CHECK(contains(json.view(), "\"level\": \"no_plugin\""));
+        CHECK(contains(json.view(), "\"issues\": []"));
+        CHECK(contains(text.view(), "Verdict: no plugin involved."));
+    });
+
+    run("crash: text buffers cut what does not fit", [] {
+        char small[8];
+        TextBuffer b(small, sizeof(small));
+        b.put("12345");
+        b.putf("%d", 678);
+        CHECK(b.view() == "12345678" && !b.truncated());
+        b.put("9");
+        CHECK(b.view() == "12345678" && b.truncated());
+        char json[32];
+        TextBuffer j(json, sizeof(json));
+        j.json("a\"\\\x01");
+        CHECK(j.view() == "\"a\\\"\\\\\\u0001\"");
+    });
+
+    run("safe mode: two starts that ended before game_ready, then one safe start", [] {
+        const fs::path dir = fs::temp_directory_path() / "anvil-safe-mode-test";
+        fs::remove_all(dir);
+        const fs::path file = dir / "data" / "anvil" / "unfinished-starts.txt";
+        {
+            StartMarker m;
+            const StartRecord s = m.begin(file);
+            CHECK(s.unfinished == 0 && !s.safe_mode && m.active());
+            CHECK(read_file(file) == "1\n");
+        }  // crashed: nothing else happens
+        {
+            StartMarker m;
+            const StartRecord s = m.begin(file);
+            CHECK(s.unfinished == 1 && !s.safe_mode);
+            CHECK(read_file(file) == "2\n");
+        }
+        {
+            StartMarker m;
+            const StartRecord s = m.begin(file);
+            CHECK(s.unfinished == 2 && s.safe_mode && !m.active());
+            CHECK(!fs::exists(file));  // the next start loads the plugins again
+            m.game_ready();
+            m.clean_exit();
+            CHECK(!fs::exists(file));
+        }
+        {
+            StartMarker m;
+            CHECK(!m.begin(file).safe_mode);
+            m.game_ready();  // a good start forgets the earlier ones
+            CHECK(!fs::exists(file) && !m.active());
+            m.clean_exit();
+            CHECK(!fs::exists(file));
+        }
+        {
+            StartMarker m;
+            m.begin(file);
+            StartMarker n;
+            CHECK(n.begin(file).unfinished == 1);
+            n.clean_exit();  // closed before game_ready without a crash: back to 1
+            CHECK(read_file(file) == "1\n");
+            StartMarker o;
+            CHECK(o.begin(file).unfinished == 1);
+        }
+        std::ofstream(file) << "garbage";
+        StartMarker g;
+        CHECK(g.begin(file).unfinished == 0);
+        CHECK(!loads_in_safe_mode("tongs") && !loads_in_safe_mode("anvil-game"));
+        fs::remove_all(dir);
+    });
+
+    const fs::path root = fs::temp_directory_path() / "anvil-crash-tests";
+
+    run("crash capture: an access violation in a plugin's code (child process)", [&] {
+        const ChildResult r = run_child("av", root / "av");
+        CHECK(r.exit == 0xC0DE);  // Anvil's filter called the game's
+        CHECK(r.next_filter);
+        CHECK(r.reports.size() == 10);  // pruned to the last 10, the new one included
+        CHECK(!r.json.empty() && Json::valid(r.json));
+        CHECK(contains(r.json, "\"code\": \"0xC0000005\""));
+        CHECK(contains(r.json, "\"level\": \"in_plugin_code\""));
+        CHECK(contains(r.json, "\"summary\": \"in plugin crasher's code\""));
+        CHECK(contains(r.json, "\"url\": \"https://example.org/crasher/issues\""));
+        CHECK(contains(r.json, "\"access\": \"write\""));
+        CHECK(contains(r.json, "\"anvil\": \"9.9.9\""));
+        CHECK(contains(r.json, "\"unfinished_starts\": 1"));
+        CHECK(contains(r.json, "\"main_thread\": false"));
+        CHECK(contains(r.json, "line two"));
+        CHECK(contains(r.json, "\"minidump\": null"));
+        CHECK(contains(r.text, "Verdict: in plugin crasher's code."));
+        CHECK(!r.dump && !r.pending_left);
+    });
+
+    run("crash capture: an illegal instruction in a plugin's byte patch (child process)", [&] {
+        const ChildResult r = run_child("change", root / "change");
+        CHECK(r.exit == 0xC0DE && r.next_filter);
+        CHECK(Json::valid(r.json));
+        CHECK(contains(r.json, "\"code\": \"0xC000001D\""));
+        CHECK(contains(r.json, "\"level\": \"in_plugin_change\""));
+        CHECK(contains(r.json, "\"module\": \"game.exe\", \"offset\": \"0x200\""));
+        CHECK(contains(r.json, "\"name\": \"add_one\""));
+        CHECK(contains(r.text, "Verdict: in plugin patcher's change."));
+        // The caller is in the test executable, "crasher"'s module.
+        CHECK(contains(r.text, "[plugin crasher]"));
+    });
+
+    run("crash capture: a stack overflow writes the report and a minidump (child process)", [&] {
+        const ChildResult r = run_child("overflow", root / "overflow");
+        CHECK(r.exit == 0xC0DE || r.exit == EXCEPTION_STACK_OVERFLOW);
+        CHECK(Json::valid(r.json));
+        CHECK(contains(r.json, "\"code\": \"0xC00000FD\""));
+        CHECK(contains(r.json, "\"level\": \"in_plugin_code\""));
+        CHECK(contains(r.json, ".dmp\""));
+        // The recursion is one frame with its repeats; the walk reaches the thread's start.
+        CHECK(contains(r.json, "\"repeats\": "));
+        CHECK(contains(r.text, "KERNEL32.dll+"));
+        CHECK(r.dump && !r.pending_left);
+    });
+    fs::remove_all(root);
+
+    std::printf("\n%d checks, %d failed\n", g_checks, g_failures);
+    return g_failures == 0 ? 0 : 1;
+}

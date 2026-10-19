@@ -1,0 +1,47 @@
+#pragma once
+
+#include <filesystem>
+#include <string_view>
+
+namespace anvil {
+
+// Safe mode (design §10, §12): the start after two consecutive starts that
+// ended before the game was ready (anvil-game.ready) loads no plugins, except
+// the standard ones the overlay needs to explain it.
+//
+// The record is one number in anvil/data/anvil/unfinished-starts.txt: how many
+// starts in a row ended before the game was ready. Each start counts itself
+// in at the beginning; readiness removes the file; a clean exit before it,
+// without a crash (crash::crashed), puts the previous number back. So a start
+// that crashed, was killed or hung before the game was ready stays counted,
+// whatever caught the crash. The safe start removes the file: the next one
+// loads the plugins again.
+inline constexpr unsigned kSafeModeAfter = 2;
+
+// The standard plugins that still load in safe mode: today none. anvil-game
+// and anvil-overlay (#58) join when the overlay explains safe mode.
+bool loads_in_safe_mode(std::string_view id);
+
+struct StartRecord {
+    unsigned unfinished = 0;  // starts before this one that ended before game_ready
+    bool safe_mode = false;
+};
+
+class StartMarker {
+public:
+    // Reads the record and counts this start in (or, in safe mode, clears it).
+    StartRecord begin(const std::filesystem::path& file);
+    // The game is ready: this start is not counted.
+    void game_ready();
+    // The process exits without a crash before game_ready: the record goes
+    // back to what it was before this start.
+    void clean_exit();
+    bool active() const { return active_; }
+
+private:
+    std::wstring file_;
+    unsigned previous_ = 0;
+    bool active_ = false;  // counted in, not yet ready or exited
+};
+
+}  // namespace anvil

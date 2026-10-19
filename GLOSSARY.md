@@ -55,3 +55,13 @@ _Avoid_: mid hook (for this; a mid hook lets the original code run), code cave, 
 **Chain**:
 The ordered changes of several plugins at one address, each passing control or the previous value to the next.
 _Avoid_: stack, hook list
+
+### When the game crashes
+
+**Crash report**:
+What Anvil writes when the game crashes: where it happened and which plugins were involved, on one of four levels (in a plugin's code, in a plugin's change, a plugin on the stack, no plugin involved). It never says which plugin caused the crash.
+_Avoid_: crash log, blame, culprit
+
+**Safe mode**:
+A start that loads no plugins except the standard ones needed to explain it, because the two starts before it ended before the game was ready.
+_Avoid_: recovery mode, failsafe, disabled mode

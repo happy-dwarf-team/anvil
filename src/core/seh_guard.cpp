@@ -24,4 +24,13 @@ AnvilResult call_plugin_load(PluginLoadFn fn, const AnvilHost* host, AnvilPlugin
     }
 }
 
+bool call_guarded(void (*fn)(void*), void* argument, unsigned long* code_out) {
+    __try {
+        fn(argument);
+        return true;
+    } __except (record_exception(GetExceptionCode(), code_out)) {
+        return false;
+    }
+}
+
 }  // namespace anvil
