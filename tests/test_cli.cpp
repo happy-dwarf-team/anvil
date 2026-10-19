@@ -361,6 +361,34 @@ int main(int argc, char** argv) {
         CHECK(bad.skip_reason == "settings.toml: setting enabled: default must be true or false");
     });
 
+    // #80: a name gen refuses passed check, and the build failed later.
+    run("check reports the names gen refuses, at their line", [&] {
+        const auto value = fx.check(fx.plugin("value-id", symbol("script", "rva = 0x10\nbytes = \"48 8B 05 00\"\nmemory = \"code\"\n"
+                                                                            "values.id = { at = 3, size = 1 }\n")),
+                                    false);
+        CHECK(value.exit_code == kExitProblems &&
+              has_problem(value, 3, "symbol script: value id: the name would hide the symbol's 'id' member; rename it"));
+        CHECK(value.skip_reason.empty());  // the loader does not care
+        const auto keyword = fx.check(fx.plugin("keyword", symbol("delete", "rva = 0x10\nbytes = \"48\"\nmemory = \"code\"\n")), false);
+        CHECK(has_problem(keyword, 3, "symbol delete: 'delete' is a C++ keyword; rename it"));
+        const auto rust = fx.check(
+            fx.plugin("rust-clash", "build = \"test-build\"\n[symbol.a_b]\nrva = 0x10\nbytes = \"48\"\nmemory = \"code\"\n"
+                                    "[symbol.a]\nrva = 0x20\nbytes = \"48\"\nmemory = \"code\"\n"
+                                    "values.b = { at = 0, size = 1 }\n"),
+            false);  // SYM_A_B and SYMVAL_A_B in C; A_B twice in Rust
+        CHECK(has_problem(rust, 6, "symbol a: value b: the Rust name A_B is already symbol a_b"));
+        CHECK(rust.problems[0].file.ends_with("rust-clash/symbols.toml"));
+
+        const fs::path dir = fx.plugin("option-get", "");
+        write(dir / "plugin.toml", plugin_toml("option-get", "settings = \"settings.toml\"\n"));
+        write(dir / "settings.toml", "[setting.m]\ntype = \"enum\"\nvalues = [{ name = \"a\" }, { name = \"get\" }]\n"
+                                     "default = \"a\"\nlabel = \"M\"\n");
+        const auto option = fx.check(dir, false);
+        CHECK(option.exit_code == kExitProblems && option.problems.size() == 1 &&
+              has_problem(option, 1, "setting m: option get: the name would hide the setting's 'get' member"));
+        CHECK(option.problems[0].file.ends_with("option-get/settings.toml") && option.skip_reason.empty());
+    });
+
     run("gen writes settings headers and refuses names they cannot hold", [] {
         auto error = [](const std::string& text, bool c, bool cpp) {
             const auto file = parse_settings_text(text);

@@ -443,7 +443,7 @@ Decided in [Player UI: in-game overlay and Anvil Manager](https://github.com/hap
 
 - **`anvil.exe`** (in the SDK archive) is built from the core's own library:
   - `anvil gen [--lang c|cpp|rust]`;
-  - `anvil check` with strict schemas (`plugin.toml`, `symbols.toml`, `settings.toml`), which also verifies, with `--exe`, the build, bytes, memory, pointers, exports, values and instruction boundaries; with `--game <folder>`, every installed plugin and the conflicts between them;
+  - `anvil check` with strict schemas (`plugin.toml`, `symbols.toml`, `settings.toml`) and the names `anvil gen` refuses in any language it writes (the generators' own checks, so a name that cannot be generated is reported at its line before the build), which also verifies, with `--exe`, the build, bytes, memory, pointers, exports, values and instruction boundaries; with `--game <folder>`, every installed plugin and the conflicts between them;
   - `--format text|json|github`; exit codes 0 OK, 1 problems, 2 cannot check.
 - **`anvil gen [--lang c|cpp|rust] <symbols.toml> <out-dir>`** writes both headers without `--lang` (`--lang rust` writes only `symbols.gen.rs`, and `settings.gen.rs` for a settings file, §9) and leaves a file alone when its content would not change:
   - `symbols.gen.h`: `SYM_<NAME>` ids, `sym_<name>_fn` pointer types from `signature`, `SYMVAL_<SYMBOL>_<VALUE>` constants;

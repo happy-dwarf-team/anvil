@@ -74,7 +74,9 @@ struct CheckReport {
 };
 
 // `anvil check <plugin-dir> [--exe <eu4.exe>]` (design §16): the strict
-// plugin.toml, symbols.toml and settings.toml schemas (the loader's parsers); with an exe the
+// plugin.toml, symbols.toml and settings.toml schemas (the loader's parsers)
+// and the names `anvil gen` refuses (generate_headers, generate_settings_headers,
+// every language); with an exe the
 // build, every symbol (verify_symbols) and instruction boundaries, then
 // writes symbols.lock; without one, that symbols.lock matches symbols.toml.
 CheckReport check_plugin(const CheckOptions& options);
