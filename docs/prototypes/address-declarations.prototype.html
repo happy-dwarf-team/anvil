@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Address Declarations Prototype</title>
+<style>
+  :root { --bg:#fbfaf8; --fg:#1d1d1f; --muted:#6b6b70; --line:#e4e2dd; --card:#fff; --accent:#b4531f; --ok:#2d7a3e; --bad:#b3261e; --warn:#8a6d00; --code:#f4f2ee; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#161615; --fg:#ecebe8; --muted:#a19f9a; --line:#33322f; --card:#1f1e1c; --accent:#e58a52; --ok:#6cc27f; --bad:#f08a80; --warn:#e0c25a; --code:#262522; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  main { max-width:1180px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:24px; margin:0 0 4px; } h2 { font-size:17px; margin:28px 0 10px; } h3 { font-size:14px; margin:0 0 6px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+  p { margin:6px 0; } .muted { color:var(--muted); }
+  .intro { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .tag { display:inline-block; font-size:12px; padding:1px 8px; border-radius:99px; border:1px solid var(--accent); color:var(--accent); margin-right:6px; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  button { font:inherit; font-size:14px; padding:6px 12px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:disabled { opacity:.45; cursor:default; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:860px) { .grid { grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; min-width:0; }
+  pre { margin:0; background:var(--code); border-radius:8px; padding:10px 12px; overflow:auto; font:12.5px/1.45 ui-monospace,Consolas,monospace; white-space:pre; }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  th, td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  td.mono { font-family:ui-monospace,Consolas,monospace; font-size:12.5px; }
+  .ok { color:var(--ok); font-weight:600; } .bad { color:var(--bad); font-weight:600; } .warn { color:var(--warn); font-weight:600; }
+  .verdict { font-size:16px; font-weight:700; padding:8px 12px; border-radius:8px; border:1px solid var(--line); }
+  .changed { outline:2px solid var(--accent); outline-offset:2px; border-radius:6px; }
+  .tabs { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+  .steps { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+  .steps button { text-align:left; }
+  .steps button.done { opacity:.55; text-decoration:line-through; }
+  ul.compact { margin:4px 0; padding-left:18px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Address declarations, prototype</h1>
+  <p class="muted">Throwaway prototype for the Anvil 2 ticket "One source of truth for game addresses". Not production code.</p>
+  <div class="intro">
+    <p><b>Question.</b> How should a plugin declare the game addresses it uses <i>once</i>, so that the plugin's code and Anvil's verification come from the same declaration?</p>
+    <p>The sample plugin is a <b>menu-return</b> port: two hook sites and a function-pointer slot taken from EU4 Menu Patch, and a game-speed read plus a function call taken from Tongs (real RVAs and bytes of EU4 1.37.5). Pick a <b>declaration style</b>, change the game or the plugin with the buttons, and watch what Anvil checks before it loads the plugin and what the plugin's code actually uses.</p>
+    <p class="muted">Styles: <span class="tag">A</span>a symbols file and a generator, <span class="tag">B</span>declarations in the plugin's own source, read by Anvil from the DLL file, <span class="tag">C</span>like A, but common game symbols come from a shared address library, <span class="tag">API 1</span>today: addresses in code and <code>[[expect]]</code> in the manifest.</p>
+  </div>
+
+  <h2>Declaration style</h2>
+  <div class="row" id="styles"></div>
+
+  <h2>Free play</h2>
+  <div class="row" id="actions"></div>
+
+  <h2>Current state</h2>
+  <div class="card"><div class="verdict" id="verdict"></div><p class="muted" id="lastAction"></p></div>
+  <div class="grid" style="margin-top:14px">
+    <div class="card"><h3>What the author writes</h3><pre id="source"></pre></div>
+    <div class="card"><h3 id="derivedTitle">What is derived from it</h3><pre id="derived"></pre></div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>What Anvil verifies before loading the DLL</h3><table id="checks"></table></div>
+  <div class="grid" style="margin-top:14px">
+    <div class="card"><h3>What the plugin code actually touches</h3><table id="uses"></table></div>
+    <div class="card"><h3>The game right now</h3><div id="game"></div></div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>anvil.log</h3><pre id="log"></pre></div>
+
+  <h2>Guided walkthroughs</h2>
+  <div class="card"><div class="tabs" id="tabs"></div><div id="scenario"></div></div>
+</main>
+
+<script id="model">
+// ---- Pure model: no DOM in here. -------------------------------------------------
+const BUILD = "eu4-1.37.5-steam-win64";
+const SECTIONS = [
+  { start: 0x1000,    size: 0x1b64d78, access: "code",  name: "game code" },
+  { start: 0x1b66000, size: 0x44999a,  access: "read",  name: "game constants" },
+  { start: 0x1fb0000, size: 0x4b4fb4,  access: "write", name: "game globals" },
+];
+// The plugin's needs, as an author thinks of them.
+const NEEDS = [
+  { name: "idle_exit",          use: "mid hook",     rva: 0x815cae,  bytes: "48 8D 8D 40 02 00 00",          section: "code", lib: null,
+    note: "CInGameIdler::Idle, block that returns to the menu" },
+  { name: "pregame_reset",      use: "mid hook",     rva: 0x111dfd7, bytes: "66 C7 83 83 00 00 00 01 01",    section: "code", lib: null,
+    note: "pre-game state reset" },
+  { name: "frontend_tick_slot", use: "pointer swap", rva: 0x1d5a8e8, pointsTo: 0x10d2e80,                       section: "read", lib: null,
+    note: "front-end tick function pointer (read-only table)" },
+  { name: "root_and_date",      use: "read layout",  rva: 0x14321fc, bytes: "48 8B 05 75 DC F0 00 8B 98 D0 1D 00 00", section: "code", lib: "eu4.ui.top_bar_date",
+    note: "root global 0x233FE78, current date at root+0x1DD0" },
+  { name: "speed_object",       use: "call",         rva: 0x8024d0,  bytes: "48 8B 81 18 04 00 00 C3",       section: "code", lib: "eu4.session.speed_object",
+    note: "session vtable slot 0x100: game-speed object" },
+];
+
+function initialGame() {
+  const sites = {};
+  for (const n of NEEDS) if (n.bytes) sites[n.rva] = { orig: n.bytes, cur: n.bytes, owner: null };
+  sites[0x8024e0] = { orig: "40 53 48 83 EC 20 48 8B D9", cur: "40 53 48 83 EC 20 48 8B D9", owner: null }; // a neighbouring function
+  return { build: BUILD, sites, pointers: { 0x1d5a8e8: { orig: 0x10d2e80, cur: 0x10d2e80, owner: null } } };
+}
+
+function initialState(style = "A") {
+  return { style, game: initialGame(), plugin: NEEDS.map(n => ({ ...n })), codeOnly: {}, compareOriginal: true, last: "Start: game and plugin as shipped." };
+}
+
+const hex = n => "0x" + n.toString(16).toUpperCase();
+const sectionOf = rva => SECTIONS.find(s => rva >= s.start && rva < s.start + s.size);
+function firstDiff(actual, pattern) {
+  const a = actual.split(" "), p = pattern.split(" ");
+  for (let i = 0; i < p.length; i++) if (p[i] !== "??" && a[i] !== p[i]) return i;
+  return -1;
+}
+
+// What each style hands to Anvil for verification, and what the code really uses.
+function declarations(state) {
+  const p = state.plugin;
+  if (state.style === "API1") {
+    // [[expect]] only lists what the author remembered to copy into the manifest; the pointer slot is checked in code only.
+    return p.filter(n => n.bytes).map(n => ({ ...n, from: "plugin.toml [[expect]]" }));
+  }
+  if (state.style === "C") {
+    return p.map(n => ({ ...n, from: n.lib ? "address library: " + n.lib : "plugin symbols" }));
+  }
+  return p.map(n => ({ ...n, from: state.style === "A" ? "symbols.toml" : ".anvsym section of the DLL" }));
+}
+function codeUses(state) {
+  return state.plugin.map(n => {
+    const rva = state.style === "API1" && state.codeOnly[n.name] !== undefined ? state.codeOnly[n.name] : n.rva;
+    return { name: n.name, use: n.use, rva };
+  });
+}
+
+function check(decl, game, compareOriginal) {
+  const sec = sectionOf(decl.rva);
+  if (!sec) return { ok: false, why: "outside the image" };
+  if (decl.section && sec.access !== decl.section) return { ok: false, why: `expected ${decl.section} memory, found ${sec.access} (${sec.name})` };
+  if (decl.pointsTo !== undefined) {
+    const ptr = game.pointers[decl.rva];
+    const value = compareOriginal ? ptr.orig : ptr.cur;
+    if (value !== decl.pointsTo) return { ok: false, why: `points to ${hex(value)}, expected ${hex(decl.pointsTo)}` };
+    return { ok: true, why: `points to ${hex(decl.pointsTo)}` + (ptr.owner ? ` (original value; now swapped by ${ptr.owner})` : "") };
+  }
+  const site = game.sites[decl.rva];
+  if (!site) return { ok: false, why: "no known bytes at this address" };
+  const actual = compareOriginal ? site.orig : site.cur;
+  const d = firstDiff(actual, decl.bytes);
+  if (d >= 0) return { ok: false, why: `byte ${d} is ${actual.split(" ")[d]}, expected ${decl.bytes.split(" ")[d]}` };
+  return { ok: true, why: "bytes match" + (site.owner && compareOriginal ? ` (original bytes; ${site.owner} has patched it)` : "") };
+}
+
+function evaluate(state) {
+  const decls = declarations(state);
+  const checks = decls.map(d => ({ ...d, result: check(d, state.game, state.compareOriginal) }));
+  const verified = new Set(checks.filter(c => c.result.ok).map(c => c.rva));
+  const declared = new Set(decls.map(d => d.rva));
+  const uses = codeUses(state).map(u => ({ ...u, status: verified.has(u.rva) ? "verified" : declared.has(u.rva) ? "failed" : "unverified" }));
+  const failed = checks.filter(c => !c.result.ok);
+  const unverified = uses.filter(u => u.status === "unverified");
+  let verdict, tone;
+  if (failed.length) { verdict = `Skipped: ${failed.length} declaration(s) do not match this game. The game starts without the plugin.`; tone = "bad"; }
+  else if (unverified.length) { verdict = `Loaded, but the code uses ${unverified.length} address(es) nobody checked: ${unverified.map(u => hex(u.rva)).join(", ")}. A crash or silent corruption is possible.`; tone = "warn"; }
+  else { verdict = "Loaded: every address the code uses was checked first."; tone = "ok"; }
+  const log = [`[anvil] game build ${state.game.build}`, `[anvil] plugin menu-return: ${decls.length} declaration(s) from ${state.style === "API1" ? "plugin.toml" : state.style === "B" ? "the DLL file (.anvsym)" : "symbols" + (state.style === "C" ? " + address library eu4-1.37.5" : "")}`];
+  for (const c of checks) if (!c.result.ok) log.push(`[anvil] menu-return: ${c.name} at ${hex(c.rva)}: ${c.result.why}`);
+  log.push(failed.length ? "[anvil] menu-return skipped (declarations do not match); nothing was patched" : "[anvil] menu-return loaded");
+  if (!failed.length) for (const u of unverified) log.push(`[menu-return] (not visible to Anvil) code touches ${hex(u.rva)}`);
+  return { checks, uses, verdict, tone, log };
+}
+
+// Actions: (state) => state
+const ACTIONS = {
+  reset:            s => ({ ...initialState(s.style), last: "Reset: game and plugin as shipped." }),
+  gameUpdate:       s => { const g = structuredClone(s.game); g.build = "eu4-1.37.6-steam-win64 (hypothetical)"; g.sites[0x815cae] = { orig: "48 8D 8D 48 02 00 00", cur: "48 8D 8D 48 02 00 00", owner: null };
+                           return { ...s, game: g, last: "The game changed: the stack offset at idle_exit is now 0x248 instead of 0x240." }; },
+  otherHooksCall:   s => { const g = structuredClone(s.game); g.sites[0x8024d0] = { orig: g.sites[0x8024d0].orig, cur: "E9 1B 2C 3D 4E C3 90 90", owner: "another plugin" };
+                           return { ...s, game: g, last: "Another plugin hooked speed_object (the function this plugin calls)." }; },
+  otherSwapsSlot:   s => { const g = structuredClone(s.game); g.pointers[0x1d5a8e8] = { ...g.pointers[0x1d5a8e8], cur: 0x7ff6a000, owner: "another plugin" };
+                           return { ...s, game: g, last: "Another plugin swapped the front-end tick pointer first." }; },
+  moveCall:         s => { if (s.style === "API1") return { ...s, codeOnly: { ...s.codeOnly, speed_object: 0x8024e0 }, last: "Author changed the call target in code to 0x8024E0 and forgot plugin.toml." };
+                           const plugin = s.plugin.map(n => n.name === "speed_object" ? { ...n, rva: 0x8024e0, bytes: "40 53 48 83 EC 20 48 8B D9" } : n);
+                           return { ...s, plugin, last: "Author changed the call target to 0x8024E0. There is only one place to change, so the check moved with it." }; },
+  wrongSection:     s => ({ ...s, plugin: s.plugin.map(n => n.name === "frontend_tick_slot" ? { ...n, section: "write" } : n), last: "Author declared the pointer slot as writable globals (it is in read-only constants)." }),
+  toggleOriginal:   s => ({ ...s, compareOriginal: !s.compareOriginal, last: s.compareOriginal ? "Compare against memory as it is now (other plugins' patches included)." : "Compare against the original bytes (Anvil's patch registry)." }),
+};
+function setStyle(s, style) { return { ...s, style, last: `Style ${style === "API1" ? "API 1" : style}.` }; }
+
+// Text of what the author writes and what is derived, per style.
+function sourceText(state) {
+  const p = Object.fromEntries(state.plugin.map(n => [n.name, n]));
+  const sym = n => n.pointsTo !== undefined
+    ? `[symbol.${n.name}]          # ${n.note}\nrva = ${hex(n.rva)}\nsection = "${n.section}"\npoints_to = ${hex(n.pointsTo)}\n`
+    : `[symbol.${n.name}]          # ${n.note}\nrva = ${hex(n.rva)}\nbytes = "${n.bytes}"\nsection = "${n.section}"\n`;
+  if (state.style === "A") return `# symbols.toml\nbuild = "${BUILD}"\n\n` + state.plugin.map(sym).join("\n") +
+    `\n// plugin.cpp\nhost->mid_hook(self, sym::idle_exit, on_idle_exit);\nhost->mid_hook(self, sym::pregame_reset, on_pregame);\nhost->swap_pointer(self, sym::frontend_tick_slot, &frontend_tick);\nauto speed = sym::speed_object.call<void*(void*)>(session);`;
+  if (state.style === "B") {
+    const line = n => n.pointsTo !== undefined
+      ? `ANVIL_POINTER(${n.name}, ${hex(n.rva)}, ${n.section}, points_to(${hex(n.pointsTo)}));`
+      : `ANVIL_SITE(${n.name}, ${hex(n.rva)}, ${n.section}, "${n.bytes}");`;
+    return `// symbols.hpp (part of the plugin source)\n#include <anvil/anvil.hpp>\nANVIL_BUILD("${BUILD}");\n` + state.plugin.map(line).join("\n") +
+      `\n\n// plugin.cpp\nhost->mid_hook(self, idle_exit, on_idle_exit);\nhost->swap_pointer(self, frontend_tick_slot, &frontend_tick);\nauto speed = speed_object.call<void*(void*)>(session);`;
+  }
+  if (state.style === "C") {
+    const local = state.plugin.filter(n => !n.lib).map(sym).join("\n");
+    return `# symbols.toml\nbuild = "${BUILD}"\nlibrary = "eu4-1.37.5 >=1.0"          # shared address library\n\n[import]\nroot_and_date = "${p.root_and_date.lib}"\nspeed_object  = "${p.speed_object.lib}"\n\n` + local;
+  }
+  const uses = codeUses(state);
+  const at = n => hex(uses.find(u => u.name === n).rva);
+  return `# plugin.toml\n` + state.plugin.filter(n => n.bytes).map(n => `[[expect]]\nbuild = "${BUILD}"\nrva = ${hex(n.rva)}\nbytes = "${n.bytes}"\n`).join("\n") +
+    `\n// build.hpp (written again, by hand)\nconstexpr uint32_t kIdleExit = ${at("idle_exit")};\nconstexpr uint32_t kPregameReset = ${at("pregame_reset")};\nconstexpr uint32_t kFrontendSlot = ${at("frontend_tick_slot")};\nconstexpr uint32_t kSpeedObject = ${at("speed_object")};\n// the pointer slot's expected value is only checked in code`;
+}
+function derivedText(state) {
+  const decls = declarations(state);
+  if (state.style === "API1") return "Nothing is derived.\nThe manifest and build.hpp are two hand-kept copies.\nAnvil sees only [[expect]]; it never learns which addresses\nthe code really patches, calls or reads.";
+  const header = `// symbols.gen.hpp: generated by \`anvil gen\` from symbols.toml, do not edit\nnamespace sym {\n` +
+    decls.map((d, i) => `  inline constexpr anvil::Symbol ${d.name}{${i}, ${hex(d.rva)}};`).join("\n") + `\n}\n`;
+  const table = `\n// verification data Anvil reads before LoadLibrary\n` + decls.map(d => `${d.name.padEnd(19)} ${hex(d.rva).padEnd(10)} ${d.section.padEnd(5)} ${d.pointsTo !== undefined ? "-> " + hex(d.pointsTo) : d.bytes}   [${d.from}]`).join("\n");
+  if (state.style === "B") return "No generator, no extra file: each ANVIL_* macro emits a constexpr\nsymbol for the code AND a record in a .anvsym section of the DLL.\nAnvil and `anvil check` parse that section from the file on disk\nwithout running the DLL.\n" + table;
+  if (state.style === "C") return header + table + "\n\n// eu4-1.37.5 address library (shared data package)\n" +
+    decls.filter(d => d.lib).map(d => `${d.lib.padEnd(26)} ${hex(d.rva)}  ${d.bytes}`).join("\n");
+  return header + table;
+}
+</script>
+
+<script>
+// ---- Thin page shell. -------------------------------------------------------------
+let state = initialState("A");
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const STYLES = [["A", "A: symbols file + generator"], ["B", "B: declared in plugin source"], ["C", "C: A + shared address library"], ["API1", "API 1 today"]];
+const BUTTONS = [
+  ["gameUpdate", "Game update changes a hook site"], ["otherHooksCall", "Another plugin hooks a function we call"],
+  ["otherSwapsSlot", "Another plugin swaps the pointer first"], ["moveCall", "Author moves the call target"],
+  ["wrongSection", "Author declares the wrong memory kind"], ["toggleOriginal", "Toggle: compare original bytes / memory now"], ["reset", "Reset"],
+];
+let previous = "";
+function render() {
+  $("styles").innerHTML = STYLES.map(([k, l]) => `<button class="${state.style === k ? "on" : ""}" data-style="${k}">${l}</button>`).join("");
+  $("actions").innerHTML = BUTTONS.map(([k, l]) => `<button data-act="${k}">${l}</button>`).join("");
+  const e = evaluate(state);
+  $("verdict").innerHTML = `<span class="${e.tone}">${esc(e.verdict)}</span>`;
+  $("lastAction").textContent = "Last change: " + state.last + (state.compareOriginal ? "" : "  [comparing memory as it is now]");
+  $("source").textContent = sourceText(state);
+  $("derived").textContent = derivedText(state);
+  $("checks").innerHTML = `<tr><th>Declaration</th><th>Use</th><th>Address</th><th>Source</th><th>Result</th></tr>` +
+    e.checks.map(c => `<tr><td>${c.name}</td><td>${c.use}</td><td class="mono">${hex(c.rva)}</td><td class="muted">${esc(c.from)}</td><td class="${c.result.ok ? "ok" : "bad"}">${c.result.ok ? "OK" : "FAIL"}: ${esc(c.result.why)}</td></tr>`).join("") +
+    (state.style === "API1" ? `<tr><td colspan="5" class="muted">frontend_tick_slot: not declared; API 1 [[expect]] cannot say "this pointer points to X" or "this is read-only memory".</td></tr>` : "");
+  $("uses").innerHTML = `<tr><th>Code</th><th>Address</th><th>Checked?</th></tr>` +
+    e.uses.map(u => `<tr><td>${u.name} (${u.use})</td><td class="mono">${hex(u.rva)}</td><td class="${u.status === "verified" ? "ok" : u.status === "failed" ? "bad" : "warn"}">${u.status === "verified" ? "yes" : u.status === "failed" ? "declared, check failed" : "NO: never checked"}</td></tr>`).join("");
+  const g = state.game;
+  $("game").innerHTML = `<p>Build: <b>${esc(g.build)}</b></p><ul class="compact">` +
+    Object.entries(g.sites).filter(([, v]) => v.owner || v.orig !== v.cur).map(([r, v]) => `<li>${hex(+r)} patched by ${v.owner}</li>`).join("") +
+    Object.entries(g.pointers).filter(([, v]) => v.owner).map(([r, v]) => `<li>pointer ${hex(+r)} swapped by ${v.owner}</li>`).join("") +
+    (g.build !== BUILD ? `<li>idle_exit bytes changed by the update</li>` : "") + `</ul>` +
+    (Object.values(g.sites).some(v => v.owner) || Object.values(g.pointers).some(v => v.owner) || g.build !== BUILD ? "" : `<p class="muted">Unmodified 1.37.5.</p>`);
+  $("log").textContent = e.log.join("\n");
+  const now = e.verdict;
+  $("verdict").classList.toggle("changed", previous !== "" && previous !== now);
+  previous = now;
+  renderScenario();
+}
+document.addEventListener("click", ev => {
+  const b = ev.target.closest("button"); if (!b) return;
+  if (b.dataset.style) { state = setStyle(state, b.dataset.style); render(); }
+  if (b.dataset.act) { state = ACTIONS[b.dataset.act](state); render(); }
+});
+
+const SCENARIOS = [
+  { title: "1. Happy path", text: "Everything as shipped. Watch that in A, B and C every address the code touches appears in the verification table, while in API 1 the pointer slot is checked only inside the plugin.",
+    steps: [["Style A", s => setStyle(initialState(), "A")], ["Style B", s => setStyle(s, "B")], ["Style C", s => setStyle(s, "C")], ["API 1", s => setStyle(s, "API1")]] },
+  { title: "2. Game changes under the plugin", text: "A patch changes one byte at a hook site. Watch the log: the plugin is skipped before its DLL loads, and the message names the declaration and the differing byte. `anvil check` would print the same line offline.",
+    steps: [["Start with style A", s => setStyle(initialState(), "A")], ["Game update changes a hook site", s => ACTIONS.gameUpdate(s)], ["Same in style B", s => setStyle(s, "B")]] },
+  { title: "3. Another plugin got there first", text: "Another plugin hooks the function this plugin only calls, and swaps the pointer this plugin wants to swap. Compare against the original bytes (Anvil's registry): the dependency is still valid. Then compare against memory as it is now: a naive check would refuse.",
+    steps: [["Start with style A", s => setStyle(initialState(), "A")], ["Another plugin hooks a function we call", s => ACTIONS.otherHooksCall(s)], ["Another plugin swaps the pointer first", s => ACTIONS.otherSwapsSlot(s)], ["Compare memory as it is now", s => ACTIONS.toggleOriginal(s)]] },
+  { title: "4. Author edits one copy", text: "The author retargets the call. In API 1 the code and the manifest drift apart: the plugin loads, verification passes, and the code calls an address nobody checked. In A, B and C there is only one place to edit.",
+    steps: [["Start with API 1", s => setStyle(initialState(), "API1")], ["Author moves the call target", s => ACTIONS.moveCall(s)], ["Restart with style A", s => setStyle(initialState(), "A")], ["Author moves the call target", s => ACTIONS.moveCall(s)]] },
+  { title: "5. What the old format cannot say", text: "The pointer slot lives in read-only constants and must point at the stock front-end tick. A, B and C declare both; a wrong memory kind is caught before load. API 1 has no way to express either.",
+    steps: [["Start with style B", s => setStyle(initialState(), "B")], ["Author declares the wrong memory kind", s => ACTIONS.wrongSection(s)], ["Look at API 1", s => setStyle(initialState(), "API1")]] },
+];
+let tab = 0, step = 0;
+function renderScenario() {
+  $("tabs").innerHTML = SCENARIOS.map((sc, i) => `<button class="${i === tab ? "on" : ""}" data-tab="${i}">${sc.title}</button>`).join("");
+  const sc = SCENARIOS[tab];
+  $("scenario").innerHTML = `<p>${esc(sc.text)}</p><div class="steps">` +
+    sc.steps.map(([l], i) => `<button data-step="${i}" ${i !== step ? "disabled" : ""} class="${i < step ? "done" : ""}">${i + 1}. ${esc(l)}</button>`).join("") + `</div>`;
+}
+document.addEventListener("click", ev => {
+  const b = ev.target.closest("button"); if (!b) return;
+  if (b.dataset.tab) { tab = +b.dataset.tab; step = 0; state = initialState(state.style); render(); }
+  if (b.dataset.step && +b.dataset.step === step) { state = SCENARIOS[tab].steps[step][1](state); step = Math.min(step + 1, SCENARIOS[tab].steps.length); render(); }
+});
+render();
+</script>
+</body>
+</html>
