@@ -1,5 +1,7 @@
 #pragma once
 
+#include "cpu_context.h"
+
 #include <windows.h>
 
 #include <cstdint>
@@ -29,10 +31,10 @@ enum class ChangeStatus {
 
 const char* change_status_name(ChangeStatus status);
 
-// Kinds in this registry. Mid hooks and block replacements (#43) share the
-// function hook's site and SafetyHook hook; pointer swaps (#44) chain like
-// import replacements but on any declared slot.
-enum class ChangeKind { FunctionHook, CallRedirect, BytePatch, ImportReplacement };
+// Kinds in this registry. Function hooks, mid hooks and block replacements at
+// one address share one code site and its SafetyHook hook; pointer swaps (#44)
+// will chain like import replacements but on any declared slot.
+enum class ChangeKind { FunctionHook, MidHook, BlockReplacement, CallRedirect, BytePatch, ImportReplacement };
 
 const char* change_kind_name(ChangeKind kind);
 
@@ -59,6 +61,9 @@ struct ChangeTarget {
 //  - one SafetyHook hook per address; Anvil chains the plugins itself, each
 //    link with its own `next` (a jump stub Anvil re-points atomically), so
 //    links can be removed in any order;
+//  - at one address the mid hooks run first (one saved context, callbacks in
+//    chain order), then a block replacement or the function-hook chain or the
+//    redirected call (§8.2); a mid hook that changes `rip` ends the chain;
 //  - a change overlapping another change at a different address is refused
 //    (also for the same owner); identical byte patches share ownership;
 //  - changes inside a group (begin/commit) are enabled together or not at
@@ -84,12 +89,30 @@ public:
     // conflict. Called under the registry's lock: it must not call back.
     using RefusalSink = std::function<void(OwnerId owner, const std::string& message)>;
     void set_refusal_sink(RefusalSink sink);
+    // Receives what the changes meet while the game runs: the first mid hook
+    // per address that changes `rip`. Called on the game's thread, not under
+    // the registry's lock; set it before the first change.
+    using NoticeSink = std::function<void(OwnerId owner, const std::string& message)>;
+    void set_notice_sink(NoticeSink sink);
 
     // --- requests: `next` receives the link's own next (never null on Ok);
     // `out` (optional) the handle. In an open group the change is staged and
     // `next` already leads to the rest of the chain.
     ChangeStatus hook_function(OwnerId owner, const ChangeTarget& target, void* detour, void** next,
                                ChangeId* out = nullptr);
+    // callback(cpu, user) runs when the game reaches target.address, before
+    // the code there (or the block replacement / function hooks / redirected
+    // call at the same address). Registers written to `cpu` are loaded on the
+    // way out; a new `cpu->rip` resumes there and skips the rest of the chain.
+    ChangeStatus mid_hook(OwnerId owner, const ChangeTarget& target, AnvilCpuCallback callback, void* user,
+                          ChangeId* out = nullptr);
+    // The `size` bytes at target.address (whole instructions, >= 5) never run:
+    // callback(cpu, user) runs instead and the game resumes at `resume`, or at
+    // the block's end when it is 0 (unless the callback writes `cpu->rip`).
+    // The owner holds the whole block: other changes inside it conflict, mid
+    // hooks at its first byte run before it.
+    ChangeStatus replace_block(OwnerId owner, const ChangeTarget& target, size_t size, uintptr_t resume,
+                               AnvilCpuCallback callback, void* user, ChangeId* out = nullptr);
     // A `call rel32` at target.address. expected_callee != 0 must be the
     // original callee. `next` is the previous target in the chain.
     ChangeStatus redirect_call(OwnerId owner, const ChangeTarget& target, uintptr_t expected_callee, void* new_target,
@@ -135,20 +158,31 @@ private:
     struct Site;
     struct Change;
     struct Owner;
+    struct Dispatch;
+    struct CpuStub;
+
+    static void dispatch(AnvilCpuContext* cpu);
 
     ChangeStatus refuse(OwnerId owner, ChangeStatus status, const std::string& message);
     ChangeStatus check_owner(OwnerId owner) const;
     ChangeStatus check_target(OwnerId owner, const ChangeTarget& target, size_t size, const char* what);
     ChangeStatus check_overlap(OwnerId owner, const Site* joining, uintptr_t address, size_t size, ChangeKind kind,
-                               const std::string& what);
+                               const std::string& what, const Site* partner = nullptr);
     Site* find_site(uintptr_t address, ChangeKind kind) const;
     Site& add_site(uintptr_t address, ChangeKind kind, size_t footprint);
-    ChangeStatus add_link(OwnerId owner, Site& site, uintptr_t detour, std::vector<uint8_t> bytes, std::string label,
-                          void** next, ChangeId* out);
+    ChangeStatus code_site(OwnerId owner, const ChangeTarget& target, ChangeKind kind, size_t span,
+                           const std::string& label, Site*& out);
+    bool add_call_stub(Site& code, const Site* call);
+    ChangeStatus add_link(OwnerId owner, Site& site, ChangeKind kind, uintptr_t detour, std::vector<uint8_t> bytes,
+                          std::string label, void** next, ChangeId* out, void* user = nullptr, uintptr_t resume = 0,
+                          size_t span = 0);
     ChangeStatus enable(std::vector<ChangeId> ids);
     bool relink(Site& site);
+    void publish(Site& site, uintptr_t resume, const std::vector<Change*>& callbacks);
     uintptr_t successor(const Site& site, const Change& link) const;
     bool live(const Site& site) const;
+    size_t extent(const Site& site) const;
+    std::string site_name(const Site& site) const;
     bool installed_bytes(const Site& site, const std::vector<uint8_t>*& original) const;
     uint8_t* new_stub(uintptr_t target);
     bool in_image(uintptr_t address, size_t size) const;
@@ -163,6 +197,8 @@ private:
     std::vector<std::unique_ptr<Site>> sites_;
     std::vector<std::unique_ptr<Change>> changes_;  // index == id - 1; removed ones stay
     RefusalSink sink_;
+    std::mutex notice_mutex_;  // not the registry's lock: the sink runs inside game code
+    NoticeSink notice_;
     struct Arena {
         uint8_t* base;
         size_t used;

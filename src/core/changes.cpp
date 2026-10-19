@@ -5,9 +5,39 @@
 #include <safetyhook/os.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <sstream>
+
+// AnvilCpuContext is SafetyHook's Context64, field for field (design §8.5).
+static_assert(sizeof(AnvilCpuContext) == 408 && sizeof(AnvilCpuContext) == sizeof(safetyhook::Context64));
+static_assert(sizeof(AnvilXmm) == sizeof(safetyhook::Xmm) && sizeof(AnvilXmm) == 16);
+static_assert(offsetof(AnvilCpuContext, xmm) == offsetof(safetyhook::Context64, xmm0));
+static_assert(offsetof(AnvilCpuContext, xmm) + 15 * sizeof(AnvilXmm) == offsetof(safetyhook::Context64, xmm15));
+static_assert(offsetof(AnvilCpuContext, rflags) == offsetof(safetyhook::Context64, rflags) &&
+              offsetof(AnvilCpuContext, rflags) == 256);
+static_assert(offsetof(AnvilCpuContext, r15) == offsetof(safetyhook::Context64, r15));
+static_assert(offsetof(AnvilCpuContext, r14) == offsetof(safetyhook::Context64, r14));
+static_assert(offsetof(AnvilCpuContext, r13) == offsetof(safetyhook::Context64, r13));
+static_assert(offsetof(AnvilCpuContext, r12) == offsetof(safetyhook::Context64, r12));
+static_assert(offsetof(AnvilCpuContext, r11) == offsetof(safetyhook::Context64, r11));
+static_assert(offsetof(AnvilCpuContext, r10) == offsetof(safetyhook::Context64, r10));
+static_assert(offsetof(AnvilCpuContext, r9) == offsetof(safetyhook::Context64, r9));
+static_assert(offsetof(AnvilCpuContext, r8) == offsetof(safetyhook::Context64, r8));
+static_assert(offsetof(AnvilCpuContext, rdi) == offsetof(safetyhook::Context64, rdi));
+static_assert(offsetof(AnvilCpuContext, rsi) == offsetof(safetyhook::Context64, rsi));
+static_assert(offsetof(AnvilCpuContext, rdx) == offsetof(safetyhook::Context64, rdx));
+static_assert(offsetof(AnvilCpuContext, rcx) == offsetof(safetyhook::Context64, rcx));
+static_assert(offsetof(AnvilCpuContext, rbx) == offsetof(safetyhook::Context64, rbx));
+static_assert(offsetof(AnvilCpuContext, rax) == offsetof(safetyhook::Context64, rax));
+static_assert(offsetof(AnvilCpuContext, rbp) == offsetof(safetyhook::Context64, rbp));
+static_assert(offsetof(AnvilCpuContext, rsp) == offsetof(safetyhook::Context64, rsp) &&
+              offsetof(AnvilCpuContext, rsp) == 384);
+static_assert(offsetof(AnvilCpuContext, reserved) == offsetof(safetyhook::Context64, trampoline_rsp));
+static_assert(offsetof(AnvilCpuContext, rip) == offsetof(safetyhook::Context64, rip) &&
+              offsetof(AnvilCpuContext, rip) == 400);
 
 namespace anvil {
 
@@ -31,6 +61,8 @@ const char* change_status_name(ChangeStatus status) {
 const char* change_kind_name(ChangeKind kind) {
     switch (kind) {
     case ChangeKind::FunctionHook: return "function hook";
+    case ChangeKind::MidHook: return "mid hook";
+    case ChangeKind::BlockReplacement: return "block replacement";
     case ChangeKind::CallRedirect: return "call redirect";
     case ChangeKind::BytePatch: return "byte patch";
     case ChangeKind::ImportReplacement: return "import replacement";
@@ -50,6 +82,49 @@ constexpr size_t kStubSize = 16;
 
 void set_stub(uint8_t* stub, uintptr_t target) {
     InterlockedExchange64(reinterpret_cast<volatile LONG64*>(stub + 8), static_cast<LONG64>(target));
+}
+
+// Context stub of mid hooks and block replacements: SafetyHook 0.7.0's x64
+// Windows mid-hook stub (src/mid_hook.cpp, MIT), byte for byte, so the saved
+// context is its Context64. It pushes the qword at +383 as `rip`, saves
+// RFLAGS, the GPRs and XMM0-15, calls the function at +375 with rcx = the
+// context, restores everything and returns to the context's `rip`. Anvil
+// stores the site's CpuStub at +383; dispatch() replaces it with the real
+// resume address before any plugin sees the context.
+constexpr uint8_t kCpuStub[391] = {
+    0xFF, 0x35, 0x79, 0x01, 0x00, 0x00, 0x54, 0x54, 0x55, 0x50, 0x53, 0x51, 0x52, 0x56, 0x57, 0x41, 0x50, 0x41, 0x51,
+    0x41, 0x52, 0x41, 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0x9C, 0x48, 0x81, 0xEC, 0x00, 0x01, 0x00,
+    0x00, 0xF3, 0x44, 0x0F, 0x7F, 0xBC, 0x24, 0xF0, 0x00, 0x00, 0x00, 0xF3, 0x44, 0x0F, 0x7F, 0xB4, 0x24, 0xE0, 0x00,
+    0x00, 0x00, 0xF3, 0x44, 0x0F, 0x7F, 0xAC, 0x24, 0xD0, 0x00, 0x00, 0x00, 0xF3, 0x44, 0x0F, 0x7F, 0xA4, 0x24, 0xC0,
+    0x00, 0x00, 0x00, 0xF3, 0x44, 0x0F, 0x7F, 0x9C, 0x24, 0xB0, 0x00, 0x00, 0x00, 0xF3, 0x44, 0x0F, 0x7F, 0x94, 0x24,
+    0xA0, 0x00, 0x00, 0x00, 0xF3, 0x44, 0x0F, 0x7F, 0x8C, 0x24, 0x90, 0x00, 0x00, 0x00, 0xF3, 0x44, 0x0F, 0x7F, 0x84,
+    0x24, 0x80, 0x00, 0x00, 0x00, 0xF3, 0x0F, 0x7F, 0x7C, 0x24, 0x70, 0xF3, 0x0F, 0x7F, 0x74, 0x24, 0x60, 0xF3, 0x0F,
+    0x7F, 0x6C, 0x24, 0x50, 0xF3, 0x0F, 0x7F, 0x64, 0x24, 0x40, 0xF3, 0x0F, 0x7F, 0x5C, 0x24, 0x30, 0xF3, 0x0F, 0x7F,
+    0x54, 0x24, 0x20, 0xF3, 0x0F, 0x7F, 0x4C, 0x24, 0x10, 0xF3, 0x0F, 0x7F, 0x04, 0x24, 0x48, 0x8B, 0x8C, 0x24, 0x80,
+    0x01, 0x00, 0x00, 0x48, 0x83, 0xC1, 0x10, 0x48, 0x89, 0x8C, 0x24, 0x80, 0x01, 0x00, 0x00, 0x48, 0x8D, 0x0C, 0x24,
+    0x48, 0x89, 0xE3, 0x48, 0x83, 0xEC, 0x30, 0x48, 0x83, 0xE4, 0xF0, 0xFF, 0x15, 0xA8, 0x00, 0x00, 0x00, 0x48, 0x89,
+    0xDC, 0xF3, 0x0F, 0x6F, 0x04, 0x24, 0xF3, 0x0F, 0x6F, 0x4C, 0x24, 0x10, 0xF3, 0x0F, 0x6F, 0x54, 0x24, 0x20, 0xF3,
+    0x0F, 0x6F, 0x5C, 0x24, 0x30, 0xF3, 0x0F, 0x6F, 0x64, 0x24, 0x40, 0xF3, 0x0F, 0x6F, 0x6C, 0x24, 0x50, 0xF3, 0x0F,
+    0x6F, 0x74, 0x24, 0x60, 0xF3, 0x0F, 0x6F, 0x7C, 0x24, 0x70, 0xF3, 0x44, 0x0F, 0x6F, 0x84, 0x24, 0x80, 0x00, 0x00,
+    0x00, 0xF3, 0x44, 0x0F, 0x6F, 0x8C, 0x24, 0x90, 0x00, 0x00, 0x00, 0xF3, 0x44, 0x0F, 0x6F, 0x94, 0x24, 0xA0, 0x00,
+    0x00, 0x00, 0xF3, 0x44, 0x0F, 0x6F, 0x9C, 0x24, 0xB0, 0x00, 0x00, 0x00, 0xF3, 0x44, 0x0F, 0x6F, 0xA4, 0x24, 0xC0,
+    0x00, 0x00, 0x00, 0xF3, 0x44, 0x0F, 0x6F, 0xAC, 0x24, 0xD0, 0x00, 0x00, 0x00, 0xF3, 0x44, 0x0F, 0x6F, 0xB4, 0x24,
+    0xE0, 0x00, 0x00, 0x00, 0xF3, 0x44, 0x0F, 0x6F, 0xBC, 0x24, 0xF0, 0x00, 0x00, 0x00, 0x48, 0x81, 0xC4, 0x00, 0x01,
+    0x00, 0x00, 0x9D, 0x41, 0x5F, 0x41, 0x5E, 0x41, 0x5D, 0x41, 0x5C, 0x41, 0x5B, 0x41, 0x5A, 0x41, 0x59, 0x41, 0x58,
+    0x5F, 0x5E, 0x5A, 0x59, 0x5B, 0x58, 0x5D, 0x48, 0x8D, 0x64, 0x24, 0x08, 0x5C, 0xC3, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+constexpr size_t kCpuStubDestination = 375;
+constexpr size_t kCpuStubState = 383;
+
+// Call stub: the original `call rel32` of a code site, so mid hooks at a call
+// pass on to the callee or to the redirect chain with the game's own return
+// address. lea rsp,[rsp-8]; mov dword [rsp], lo; mov dword [rsp+4], hi;
+// jmp qword ptr [rip+6]; int3 x6; dq target. No register or flag changes;
+// the target sits 8-byte aligned at +32.
+constexpr size_t kCallStubSize = 40;
+
+void set_call_stub(uint8_t* stub, uintptr_t target) {
+    InterlockedExchange64(reinterpret_cast<volatile LONG64*>(stub + 32), static_cast<LONG64>(target));
 }
 
 bool readable(uintptr_t address, size_t size) {
@@ -136,6 +211,21 @@ ChangeStatus stolen_length(const uint8_t* code, size_t available, size_t& length
     return ChangeStatus::Ok;
 }
 
+// A replaced block must be whole instructions: the game resumes at its end.
+bool whole_instructions(const uint8_t* code, size_t size) {
+    ZydisDecoder decoder;
+    if (!ZYAN_SUCCESS(ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_STACK_WIDTH_64))) return false;
+    size_t at = 0;
+    while (at < size) {
+        ZydisDecodedInstruction instruction;
+        if (!ZYAN_SUCCESS(ZydisDecoderDecodeInstruction(&decoder, nullptr, code + at, size - at, &instruction))) {
+            return false;
+        }
+        at += instruction.length;
+    }
+    return at == size;
+}
+
 ChangeStatus from_safetyhook(const safetyhook::InlineHook::Error& error, std::string& detail) {
     using E = safetyhook::InlineHook::Error;
     switch (error.type) {
@@ -158,24 +248,55 @@ struct ChangeRegistry::Change {
     ChangeId id = 0;
     OwnerId owner = 0;
     Site* site = nullptr;
+    ChangeKind kind = ChangeKind::BytePatch;
     LinkState state = LinkState::Staged;
-    uintptr_t detour = 0;        // chain kinds: where this link goes
+    uintptr_t detour = 0;        // chain kinds: where this link goes; mid hook, block: the callback
     uint8_t* next = nullptr;     // chain kinds: this link's own next stub
+    void* user = nullptr;        // mid hook, block: the callback's argument
+    uintptr_t resume = 0;        // block: where the game goes on
+    size_t span = 0;             // block: its size, owned from the site's address
     std::vector<uint8_t> bytes;  // byte patch
     std::string label;
 };
 
+// The callbacks behind a code site's context stub, published as a whole so a
+// thread in the stub reads one consistent list. Never freed while the
+// registry lives: a thread may still read an older one.
+struct ChangeRegistry::Dispatch {
+    struct Item {
+        AnvilCpuCallback callback;
+        void* user;
+        OwnerId owner;
+        bool mid;  // a mid hook (a rip change ends the chain); else the block replacement
+    };
+    uintptr_t resume = 0;     // where the game goes on unless a callback writes rip
+    std::vector<Item> items;  // the mid hooks in chain order, then the block replacement
+};
+
+// A code site's context stub (kCpuStub) and what dispatch() needs.
+struct ChangeRegistry::CpuStub {
+    uint8_t* code = nullptr;
+    ChangeRegistry* registry = nullptr;
+    uintptr_t address = 0;
+    std::atomic<const Dispatch*> current{nullptr};
+    std::vector<std::unique_ptr<Dispatch>> published;
+    std::atomic<bool> rip_noticed{false};  // the first rip change here is reported, once
+};
+
 // Everything at one address of one kind. The game is changed only while a site
 // has Active links; a site without links stays (its stubs and hook are never
-// freed) and is reused by the next request of the same kind.
+// freed) and is reused by the next request of the same kind. Function hooks,
+// mid hooks and block replacements share one code site (kind FunctionHook).
 struct ChangeRegistry::Site {
     ChangeKind kind = ChangeKind::BytePatch;
     uintptr_t address = 0;
     size_t footprint = 0;           // bytes this site owns: stolen bytes, call, slot, patch
     std::vector<uint8_t> original;  // those bytes as the game shipped them
-    uintptr_t terminal = 0;         // where the innermost next leads: trampoline, callee, import
-    uint8_t* entry = nullptr;       // function hook, redirect: the stub the game jumps to first
-    std::unique_ptr<safetyhook::InlineHook> hook;  // function hook; #43 hangs mid hooks here too
+    uintptr_t terminal = 0;         // where the innermost next leads: trampoline (or call stub), callee, import
+    uint8_t* entry = nullptr;       // code site, redirect: the stub the game jumps to first
+    std::unique_ptr<safetyhook::InlineHook> hook;  // code site
+    std::unique_ptr<CpuStub> cpu;   // code site with mid hooks or a block replacement (once)
+    uint8_t* call_stub = nullptr;   // code site on a `call rel32`: the call, to the callee or the redirect chain
     bool installed = false;         // the game's bytes are changed
     std::vector<Change*> links;     // not Removed, in chain order (owner, then request)
 };
@@ -235,6 +356,37 @@ void ChangeRegistry::set_refusal_sink(RefusalSink sink) {
     sink_ = std::move(sink);
 }
 
+void ChangeRegistry::set_notice_sink(NoticeSink sink) {
+    std::lock_guard lock(notice_mutex_);
+    notice_ = std::move(sink);
+}
+
+// Called by a code site's context stub on the game's thread, without the
+// registry's lock: it reads only the published list.
+void ChangeRegistry::dispatch(AnvilCpuContext* cpu) {
+    auto* stub = reinterpret_cast<CpuStub*>(cpu->rip);  // kCpuStubState, pushed as rip
+    const Dispatch* list = stub->current.load(std::memory_order_acquire);
+    cpu->rip = list->resume;
+    for (const Dispatch::Item& item : list->items) {
+        item.callback(cpu, item.user);
+        if (cpu->rip == list->resume) continue;
+        // A new rip ends the chain here (§8.2): the rest is skipped.
+        if (item.mid && !stub->rip_noticed.exchange(true)) {
+            try {
+                ChangeRegistry& registry = *stub->registry;
+                const std::string message = "mid hook " + registry.where(stub->address) + " changed rip to " +
+                                            registry.where(cpu->rip) +
+                                            ": the rest of the chain at this address is skipped (reported once)";
+                std::lock_guard lock(registry.notice_mutex_);
+                if (registry.notice_) registry.notice_(item.owner, message);
+            } catch (...) {
+                // Never unwind into the game.
+            }
+        }
+        return;
+    }
+}
+
 ChangeStatus ChangeRegistry::refuse(OwnerId owner, ChangeStatus status, const std::string& message) {
     if (sink_) sink_(owner, message);
     return status;
@@ -284,19 +436,42 @@ ChangeStatus ChangeRegistry::check_target(OwnerId owner, const ChangeTarget& tar
 
 bool ChangeRegistry::live(const Site& site) const { return !site.links.empty(); }
 
+// The bytes a live site owns: a block replacement owns its whole block.
+size_t ChangeRegistry::extent(const Site& site) const {
+    size_t size = site.footprint;
+    for (const Change* c : site.links) size = std::max(size, c->span);
+    return size;
+}
+
+// The kinds of a site's links, e.g. "mid hook and function hook".
+std::string ChangeRegistry::site_name(const Site& site) const {
+    if (site.kind != ChangeKind::FunctionHook) return change_kind_name(site.kind);
+    std::string name;
+    for (const ChangeKind kind : {ChangeKind::MidHook, ChangeKind::BlockReplacement, ChangeKind::FunctionHook}) {
+        if (std::none_of(site.links.begin(), site.links.end(), [&](const Change* c) { return c->kind == kind; })) {
+            continue;
+        }
+        name += (name.empty() ? "" : " and ") + std::string(change_kind_name(kind));
+    }
+    return name.empty() ? change_kind_name(site.kind) : name;
+}
+
+// `partner`: a site at the same address that may stay (a redirected call
+// under mid hooks).
 ChangeStatus ChangeRegistry::check_overlap(OwnerId owner, const Site* joining, uintptr_t address, size_t size,
-                                           ChangeKind kind, const std::string& what) {
+                                           ChangeKind kind, const std::string& what, const Site* partner) {
     for (const auto& s : sites_) {
-        if (s.get() == joining || !live(*s)) continue;
-        if (!(address < s->address + s->footprint && s->address < address + size)) continue;
+        if (s.get() == joining || s.get() == partner || !live(*s)) continue;
+        const size_t owned = extent(*s);
+        if (!(address < s->address + owned && s->address < address + size)) continue;
         std::string owners;
         for (const Change* c : s->links) {
             const std::string& name = owners_[c->owner].name;
             if (owners.find("'" + name + "'") != std::string::npos) continue;
             owners += (owners.empty() ? "'" : ", '") + name + "'";
         }
-        std::string message = what + " overlaps the " + change_kind_name(s->kind) + " " + where(s->address) + " (" +
-                              std::to_string(s->footprint) + " B) of " + owners;
+        std::string message = what + " overlaps the " + site_name(*s) + " " + where(s->address) + " (" +
+                              std::to_string(owned) + " B) of " + owners;
         if (s->address == address && s->kind == kind) message += " with different bytes";
         return refuse(owner, ChangeStatus::Conflict, message + "; refused");
     }
@@ -329,16 +504,44 @@ uint8_t* ChangeRegistry::new_stub(uintptr_t target) {
     return stub;
 }
 
+// The next chained link (function hook, redirect, import) after `link`.
 uintptr_t ChangeRegistry::successor(const Site& site, const Change& link) const {
     bool after = false;
     for (const Change* c : site.links) {
         if (c == &link) {
             after = true;
-        } else if (after && c->state == LinkState::Active) {
+        } else if (after && c->next != nullptr && c->state == LinkState::Active) {
             return c->detour;
         }
     }
     return site.terminal;
+}
+
+// Makes `callbacks` with `resume` the list the site's context stub runs; a
+// new list only when it differs from the current one.
+void ChangeRegistry::publish(Site& site, uintptr_t resume, const std::vector<Change*>& callbacks) {
+    CpuStub& cpu = *site.cpu;
+    const Dispatch* now = cpu.current.load(std::memory_order_relaxed);
+    const auto same = [&] {
+        if (now == nullptr || now->resume != resume || now->items.size() != callbacks.size()) return false;
+        for (size_t i = 0; i < callbacks.size(); ++i) {
+            const Dispatch::Item& item = now->items[i];
+            if (item.callback != reinterpret_cast<AnvilCpuCallback>(callbacks[i]->detour) ||
+                item.user != callbacks[i]->user || item.owner != callbacks[i]->owner) {
+                return false;
+            }
+        }
+        return true;
+    };
+    if (same()) return;
+    auto list = std::make_unique<Dispatch>();
+    list->resume = resume;
+    for (const Change* c : callbacks) {
+        list->items.push_back(
+            {reinterpret_cast<AnvilCpuCallback>(c->detour), c->user, c->owner, c->kind == ChangeKind::MidHook});
+    }
+    cpu.current.store(list.get(), std::memory_order_release);
+    cpu.published.push_back(std::move(list));
 }
 
 // Points every link and the site's entry at the Active links, innermost first,
@@ -349,34 +552,68 @@ bool ChangeRegistry::relink(Site& site) {
     for (Change* c : site.links) {
         if (c->state == LinkState::Active) active.push_back(c);
     }
-    if (site.kind != ChangeKind::BytePatch) {
-        for (Change* c : site.links) {
-            if (c->state != LinkState::Active) set_stub(c->next, successor(site, *c));
-        }
-        for (size_t i = active.size(); i-- > 0;) {
-            set_stub(active[i]->next, i + 1 < active.size() ? active[i + 1]->detour : site.terminal);
+    // The chained links (function hooks, redirects, imports): each next leads
+    // to the following Active one.
+    std::vector<Change*> chained;
+    for (Change* c : site.links) {
+        if (c->next == nullptr) continue;
+        if (c->state == LinkState::Active) {
+            chained.push_back(c);
+        } else {
+            set_stub(c->next, successor(site, *c));
         }
     }
+    for (size_t i = chained.size(); i-- > 0;) {
+        set_stub(chained[i]->next, i + 1 < chained.size() ? chained[i + 1]->detour : site.terminal);
+    }
+    const uintptr_t chain = chained.empty() ? site.terminal : chained.front()->detour;
     const bool want = !active.empty();
     switch (site.kind) {
     case ChangeKind::FunctionHook:
+    case ChangeKind::MidHook:
+    case ChangeKind::BlockReplacement: {
+        // Mid hooks first, then the block replacement or the function-hook
+        // chain (or, at a call, the call stub and so the redirect chain).
+        std::vector<Change*> callbacks;
+        Change* block = nullptr;
+        for (Change* c : active) {
+            if (c->kind == ChangeKind::MidHook) callbacks.push_back(c);
+            if (c->kind == ChangeKind::BlockReplacement) block = c;
+        }
+        if (block != nullptr) callbacks.push_back(block);
+        if (site.cpu) publish(site, block != nullptr ? block->resume : chain, callbacks);
         // Uninstalled, the entry leads past every link: a thread already on
         // its way in skips the removed ones.
-        set_stub(site.entry, want ? active.front()->detour : site.terminal);
+        set_stub(site.entry, callbacks.empty() ? chain : reinterpret_cast<uintptr_t>(site.cpu->code));
         if (want != site.installed) {
             if (!(want ? site.hook->enable() : site.hook->disable())) return false;
+            if (!want) {
+                // SafetyHook wrote back the bytes it found: a redirect at this
+                // call writes its own again.
+                site.installed = false;
+                if (Site* call = find_site(site.address, ChangeKind::CallRedirect)) return relink(*call);
+            }
         }
         break;
-    case ChangeKind::CallRedirect:
-        set_stub(site.entry, want ? active.front()->detour : site.terminal);
-        if (want != site.installed) {
-            uint8_t call[5] = {0xE8, 0, 0, 0, 0};
-            const int32_t rel = static_cast<int32_t>(reinterpret_cast<intptr_t>(site.entry) -
-                                                     static_cast<intptr_t>(site.address + 5));
-            std::memcpy(call + 1, &rel, sizeof(rel));
-            if (!write_code_or_data(site.address, want ? call : site.original.data(), 5)) return false;
+    }
+    case ChangeKind::CallRedirect: {
+        set_stub(site.entry, chain);
+        // Under an installed code site (mid hooks) the bytes are the code
+        // site's; its call stub leads to this entry.
+        const Site* code = find_site(site.address, ChangeKind::FunctionHook);
+        if (code != nullptr && code->installed) break;
+        uint8_t call[5] = {0xE8, 0, 0, 0, 0};
+        const int32_t rel = static_cast<int32_t>(reinterpret_cast<intptr_t>(site.entry) -
+                                                 static_cast<intptr_t>(site.address + 5));
+        std::memcpy(call + 1, &rel, sizeof(rel));
+        const uint8_t* bytes = want ? call : site.original.data();
+        if (!readable(site.address, 5)) return false;
+        if (std::memcmp(reinterpret_cast<const void*>(site.address), bytes, 5) != 0 &&
+            !write_code_or_data(site.address, bytes, 5)) {
+            return false;
         }
         break;
+    }
     case ChangeKind::ImportReplacement: {
         const uintptr_t value = want ? active.front()->detour : site.terminal;
         if (want || site.installed) {
@@ -397,16 +634,21 @@ bool ChangeRegistry::relink(Site& site) {
     return true;
 }
 
-ChangeStatus ChangeRegistry::add_link(OwnerId owner, Site& site, uintptr_t detour, std::vector<uint8_t> bytes,
-                                      std::string label, void** next, ChangeId* out) {
+ChangeStatus ChangeRegistry::add_link(OwnerId owner, Site& site, ChangeKind kind, uintptr_t detour,
+                                      std::vector<uint8_t> bytes, std::string label, void** next, ChangeId* out,
+                                      void* user, uintptr_t resume, size_t span) {
     auto change = std::make_unique<Change>();
     change->id = changes_.size() + 1;
     change->owner = owner;
     change->site = &site;
+    change->kind = kind;
     change->detour = detour;
+    change->user = user;
+    change->resume = resume;
+    change->span = span;
     change->bytes = std::move(bytes);
     change->label = std::move(label);
-    if (site.kind != ChangeKind::BytePatch) {
+    if (kind == ChangeKind::FunctionHook || kind == ChangeKind::CallRedirect || kind == ChangeKind::ImportReplacement) {
         change->next = new_stub(site.terminal);
         if (change->next == nullptr) return refuse(owner, ChangeStatus::OutOfMemory, change->label + ": no stub memory");
     }
@@ -457,23 +699,40 @@ ChangeStatus ChangeRegistry::enable(std::vector<ChangeId> ids) {
     return ChangeStatus::Ok;
 }
 
-ChangeStatus ChangeRegistry::hook_function(OwnerId owner, const ChangeTarget& target, void* detour, void** next,
-                                           ChangeId* out) {
-    if (detour == nullptr || next == nullptr) return ChangeStatus::InvalidArgument;
-    std::lock_guard lock(mutex_);
-    if (check_owner(owner) != ChangeStatus::Ok) return ChangeStatus::InvalidArgument;
-    const std::string label = "function hook " + where(target.address);
-    // At least the 5 bytes of the jump; the exact stolen length follows below.
-    if (const ChangeStatus s = check_target(owner, target, 5, "function hook"); s != ChangeStatus::Ok) return s;
+// The code site at target.address, created on first use: one SafetyHook hook
+// whose stolen bytes are checked for overlaps and unsafe instructions. `span`
+// is what a block replacement owns from the address. A redirected call at the
+// same address stays only under mid hooks, which then pass on to it.
+ChangeStatus ChangeRegistry::code_site(OwnerId owner, const ChangeTarget& target, ChangeKind kind, size_t span,
+                                       const std::string& label, Site*& out) {
     Site* site = find_site(target.address, ChangeKind::FunctionHook);
+    Site* call = find_site(target.address, ChangeKind::CallRedirect);
+    const Site* partner = kind == ChangeKind::MidHook ? call : nullptr;
     if (site != nullptr) {
-        if (const ChangeStatus s = check_overlap(owner, site, site->address, site->footprint, site->kind, label);
+        // At one address: mid hooks, then a block replacement or function hooks.
+        for (const Change* c : site->links) {
+            const bool clash = kind == ChangeKind::BlockReplacement ? c->kind != ChangeKind::MidHook
+                                                                    : kind == ChangeKind::FunctionHook &&
+                                                                          c->kind == ChangeKind::BlockReplacement;
+            if (!clash) continue;
+            return refuse(owner, ChangeStatus::Conflict,
+                          label + ": " + where(target.address) + " already has a " + change_kind_name(c->kind) +
+                              " of '" + owners_[c->owner].name + "'; refused");
+        }
+        if (span != 0 && span < site->footprint) {
+            return refuse(owner, ChangeStatus::UnsafeSite,
+                          label + ": the hook's jump (" + std::to_string(site->footprint) +
+                              " B) is longer than the block");
+        }
+        if (partner != nullptr && site->call_stub == nullptr) partner = nullptr;  // reported as an overlap
+        if (const ChangeStatus s = check_overlap(owner, site, site->address, std::max(extent(*site), span), kind,
+                                                 label, partner);
             s != ChangeStatus::Ok) {
             return s;
         }
     } else {
-        // No change covers these bytes (that would be a conflict), so the live
-        // bytes are the original ones and SafetyHook may copy them.
+        // No change covers these bytes (that would be a conflict, a redirected
+        // call aside), so SafetyHook copies the original bytes or that call.
         uint8_t code[32];
         size_t available = sizeof(code);
         if (target.inside_image) available = std::min<size_t>(available, image_base_ + image_size_ - target.address);
@@ -484,7 +743,12 @@ ChangeStatus ChangeRegistry::hook_function(OwnerId owner, const ChangeTarget& ta
         if (const ChangeStatus s = stolen_length(code, available, length, detail); s != ChangeStatus::Ok) {
             return refuse(owner, s, label + ": " + detail);
         }
-        if (const ChangeStatus s = check_overlap(owner, nullptr, target.address, length, ChangeKind::FunctionHook, label);
+        if (span != 0 && span < length) {
+            return refuse(owner, ChangeStatus::UnsafeSite,
+                          label + ": the hook's jump (" + std::to_string(length) + " B) is longer than the block");
+        }
+        if (const ChangeStatus s =
+                check_overlap(owner, nullptr, target.address, std::max(length, span), kind, label, partner);
             s != ChangeStatus::Ok) {
             return s;
         }
@@ -499,21 +763,138 @@ ChangeStatus ChangeRegistry::hook_function(OwnerId owner, const ChangeTarget& ta
         auto hook = std::make_unique<safetyhook::InlineHook>(std::move(*created));
         const size_t stolen = hook->original_bytes().size();
         if (stolen > length) {  // SafetyHook's 14-byte form: check the longer range
-            if (const ChangeStatus s =
-                    check_overlap(owner, nullptr, target.address, stolen, ChangeKind::FunctionHook, label);
-                s != ChangeStatus::Ok) {
+            ChangeStatus s = ChangeStatus::Ok;
+            if (span != 0 && span < stolen) {
+                s = refuse(owner, ChangeStatus::UnsafeSite,
+                           label + ": the hook's jump (" + std::to_string(stolen) + " B) is longer than the block");
+            } else if (partner != nullptr && live(*partner)) {
+                s = refuse(owner, ChangeStatus::UnsafeSite,
+                           label + ": the hook's jump (" + std::to_string(stolen) + " B) is longer than the call");
+            } else {
+                s = check_overlap(owner, nullptr, target.address, std::max(stolen, span), kind, label, partner);
+            }
+            if (s != ChangeStatus::Ok) {
                 (void)hook.release();  // never free a trampoline
                 return s;
             }
         }
         site = &add_site(target.address, ChangeKind::FunctionHook, stolen);
-        site->original = hook->original_bytes();
+        // The shipped bytes: SafetyHook may have found a redirect's call.
+        site->original.resize(stolen);
+        read_original_locked(target.address, site->original.data(), stolen);
         site->terminal = hook->trampoline().address();
         site->entry = entry;
         site->hook = std::move(hook);
+        if (stolen == 5 && site->original[0] == 0xE8 && !add_call_stub(*site, call)) {
+            return refuse(owner, ChangeStatus::OutOfMemory, label + ": no stub memory");
+        }
         set_stub(entry, site->terminal);
     }
-    return add_link(owner, *site, reinterpret_cast<uintptr_t>(detour), {}, label, next, out);
+    if (kind != ChangeKind::FunctionHook && !site->cpu) {
+        auto* code = static_cast<uint8_t*>(alloc_near_locked(sizeof(kCpuStub)));
+        if (code == nullptr) return refuse(owner, ChangeStatus::OutOfMemory, label + ": no stub memory");
+        auto cpu = std::make_unique<CpuStub>();
+        std::memcpy(code, kCpuStub, sizeof(kCpuStub));
+        const uintptr_t destination = reinterpret_cast<uintptr_t>(&ChangeRegistry::dispatch);
+        const uintptr_t state = reinterpret_cast<uintptr_t>(cpu.get());
+        std::memcpy(code + kCpuStubDestination, &destination, sizeof(destination));
+        std::memcpy(code + kCpuStubState, &state, sizeof(state));
+        FlushInstructionCache(GetCurrentProcess(), code, sizeof(kCpuStub));
+        cpu->code = code;
+        cpu->registry = this;
+        cpu->address = site->address;
+        site->cpu = std::move(cpu);
+    }
+    out = site;
+    return ChangeStatus::Ok;
+}
+
+// The call stub of a code site on `call rel32`: to the redirect chain's entry
+// when `call` exists, else to the original callee. It becomes the site's
+// terminal, so mid hooks pass on with the game's own return address.
+bool ChangeRegistry::add_call_stub(Site& code, const Site* call) {
+    auto* stub = static_cast<uint8_t*>(alloc_near_locked(kCallStubSize));
+    if (stub == nullptr) return false;
+    const uintptr_t back = code.address + 5;
+    const uint32_t low = static_cast<uint32_t>(back), high = static_cast<uint32_t>(back >> 32);
+    const uint8_t head[32] = {0x48, 0x8D, 0x64, 0x24, 0xF8,                 // lea rsp, [rsp-8]
+                              0xC7, 0x04, 0x24, 0, 0, 0, 0,                 // mov dword [rsp], low
+                              0xC7, 0x44, 0x24, 0x04, 0, 0, 0, 0,           // mov dword [rsp+4], high
+                              0xFF, 0x25, 0x06, 0x00, 0x00, 0x00,           // jmp qword [rip+6]
+                              0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC};
+    std::memcpy(stub, head, sizeof(head));
+    std::memcpy(stub + 8, &low, sizeof(low));
+    std::memcpy(stub + 16, &high, sizeof(high));
+    int32_t rel = 0;
+    std::memcpy(&rel, code.original.data() + 1, sizeof(rel));
+    const uintptr_t callee = code.address + 5 + static_cast<intptr_t>(rel);
+    set_call_stub(stub, call != nullptr ? reinterpret_cast<uintptr_t>(call->entry) : callee);
+    FlushInstructionCache(GetCurrentProcess(), stub, kCallStubSize);
+    code.call_stub = stub;
+    code.terminal = reinterpret_cast<uintptr_t>(stub);
+    return true;
+}
+
+ChangeStatus ChangeRegistry::hook_function(OwnerId owner, const ChangeTarget& target, void* detour, void** next,
+                                           ChangeId* out) {
+    if (detour == nullptr || next == nullptr) return ChangeStatus::InvalidArgument;
+    std::lock_guard lock(mutex_);
+    if (check_owner(owner) != ChangeStatus::Ok) return ChangeStatus::InvalidArgument;
+    const std::string label = "function hook " + where(target.address);
+    // At least the 5 bytes of the jump; the exact stolen length follows below.
+    if (const ChangeStatus s = check_target(owner, target, 5, "function hook"); s != ChangeStatus::Ok) return s;
+    Site* site = nullptr;
+    if (const ChangeStatus s = code_site(owner, target, ChangeKind::FunctionHook, 0, label, site); s != ChangeStatus::Ok) {
+        return s;
+    }
+    return add_link(owner, *site, ChangeKind::FunctionHook, reinterpret_cast<uintptr_t>(detour), {}, label, next, out);
+}
+
+ChangeStatus ChangeRegistry::mid_hook(OwnerId owner, const ChangeTarget& target, AnvilCpuCallback callback,
+                                      void* user, ChangeId* out) {
+    if (callback == nullptr) return ChangeStatus::InvalidArgument;
+    std::lock_guard lock(mutex_);
+    if (check_owner(owner) != ChangeStatus::Ok) return ChangeStatus::InvalidArgument;
+    const std::string label = "mid hook " + where(target.address);
+    if (const ChangeStatus s = check_target(owner, target, 5, "mid hook"); s != ChangeStatus::Ok) return s;
+    Site* site = nullptr;
+    if (const ChangeStatus s = code_site(owner, target, ChangeKind::MidHook, 0, label, site); s != ChangeStatus::Ok) {
+        return s;
+    }
+    return add_link(owner, *site, ChangeKind::MidHook, reinterpret_cast<uintptr_t>(callback), {}, label, nullptr, out,
+                    user);
+}
+
+ChangeStatus ChangeRegistry::replace_block(OwnerId owner, const ChangeTarget& target, size_t size, uintptr_t resume,
+                                           AnvilCpuCallback callback, void* user, ChangeId* out) {
+    if (callback == nullptr || size > 4096) return ChangeStatus::InvalidArgument;
+    std::lock_guard lock(mutex_);
+    if (check_owner(owner) != ChangeStatus::Ok) return ChangeStatus::InvalidArgument;
+    const std::string label = "block replacement " + where(target.address) + " (" + std::to_string(size) + " B)";
+    if (size < 5) {
+        return refuse(owner, ChangeStatus::UnsafeSite, label + ": shorter than the hook's 5-byte jump");
+    }
+    if (const ChangeStatus s = check_target(owner, target, size, "block replacement"); s != ChangeStatus::Ok) return s;
+    std::vector<uint8_t> block(size);
+    if (!read_original_locked(target.address, block.data(), size)) return ChangeStatus::InvalidArgument;
+    if (!whole_instructions(block.data(), size)) {
+        return refuse(owner, ChangeStatus::UnsafeSite, label + ": does not end on an instruction boundary");
+    }
+    const uintptr_t end = target.address + size;
+    if (resume == 0) resume = end;
+    if (resume != end && resume >= target.address && resume < end) {
+        return refuse(owner, ChangeStatus::InvalidArgument, label + ": resumes inside the block");
+    }
+    if (!executable(resume)) {
+        return refuse(owner, ChangeStatus::InvalidArgument, label + ": resumes " + where(resume) + ", not code");
+    }
+    Site* site = nullptr;
+    if (const ChangeStatus s = code_site(owner, target, ChangeKind::BlockReplacement, size, label, site);
+        s != ChangeStatus::Ok) {
+        return s;
+    }
+    return add_link(owner, *site, ChangeKind::BlockReplacement, reinterpret_cast<uintptr_t>(callback), {}, label,
+                    nullptr, out, user, resume, size);
 }
 
 ChangeStatus ChangeRegistry::redirect_call(OwnerId owner, const ChangeTarget& target, uintptr_t expected_callee,
@@ -524,6 +905,15 @@ ChangeStatus ChangeRegistry::redirect_call(OwnerId owner, const ChangeTarget& ta
     const std::string label = "call redirect " + where(target.address);
     if (const ChangeStatus s = check_target(owner, target, 5, "call redirect"); s != ChangeStatus::Ok) return s;
     Site* site = find_site(target.address, ChangeKind::CallRedirect);
+    // Mid hooks at this call stay: they run first and pass on through their
+    // call stub. Function hooks and block replacements here are a conflict.
+    Site* code_site = find_site(target.address, ChangeKind::FunctionHook);
+    const Site* partner = code_site;
+    if (code_site == nullptr || code_site->call_stub == nullptr ||
+        std::any_of(code_site->links.begin(), code_site->links.end(),
+                    [](const Change* c) { return c->kind != ChangeKind::MidHook; })) {
+        partner = nullptr;
+    }
     if (site == nullptr) {
         uint8_t code[5];
         if (!read_original_locked(target.address, code, sizeof(code))) return ChangeStatus::InvalidArgument;
@@ -535,7 +925,8 @@ ChangeStatus ChangeRegistry::redirect_call(OwnerId owner, const ChangeTarget& ta
             return refuse(owner, ChangeStatus::BytesMismatch,
                           label + ": calls " + where(callee) + ", expected " + where(expected_callee));
         }
-        if (const ChangeStatus s = check_overlap(owner, nullptr, target.address, 5, ChangeKind::CallRedirect, label);
+        if (const ChangeStatus s =
+                check_overlap(owner, nullptr, target.address, 5, ChangeKind::CallRedirect, label, partner);
             s != ChangeStatus::Ok) {
             return s;
         }
@@ -549,17 +940,21 @@ ChangeStatus ChangeRegistry::redirect_call(OwnerId owner, const ChangeTarget& ta
         site->original.assign(code, code + 5);
         site->terminal = callee;
         site->entry = entry;
+        if (code_site != nullptr && code_site->call_stub != nullptr) {
+            set_call_stub(code_site->call_stub, reinterpret_cast<uintptr_t>(entry));
+        }
     } else {
         if (expected_callee != 0 && site->terminal != expected_callee) {
             return refuse(owner, ChangeStatus::BytesMismatch,
                           label + ": calls " + where(site->terminal) + ", expected " + where(expected_callee));
         }
-        if (const ChangeStatus s = check_overlap(owner, site, site->address, 5, site->kind, label);
+        if (const ChangeStatus s = check_overlap(owner, site, site->address, 5, site->kind, label, partner);
             s != ChangeStatus::Ok) {
             return s;
         }
     }
-    return add_link(owner, *site, reinterpret_cast<uintptr_t>(new_target), {}, label, next, out);
+    return add_link(owner, *site, ChangeKind::CallRedirect, reinterpret_cast<uintptr_t>(new_target), {}, label, next,
+                    out);
 }
 
 ChangeStatus ChangeRegistry::patch_bytes(OwnerId owner, const ChangeTarget& target, const void* bytes, size_t size,
@@ -589,7 +984,7 @@ ChangeStatus ChangeRegistry::patch_bytes(OwnerId owner, const ChangeTarget& targ
         site->original.resize(size);
         std::memcpy(site->original.data(), reinterpret_cast<const void*>(target.address), size);
     }
-    return add_link(owner, *site, 0, std::move(patch), label, nullptr, out);
+    return add_link(owner, *site, ChangeKind::BytePatch, 0, std::move(patch), label, nullptr, out);
 }
 
 ChangeStatus ChangeRegistry::replace_import(OwnerId owner, HMODULE image, const char* module, const char* function,
@@ -627,7 +1022,8 @@ ChangeStatus ChangeRegistry::replace_import(OwnerId owner, HMODULE image, const 
                 site->original.assign(current, current + sizeof(uintptr_t));
                 site->terminal = static_cast<uintptr_t>(slots->u1.Function);
             }
-            return add_link(owner, *site, reinterpret_cast<uintptr_t>(replacement), {}, label, next, out);
+            return add_link(owner, *site, ChangeKind::ImportReplacement, reinterpret_cast<uintptr_t>(replacement), {},
+                            label, next, out);
         }
     }
     return refuse(owner, ChangeStatus::NotFound, label + ": not imported");
@@ -819,11 +1215,26 @@ size_t ChangeRegistry::staged_count(OwnerId owner) const {
 std::vector<OwnerId> ChangeRegistry::chain_at(uintptr_t address) const {
     std::lock_guard lock(mutex_);
     std::vector<OwnerId> out;
-    for (const auto& s : sites_) {
-        if (s->address != address || !s->installed) continue;
-        for (const Change* c : s->links) {
-            if (c->state == LinkState::Active) out.push_back(c->owner);
+    const auto add = [&](const Site& s, bool callbacks) {
+        for (const Change* c : s.links) {
+            const bool callback = c->kind == ChangeKind::MidHook;
+            if (c->state == LinkState::Active && callback == callbacks) out.push_back(c->owner);
         }
+    };
+    // In the order the game runs them: mid hooks, the rest of the code site,
+    // then a redirect at the same call.
+    for (const ChangeKind kind : {ChangeKind::FunctionHook, ChangeKind::CallRedirect, ChangeKind::BytePatch,
+                                  ChangeKind::ImportReplacement}) {
+        const Site* s = find_site(address, kind);
+        if (kind == ChangeKind::BytePatch) {
+            s = nullptr;
+            for (const auto& p : sites_) {
+                if (p->address == address && p->kind == kind && p->installed) s = p.get();
+            }
+        }
+        if (s == nullptr || !s->installed) continue;
+        add(*s, true);
+        add(*s, false);
     }
     return out;
 }

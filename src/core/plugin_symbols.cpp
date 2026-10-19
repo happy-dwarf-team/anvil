@@ -14,6 +14,13 @@ PluginSymbols::PluginSymbols(const SymbolFile& file, const SymbolVerification& v
     }
 }
 
+const PluginSymbol* PluginSymbols::find(std::string_view name) const {
+    for (const auto& s : symbols_) {
+        if (s.declaration.name == name) return &s;
+    }
+    return nullptr;
+}
+
 void* PluginSymbols::address_of(uint32_t id) const {
     const PluginSymbol* s = get(id);
     return s != nullptr ? reinterpret_cast<void*>(s->address) : nullptr;
@@ -38,12 +45,45 @@ ChangeTarget target_of(const PluginSymbol& symbol) {
     return t;
 }
 
+namespace {
+
+// A hook writes a 5-byte jump over declared, verified code.
+ChangeStatus hookable(const PluginSymbol* s, bool function_only) {
+    if (s == nullptr) return ChangeStatus::NotDeclared;
+    const Symbol& d = s->declaration;
+    if (d.kind != SymbolKind::Function && (function_only || d.kind != SymbolKind::Site)) return ChangeStatus::WrongKind;
+    if (d.memory && *d.memory != MemoryKind::Code) return ChangeStatus::WrongKind;
+    if (d.bytes.size() < 5) return ChangeStatus::UnsafeSite;
+    return ChangeStatus::Ok;
+}
+
+}  // namespace
+
 ChangeStatus hook_function(ChangeRegistry& registry, OwnerId owner, const PluginSymbols& symbols, uint32_t fn,
                            void* detour, void** next, ChangeId* out) {
     const PluginSymbol* s = symbols.get(fn);
-    if (s == nullptr) return ChangeStatus::NotDeclared;
-    if (s->declaration.kind != SymbolKind::Function) return ChangeStatus::WrongKind;
+    if (const ChangeStatus status = hookable(s, true); status != ChangeStatus::Ok) return status;
     return registry.hook_function(owner, target_of(*s), detour, next, out);
+}
+
+ChangeStatus mid_hook(ChangeRegistry& registry, OwnerId owner, const PluginSymbols& symbols, uint32_t site,
+                      AnvilCpuCallback callback, void* user, ChangeId* out) {
+    const PluginSymbol* s = symbols.get(site);
+    if (const ChangeStatus status = hookable(s, false); status != ChangeStatus::Ok) return status;
+    return registry.mid_hook(owner, target_of(*s), callback, user, out);
+}
+
+ChangeStatus replace_block(ChangeRegistry& registry, OwnerId owner, const PluginSymbols& symbols, uint32_t block,
+                           AnvilCpuCallback callback, void* user, ChangeId* out) {
+    const PluginSymbol* s = symbols.get(block);
+    if (const ChangeStatus status = hookable(s, false); status != ChangeStatus::Ok) return status;
+    uintptr_t resume = 0;  // the block's end
+    if (!s->declaration.resume.empty()) {
+        const PluginSymbol* r = symbols.find(s->declaration.resume);
+        if (r == nullptr) return ChangeStatus::NotDeclared;
+        resume = r->address;
+    }
+    return registry.replace_block(owner, target_of(*s), s->declaration.bytes.size(), resume, callback, user, out);
 }
 
 ChangeStatus redirect_call(ChangeRegistry& registry, OwnerId owner, const PluginSymbols& symbols, uint32_t call_site,
