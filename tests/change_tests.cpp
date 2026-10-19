@@ -360,8 +360,6 @@ void change_tests() {
         CHECK(traced(g_next_a, 1) == 2);
         // Staged changes reserve their bytes against other owners.
         CHECK(reg.patch_bytes(b, in_image(s.at(0x101)), patch, 2) == ChangeStatus::Conflict);
-        // An owner with changes may not verify dependencies any more.
-        CHECK(reg.expect_bytes(a, s.at(0x40), kAddOne.data(), nullptr, 3) == ChangeStatus::WrongPhase);
         CHECK(reg.commit_group(a) == ChangeStatus::Ok);
         CHECK(!reg.group_open(a) && reg.staged_count(a) == 0 && reg.count(a) == 2);
         CHECK(traced(f, 1) == 102 && g_trace == "a" && s.base[0x100] == 0x90);
@@ -467,53 +465,6 @@ void change_tests() {
         CHECK(GetTickCount() == 0u);                   // tick_a: the original is not 7
         CHECK(reg.remove(a, ha) == ChangeStatus::Ok);
         CHECK(GetTickCount() - real < 60000u);
-    });
-
-    run("changes: expect_bytes compares the original bytes", [] {
-        Scratch s(0x2000);
-        const uintptr_t base = s.at(0);
-        ChangeRegistry reg(base, 0x2000);
-        const OwnerId mine = reg.add_owner("mine"), other = reg.add_owner("other"), third = reg.add_owner("third");
-        const std::vector<uint8_t> code = {0x48, 0x89, 0x5C, 0x24, 0x08};
-        s.put(0x100, code);
-        const uintptr_t addr = base + 0x100;
-        std::string detail;
-        CHECK(reg.expect_bytes(mine, addr, code.data(), nullptr, code.size()) == ChangeStatus::Ok);
-        const uint8_t wrong[] = {0x48, 0x89, 0x5C, 0x24, 0x10};
-        CHECK(reg.expect_bytes(mine, addr, wrong, nullptr, sizeof(wrong), &detail) == ChangeStatus::BytesMismatch);
-        CHECK(detail == "byte +0x4: expected 0x10, found 0x08");
-        const uint8_t wildcard[] = {0xFF, 0xFF, 0xFF, 0xFF, 0x00};
-        CHECK(reg.expect_bytes(mine, addr, wrong, wildcard, sizeof(wrong)) == ChangeStatus::Ok);
-        const uint8_t low_nibble[] = {0xFF, 0xFF, 0xFF, 0xFF, 0x0F};  // 0x08 vs 0x18: low nibble equal
-        const uint8_t eighteen[] = {0x48, 0x89, 0x5C, 0x24, 0x18};
-        CHECK(reg.expect_bytes(mine, addr, eighteen, low_nibble, sizeof(eighteen)) == ChangeStatus::Ok);
-
-        CHECK(reg.expect_bytes(mine, addr, nullptr, nullptr, 4) == ChangeStatus::InvalidArgument);
-        CHECK(reg.expect_bytes(mine, addr, code.data(), nullptr, 0) == ChangeStatus::InvalidArgument);
-        CHECK(reg.expect_bytes(mine, addr, code.data(), nullptr, 65537) == ChangeStatus::InvalidArgument);
-        CHECK(reg.expect_bytes(mine, base + 0x1FFE, code.data(), nullptr, 4) == ChangeStatus::InvalidArgument);
-        CHECK(VirtualFree(s.base + 0x1000, 0x1000, MEM_DECOMMIT));
-        CHECK(reg.expect_bytes(mine, base + 0x1000, code.data(), nullptr, 1) == ChangeStatus::InvalidArgument);
-        CHECK(reg.expect_bytes(mine, base + 0xFFE, code.data(), nullptr, 4) == ChangeStatus::InvalidArgument);
-
-        // Changes of other owners are compared in their original form.
-        const uint8_t nops[] = {0x90, 0x90};
-        CHECK(reg.patch_bytes(other, in_image(addr, {0x48, 0x89}), nops, 2) == ChangeStatus::Ok);
-        CHECK(s.base[0x100] == 0x90);
-        CHECK(reg.expect_bytes(mine, addr, code.data(), nullptr, code.size()) == ChangeStatus::Ok);
-        s.put(0x200, kAddOne);
-        CHECK(reg.hook_function(other, in_image(base + 0x200, kAddOne), reinterpret_cast<void*>(&detour_a),
-                                slot(g_next_a)) == ChangeStatus::Ok);
-        CHECK(std::memcmp(s.base + 0x200, kAddOne.data(), kAddOne.size()) != 0);
-        CHECK(reg.expect_bytes(mine, base + 0x200, kAddOne.data(), nullptr, kAddOne.size()) == ChangeStatus::Ok);
-
-        // Own changes first: dependencies must be verified before changing anything.
-        CHECK(reg.patch_bytes(mine, in_image(base + 0x400), nops, 2) == ChangeStatus::Ok);
-        CHECK(reg.expect_bytes(mine, addr, code.data(), nullptr, code.size()) == ChangeStatus::WrongPhase);
-        CHECK(reg.expect_bytes(third, addr, code.data(), nullptr, code.size()) == ChangeStatus::Ok);
-        CHECK(reg.rollback(mine) == 1);
-        CHECK(reg.expect_bytes(mine, addr, code.data(), nullptr, code.size()) == ChangeStatus::Ok);
-        CHECK(reg.rollback(other) == 2);
     });
 
     run("changes: owners, names and the end of the registry", [] {

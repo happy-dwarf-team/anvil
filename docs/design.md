@@ -247,17 +247,20 @@ Every call that touches `eu4.exe` takes a declared symbol, never a raw RVA. Raw 
 
 ## 9. Plugin API 2
 
-The C ABI is in `include/anvil/anvil_plugin.h`; the draft is [`docs/api2/anvil_plugin.h`](api2/anvil_plugin.h) until it replaces API 1. Plugins vendor it.
-- **Host table:** log, `plugin_dir`, `data_dir`, game info, the change calls of §8, `address_of`, services, events, and settings (§11).
-- **Versioning:** the `size` and `api_version` fields keep it extensible; within API 2 functions are only appended (`ANVIL_HOST_HAS`).
+The C ABI is [`include/anvil/anvil_plugin.h`](../include/anvil/anvil_plugin.h) (`ANVIL_API_VERSION 2`); plugins vendor it. API 1 is gone: no bridge, and the manifest accepts only `api = 2` (§22.2).
+- **Host table:** log, `plugin_dir`, `data_dir`, game info (build id, image base and size, the SHA-256 once verified), the change calls of §8, `remove`, groups, `address_of`, `symbol_value`, services, events (`anvil.plugins_loaded`, `anvil.suspended`, `anvil.resumed`), and settings (§11). Anvil fills every field.
+  - A change handle (`AnvilChange*`) is the registry's change id; ids are never reused, so a stale handle is `ANVIL_ERROR_NOT_FOUND`. While the process exits, `remove` does nothing.
+  - Inside `anvil_plugin_load` the load is the plugin's group: `begin_group`/`commit_group` return `ANVIL_ERROR_WRONG_PHASE` there.
+  - Results map the registry's one to one; `NOT_FOUND` and `ALREADY_EXISTS` (services) are the last two codes.
+- **Versioning:** the `size` and `api_version` fields keep it extensible; within API 2 functions are only appended (`ANVIL_HOST_HAS`) after the "end of API 2.0" line.
 - **Generated headers:** `anvil gen` produces `symbols.gen.h/.hpp` (symbol ids, typed function symbols, values) and `settings.gen.h/.hpp` (typed accessors).
-- **C++ wrapper** (`anvil.hpp`, header-only):
-  - `ANVIL_PLUGIN(Type)`; a failing call in `load()` throws, the macro turns it into a result, and Anvil rolls back;
-  - hook callbacks must not throw: the adapter catches, logs once and continues;
-  - `anvil::HookOf<sym::x>`; mid hooks and block replacements take any callable;
-  - a signature mismatch fails with a `static_assert` naming the symbol;
-  - `Host` is a stateless value (`anvil::Host{}` works anywhere);
-  - `Change` is a move-only handle.
+- **C++ wrapper** ([`anvil.hpp`](../include/anvil/anvil.hpp), header-only, C++20):
+  - `ANVIL_PLUGIN(Type)` with `Type : anvil::Plugin`; a failing call in `load()` throws `anvil::Error` (the host's result and a message), the macro turns any exception into a result, and Anvil rolls back;
+  - callables the wrapper adapts (mid hooks, block replacements, event handlers) must not throw: the adapter catches, logs the first exception per change and the game continues. Function-hook detours, redirect targets and import replacements are plain functions the game calls directly; they must not throw (`noexcept`);
+  - `anvil::HookOf<sym::x>` (a `FunctionHook` whose `next` Anvil writes before enabling), `PointerSwap<T>` (keeps `previous` where Anvil can rewrite it); mid hooks and block replacements take any callable, kept for the process;
+  - a signature mismatch (detour, call arguments, hook object) fails with a `static_assert`; each symbol has its own generated type (`sym::Types::<name>`), so the compiler's note names it;
+  - `Host` is a stateless value (`anvil::Host{}` works anywhere once the plugin is loading); typed `call`, `function`, `data` (`Data<T>`, also typed `rip_relative` values) and `value`;
+  - `Change` is a move-only handle: destroying it removes the change, `release()` keeps it.
 - **Rust** ([Rust SDK tier and timing](https://github.com/happy-dwarf-team/anvil/issues/22)): `anvil-sys` (committed bindgen bindings, checked against the header in CI, published to crates.io), `anvil gen --lang rust`, and a Rust hello in CI. The safe `anvil` crate comes later, with recorded principles: `#[anvil::plugin]` returning `Result`, `catch_unwind` adapters, typed symbols, `Drop` handles, a `#[repr(C)]` context.
 
 ## 10. Load order and failure policy
@@ -372,8 +375,8 @@ Decided in [Player UI: in-game overlay and Anvil Manager](https://github.com/hap
   - `--format text|json|github`; exit codes 0 OK, 1 problems, 2 cannot check.
 - **`anvil gen [--lang c|cpp] <symbols.toml> <out-dir>`** writes both headers without `--lang` and leaves a file alone when its content would not change:
   - `symbols.gen.h`: `SYM_<NAME>` ids, `sym_<name>_fn` pointer types from `signature`, `SYMVAL_<SYMBOL>_<VALUE>` constants;
-  - `symbols.gen.hpp`: namespace `sym` with an `anvil::Function<signature>`, `Site`, `Slot` or `Data<type>` per symbol ([`anvil_symbols.hpp`](../include/anvil/anvil_symbols.hpp)), values as `static constexpr` members (`sym::root_and_date.date_offset`), and an `anvil::Data<type>` for each typed `rip_relative` value (`sym::root`);
-  - a value is the integer in the declared bytes, or for `rip_relative` an RVA, which gen cannot know for an `export` symbol. The plugin declares the types named in `signature` and `type` before including the header. Names the C++ header cannot hold (keywords, a value called `id` or `value`, two `sym::` names alike) are errors.
+  - `symbols.gen.hpp`: namespace `sym` with a constant per symbol whose type `sym::Types::<name>` derives from `anvil::Function<signature>`, `Site`, `Slot` or `Data<type>` ([`anvil_symbols.hpp`](../include/anvil/anvil_symbols.hpp)) and holds `symbol_name`, values as `static constexpr` members (`sym::root_and_date.date_offset`), and an `anvil::Data<type>` for each typed `rip_relative` value (`sym::root`);
+  - a value is the integer in the declared bytes, or for `rip_relative` an RVA, which gen cannot know for an `export` symbol. The plugin declares the types named in `signature` and `type` before including the header. Names the C++ header cannot hold (keywords, a value called `id`, `value` or `symbol_name`, two `sym::` names alike) are errors.
 - **Problems carry lines:** the parsers report the line of the key (one error per file, as the loader stops at it); `--exe` reports every failing symbol at its `[symbol.<name>]` line. `--format github` prints `::error file=<path>,line=<n>,title=anvil check::<message>` with the path as passed, so CI runs it from the repository root.
 - **Instruction boundaries** (`--exe`): `symbols.toml` does not say how a symbol is used, so the rule covers every function or site in code with at least 5 declared bytes (a `jmp rel32`):
   - decoded from the first byte (Zydis, x86-64; `??` bytes take the image's values), the declared bytes are valid instructions and the last one ends exactly at their end, so a block replacement owns whole instructions and a hook's stolen bytes lie in verified bytes;

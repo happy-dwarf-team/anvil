@@ -1,0 +1,9 @@
+id = "probe"
+name = "Wrapper probe"
+version = "1.0.0"
+description = "Test plugin: every kind of change through anvil.hpp."
+api = 2
+entry = "probe.dll"
+phase = "main"
+symbols = "symbols.toml"
+affects_gameplay = false

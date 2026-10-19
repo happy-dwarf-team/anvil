@@ -123,8 +123,8 @@ int main(int argc, char** argv) {
         CHECK(!parse_byte_pattern("4G", bytes, mask, error));     // not hex
         CHECK(!parse_byte_pattern("?4", bytes, mask, error));     // nibble wildcards are not supported
         CHECK(!parse_byte_pattern("?? ??", bytes, mask, error));  // nothing to compare
-        CHECK(parse_byte_pattern(std::string(2 * ANVIL_MAX_EXPECT_BYTES, '0'), bytes, mask, error));
-        CHECK(!parse_byte_pattern(std::string(2 * ANVIL_MAX_EXPECT_BYTES + 2, '0'), bytes, mask, error));
+        CHECK(parse_byte_pattern(std::string(2 * kMaxPatternBytes, '0'), bytes, mask, error));
+        CHECK(!parse_byte_pattern(std::string(2 * kMaxPatternBytes + 2, '0'), bytes, mask, error));
     });
 
     change_tests();

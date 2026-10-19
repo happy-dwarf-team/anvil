@@ -1,0 +1,13 @@
+id = "hello-c"
+name = "Hello (C)"
+version = "0.1.0"
+authors = ["Happy Dwarf Team"]
+description = "Example plugin in C: logs the first game-speed object and each return to the menu."
+api = 2
+entry = "hello_c.dll"
+phase = "main"
+symbols = "symbols.toml"   # the game build comes from here
+# Required: true if the plugin can change the simulation's state or results.
+affects_gameplay = false
+issues = "https://github.com/happy-dwarf-team/anvil/issues"
+repository = "https://github.com/happy-dwarf-team/anvil"

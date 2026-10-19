@@ -12,9 +12,7 @@ namespace anvil {
 
 enum class Phase { Early, Main };
 
-// The manifest's `api` this host accepts. Until the plugin API 2 header lands,
-// AnvilHost is still the API 1 table (ANVIL_API_VERSION 1); only the manifest
-// already declares API 2.
+// The manifest's `api` this host accepts: the ANVIL_API_VERSION of the host table.
 inline constexpr unsigned kManifestApi = 2;
 
 // allow_ironman / allow_multiplayer: false, or "opt-in" (the player may allow
@@ -71,6 +69,9 @@ ManifestResult parse_manifest_text(std::string_view text, const std::filesystem:
 ManifestResult load_manifest(const std::filesystem::path& folder);
 
 bool is_valid_plugin_id(std::string_view id);
+
+// The longest byte pattern symbols.toml accepts.
+inline constexpr size_t kMaxPatternBytes = 65536;
 
 // Parses "48 8B ?? 24" (whitespace optional, "??" = any byte) into bytes and
 // a compare mask. At least one byte must not be a wildcard.

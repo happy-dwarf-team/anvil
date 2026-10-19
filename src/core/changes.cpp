@@ -1328,31 +1328,6 @@ bool ChangeRegistry::read_original(uintptr_t address, void* out, size_t size) co
     return read_original_locked(address, out, size);
 }
 
-ChangeStatus ChangeRegistry::expect_bytes(OwnerId owner, uintptr_t address, const void* expected, const void* mask,
-                                          size_t size, std::string* mismatch) const {
-    if (expected == nullptr || size == 0 || size > 65536) return ChangeStatus::InvalidArgument;
-    std::lock_guard lock(mutex_);
-    if (!in_image(address, size) || !readable(address, size)) return ChangeStatus::InvalidArgument;
-    for (const auto& c : changes_) {
-        if (c->owner == owner && c->state != LinkState::Removed) return ChangeStatus::WrongPhase;
-    }
-    std::vector<uint8_t> actual(size);
-    read_original_locked(address, actual.data(), size);
-    const auto* want = static_cast<const uint8_t*>(expected);
-    const auto* bits = static_cast<const uint8_t*>(mask);
-    for (size_t i = 0; i < size; ++i) {
-        const uint8_t m = bits != nullptr ? bits[i] : 0xFF;
-        if ((actual[i] & m) == (want[i] & m)) continue;
-        if (mismatch != nullptr) {
-            char text[96];
-            std::snprintf(text, sizeof(text), "byte +0x%zX: expected 0x%02X, found 0x%02X", i, want[i] & m, actual[i]);
-            *mismatch = text;
-        }
-        return ChangeStatus::BytesMismatch;
-    }
-    return ChangeStatus::Ok;
-}
-
 void* ChangeRegistry::alloc_near_locked(size_t size) {
     size = (size + 15) & ~static_cast<size_t>(15);
     if (size == 0 || size > 0x10000) return nullptr;

@@ -1,0 +1,9 @@
+id = "throwing"
+name = "Throwing"
+version = "1.0.0"
+description = "Test plugin: stages changes, then throws in load()."
+api = 2
+entry = "throwing.dll"
+phase = "main"
+symbols = "symbols.toml"
+affects_gameplay = false

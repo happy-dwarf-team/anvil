@@ -22,8 +22,9 @@ const std::set<std::string_view> kCppKeywords = {
     "short", "signed", "sizeof", "static", "static_assert", "static_cast", "struct", "switch", "template", "this",
     "thread_local", "throw", "true", "try", "typedef", "typeid", "typename", "union", "unsigned", "using", "virtual",
     "void", "volatile", "wchar_t", "while", "xor", "xor_eq"};
-// Members of the anvil:: symbol types that a value member would hide.
-const std::set<std::string_view> kReservedMembers = {"id", "value"};
+// Members of the anvil:: symbol types (and of every generated symbol type)
+// that a value member would hide.
+const std::set<std::string_view> kReservedMembers = {"id", "value", "symbol_name"};
 
 struct Fail {
     std::string message;
@@ -185,12 +186,11 @@ std::string generate_cpp(const SymbolFile& file, const std::string& source) {
         const std::string type = cpp_type(s);
         const std::string note = s.note.empty() ? "" : "  // " + comment_text(s.note, false);
         out += "\n// " + where_of(s) + "\n";
-        if (s.values.empty()) {
-            out += "inline constexpr " + type + " " + s.name + "{" + std::to_string(s.id) + "};" + note + "\n";
-            continue;
-        }
-        // Values become static constexpr members: sym::<symbol>.<value>.
+        // Each symbol has a type of its own, so that a compiler error about it
+        // (the wrapper's static_asserts) names it. Values become static
+        // constexpr members: sym::<symbol>.<value>.
         out += "namespace Types {\nstruct " + s.name + " : " + type + " {\n";
+        out += "    static constexpr const char* symbol_name = \"" + s.name + "\";\n";
         for (const auto& v : s.values) {
             const auto constant = constant_of(s, v);
             const std::string what = v.rip_relative != 0 ? "rva" : std::to_string(v.size) + " bytes";

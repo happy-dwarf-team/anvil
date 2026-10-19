@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cpu_context.h"
+#include <anvil/anvil_plugin.h>
 
 #include <windows.h>
 
@@ -14,7 +14,7 @@
 namespace anvil {
 
 // The result of a change request, independent of the public header's numbers:
-// the host maps it to AnvilResult (API 1 now, API 2 with #46).
+// the host maps it to AnvilResult one to one (host.cpp).
 enum class ChangeStatus {
     Ok,
     InvalidArgument,
@@ -55,7 +55,7 @@ using ChangeId = uint64_t;
 // Where a change goes and what must be found there.
 struct ChangeTarget {
     uintptr_t address = 0;
-    // inside_image: a declared symbol (or an API 1 RVA) in eu4.exe.
+    // inside_image: a declared symbol in eu4.exe (or a test's scratch image).
     // Otherwise a raw pointer (`*_at`), which must lie outside the image.
     bool inside_image = true;
     // Compared with the original bytes (other changes undone): (actual & mask)
@@ -72,7 +72,7 @@ struct CallCount {
     OwnerId owner = 0;
     ChangeKind kind = ChangeKind::FunctionHook;
     std::string label;   // as in describe(), e.g. "function hook rva 0x40"
-    std::string symbol;  // empty for a raw address or an API 1 RVA
+    std::string symbol;  // empty for a raw address
     uint64_t calls = 0;
 };
 
@@ -189,11 +189,6 @@ public:
     // Copies bytes as the game shipped them: bytes changed by any change read in
     // their original form. False outside the image or for unreadable memory.
     bool read_original(uintptr_t address, void* out, size_t size) const;
-    // API 1 dependency check against the original bytes. WrongPhase once
-    // `owner` has changes (staged or enabled); InvalidArgument outside the image
-    // or for unreadable memory. On a mismatch `mismatch` names the first byte.
-    ChangeStatus expect_bytes(OwnerId owner, uintptr_t address, const void* expected, const void* mask, size_t size,
-                              std::string* mismatch = nullptr) const;
     // Executable memory within rel32 reach of the image; never freed.
     void* alloc_near(size_t size);
 

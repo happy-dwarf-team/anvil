@@ -216,8 +216,8 @@ bool parse_byte_pattern(std::string_view text, std::vector<uint8_t>& bytes, std:
         error = "bytes must be pairs of hex digits or \"??\"";
         return false;
     }
-    if (digits.size() / 2 > ANVIL_MAX_EXPECT_BYTES) {
-        error = "bytes longer than " + std::to_string(ANVIL_MAX_EXPECT_BYTES) + " bytes";
+    if (digits.size() / 2 > kMaxPatternBytes) {
+        error = "bytes longer than " + std::to_string(kMaxPatternBytes) + " bytes";
         return false;
     }
     bool any = false;

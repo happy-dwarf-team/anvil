@@ -1,14 +1,17 @@
 /*
- * Anvil plugin SDK — the only header a plugin needs.
+ * Anvil plugin API 2: the C ABI between Anvil and its plugins (docs/design.md §9).
  *
  * Plugins are DLLs with a C ABI; any compiler that produces x64 Windows DLLs
- * works. Copy this file into the plugin repository; the host checks
- * ANVIL_API_VERSION (major) at load time and `size` fields for additions.
+ * works. Copy this header into the plugin repository, or use the C++ wrapper
+ * anvil.hpp on top of it. Symbols (AnvilSymbol) and settings (AnvilSetting)
+ * are indices that `anvil gen` writes from the plugin's symbols.toml and
+ * settings.toml; Anvil reads the same shipped files and verifies every symbol
+ * before the plugin DLL is loaded.
  *
- * Compatibility rules:
- *   - New functions/fields are only ever appended to the end of a struct;
- *     check `host->size` before using a field added after API 1.0.
- *   - A breaking change increments ANVIL_API_VERSION.
+ * Compatibility within API 2: functions and fields are only appended to the
+ * end of a struct; check ANVIL_HOST_HAS(host, field) before using one added
+ * after API 2.0. Removing or changing anything here increments
+ * ANVIL_API_VERSION.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -22,7 +25,7 @@
 extern "C" {
 #endif
 
-#define ANVIL_API_VERSION 1
+#define ANVIL_API_VERSION 2
 
 #if defined(_WIN32)
 #define ANVIL_PLUGIN_EXPORT __declspec(dllexport)
@@ -30,19 +33,25 @@ extern "C" {
 #define ANVIL_PLUGIN_EXPORT
 #endif
 
-typedef struct AnvilPlugin AnvilPlugin; /* opaque handle identifying the calling plugin */
+typedef struct AnvilPlugin AnvilPlugin; /* the calling plugin (opaque) */
+typedef struct AnvilChange AnvilChange; /* one change (opaque); remove it with host->remove */
+typedef uint32_t AnvilSymbol;           /* declaration index in symbols.toml */
+typedef uint32_t AnvilSetting;          /* declaration index in settings.toml */
 
 typedef enum AnvilResult {
     ANVIL_OK = 0,
     ANVIL_ERROR_INVALID_ARGUMENT = 1,
-    ANVIL_ERROR_BYTES_MISMATCH = 2, /* expected bytes/target at the address differ */
-    ANVIL_ERROR_CONFLICT = 3,       /* overlaps a patch of another plugin */
-    ANVIL_ERROR_OUT_OF_MEMORY = 4,
-    ANVIL_ERROR_NOT_FOUND = 5,
-    ANVIL_ERROR_UNSUPPORTED = 6,
-    ANVIL_ERROR_WRONG_PHASE = 7,    /* call not allowed at this point of start-up */
-    ANVIL_ERROR_ALREADY_EXISTS = 8,
-    ANVIL_ERROR_INTERNAL = 9
+    ANVIL_ERROR_NOT_DECLARED = 2,   /* unknown symbol/setting, or a raw pointer into eu4.exe */
+    ANVIL_ERROR_WRONG_KIND = 3,     /* e.g. swap_pointer on a function symbol */
+    ANVIL_ERROR_CONFLICT = 4,       /* overlaps another change at a different address */
+    ANVIL_ERROR_UNSAFE_SITE = 5,    /* stolen bytes contain JRCXZ / LOOP*, not whole instructions, < 5 declared bytes */
+    ANVIL_ERROR_BYTES_MISMATCH = 6, /* the expected bytes or pointer differ from the original ones */
+    ANVIL_ERROR_OUT_OF_MEMORY = 7,
+    ANVIL_ERROR_WRONG_PHASE = 8,    /* e.g. begin_group inside anvil_plugin_load */
+    ANVIL_ERROR_UNSUPPORTED = 9,
+    ANVIL_ERROR_INTERNAL = 10,      /* also: anvil_plugin_load crashed or threw */
+    ANVIL_ERROR_NOT_FOUND = 11,     /* a change that is already removed or belongs to another plugin */
+    ANVIL_ERROR_ALREADY_EXISTS = 12 /* a service name and version registered twice */
 } AnvilResult;
 
 typedef enum AnvilLogLevel {
@@ -52,106 +61,157 @@ typedef enum AnvilLogLevel {
     ANVIL_LOG_ERROR = 3
 } AnvilLogLevel;
 
-/* Identity of the running game executable. */
+/* The running game executable. */
 typedef struct AnvilGameInfo {
-    uint32_t size;               /* sizeof(AnvilGameInfo) */
-    const char *build_id;        /* e.g. "eu4-1.37.5-steam-win64"; NULL when unknown */
-    uintptr_t image_base;        /* address of eu4.exe in memory */
+    uint32_t size;         /* sizeof(AnvilGameInfo) as known by the host */
+    const char *build_id;  /* "eu4-1.37.5-steam-win64"; NULL when unknown */
+    uintptr_t image_base;  /* where eu4.exe is in memory */
     uint32_t image_size;
-    uint32_t pe_timestamp;
-    uint32_t pe_checksum;
-    uint32_t entry_point_rva;
-    const char *file_version;    /* from the version resource, e.g. "1.37.5.0"; may be NULL */
-    int ready_signal_known;      /* 1 when Anvil can publish ANVIL_EVENT_GAME_READY for this build */
+    const char *sha256;    /* of eu4.exe, upper-case hex; NULL until verified off the critical path */
 } AnvilGameInfo;
 
-/* Built-in events (publish/subscribe below). */
-#define ANVIL_EVENT_PLUGINS_LOADED "anvil.plugins_loaded" /* all plugins processed; payload NULL */
-#define ANVIL_EVENT_GAME_READY "anvil.game_ready"         /* game finished initialization; payload NULL */
+/* --- mid hooks and block replacements --------------------------------------
+ * Exactly SafetyHook's Context64 (408 bytes), pinned by static_asserts in Anvil.
+ * Not saved: YMM upper halves, x87, MXCSR. Valid only during the callback. */
+typedef union AnvilXmm {
+    uint8_t u8[16];
+    uint16_t u16[8];
+    uint32_t u32[4];
+    uint64_t u64[2];
+    float f32[4];
+    double f64[2];
+} AnvilXmm;
 
+typedef struct AnvilCpuContext {
+    AnvilXmm xmm[16];
+    uintptr_t rflags, r15, r14, r13, r12, r11, r10, r9, r8, rdi, rsi, rdx, rcx, rbx, rax, rbp;
+    uintptr_t rsp;      /* read-only: the stack pointer at the site */
+    uintptr_t reserved; /* do not touch */
+    uintptr_t rip;      /* writable; in a mid hook a change ends the chain at this address */
+} AnvilCpuContext;
+
+/* Runs on the game's thread at the site. It must not unwind out (no C++
+ * exception, no longjmp): Anvil's stubs have no unwind information. */
+typedef void (*AnvilCpuCallback)(AnvilCpuContext *cpu, void *user);
+
+/* --- events and settings ------------------------------------------------- */
 typedef void (*AnvilEventCallback)(const char *event, const void *payload, void *context);
+typedef void (*AnvilSettingCallback)(AnvilSetting setting, void *context);
+
+#define ANVIL_EVENT_PLUGINS_LOADED "anvil.plugins_loaded" /* every plugin processed; payload NULL */
+/* To the plugin itself, payload NULL (docs/design.md §8.4, §13): its changes
+ * are out of the game (ironman, multiplayer) or back in it. */
+#define ANVIL_EVENT_SUSPENDED "anvil.suspended"
+#define ANVIL_EVENT_RESUMED "anvil.resumed"
 
 typedef struct AnvilHost {
-    uint32_t size;               /* sizeof(AnvilHost) as known by the host */
-    uint32_t api_version;        /* ANVIL_API_VERSION of the host */
-    const char *anvil_version;   /* host version, SemVer */
+    uint32_t size;             /* sizeof(AnvilHost) as known by the host */
+    uint32_t api_version;      /* ANVIL_API_VERSION of the host */
+    const char *anvil_version; /* SemVer */
     const AnvilGameInfo *game;
 
     /* --- environment --- */
-    void (*log)(AnvilPlugin *self, AnvilLogLevel level, const char *message);
+    void (*log)(AnvilPlugin *self, AnvilLogLevel level, const char *message); /* UTF-8 */
     const wchar_t *(*plugin_dir)(AnvilPlugin *self); /* read-only plugin folder */
-    const wchar_t *(*data_dir)(AnvilPlugin *self);   /* writable folder, created on first call */
+    const wchar_t *(*data_dir)(AnvilPlugin *self);   /* writable anvil/data/<id>/, created on first call */
 
-    /* --- code patching (all addresses are RVAs inside eu4.exe) ---
-     * Every call verifies the expected bytes against the game's original
-     * bytes, refuses overlaps with other changes at a different address (also
-     * the plugin's own) and records the original bytes so the change can be
-     * rolled back. Hooks, redirects and import replacements at the same
-     * address chain in load order (the earlier plugin is called first);
-     * identical byte patches are shared. Changes requested during
-     * anvil_plugin_load are enabled together after it returns ANVIL_OK. */
-    AnvilResult (*patch_bytes)(AnvilPlugin *self, uint32_t rva, const void *expected,
-                               const void *replacement, size_t size);
-    /* Retarget a 5-byte `call rel32` at call_rva (originally calling
-     * expected_target_rva) to new_target, through a stub near the image. API 1
-     * gives no next: a plugin that calls the original target itself skips
-     * later plugins' redirects of the same call. */
-    AnvilResult (*redirect_call)(AnvilPlugin *self, uint32_t call_rva, uint32_t expected_target_rva,
-                                 void *new_target);
-    /* Inline hook at the start of a function (SafetyHook inside Anvil).
-     * expected_prologue: the first bytes of the function as the plugin knows them. */
-    AnvilResult (*hook_function)(AnvilPlugin *self, uint32_t rva, const void *expected_prologue,
-                                 size_t prologue_size, void *detour, void **original);
-    /* Replace an import of eu4.exe (module name case-insensitive, e.g. "KERNEL32.dll"). */
-    AnvilResult (*replace_import)(AnvilPlugin *self, const char *module, const char *function,
-                                  void *replacement, void **original);
-    /* Executable memory within +-2 GB of the image (for plugin-written stubs). */
-    void *(*alloc_near_image)(AnvilPlugin *self, size_t size);
+    /* --- changes (docs/design.md §8) ---
+     * Every call on eu4.exe takes a declared symbol: the expected bytes,
+     * memory kind and pointer targets come from symbols.toml and were verified
+     * before load. Changes requested during anvil_plugin_load are staged and
+     * enabled together after it returns ANVIL_OK; later ones are enabled one
+     * by one, or together inside begin_group/commit_group. Changes at one
+     * address chain in load order (the earlier plugin is outermost); a change
+     * overlapping another one at a different address is refused.
+     *
+     * `next` receives the rest of the chain before the change is enabled, and
+     * never changes afterwards; call through it to pass on. `out` (may be
+     * NULL) receives the handle for remove. Nothing a change uses (detours,
+     * callbacks, `user`) may go away while it lives; Anvil never frees its
+     * own stubs, so a thread still inside a removed change finishes safely. */
+    AnvilResult (*hook_function)(AnvilPlugin *self, AnvilSymbol fn, void *detour, void **next, AnvilChange **out);
+    /* callback(cpu, user) runs when the game reaches the site (a function or
+     * site symbol with >= 5 declared bytes), before the code there. */
+    AnvilResult (*mid_hook)(AnvilPlugin *self, AnvilSymbol site, AnvilCpuCallback callback, void *user,
+                            AnvilChange **out);
+    /* The symbol's declared bytes never run: callback runs instead and the
+     * game resumes at the symbol's `resume` or at the block's end (unless the
+     * callback writes cpu->rip). */
+    AnvilResult (*replace_block)(AnvilPlugin *self, AnvilSymbol block, AnvilCpuCallback callback, void *user,
+                                 AnvilChange **out);
+    /* A `call rel32` site; `next` is the previous target in the chain. */
+    AnvilResult (*redirect_call)(AnvilPlugin *self, AnvilSymbol call_site, void *target, void **next,
+                                 AnvilChange **out);
+    /* `size` bytes at the symbol, within its declared bytes. */
+    AnvilResult (*patch_bytes)(AnvilPlugin *self, AnvilSymbol site, const void *bytes, size_t size,
+                               AnvilChange **out);
+    /* A slot symbol (`points_to`) holds `value`, stored atomically. *previous
+     * receives the rest of the chain and is rewritten by Anvil whenever the
+     * chain changes, until the change is removed: keep it in a lasting,
+     * 8-byte aligned place and read it on each use (may be NULL). */
+    AnvilResult (*swap_pointer)(AnvilPlugin *self, AnvilSymbol slot, void *value, void **previous,
+                                AnvilChange **out);
+    /* An import of eu4.exe; module case-insensitive, e.g. "KERNEL32.dll". */
+    AnvilResult (*replace_import)(AnvilPlugin *self, const char *module, const char *function, void *replacement,
+                                  void **next, AnvilChange **out);
+    /* Raw addresses, only outside the eu4.exe image (e.g. Direct3D 9 vtables;
+     * inside it: ANVIL_ERROR_NOT_DECLARED). The expected bytes may be NULL. */
+    AnvilResult (*hook_function_at)(AnvilPlugin *self, void *address, const void *expected_prologue,
+                                    size_t prologue_size, void *detour, void **next, AnvilChange **out);
+    AnvilResult (*mid_hook_at)(AnvilPlugin *self, void *address, const void *expected, size_t expected_size,
+                               AnvilCpuCallback callback, void *user, AnvilChange **out);
+    /* Removes a change, staged or enabled; ANVIL_ERROR_NOT_FOUND when it is
+     * already gone. Does nothing (ANVIL_OK) while the process exits. */
+    AnvilResult (*remove)(AnvilPlugin *self, AnvilChange *change);
+    /* After load: the changes between begin_group and commit_group are
+     * enabled together or not at all; abort_group drops them. Inside
+     * anvil_plugin_load the whole load is a group: ANVIL_ERROR_WRONG_PHASE. */
+    AnvilResult (*begin_group)(AnvilPlugin *self);
+    AnvilResult (*commit_group)(AnvilPlugin *self);
+    void (*abort_group)(AnvilPlugin *self);
+
+    /* The verified address of a symbol, to call (function) or read (data);
+     * NULL for an unknown symbol. */
+    void *(*address_of)(AnvilPlugin *self, AnvilSymbol symbol);
+    /* A value named in symbols.toml `values`, e.g. for a C plugin or for an
+     * `export` symbol whose rip_relative values gen cannot know. A
+     * rip_relative value is an RVA. ANVIL_ERROR_NOT_DECLARED when unknown. */
+    AnvilResult (*symbol_value)(AnvilPlugin *self, AnvilSymbol symbol, const char *name, uint64_t *out);
+
+    /* --- settings (docs/design.md §11); values are validated by Anvil ---
+     * An unknown setting reads as 0, 0.0 or "". */
+    int (*setting_bool)(AnvilPlugin *self, AnvilSetting setting);
+    int64_t (*setting_int)(AnvilPlugin *self, AnvilSetting setting); /* int, enum index, key code */
+    double (*setting_float)(AnvilPlugin *self, AnvilSetting setting);
+    const char *(*setting_string)(AnvilPlugin *self, AnvilSetting setting); /* UTF-8; valid until the next change */
+    AnvilResult (*subscribe_setting)(AnvilPlugin *self, AnvilSetting setting, AnvilSettingCallback callback,
+                                     void *context); /* restart = false settings only */
 
     /* --- services between plugins ---
      * A service is a struct of function pointers whose first field is
      * `uint32_t size`. Names are "<plugin-id>.<service>"; version is the
      * service's major version. A service lives as long as the process. */
-    AnvilResult (*register_service)(AnvilPlugin *self, const char *name, uint32_t version,
-                                    const void *service);
+    AnvilResult (*register_service)(AnvilPlugin *self, const char *name, uint32_t version, const void *service);
     const void *(*get_service)(AnvilPlugin *self, const char *name, uint32_t version);
 
-    /* --- events --- */
-    AnvilResult (*subscribe)(AnvilPlugin *self, const char *event, AnvilEventCallback callback,
-                             void *context);
+    /* --- events: synchronous, on the publishing thread; "anvil." names are Anvil's --- */
+    AnvilResult (*subscribe)(AnvilPlugin *self, const char *event, AnvilEventCallback callback, void *context);
     AnvilResult (*publish)(AnvilPlugin *self, const char *event, const void *payload);
 
-    /* --- added after API 1.0: check ANVIL_HOST_HAS(host, expect_bytes) --- */
-
-    /* Read-only check that game code or data the plugin depends on (functions
-     * it calls, vtables, globals) is what the plugin was written for. Compares
-     * (actual & mask) with (expected & mask); mask NULL compares every bit, a
-     * 0x00 mask byte skips that byte (e.g. relocated absolute addresses).
-     * Bytes already patched by other plugins are compared in their original
-     * form. Verify every dependency before the first patch: once the plugin
-     * has patches of its own, the call returns ANVIL_ERROR_WRONG_PHASE.
-     * Dependencies known in advance are better declared in symbols.toml:
-     * Anvil checks those before the plugin DLL is loaded.
-     * size: 1 .. ANVIL_MAX_EXPECT_BYTES. */
-    AnvilResult (*expect_bytes)(AnvilPlugin *self, uint32_t rva, const void *expected, const void *mask,
-                                size_t size);
+    /* --- end of API 2.0: fields added later go below, checked with ANVIL_HOST_HAS --- */
 } AnvilHost;
 
-/* Largest range one expect_bytes call may compare. */
-#define ANVIL_MAX_EXPECT_BYTES 65536
-
-/* Nonzero when the host provides `field` (appended after API 1.0). */
+/* Nonzero when the host provides `field`. */
 #define ANVIL_HOST_HAS(host, field) \
     ((host)->size >= offsetof(AnvilHost, field) + sizeof((host)->field))
 
 /*
- * Exported by every plugin. Called once:
- *   phase "early": at the game's entry point, before the C runtime of
- *                  eu4.exe initializes (only the main thread runs game code);
- *   phase "main":  on an Anvil thread, concurrently with game start-up.
- * Changes requested here are staged and enabled together after it returns.
- * Return ANVIL_OK to stay loaded; any other value unloads the plugin and
- * rolls back its patches (staged ones are never enabled).
+ * Exported by every plugin. Called once, in the phase plugin.toml names:
+ *   "early": at the game's entry point, before the C runtime of eu4.exe
+ *            initializes (only the main thread runs game code);
+ *   "main":  on an Anvil thread, concurrently with the game's start-up.
+ * Return ANVIL_OK to stay loaded; anything else (or a crash) rolls back every
+ * change the plugin requested, and the plugin stays inactive.
  */
 ANVIL_PLUGIN_EXPORT AnvilResult anvil_plugin_load(const AnvilHost *host, AnvilPlugin *self);
 

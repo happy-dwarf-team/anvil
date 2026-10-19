@@ -32,7 +32,7 @@ public:
     const PluginSymbol* find(std::string_view name) const;
     size_t size() const { return symbols_.size(); }
 
-    // address_of / symbol_value of the API 2 host (#46): nullptr / nullopt
+    // address_of / symbol_value of the host table: nullptr / nullopt
     // for an unknown id or name.
     void* address_of(uint32_t id) const;
     std::optional<uint64_t> value(uint32_t id, std::string_view name) const;
@@ -44,7 +44,7 @@ private:
 // Change requests on declared symbols (design §8.1): the expected bytes come
 // from the declaration and are compared with the original bytes again, the
 // symbol's kind must fit the change. Unknown ids are NotDeclared. These are the
-// calls the API 2 host table (#46) forwards to.
+// calls the host table (host.cpp) forwards to.
 // Hooks need at least the 5 declared bytes of the jump (UnsafeSite): `anvil
 // check` proves those are whole instructions (design §16).
 ChangeStatus hook_function(ChangeRegistry& registry, OwnerId owner, const PluginSymbols& symbols, uint32_t fn,

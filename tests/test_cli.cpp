@@ -215,13 +215,17 @@ int main(int argc, char** argv) {
         CHECK(contains(h.c, "#define SYMVAL_ROOT_AND_DATE_DATE_OFFSET UINT64_C(0x1DD0)"));
         CHECK(contains(h.c, "#define SYMVAL_EXPORTED_FRAME UINT64_C(0x20)"));
         CHECK(!contains(h.c, "the */ speed"));
-        CHECK(contains(h.cpp, "inline constexpr ::anvil::Function<void*(void* session)> speed_object{0};  // returns the */ speed"));
+        CHECK(contains(h.cpp, "struct speed_object : ::anvil::Function<void*(void* session)> {\n"
+                              "    static constexpr const char* symbol_name = \"speed_object\";\n};"));
+        CHECK(contains(h.cpp, "inline constexpr Types::speed_object speed_object{{0}};  // returns the */ speed"));
         CHECK(contains(h.cpp, "struct root_and_date : ::anvil::Site {"));
         CHECK(contains(h.cpp, "static constexpr ::std::uint64_t date_offset = 0x1DD0;"));
         CHECK(contains(h.cpp, "inline constexpr Types::root_and_date root_and_date{{1}};"));
         CHECK(contains(h.cpp, "inline constexpr ::anvil::Data<Root> root{1, \"root\"};"));
-        CHECK(contains(h.cpp, "inline constexpr ::anvil::Slot tick_slot{2};"));
-        CHECK(contains(h.cpp, "inline constexpr ::anvil::Data<Root> root_data{4};"));
+        CHECK(contains(h.cpp, "struct tick_slot : ::anvil::Slot {"));
+        CHECK(contains(h.cpp, "inline constexpr Types::tick_slot tick_slot{{2}};"));
+        CHECK(contains(h.cpp, "struct root_data : ::anvil::Data<Root> {"));
+        CHECK(contains(h.cpp, "inline constexpr Types::root_data root_data{{4}};"));
         const GeneratedHeaders c_only = generate_headers(*file.file, "symbols.toml", true, false);
         CHECK(!c_only.c.empty() && c_only.cpp.empty());
 
@@ -247,6 +251,9 @@ int main(int argc, char** argv) {
         CHECK(contains(error(symbol("s", "rva = 0x10\nbytes = \"48\"\nmemory = \"code\"\nvalues.id = { at = 0, size = 1 }\n"),
                              false, true),
                        "would hide the symbol's 'id' member"));
+        CHECK(contains(error(symbol("s", "rva = 0x10\nbytes = \"48\"\nmemory = \"code\"\nvalues.symbol_name = { at = 0, size = 1 }\n"),
+                             false, true),
+                       "would hide the symbol's 'symbol_name' member"));
         CHECK(contains(error(symbol("s", "rva = 0x10\nbytes = \"48 8B 05 F1 1F 00 00\"\nmemory = \"code\"\n"
                                          "values.s = { at = 3, rip_relative = 7, type = \"T\" }\n"),
                              false, true),
