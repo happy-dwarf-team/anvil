@@ -46,26 +46,24 @@ const KnownBuild* find_known_build(const PeIdentity& identity) {
     return nullptr;
 }
 
-std::string sha256_file(const std::filesystem::path& file) {
-    HANDLE handle = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-                                FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
-    if (handle == INVALID_HANDLE_VALUE) return {};
+const KnownBuild* find_known_build_by_sha256(std::string_view sha256) {
+    for (const auto& b : kKnownBuilds) {
+        if (sha256 == b.sha256) return &b;
+    }
+    return nullptr;
+}
+
+namespace {
+
+// SHA-256 as upper-case hex of what `feed` passes to BCryptHashData; empty on failure.
+template <typename Feed> std::string sha256_of(Feed&& feed) {
     BCRYPT_ALG_HANDLE algorithm = nullptr;
     BCRYPT_HASH_HANDLE hash = nullptr;
     std::string result;
     if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) == 0 &&
         BCryptCreateHash(algorithm, &hash, nullptr, 0, nullptr, 0, 0) == 0) {
-        std::vector<uint8_t> buffer(1 << 20);
-        DWORD read = 0;
-        bool ok = true;
-        while (ReadFile(handle, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) && read > 0) {
-            if (BCryptHashData(hash, buffer.data(), read, 0) != 0) {
-                ok = false;
-                break;
-            }
-        }
         uint8_t digest[32] = {};
-        if (ok && BCryptFinishHash(hash, digest, sizeof(digest), 0) == 0) {
+        if (feed(hash) && BCryptFinishHash(hash, digest, sizeof(digest), 0) == 0) {
             char hex[65] = {};
             for (int i = 0; i < 32; ++i) std::snprintf(hex + i * 2, 3, "%02X", digest[i]);
             result = hex;
@@ -73,8 +71,31 @@ std::string sha256_file(const std::filesystem::path& file) {
     }
     if (hash) BCryptDestroyHash(hash);
     if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
+    return result;
+}
+
+}  // namespace
+
+std::string sha256_file(const std::filesystem::path& file) {
+    HANDLE handle = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return {};
+    std::string result = sha256_of([&](BCRYPT_HASH_HANDLE hash) {
+        std::vector<uint8_t> buffer(1 << 20);
+        DWORD read = 0;
+        while (ReadFile(handle, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) && read > 0) {
+            if (BCryptHashData(hash, buffer.data(), read, 0) != 0) return false;
+        }
+        return true;
+    });
     CloseHandle(handle);
     return result;
+}
+
+std::string sha256_bytes(const void* data, size_t size) {
+    return sha256_of([&](BCRYPT_HASH_HANDLE hash) {
+        return BCryptHashData(hash, static_cast<PUCHAR>(const_cast<void*>(data)), static_cast<ULONG>(size), 0) == 0;
+    });
 }
 
 bool verify_build_file(const KnownBuild& build, const std::filesystem::path& exe, const std::filesystem::path& cache_file,

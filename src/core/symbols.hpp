@@ -30,6 +30,7 @@ struct SymbolValue {
 struct Symbol {
     uint32_t id = 0;  // declaration order in the file: the plugin's AnvilSymbol
     std::string name;
+    uint32_t line = 0;  // of its [symbol.<name>] table in symbols.toml
     SymbolKind kind = SymbolKind::Site;
     std::optional<uint32_t> rva;  // exactly one of rva and export_name
     std::string export_name;
@@ -46,6 +47,7 @@ struct Symbol {
 
 struct SymbolFile {
     std::string build;  // the game build these symbols are for
+    uint32_t build_line = 0;  // of `build` in symbols.toml
     std::vector<Symbol> symbols;  // in declaration order (index == id)
 
     const Symbol* find(std::string_view name) const;
@@ -54,6 +56,7 @@ struct SymbolFile {
 struct SymbolFileResult {
     std::optional<SymbolFile> file;
     std::string error;  // set when file is empty
+    uint32_t line = 0;  // the line of symbols.toml the error is about; 0 = the whole file
 };
 
 // Parses symbols.toml (design §5.2). Unknown keys, values of the wrong type
@@ -69,6 +72,7 @@ struct VerifiedSymbol {
 struct SymbolVerification {
     std::vector<VerifiedSymbol> symbols;  // index == id; complete only when ok()
     std::vector<std::string> problems;    // one line per failing symbol
+    std::vector<uint32_t> failed;         // the id of the symbol each problem is about
 
     bool ok() const { return problems.empty(); }
 };

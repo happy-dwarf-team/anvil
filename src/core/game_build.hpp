@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace anvil {
 
@@ -31,9 +32,13 @@ std::optional<PeIdentity> read_pe_identity(const void* image_base);
 
 // Header-identity match against the compiled-in table (no file hashing).
 const KnownBuild* find_known_build(const PeIdentity& identity);
+// Full-file match against the compiled-in table (`sha256` in upper-case hex).
+const KnownBuild* find_known_build_by_sha256(std::string_view sha256);
 
 // SHA-256 of a file as upper-case hex (BCrypt); empty on failure.
 std::string sha256_file(const std::filesystem::path& file);
+// SHA-256 of bytes in memory as upper-case hex (BCrypt); empty on failure.
+std::string sha256_bytes(const void* data, size_t size);
 
 // Full-file check with a cache keyed by size + last write time, stored in
 // `cache_file`. Returns true when the file hash equals build.sha256.

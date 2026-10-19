@@ -355,7 +355,28 @@ Decided in [Player UI: in-game overlay and Anvil Manager](https://github.com/hap
   - `anvil gen [--lang c|cpp|rust]`;
   - `anvil check` with strict schemas, which also verifies, with `--exe`, the build, bytes, memory, pointers, exports, values and instruction boundaries; with `--game <folder>`, every installed plugin and the conflicts between them;
   - `--format text|json|github`; exit codes 0 OK, 1 problems, 2 cannot check.
+- **`anvil gen [--lang c|cpp] <symbols.toml> <out-dir>`** writes both headers without `--lang` and leaves a file alone when its content would not change:
+  - `symbols.gen.h`: `SYM_<NAME>` ids, `sym_<name>_fn` pointer types from `signature`, `SYMVAL_<SYMBOL>_<VALUE>` constants;
+  - `symbols.gen.hpp`: namespace `sym` with an `anvil::Function<signature>`, `Site`, `Slot` or `Data<type>` per symbol ([`anvil_symbols.hpp`](../include/anvil/anvil_symbols.hpp)), values as `static constexpr` members (`sym::root_and_date.date_offset`), and an `anvil::Data<type>` for each typed `rip_relative` value (`sym::root`);
+  - a value is the integer in the declared bytes, or for `rip_relative` an RVA, which gen cannot know for an `export` symbol. The plugin declares the types named in `signature` and `type` before including the header. Names the C++ header cannot hold (keywords, a value called `id` or `value`, two `sym::` names alike) are errors.
+- **Problems carry lines:** the parsers report the line of the key (one error per file, as the loader stops at it); `--exe` reports every failing symbol at its `[symbol.<name>]` line. `--format github` prints `::error file=<path>,line=<n>,title=anvil check::<message>` with the path as passed, so CI runs it from the repository root.
+- **Instruction boundaries** (`--exe`): `symbols.toml` does not say how a symbol is used, so the rule covers every function or site in code with at least 5 declared bytes (a `jmp rel32`):
+  - decoded from the first byte (Zydis, x86-64; `??` bytes take the image's values), the declared bytes are valid instructions and the last one ends exactly at their end, so a block replacement owns whole instructions and a hook's stolen bytes lie in verified bytes;
+  - the instructions that start in the first 5 bytes, which a hook relocates, include no `JRCXZ`, `JECXZ`, `LOOP`, `LOOPE` or `LOOPNE` (§8.3);
+  - a block's `resume` symbol is in code.
+
+  Shorter sites (byte patches, which may start inside an instruction), data and pointer slots are not decoded. Hooking a symbol with fewer than 5 declared bytes would steal unverified bytes; the change registry decides whether to refuse it.
 - **`symbols.lock`:** `anvil check --exe` writes the `eu4.exe` SHA-256, a digest of `symbols.toml`, the tool version and the result. CI, which cannot have the game, fails when the lock is stale.
+  ```toml
+  format = 1
+  tool = "anvil 1.0.0"                # informational
+  symbols_sha256 = "…"                # symbols.toml without a UTF-8 BOM, CRLF read as LF (git autocrlf)
+  exe_sha256 = "9AD3EFE1…771A"
+  build = "eu4-1.37.5-steam-win64"    # the exe's build, or "unknown"
+  result = "ok"                       # or "problems"
+  ```
+
+  It lies next to `plugin.toml` and is committed. `--exe` writes it also when it finds problems, so CI fails until they are fixed, but not when a file does not parse or the exe cannot be read. Without `--exe`, a plugin with `symbols` fails on a missing lock, a different digest, `result = "problems"`, an unknown key or a newer `format`.
 - **SDK:**
   - an archive on every release, consumed with `FetchContent`;
   - `anvil_add_plugin(<target> SOURCES …)` runs `anvil gen`, builds with the static CRT and lays out `plugin/<id>/`;
