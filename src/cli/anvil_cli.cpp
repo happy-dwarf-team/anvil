@@ -4,6 +4,7 @@
 //
 // Exit codes: 0 OK, 1 problems found, 2 cannot check (also usage errors).
 #include "cli/check.hpp"
+#include "cli/game.hpp"
 #include "cli/gen.hpp"
 
 #include <cstdio>
@@ -38,6 +39,11 @@ void print_usage(std::FILE* out) {
                "      game build, every symbol (bytes, memory, pointers, exports, values) and\n"
                "      instruction boundaries, and write symbols.lock; without it, check that\n"
                "      symbols.lock matches symbols.toml.\n"
+               "  check --game <EU4 folder> [--format text|json|github]\n"
+               "      check every plugin in <folder>/anvil/plugins against <folder>/eu4.exe (nothing is\n"
+               "      written), then resolve them as the game does at start-up: the load order, what is\n"
+               "      skipped and why (anvil.toml, API, build, conflicts, dependencies), and warnings\n"
+               "      for plugins whose code ranges overlap.\n"
                "\n"
                "Options:\n"
                "  -h, --help    show this help\n"
@@ -160,9 +166,13 @@ int run_gen(const std::vector<std::wstring>& args) {
 int run_check(const std::vector<std::wstring>& args) {
     CheckOptions options;
     Format format = Format::Text;
+    std::optional<std::wstring> game;
     std::vector<std::wstring> positional;
     for (size_t i = 2; i < args.size(); ++i) {
-        if (is_option(args[i], L"--exe")) {
+        if (is_option(args[i], L"--game")) {
+            game = option_value(args, i, L"--game");
+            if (!game || game->empty()) return usage_error("check: --game needs the EU4 folder");
+        } else if (is_option(args[i], L"--exe")) {
             const auto exe = option_value(args, i, L"--exe");
             if (!exe || exe->empty()) return usage_error("check: --exe needs the path of eu4.exe");
             options.exe = *exe;
@@ -172,11 +182,23 @@ int run_check(const std::vector<std::wstring>& args) {
             if (!parsed) return usage_error("check: --format must be text, json or github");
             format = *parsed;
         } else if (args[i].starts_with(L"--")) {
-            return usage_error("check: unknown option " + utf8(args[i]) +
-                               (args[i] == L"--game" ? " (checking an installed game is not implemented yet)" : ""));
+            return usage_error("check: unknown option " + utf8(args[i]));
         } else {
             positional.push_back(args[i]);
         }
+    }
+    if (game) {
+        if (!positional.empty() || !options.exe.empty()) {
+            return usage_error("check: --game takes the EU4 folder only (not a <plugin-dir> or --exe)");
+        }
+        GameOptions game_options;
+        game_options.game_dir = *game;
+        const GameReport report = check_game(game_options);
+        const std::string text = format_game_report(report, format);
+        std::fputs(text.c_str(), format == Format::Text && report.exit_code == kExitCannotCheck && report.plugins.empty()
+                                     ? stderr
+                                     : stdout);
+        return report.exit_code;
     }
     if (positional.size() != 1) return usage_error("check needs one <plugin-dir>");
     options.plugin_dir = positional[0];

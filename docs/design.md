@@ -366,6 +366,34 @@ Decided in [Player UI: in-game overlay and Anvil Manager](https://github.com/hap
   - a block's `resume` symbol is in code.
 
   Shorter sites (byte patches, which may start inside an instruction), data and pointer slots are not decoded. Hooking a symbol with fewer than 5 declared bytes would steal unverified bytes; the change registry decides whether to refuse it.
+- **`anvil check --game <folder> [--format text|json|github]`** is the start-up analysis (§10) without starting the game, for a folder with `eu4.exe` and `anvil/`:
+  - It reads `anvil/anvil.toml` (`enabled`, `disabled_plugins`; a file that does not parse is a problem, as the loader ignores it) and every folder of `anvil/plugins`, in the order the loader discovers them. Each plugin is checked as `anvil check <folder> --exe <folder>/eu4.exe` does, except that nothing is written: no `symbols.lock`.
+  - The plugins that pass discovery (a readable `plugin.toml`, the entry DLL present) go to the loader's own resolver (`ResolveInput`, shared code in `anvil_core`): API and `anvil` range, build and symbols, duplicates, disabled ids, `conflicts`, dependencies and cycles. The result is what loads, in which order, and what is skipped and why, in the words of the loader's log. Only what the loader acts on skips a plugin: a failing instruction-boundary check is a problem of the plugin, which still loads.
+  - **Overlapping ranges (warning).** `symbols.toml` does not say which symbols a plugin will change, so every verified symbol with `memory = "code"` and declared `bytes` counts as a range `[rva, rva + length)`. For each pair of plugins that load together, ranges that overlap are reported as one warning, at the symbol of the plugin that loads first (`file:line: warning: …`; `::warning` with `github`), naming both symbols, and counting further overlaps of the pair. An identical range (same address and length) is the normal case of a chain (§8.2) and is not reported. Whether two plugins really change the same bytes is decided at load by the change registry, which refuses the second change (§8.3). A warning never changes the exit code, and plugins that are skipped overlap nothing. Symbols of other memory kinds and symbols without `bytes` are not compared.
+  - **Exit codes** as in `check`. 0: nothing is wrong. 1: a plugin has problems, a plugin that is not disabled by the player is skipped, or `anvil.toml` does not parse. What the player disabled (`disabled_plugins`, `enabled = false`) is listed but does not count, and neither do its problems (text and `github` print them as warnings). 2: no folder, no `eu4.exe` (or not a readable game image), no `anvil` folder, or a plugin whose files cannot be read. With 2 for the whole folder nothing else is printed.
+  - **JSON** is one object, which the Manager (§15) reads. `plugins[]` has one entry per folder of `anvil/plugins`, each the result `anvil check` prints for one plugin (`result`, `exit_code`, `plugin`, `build`, `symbols`, `exe`, `problems`) plus `folder` and `status`; the other sections are always present, empty when there is nothing:
+    ```json
+    {
+      "tool": "anvil 1.0.0",
+      "result": "problems",              // "ok" | "problems" | "cannot-check"
+      "exit_code": 1,
+      "cannot_check": "…",               // only with "cannot-check"
+      "game": {"folder": "C:/…/Europa Universalis IV",
+               "exe": {"name": "eu4.exe", "sha256": "9AD3EFE1…", "build": "eu4-1.37.5-steam-win64"}},   // build: null when unknown
+      "anvil_toml": {"enabled": true, "disabled_plugins": ["old-ui"]},
+      "problems": [{"file": "…/anvil.toml", "line": 2, "message": "…"}],   // of anvil.toml
+      "plugins": [
+        {"folder": "hello", "status": "loaded",   // "loaded" | "skipped" | "disabled"
+         "result": "ok", "exit_code": 0, "plugin": "hello", "build": "eu4-1.37.5-steam-win64",
+         "symbols": 3, "exe": {"sha256": "…", "build": "…"}, "problems": []}
+      ],
+      "load_order": [{"id": "hello", "version": "0.1.0", "phase": "early", "folder": "hello"}],   // early plugins first
+      "skipped": [{"id": "other", "folder": "other-1.2", "reason": "conflicts with hello 0.1.0; disable one of them", "disabled": false}],
+      "warnings": [{"file": "…/hello/symbols.toml", "line": 7, "message": "…", "plugins": ["hello", "tweaks"]}]
+    }
+    ```
+    `id` in `skipped` is the folder name when `plugin.toml` is broken; `disabled` marks what the player turned off. `file` and `line` are as in `check` (the path starts with the folder as passed; `line` 0 is the whole file). Fields may be added in minor versions; consumers ignore the ones they do not know.
+  - Text prints each plugin's problems and summary, then the load order, the skipped plugins and the warnings. `github` prints annotations for the problems, for a plugin that is skipped without problems of its own, and for the warnings.
 - **`symbols.lock`:** `anvil check --exe` writes the `eu4.exe` SHA-256, a digest of `symbols.toml`, the tool version and the result. CI, which cannot have the game, fails when the lock is stale.
   ```toml
   format = 1

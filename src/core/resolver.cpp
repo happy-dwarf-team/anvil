@@ -48,7 +48,7 @@ void prune_conflicts(std::map<std::string, Manifest>& candidates, std::vector<Sk
         return out;
     };
     const auto drop = [&](const std::string& id, const std::string& other) {
-        skipped.push_back({id, targets.at(id).at(other)});
+        skipped.push_back({id, targets.at(id).at(other), candidates.at(id).folder});
         alive.erase(id);
     };
 
@@ -110,7 +110,7 @@ void prune_dependencies(std::map<std::string, Manifest>& candidates, std::vector
                 if (!reason.empty()) break;
             }
             if (!reason.empty()) {
-                skipped.push_back({m.id, reason});
+                skipped.push_back({m.id, reason, m.folder});
                 it = candidates.erase(it);
                 changed = true;
             } else {
@@ -171,27 +171,28 @@ ResolveResult resolve(const ResolveInput& input) {
     // 1. Per-plugin checks and duplicate ids (first one wins).
     for (const auto& m : input.manifests) {
         if (candidates.contains(m.id)) {
-            result.skipped.push_back({m.id, "duplicate id; already provided by " + narrow(candidates[m.id].folder.wstring())});
+            result.skipped.push_back(
+                {m.id, "duplicate id; already provided by " + narrow(candidates[m.id].folder.wstring()), m.folder});
             continue;
         }
         if (disabled.contains(m.id)) {
-            result.skipped.push_back({m.id, "disabled in anvil.toml"});
+            result.skipped.push_back({m.id, "disabled in anvil.toml", m.folder, true});
             continue;
         }
         if (m.api != input.host_api) {
             result.skipped.push_back({m.id, "built for plugin API " + std::to_string(m.api) + ", Anvil provides API " +
-                                                std::to_string(input.host_api)});
+                                                std::to_string(input.host_api), m.folder});
             continue;
         }
         if (m.anvil && input.host_version && !m.anvil->matches(*input.host_version)) {
             result.skipped.push_back({m.id, "requires Anvil " + m.anvil->text() + ", this is Anvil " +
-                                                input.host_version->to_string()});
+                                                input.host_version->to_string(), m.folder});
             continue;
         }
         if (input.verify) {
             std::string reason = input.verify(m);
             if (!reason.empty()) {
-                result.skipped.push_back({m.id, std::move(reason)});
+                result.skipped.push_back({m.id, std::move(reason), m.folder});
                 continue;
             }
         }
@@ -217,7 +218,8 @@ ResolveResult resolve(const ResolveInput& input) {
         }
         if (stuck.empty()) break;
         for (const auto& id : stuck) {
-            result.skipped.push_back({id, "dependency/load_after cycle in " + phase_name(stuckPhase) + " phase"});
+            result.skipped.push_back(
+                {id, "dependency/load_after cycle in " + phase_name(stuckPhase) + " phase", candidates.at(id).folder});
             candidates.erase(id);
         }
     }

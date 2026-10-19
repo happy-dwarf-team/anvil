@@ -2,6 +2,7 @@
 
 #include "manifest.hpp"
 
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <vector>
@@ -22,6 +23,8 @@ struct ResolveInput {
 struct Skipped {
     std::string id;     // may be a folder name when the manifest is broken
     std::string reason;
+    std::filesystem::path folder;  // the plugin folder
+    bool disabled = false;         // disabled by the player in anvil.toml, not a fault
 };
 
 struct ResolveResult {

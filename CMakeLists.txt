@@ -37,6 +37,7 @@ FetchContent_MakeAvailable(tomlplusplus safetyhook)
 # the log). Nothing here may depend on running inside the game process, so the
 # CLI applies the same rules as the loader.
 add_library(anvil_core STATIC
+    src/core/discovery.cpp
     src/core/game_build.cpp
     src/core/instructions.cpp
     src/core/log.cpp
@@ -76,7 +77,7 @@ set_target_properties(version_dll PROPERTIES OUTPUT_NAME version)
 
 # anvil.exe = the command-line tool for plugin authors (design §16). Its
 # commands live in anvil_tool so the tests can run them in-process.
-add_library(anvil_tool STATIC src/cli/check.cpp src/cli/gen.cpp)
+add_library(anvil_tool STATIC src/cli/check.cpp src/cli/game.cpp src/cli/gen.cpp)
 target_link_libraries(anvil_tool PUBLIC anvil_core)
 add_executable(anvil src/cli/anvil_cli.cpp)
 target_link_libraries(anvil PRIVATE anvil_tool)
@@ -98,6 +99,11 @@ if(ANVIL_BUILD_TESTS)
     add_executable(anvil_symbols_tests tests/test_symbols.cpp)
     target_link_libraries(anvil_symbols_tests PRIVATE anvil_loader)
     add_test(NAME anvil_symbols_tests COMMAND anvil_symbols_tests)
+
+    add_executable(anvil_game_tests tests/game_tests.cpp)
+    target_link_libraries(anvil_game_tests PRIVATE anvil_tool)
+    add_dependencies(anvil_game_tests anvil)
+    add_test(NAME anvil_game_tests COMMAND anvil_game_tests $<TARGET_FILE:anvil>)
 
     add_executable(anvil_cli_tests tests/test_cli.cpp)
     target_link_libraries(anvil_cli_tests PRIVATE anvil_tool)

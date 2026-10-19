@@ -46,48 +46,10 @@ std::string shown_path(const std::filesystem::path& dir, const std::filesystem::
 
 std::filesystem::path utf8_path(const std::string& text) { return std::filesystem::path(std::u8string(text.begin(), text.end())); }
 
-std::string tool_name() { return "anvil " ANVIL_VERSION; }
-
 // Removes the prefix the parsers give their errors: the file is shown separately.
 std::string without_prefix(std::string message, std::string_view prefix) {
     if (message.starts_with(prefix)) message.erase(0, prefix.size());
     return message;
-}
-
-std::string json_string(std::string_view text) {
-    std::string out = "\"";
-    for (char c : text) {
-        switch (c) {
-        case '"': out += "\\\""; break;
-        case '\\': out += "\\\\"; break;
-        case '\n': out += "\\n"; break;
-        case '\r': out += "\\r"; break;
-        case '\t': out += "\\t"; break;
-        default:
-            if (static_cast<unsigned char>(c) < 0x20) {
-                char escaped[8];
-                std::snprintf(escaped, sizeof(escaped), "\\u%04X", static_cast<unsigned>(c));
-                out += escaped;
-            } else {
-                out.push_back(c);
-            }
-        }
-    }
-    return out + "\"";
-}
-
-// GitHub workflow commands: data escapes %, CR and LF; properties also : and ,.
-std::string github_escape(std::string_view text, bool property) {
-    std::string out;
-    for (char c : text) {
-        if (c == '%') out += "%25";
-        else if (c == '\r') out += "%0D";
-        else if (c == '\n') out += "%0A";
-        else if (property && c == ':') out += "%3A";
-        else if (property && c == ',') out += "%2C";
-        else out.push_back(c);
-    }
-    return out;
 }
 
 const char* known_build(std::string_view sha256) {
@@ -117,8 +79,10 @@ void check_against_exe(const CheckOptions& options, const SymbolFile& file, cons
         if (report.exe_build != file.build) {
             report.problems.push_back({symbols_path, file.build_line,
                                        "symbols.toml is for " + file.build + ", " + report.exe_name + " is " + report.exe_build});
+            report.skip_reason = "symbols.toml is for build " + file.build + ", the game is " + report.exe_build;
         }
     } else {
+        report.skip_reason = "game build unknown (EU4 updated?)";
         report.problems.push_back({symbols_path, file.build_line,
                                    report.exe_name + " (SHA-256 " + report.exe_sha256 +
                                        ") is not a game build this Anvil knows; symbols.toml declares " + file.build});
@@ -130,6 +94,17 @@ void check_against_exe(const CheckOptions& options, const SymbolFile& file, cons
         const Symbol& s = file.symbols[verification.failed[i]];
         failed.insert(s.id);
         report.problems.push_back({symbols_path, s.line, verification.problems[i]});
+    }
+    // The loader checks the build first and gives the first failing symbol.
+    if (report.skip_reason.empty() && !verification.problems.empty()) {
+        report.skip_reason = verification.problems.front() + " (EU4 updated or eu4.exe modified?)";
+        if (verification.problems.size() > 1) {
+            report.skip_reason += " and " + std::to_string(verification.problems.size() - 1) + " more";
+        }
+    }
+    for (const auto& s : file.symbols) {
+        if (failed.contains(s.id) || s.memory != MemoryKind::Code || s.bytes.empty()) continue;
+        report.code_ranges.push_back({s.name, s.line, verification.symbols[s.id].rva, static_cast<uint32_t>(s.bytes.size())});
     }
     // Instruction boundaries (design §16) of the symbols that verified.
     for (const auto& s : file.symbols) {
@@ -155,6 +130,7 @@ void check_against_exe(const CheckOptions& options, const SymbolFile& file, cons
         }
     }
 
+    if (!options.write_lock) return;
     SymbolsLock lock;
     lock.tool = tool_name();
     lock.symbols_sha256 = symbols_digest(symbols_text);
@@ -206,6 +182,44 @@ void check_lock(const CheckOptions& options, const std::string& symbols_text, co
 }
 
 }  // namespace
+
+std::string tool_name() { return "anvil " ANVIL_VERSION; }
+
+std::string json_string(std::string_view text) {
+    std::string out = "\"";
+    for (char c : text) {
+        switch (c) {
+        case '"': out += "\\\""; break;
+        case '\\': out += "\\\\"; break;
+        case '\n': out += "\\n"; break;
+        case '\r': out += "\\r"; break;
+        case '\t': out += "\\t"; break;
+        default:
+            if (static_cast<unsigned char>(c) < 0x20) {
+                char escaped[8];
+                std::snprintf(escaped, sizeof(escaped), "\\u%04X", static_cast<unsigned>(c));
+                out += escaped;
+            } else {
+                out.push_back(c);
+            }
+        }
+    }
+    return out + "\"";
+}
+
+// GitHub workflow commands: data escapes %, CR and LF; properties also : and ,.
+std::string github_escape(std::string_view text, bool property) {
+    std::string out;
+    for (char c : text) {
+        if (c == '%') out += "%25";
+        else if (c == '\r') out += "%0D";
+        else if (c == '\n') out += "%0A";
+        else if (property && c == ':') out += "%3A";
+        else if (property && c == ',') out += "%2C";
+        else out.push_back(c);
+    }
+    return out;
+}
 
 std::optional<Format> parse_format(std::string_view text) {
     if (text == "text") return Format::Text;
@@ -303,9 +317,11 @@ CheckReport check_plugin(const CheckOptions& options) {
     const ManifestResult manifest = load_manifest(options.plugin_dir);
     if (!manifest.manifest) {
         report.problems.push_back({manifest_path, manifest.line, without_prefix(manifest.error, "plugin.toml: ")});
+        report.skip_reason = manifest.error;
         report.exit_code = kExitProblems;
         return report;
     }
+    report.manifest = manifest.manifest;
     const Manifest& m = *manifest.manifest;
     report.plugin = m.id;
     report.has_symbols = !m.symbols.empty();
@@ -316,12 +332,14 @@ CheckReport check_plugin(const CheckOptions& options) {
         if (!read_file(options.plugin_dir / relative, text)) {
             report.exit_code = kExitCannotCheck;
             report.cannot_check = "cannot read " + symbols_path;
+            report.skip_reason = report.cannot_check;
             return report;
         }
         if (text.starts_with("ï»¿")) text.erase(0, 3);  // saved by Notepad, as load_symbols allows
         const SymbolFileResult symbols = parse_symbols_text(text);
         if (!symbols.file) {
             report.problems.push_back({symbols_path, symbols.line, without_prefix(symbols.error, "symbols.toml: ")});
+            report.skip_reason = symbols.error;
             report.exit_code = kExitProblems;
             return report;
         }
@@ -341,49 +359,58 @@ CheckReport check_plugin(const CheckOptions& options) {
     return report;
 }
 
-std::string format_report(const CheckReport& report, Format format) {
-    std::string out;
-    if (format == Format::Json) {
-        const char* result = report.exit_code == kExitCannotCheck ? "cannot-check"
-                             : report.problems.empty()              ? "ok"
-                                                                    : "problems";
-        out = "{\n  \"tool\": " + json_string(tool_name()) + ",\n  \"result\": \"" + result + "\",\n";
-        out += "  \"exit_code\": " + std::to_string(report.exit_code) + ",\n";
-        if (!report.cannot_check.empty()) out += "  \"cannot_check\": " + json_string(report.cannot_check) + ",\n";
-        out += "  \"plugin\": " + (report.plugin.empty() ? std::string("null") : json_string(report.plugin)) + ",\n";
-        if (report.has_symbols) {
-            out += "  \"build\": " + json_string(report.build) + ",\n";
-            out += "  \"symbols\": " + std::to_string(report.symbols) + ",\n";
-        }
-        if (report.with_exe && !report.exe_sha256.empty()) {
-            out += "  \"exe\": {\"sha256\": " + json_string(report.exe_sha256) + ", \"build\": " +
-                   (report.exe_build.empty() ? std::string("null") : json_string(report.exe_build)) + "},\n";
-        }
-        if (!report.lock.empty()) out += "  \"lock\": " + json_string(report.lock) + ",\n";
-        out += "  \"problems\": [";
-        for (size_t i = 0; i < report.problems.size(); ++i) {
-            const Problem& p = report.problems[i];
-            out += std::string(i == 0 ? "\n" : ",\n") + "    {\"file\": " + json_string(p.file) +
-                   ", \"line\": " + std::to_string(p.line) + ", \"message\": " + json_string(p.message) + "}";
-        }
-        out += report.problems.empty() ? "]\n}\n" : "\n  ]\n}\n";
-        return out;
+std::string report_json(const CheckReport& report, const std::string& pad, const std::string& folder,
+                        const std::string& status) {
+    const bool nested = !folder.empty();
+    const std::string in = pad + "  ";  // members of the object
+    const char* result = report.exit_code == kExitCannotCheck ? "cannot-check"
+                         : report.problems.empty()              ? "ok"
+                                                                : "problems";
+    std::string out = "{\n";
+    if (nested) {
+        out += in + "\"folder\": " + json_string(folder) + ",\n";
+        if (!status.empty()) out += in + "\"status\": " + json_string(status) + ",\n";
+    } else {
+        out += in + "\"tool\": " + json_string(tool_name()) + ",\n";
     }
+    out += in + "\"result\": \"" + result + "\",\n";
+    out += in + "\"exit_code\": " + std::to_string(report.exit_code) + ",\n";
+    if (!report.cannot_check.empty()) out += in + "\"cannot_check\": " + json_string(report.cannot_check) + ",\n";
+    out += in + "\"plugin\": " + (report.plugin.empty() ? std::string("null") : json_string(report.plugin)) + ",\n";
+    if (report.has_symbols) {
+        out += in + "\"build\": " + json_string(report.build) + ",\n";
+        out += in + "\"symbols\": " + std::to_string(report.symbols) + ",\n";
+    }
+    if (report.with_exe && !report.exe_sha256.empty()) {
+        out += in + "\"exe\": {\"sha256\": " + json_string(report.exe_sha256) + ", \"build\": " +
+               (report.exe_build.empty() ? std::string("null") : json_string(report.exe_build)) + "},\n";
+    }
+    if (!report.lock.empty()) out += in + "\"lock\": " + json_string(report.lock) + ",\n";
+    out += in + "\"problems\": [";
+    for (size_t i = 0; i < report.problems.size(); ++i) {
+        const Problem& p = report.problems[i];
+        out += std::string(i == 0 ? "\n" : ",\n") + in + "  {\"file\": " + json_string(p.file) +
+               ", \"line\": " + std::to_string(p.line) + ", \"message\": " + json_string(p.message) + "}";
+    }
+    out += report.problems.empty() ? "]\n" + pad + "}" : "\n" + in + "]\n" + pad + "}";
+    return out;
+}
 
-    for (const Problem& p : report.problems) {
+std::string problem_lines(const std::vector<Problem>& problems, Format format, const char* level) {
+    std::string out;
+    for (const Problem& p : problems) {
         if (format == Format::Github) {
-            out += "::error file=" + github_escape(p.file, true);
+            out += std::string("::") + level + " file=" + github_escape(p.file, true);
             if (p.line != 0) out += ",line=" + std::to_string(p.line);
             out += ",title=anvil check::" + github_escape(p.message, false) + "\n";
         } else {
-            out += p.file + (p.line != 0 ? ":" + std::to_string(p.line) : "") + ": error: " + p.message + "\n";
+            out += p.file + (p.line != 0 ? ":" + std::to_string(p.line) : "") + ": " + level + ": " + p.message + "\n";
         }
     }
-    if (report.exit_code == kExitCannotCheck) {
-        out += format == Format::Github ? "::error title=anvil check::" + github_escape(report.cannot_check, false) + "\n"
-                                        : "error: cannot check: " + report.cannot_check + "\n";
-        return out;
-    }
+    return out;
+}
+
+std::string report_summary(const CheckReport& report) {
     std::string summary = report.plugin.empty() ? std::string("plugin") : report.plugin;
     if (!report.has_symbols && !report.plugin.empty()) {
         summary += ": no symbols.toml (runs on every game build)";
@@ -396,8 +423,19 @@ std::string format_report(const CheckReport& report, Format format) {
         if (!report.lock.empty()) summary += "; " + std::string(kLockFile) + " " + report.lock;
     }
     summary += report.problems.empty() ? ": OK" : ": " + std::to_string(report.problems.size()) + " problem(s)";
-    out += summary + "\n";
-    return out;
+    return summary;
+}
+
+std::string format_report(const CheckReport& report, Format format) {
+    if (format == Format::Json) return report_json(report) + "\n";
+
+    std::string out = problem_lines(report.problems, format, "error");
+    if (report.exit_code == kExitCannotCheck) {
+        out += format == Format::Github ? "::error title=anvil check::" + github_escape(report.cannot_check, false) + "\n"
+                                        : "error: cannot check: " + report.cannot_check + "\n";
+        return out;
+    }
+    return out + report_summary(report) + "\n";
 }
 
 }  // namespace anvil::cli
