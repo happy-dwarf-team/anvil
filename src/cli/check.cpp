@@ -1,5 +1,6 @@
 #include "cli/check.hpp"
 
+#include "cli/gen.hpp"
 #include "core/game_build.hpp"
 #include "core/instructions.hpp"
 #include "core/manifest.hpp"
@@ -346,6 +347,11 @@ CheckReport check_plugin(const CheckOptions& options) {
         }
         report.build = symbols.file->build;
         report.symbols = symbols.file->symbols.size();
+        // Names `anvil gen` refuses, in any language it writes, fail the build later.
+        const GeneratedHeaders headers = generate_headers(*symbols.file, relative.generic_string(), true, true, true);
+        if (!headers.error.empty()) {
+            report.problems.push_back({symbols_path, headers.line, without_prefix(headers.error, "symbols.toml: ")});
+        }
         if (report.with_exe) {
             check_against_exe(options, *symbols.file, text, symbols_path, report);
             if (report.exit_code == kExitCannotCheck) return report;
@@ -369,6 +375,11 @@ CheckReport check_plugin(const CheckOptions& options) {
         report.has_settings = true;
         if (settings.file) {
             report.settings = settings.file->settings.size();
+            const GeneratedHeaders headers =
+                generate_settings_headers(*settings.file, relative.generic_string(), true, true, true);
+            if (!headers.error.empty()) {
+                report.problems.push_back({settings_path, headers.line, without_prefix(headers.error, "settings.toml: ")});
+            }
         } else {
             report.problems.push_back({settings_path, settings.line, without_prefix(settings.error, "settings.toml: ")});
             if (report.skip_reason.empty()) report.skip_reason = settings.error;
