@@ -29,6 +29,7 @@ public:
     PluginSymbols(const SymbolFile& file, const SymbolVerification& verified, uintptr_t image_base);
 
     const PluginSymbol* get(uint32_t id) const { return id < symbols_.size() ? &symbols_[id] : nullptr; }
+    const PluginSymbol* find(std::string_view name) const;
     size_t size() const { return symbols_.size(); }
 
     // address_of / symbol_value of the API 2 host (#46): nullptr / nullopt
@@ -44,8 +45,17 @@ private:
 // from the declaration and are compared with the original bytes again, the
 // symbol's kind must fit the change. Unknown ids are NotDeclared. These are the
 // calls the API 2 host table (#46) forwards to.
+// Hooks need at least the 5 declared bytes of the jump (UnsafeSite): `anvil
+// check` proves those are whole instructions (design §16).
 ChangeStatus hook_function(ChangeRegistry& registry, OwnerId owner, const PluginSymbols& symbols, uint32_t fn,
                            void* detour, void** next, ChangeId* out = nullptr);
+// On a code symbol (a function or a site).
+ChangeStatus mid_hook(ChangeRegistry& registry, OwnerId owner, const PluginSymbols& symbols, uint32_t site,
+                      AnvilCpuCallback callback, void* user, ChangeId* out = nullptr);
+// The block is the symbol's declared bytes; the game resumes at its `resume`
+// symbol or at the block's end.
+ChangeStatus replace_block(ChangeRegistry& registry, OwnerId owner, const PluginSymbols& symbols, uint32_t block,
+                           AnvilCpuCallback callback, void* user, ChangeId* out = nullptr);
 ChangeStatus redirect_call(ChangeRegistry& registry, OwnerId owner, const PluginSymbols& symbols, uint32_t call_site,
                            void* target, void** next, ChangeId* out = nullptr);
 // The patch must lie within the symbol's declared bytes.

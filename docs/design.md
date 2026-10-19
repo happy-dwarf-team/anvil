@@ -227,7 +227,7 @@ Every call that touches `eu4.exe` takes a declared symbol, never a raw RVA. Raw 
 
 - The layout is identical to SafetyHook's `Context64` (408 bytes): XMM0–15, RFLAGS, the GPRs, `rsp` (read-only), a reserved slot (`trampoline_rsp`) and `rip` (writable). It is pinned with `static_assert`s.
 - YMM upper halves, x87 and MXCSR are not saved.
-- If SafetyHook's layout ever changes, Anvil ships its own stub and keeps the ABI.
+- Anvil runs a copy of SafetyHook 0.7's stub, one per address: one context save for all mid hooks there and the block replacement, so a later SafetyHook cannot change the ABI.
 - A lighter, volatile-only context is not offered in 1.0 (§17).
 
 ## 9. Plugin API 2

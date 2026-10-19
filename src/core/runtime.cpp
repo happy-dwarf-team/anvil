@@ -383,6 +383,11 @@ void startup_impl(const std::filesystem::path& game_dir) {
         const auto& plugins = g_runtime->plugins;
         Log::instance().write(ANVIL_LOG_WARNING, owner < plugins.size() ? plugins[owner]->manifest.id : "?", message);
     });
+    g_runtime->changes->set_notice_sink([](OwnerId owner, const std::string& message) {
+        // On the game's thread, e.g. the first mid hook per address that changes rip.
+        const auto& plugins = g_runtime->plugins;
+        Log::instance().write(ANVIL_LOG_INFO, owner < plugins.size() ? plugins[owner]->manifest.id : "?", message);
+    });
     AnvilGameInfo& game = g_runtime->game;
     game.size = sizeof(AnvilGameInfo);
     game.build_id = g_runtime->build ? g_runtime->build->id : nullptr;

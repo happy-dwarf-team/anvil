@@ -506,6 +506,89 @@ signature = "const char* ()"
         CHECK(changes.rollback(owner) == 2 && mapped.base[0x1000] == 0x48 && mapped.base[0x1010] == 0x48);
     });
 
+    run("loader: mid hooks and block replacements on symbols", [&] {
+        MappedImage mapped(test_image);
+        DWORD old = 0;
+        CHECK(VirtualProtect(mapped.base + 0x1000, 0x1000, PAGE_EXECUTE_READWRITE, &old));
+        ChangeRegistry changes(mapped.address(), TestImage::kSize);
+        const OwnerId owner = changes.add_owner("p");
+        const SymbolFile file = symbols(R"toml(
+build = "test-build"
+
+[symbol.block]
+rva = 0x1010
+bytes = "48 8B 05 F1 1F 00 00 8B 98 D0 1D 00 00"
+memory = "code"
+resume = "speed_object"
+
+[symbol.speed_object]
+rva = 0x1000
+bytes = "48 8B 81 18 04 00 00 C3"
+memory = "code"
+signature = "void* (void* session)"
+
+[symbol.exported]
+export = "Exported_fn"
+bytes = "40 53"
+memory = "code"
+signature = "void ()"
+
+[symbol.tick_slot]
+rva = 0x2000
+memory = "read"
+points_to = 0x1000
+
+[symbol.bss_tail]
+rva = 0x3500
+bytes = "00 00 00 00 00 00"
+memory = "write"
+)toml");
+        const OriginalImageReader reader(changes, mapped.address());
+        std::string error;
+        const auto image = PeImage::parse(reader, error);
+        CHECK(image.has_value());
+        if (!image) return;
+        const SymbolVerification verified = verify_symbols(file, *image);
+        CHECK(verified.ok());
+        const PluginSymbols syms(file, verified, mapped.address());
+        CHECK(syms.find("speed_object") == syms.get(1) && syms.find("nothing") == nullptr);
+
+        const AnvilCpuCallback callback = [](AnvilCpuContext* cpu, void*) { cpu->rcx = cpu->rdx; };
+        void* next = nullptr;
+        auto* detour = reinterpret_cast<void*>(+[](void*) -> void* { return nullptr; });
+        // Fewer than the 5 declared bytes of the jump: unsafe for every hook.
+        CHECK(mid_hook(changes, owner, syms, 2, callback, nullptr) == ChangeStatus::UnsafeSite);
+        CHECK(replace_block(changes, owner, syms, 2, callback, nullptr) == ChangeStatus::UnsafeSite);
+        CHECK(hook_function(changes, owner, syms, 2, detour, &next) == ChangeStatus::UnsafeSite);
+        CHECK(hook_function(changes, owner, syms, 0, detour, &next) == ChangeStatus::WrongKind);  // not a function
+        CHECK(mid_hook(changes, owner, syms, 3, callback, nullptr) == ChangeStatus::WrongKind);   // a slot
+        CHECK(mid_hook(changes, owner, syms, 4, callback, nullptr) == ChangeStatus::WrongKind);   // not code
+        CHECK(replace_block(changes, owner, syms, 4, callback, nullptr) == ChangeStatus::WrongKind);
+        CHECK(mid_hook(changes, owner, syms, 9, callback, nullptr) == ChangeStatus::NotDeclared);
+        CHECK(replace_block(changes, owner, syms, 9, callback, nullptr) == ChangeStatus::NotDeclared);
+
+        // A mid hook on a function symbol: rcx (the session) taken from rdx.
+        ChangeId mid = 0;
+        CHECK(mid_hook(changes, owner, syms, 1, callback, nullptr, &mid) == ChangeStatus::Ok);
+        struct Session {
+            uint8_t pad[0x418];
+            void* speed;
+        } first{{}, &first}, second{{}, &second};
+        using Speed = void* (*)(void*, void*);
+        CHECK(reinterpret_cast<Speed>(mapped.base + 0x1000)(&first, &second) == &second);
+        CHECK(changes.remove(owner, mid) == ChangeStatus::Ok);
+        CHECK(reinterpret_cast<Speed>(mapped.base + 0x1000)(&first, &second) == &first);
+
+        // The block is the declared bytes; it resumes at its `resume` symbol.
+        ChangeId block = 0;
+        CHECK(replace_block(changes, owner, syms, 0, callback, nullptr, &block) == ChangeStatus::Ok);
+        CHECK(block != 0 && mapped.base[0x1010] == 0xE9);
+        CHECK(mid_hook(changes, owner, syms, 1, callback, nullptr) == ChangeStatus::Ok);  // outside the block
+        CHECK(changes.describe(owner) ==
+              (std::vector<std::string>{"block replacement rva 0x1010 (13 B)", "mid hook rva 0x1000"}));
+        CHECK(changes.rollback(owner) == 2 && mapped.base[0x1010] == 0x48 && mapped.base[0x1000] == 0x48);
+    });
+
     std::printf("\n%d checks, %d failed\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }
