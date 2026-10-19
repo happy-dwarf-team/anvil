@@ -27,16 +27,16 @@ jobs:
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
 
-      # Microbenchmarks (design §17): two runs, gated on each case's ratio to a
+      # Microbenchmarks (design §17): three runs, gated on each case's ratio to a
       # plain call against bench/baseline-ci.json for this runner's CPU model.
       - name: Benchmark
         shell: pwsh
         run: |
-          foreach ($i in 1, 2) {
+          foreach ($i in 1, 2, 3) {
             build/Release/anvil_bench.exe --out "bench-$i.json"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
-          bench/check-regression.ps1 -Result bench-1.json, bench-2.json
+          bench/check-regression.ps1 -Result bench-1.json, bench-2.json, bench-3.json
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}

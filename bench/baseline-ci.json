@@ -19,6 +19,23 @@
         "resolve_set": 92353.97,
         "symbols_parse": 144894.138
       }
+    },
+    "AMD EPYC 9V45 96-Core Processor": {
+      "source": "windows-2022 runner, PR #70 (1 CI attempt x 2 runs, the higher ratio of the runs), 2026-10-19",
+      "ratios": {
+        "function_hook_1": 1.861,
+        "function_hook_8": 3.866,
+        "call_site": 1.571,
+        "call_redirect_1": 2.008,
+        "call_redirect_8": 4.003,
+        "mid_hook_1": 16.265,
+        "mid_hook_8": 21.311,
+        "block_native": 1.001,
+        "block_replacement": 15.839,
+        "manifest_parse_set": 65182.405,
+        "resolve_set": 76056.768,
+        "symbols_parse": 128585.068
+      }
     }
   }
 }

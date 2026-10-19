@@ -450,7 +450,7 @@ Decided in [Performance budgets and how the lab measures them](https://github.co
 - **CI gate** (`bench/check-regression.ps1`):
   - Runners differ in CPU model and clock, so the gate never compares nanoseconds. It compares each case's ratio to the plain call of the same run.
   - It compares only against a baseline from the same CPU model: `bench/baseline-ci.json` keeps one entry per runner CPU.
-  - Each case takes its lowest ratio of two runs. A case more than 20% slower than its baseline fails the build. A case more than 20% faster prints a notice to lower its baseline.
+  - Each case takes its lowest ratio of three runs. The baseline keeps the highest ratio seen on that CPU, because a short path can differ by almost 20% between two processes on the same runner (code placement). A case more than 20% slower than its baseline fails the build. A case more than 20% faster prints a notice to lower its baseline.
   - On a CPU model without an entry the gate prints the entry to add and does not fail.
   - A baseline is raised only with a reason in the pull request.
 - **Lab:** `bench/run-lab.ps1` runs `anvil_bench` pinned to CPU4 at high priority, with ≥ 30 repetitions and EU4 closed, and checks the budgets above.
