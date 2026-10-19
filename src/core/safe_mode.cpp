@@ -63,10 +63,10 @@ StartRecord StartMarker::begin(const std::filesystem::path& file) {
     return record;
 }
 
-void StartMarker::game_ready() {
+void StartMarker::game_ready(bool crash_reported) {
     if (!active_) return;
     active_ = false;
-    write_count(file_, 0);
+    if (!crash_reported) write_count(file_, 0);
 }
 
 void StartMarker::clean_exit() {

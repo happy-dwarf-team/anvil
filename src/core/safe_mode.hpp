@@ -10,12 +10,14 @@ namespace anvil {
 // the standard ones the overlay needs to explain it.
 //
 // The record is one number in anvil/data/anvil/unfinished-starts.txt: how many
-// starts in a row ended before the game was ready. Each start counts itself
-// in at the beginning; readiness removes the file; a clean exit before it,
-// without a crash (crash::crashed), puts the previous number back. So a start
-// that crashed, was killed or hung before the game was ready stays counted,
-// whatever caught the crash. The safe start removes the file: the next one
-// loads the plugins again.
+// starts in a row ended before the game was ready or wrote a crash report
+// before it. Each start counts itself in at the beginning; readiness without
+// a crash report removes the file; a clean exit before it, without a crash
+// (crash::crashed), puts the previous number back. So a start that crashed,
+// was killed or hung before the game was ready stays counted, whatever caught
+// the crash, and so does one that crashed on another thread while the game
+// went on to the menu. The safe start removes the file: the next one loads
+// the plugins again.
 inline constexpr unsigned kSafeModeAfter = 2;
 
 // The standard plugins that still load in safe mode: today none. anvil-game
@@ -31,8 +33,9 @@ class StartMarker {
 public:
     // Reads the record and counts this start in (or, in safe mode, clears it).
     StartRecord begin(const std::filesystem::path& file);
-    // The game is ready: this start is not counted.
-    void game_ready();
+    // The game is ready: this start is not counted, unless a crash report
+    // was written before (crash::reported); then it stays counted.
+    void game_ready(bool crash_reported);
     // The process exits without a crash before game_ready: the record goes
     // back to what it was before this start.
     void clean_exit();

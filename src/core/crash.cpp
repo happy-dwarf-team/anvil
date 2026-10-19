@@ -195,24 +195,39 @@ bool open_reports() {
     return true;
 }
 
+// Replaces what a report file holds so far.
+void rewrite(HANDLE file, std::string_view text) {
+    LARGE_INTEGER start{};
+    if (file == INVALID_HANDLE_VALUE || !SetFilePointerEx(file, start, nullptr, FILE_BEGIN)) return;
+    if (write_all(file, text)) SetEndOfFile(file);
+}
+
+// A small minidump of the whole process into the pending file, written from
+// this thread (the crashed one may have no stack left), then kept as
+// <stem>.dmp. `name` gets its name, or stays empty. Guarded on its own: a
+// fault in the dump writer costs only the dump, not the report.
+struct Dump {
+    const Request* request;
+    char name[80];
+};
+
+void write_dump(void* argument) {
+    auto& dump = *static_cast<Dump*>(argument);
+    if (g_write_dump == nullptr || g_dump == INVALID_HANDLE_VALUE) return;
+    MINIDUMP_EXCEPTION_INFORMATION exception{dump.request->thread, dump.request->pointers, FALSE};
+    const auto type = static_cast<MINIDUMP_TYPE>(MiniDumpNormal | MiniDumpWithThreadInfo | MiniDumpWithUnloadedModules);
+    wchar_t name[80] = {};
+    if (!g_write_dump(GetCurrentProcess(), GetCurrentProcessId(), g_dump, type, &exception, nullptr, nullptr) ||
+        !keep_dump(g_stem, name)) {
+        return;
+    }
+    for (size_t i = 0; i + 1 < std::size(dump.name) && name[i] != L'\0'; ++i) dump.name[i] = static_cast<char>(name[i]);
+}
+
 void write_report(void*) {
     const Request request = g_request;
     const EXCEPTION_RECORD* record = request.pointers->ExceptionRecord;
     if (!open_reports()) return;
-
-    wchar_t dump_name_w[80] = {};
-    char dump_name[80] = {};
-    if (record->ExceptionCode == EXCEPTION_STACK_OVERFLOW && g_write_dump != nullptr && g_dump != INVALID_HANDLE_VALUE) {
-        // Written from this thread: the crashed one has no stack left.
-        MINIDUMP_EXCEPTION_INFORMATION exception{request.thread, request.pointers, FALSE};
-        const auto type = static_cast<MINIDUMP_TYPE>(MiniDumpNormal | MiniDumpWithThreadInfo | MiniDumpWithUnloadedModules);
-        if (g_write_dump(GetCurrentProcess(), GetCurrentProcessId(), g_dump, type, &exception, nullptr, nullptr) &&
-            keep_dump(g_stem, dump_name_w)) {
-            for (size_t i = 0; i + 1 < std::size(dump_name) && dump_name_w[i] != L'\0'; ++i) {
-                dump_name[i] = static_cast<char>(dump_name_w[i]);
-            }
-        }
-    }
 
     const Setup& setup = *g_setup;
     LARGE_INTEGER now{}, frequency{};
@@ -237,13 +252,25 @@ void write_report(void*) {
     in.seen = g_seen;
     in.seen_count = static_cast<size_t>(g_seen_count) < kSeenMax ? static_cast<size_t>(g_seen_count) : kSeenMax;
     in.log_tail = read_log_tail();
-    in.minidump = dump_name[0] != '\0' ? dump_name : nullptr;
+    in.minidump = nullptr;
 
+    // The report first: a minidump writer stuck on a lock the crashed thread
+    // holds costs only the dump. With the dump kept, the report names it.
     g_json_text.clear();
     g_text_text.clear();
-    const CrashVerdict verdict = build_report(in, g_json_text, g_text_text);
+    CrashVerdict verdict = build_report(in, g_json_text, g_text_text);
     write_all(g_json_file, g_json_text.view());
     if (g_text_file != INVALID_HANDLE_VALUE) write_all(g_text_file, g_text_text.view());
+    Dump dump{&request, {}};
+    unsigned long dump_fault = 0;
+    if (call_guarded(&write_dump, &dump, &dump_fault) && dump.name[0] != '\0') {
+        in.minidump = dump.name;
+        g_json_text.clear();
+        g_text_text.clear();
+        verdict = build_report(in, g_json_text, g_text_text);
+        rewrite(g_json_file, g_json_text.view());
+        rewrite(g_text_file, g_text_text.view());
+    }
     close_reports();
     prune(kKeep);
 
@@ -263,14 +290,14 @@ void write_partial(unsigned long code) {
     char note[160];
     const int n = std::snprintf(note, sizeof(note), "\r\n[the report writer failed with exception 0x%08lX; the report is incomplete]\r\n", code);
     if (g_text_file != INVALID_HANDLE_VALUE) {
-        write_all(g_text_file, g_text_text.view());
+        rewrite(g_text_file, g_text_text.view());
         write_all(g_text_file, std::string_view(note, n > 0 ? static_cast<size_t>(n) : 0));
     }
     // The JSON is all or nothing: a stub that says so.
     if (g_json_file != INVALID_HANDLE_VALUE) {
         char json[160];
         const int k = std::snprintf(json, sizeof(json), "{\n  \"format\": 1,\n  \"incomplete\": true,\n  \"writer_exception\": \"0x%08lX\"\n}\n", code);
-        write_all(g_json_file, std::string_view(json, k > 0 ? static_cast<size_t>(k) : 0));
+        rewrite(g_json_file, std::string_view(json, k > 0 ? static_cast<size_t>(k) : 0));
     }
     close_reports();
 }
@@ -433,10 +460,12 @@ bool install(const Setup& setup, std::string& error) {
 
 void set_game_ready() { g_game_ready.store(true); }
 
+bool reported() { return g_claimed != 0; }
+
 bool crashed() {
     // A crash the game's own handler caught ends the process soon after.
     const auto last = static_cast<ULONGLONG>(InterlockedCompareExchange64(&g_last_fatal, 0, 0));
-    return g_claimed != 0 || (last != 0 && GetTickCount64() - last < 30000);
+    return reported() || (last != 0 && GetTickCount64() - last < 30000);
 }
 
 bool check_filter(std::string& by) {

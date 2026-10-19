@@ -213,6 +213,28 @@ LONG WINAPI child_next_filter(EXCEPTION_POINTERS*) {
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
+// As EU4's filter after a crash on one of its other threads: it starts its
+// crash reporter and keeps the crashed thread, while the main thread goes on
+// to the menu (seen in the game, #82).
+HANDLE g_handed_over = nullptr;
+LONG WINAPI child_keep_running_filter(EXCEPTION_POINTERS*) {
+    SetEvent(g_handed_over);
+    Sleep(INFINITE);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+// The non-pending minidumps in the crash folder.
+size_t kept_dumps(const fs::path& crashes) {
+    size_t count = 0;
+    for (const auto& entry : fs::directory_iterator(crashes)) {
+        if (entry.path().extension() == L".dmp" && entry.path().filename().wstring().rfind(L"pending-", 0) != 0 &&
+            fs::file_size(entry.path()) > 0) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 int child(const std::string& mode, const fs::path& dir) {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
     g_child_dir = dir;
@@ -243,17 +265,22 @@ int child(const std::string& mode, const fs::path& dir) {
     setup.sources.build_id = "test-build";
     setup.anvil_version = "9.9.9";
     QueryPerformanceCounter(&setup.start);
-    setup.unfinished_starts = 1;
+    // The start marker as the runtime keeps it: counted in before install.
+    static StartMarker marker;
+    const StartRecord start = marker.begin(dir / "unfinished-starts.txt");
+    setup.unfinished_starts = start.unfinished;
     std::string error;
     if (!crash::install(setup, error)) {
         std::printf("install: %s\n", error.c_str());
         return 11;
     }
     // As the game does after Anvil's entry: through its own import.
-    SetUnhandledExceptionFilter(child_next_filter);
+    const bool keep_running = mode == "survive";
+    g_handed_over = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    SetUnhandledExceptionFilter(keep_running ? child_keep_running_filter : child_next_filter);
 
     DWORD (WINAPI *body)(LPVOID) = nullptr;
-    if (mode == "av") {
+    if (mode == "av" || mode == "survive") {
         body = [](LPVOID) -> DWORD {
             crash_here();
             return 0;
@@ -270,8 +297,17 @@ int child(const std::string& mode, const fs::path& dir) {
     // A thread of its own with the default stack guarantee, like the game's.
     HANDLE thread = CreateThread(nullptr, 256 * 1024, body, reinterpret_cast<void*>(image.at(0x200)),
                                  STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
-    WaitForSingleObject(thread, 60000);
-    return 13;  // not reached: the crash ends the process
+    if (!keep_running) {
+        WaitForSingleObject(thread, 60000);
+        return 13;  // not reached: the crash ends the process
+    }
+    // The game goes on after the hand-over: readiness, then a normal exit,
+    // as runtime.cpp handles them.
+    if (WaitForSingleObject(g_handed_over, 60000) != WAIT_OBJECT_0) return 14;
+    if (kept_dumps(dir / "crashes") == 1) std::ofstream(dir / "dump-while-running.txt") << "yes";
+    marker.game_ready(crash::reported());
+    if (marker.active() && !crash::crashed()) marker.clean_exit();
+    ExitProcess(0x5AFE);
 }
 
 // ---- the parent side -------------------------------------------------------------
@@ -289,6 +325,7 @@ ChildResult run_child(const char* mode, const fs::path& dir) {
     ChildResult r;
     fs::remove_all(dir);
     fs::create_directories(dir / "crashes");
+    std::ofstream(dir / "unfinished-starts.txt") << "1\n";  // one unfinished start before this one
     // Older reports: the oldest go, 10 stay.
     for (int i = 0; i < 12; ++i) {
         char stem[32];
@@ -309,11 +346,9 @@ ChildResult run_child(const char* mode, const fs::path& dir) {
     for (const auto& entry : fs::directory_iterator(dir / "crashes")) {
         const auto name = entry.path().filename().wstring();
         if (entry.path().extension() == L".json") r.reports.push_back(entry.path());
-        if (entry.path().extension() == L".dmp" && name.rfind(L"pending-", 0) != 0 && fs::file_size(entry.path()) > 0) {
-            r.dump = true;
-        }
         if (name.rfind(L"pending-", 0) == 0) r.pending_left = true;
     }
+    r.dump = kept_dumps(dir / "crashes") == 1;
     for (const auto& report : r.reports) {
         if (report.filename().wstring().rfind(L"2000-", 0) == 0) continue;
         r.json = read_file(report);
@@ -628,14 +663,14 @@ int main(int argc, char** argv) {
             const StartRecord s = m.begin(file);
             CHECK(s.unfinished == 2 && s.safe_mode && !m.active());
             CHECK(!fs::exists(file));  // the next start loads the plugins again
-            m.game_ready();
+            m.game_ready(false);
             m.clean_exit();
             CHECK(!fs::exists(file));
         }
         {
             StartMarker m;
             CHECK(!m.begin(file).safe_mode);
-            m.game_ready();  // a good start forgets the earlier ones
+            m.game_ready(false);  // a good start forgets the earlier ones
             CHECK(!fs::exists(file) && !m.active());
             m.clean_exit();
             CHECK(!fs::exists(file));
@@ -649,6 +684,10 @@ int main(int argc, char** argv) {
             CHECK(read_file(file) == "1\n");
             StartMarker o;
             CHECK(o.begin(file).unfinished == 1);
+            o.game_ready(true);  // ready after a crash report: still counted
+            CHECK(read_file(file) == "2\n" && !o.active());
+            o.clean_exit();
+            CHECK(read_file(file) == "2\n");
         }
         std::ofstream(file) << "garbage";
         StartMarker g;
@@ -674,9 +713,25 @@ int main(int argc, char** argv) {
         CHECK(contains(r.json, "\"unfinished_starts\": 1"));
         CHECK(contains(r.json, "\"main_thread\": false"));
         CHECK(contains(r.json, "line two"));
-        CHECK(contains(r.json, "\"minidump\": null"));
+        CHECK(contains(r.json, "\"minidump\": \"20"));  // <time>.dmp
         CHECK(contains(r.text, "Verdict: in plugin crasher's code."));
-        CHECK(!r.dump && !r.pending_left);
+        CHECK(contains(r.text, "Minidump: 20"));
+        CHECK(r.dump && !r.pending_left);
+    });
+
+    // #82: EU4's filter kept the crashed thread and the game reached the menu;
+    // readiness reset the safe-mode count, and an access violation got no
+    // minidump (only a stack overflow had one).
+    run("crash capture: the game goes on to the menu after a crash on another thread (child process)", [&] {
+        const fs::path dir = root / "survive";
+        const ChildResult r = run_child("survive", dir);
+        CHECK(r.exit == 0x5AFE);
+        CHECK(contains(r.json, "\"unfinished_starts\": 1"));
+        CHECK(contains(r.json, "\"before_game_ready\": true"));
+        CHECK(read_file(dir / "unfinished-starts.txt") == "2\n");  // still counted: the next start is safe
+        CHECK(fs::exists(dir / "dump-while-running.txt"));       // the dump was kept before readiness
+        CHECK(contains(r.json, "\"minidump\": \"20"));
+        CHECK(r.dump && !r.pending_left);
     });
 
     run("crash capture: an illegal instruction in a plugin's byte patch (child process)", [&] {
