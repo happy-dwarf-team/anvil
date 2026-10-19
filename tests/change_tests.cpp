@@ -1,6 +1,6 @@
 // Change registry tests (design §8): chains, mid hooks, block replacements,
-// conflicts, shared byte patches, staging, handles, rollback and `*_at`, on
-// code written into scratch memory.
+// pointer swaps, conflicts, shared byte patches, staging, handles, rollback and
+// `*_at`, on code written into scratch memory.
 #include "core/changes.hpp"
 #include "test_support.hpp"
 
@@ -112,6 +112,24 @@ int detour_r(int x) {
     g_trace += 'r';
     return g_next_r(x) * 2;
 }
+
+// Pointer swaps: values a slot can hold, and plugins' previous cells.
+int g_values[4] = {};
+void* g_prev_a = nullptr;
+void* g_prev_b = nullptr;
+void* g_prev_c = nullptr;
+void* value(int i) { return &g_values[i]; }
+
+DWORD protection(const void* address) {
+    MEMORY_BASIC_INFORMATION mbi{};
+    VirtualQuery(address, &mbi, sizeof(mbi));
+    return mbi.Protect;
+}
+
+// Through a swapped function pointer: each reads its previous on every call.
+int shipped_fn(int x) { return x + 1; }
+int swapped_a(int x) { g_trace += 'a'; return reinterpret_cast<Fn>(g_prev_a)(x) + 100; }
+int swapped_b(int x) { g_trace += 'b'; return reinterpret_cast<Fn>(g_prev_b)(x) * 2; }
 
 }  // namespace
 
@@ -508,6 +526,126 @@ void change_tests() {
         }
         // Destroying the registry (tests only) removes its changes.
         CHECK(traced(f, 1) == 2 && std::memcmp(s.base + 0x40, kAddOne.data(), kAddOne.size()) == 0);
+    });
+
+    run("pointer swap: chain in load order, previous follows the removal of any link", [] {
+        Scratch s(0x2000);
+        uint64_t* const slot_ptr = reinterpret_cast<uint64_t*>(s.base + 0x1000);
+        *slot_ptr = reinterpret_cast<uint64_t>(value(0));
+        DWORD old = 0;
+        CHECK(VirtualProtect(s.base + 0x1000, 0x1000, PAGE_READONLY, &old));  // a read-only slot, as in .rdata
+        const uintptr_t slot = s.at(0x1000);
+        const auto now = [&] { return reinterpret_cast<void*>(*slot_ptr); };
+        ChangeRegistry reg(s.at(0), 0x2000);
+        const OwnerId a = reg.add_owner("a"), b = reg.add_owner("b"), c = reg.add_owner("c");
+        ChangeId ha = 0, hb = 0, hc = 0;
+        // Requested out of load order: the chain still follows the owners.
+        CHECK(reg.swap_pointer(c, in_image(slot), reinterpret_cast<uintptr_t>(value(0)), value(3), &g_prev_c, &hc) ==
+              ChangeStatus::Ok);
+        CHECK(now() == value(3) && g_prev_c == value(0));
+        CHECK(protection(s.base + 0x1000) == PAGE_READONLY);
+        CHECK(reg.swap_pointer(a, in_image(slot), 0, value(1), &g_prev_a, &ha) == ChangeStatus::Ok);
+        CHECK(reg.swap_pointer(b, in_image(slot), 0, value(2), &g_prev_b, &hb) == ChangeStatus::Ok);
+        CHECK(now() == value(1) && g_prev_a == value(2) && g_prev_b == value(3) && g_prev_c == value(0));
+        CHECK((reg.chain_at(slot) == std::vector<OwnerId>{a, b, c}));
+        CHECK(reg.describe(b) == std::vector<std::string>{"pointer swap rva 0x1000"});
+        uint64_t shipped = 0;
+        CHECK(reg.read_original(slot, &shipped, sizeof(shipped)) && shipped == reinterpret_cast<uint64_t>(value(0)));
+
+        // The middle link leaves: a's previous now holds c's value; b's keeps
+        // its last value (a thread may still pass through b).
+        CHECK(reg.remove(b, hb) == ChangeStatus::Ok);
+        CHECK(now() == value(1) && g_prev_a == value(3) && g_prev_b == value(3));
+        // The outermost link leaves: the slot holds c's value.
+        CHECK(reg.remove(a, ha) == ChangeStatus::Ok);
+        CHECK(now() == value(3) && g_prev_c == value(0));
+        // The innermost link leaves under a new outer one.
+        CHECK(reg.swap_pointer(a, in_image(slot), 0, value(1), &g_prev_a, &ha) == ChangeStatus::Ok);
+        CHECK(g_prev_a == value(3));
+        CHECK(reg.remove(c, hc) == ChangeStatus::Ok);
+        CHECK(now() == value(1) && g_prev_a == value(0));
+        CHECK(reg.remove(a, ha) == ChangeStatus::Ok);
+        CHECK(now() == value(0) && protection(s.base + 0x1000) == PAGE_READONLY);
+        CHECK(reg.chain_at(slot).empty());
+
+        // `previous` is optional; a staged swap leaves the slot alone, but its
+        // previous already holds the rest of the chain.
+        CHECK(reg.swap_pointer(c, in_image(slot), 0, value(3), nullptr, &hc) == ChangeStatus::Ok);
+        CHECK(reg.begin_group(a) == ChangeStatus::Ok);
+        CHECK(reg.swap_pointer(a, in_image(slot), 0, value(1), &g_prev_a) == ChangeStatus::Ok);
+        CHECK(now() == value(3) && g_prev_a == value(3));
+        CHECK(reg.commit_group(a) == ChangeStatus::Ok);
+        CHECK(now() == value(1));
+        CHECK(reg.rollback(a) == 1 && reg.rollback(c) == 1 && now() == value(0));
+
+        // The game set another pointer while nobody swapped it: that is the
+        // original for the next chain.
+        CHECK(VirtualProtect(s.base + 0x1000, 0x1000, PAGE_READWRITE, &old));
+        *slot_ptr = reinterpret_cast<uint64_t>(value(2));
+        CHECK(VirtualProtect(s.base + 0x1000, 0x1000, PAGE_READONLY, &old));
+        CHECK(reg.swap_pointer(a, in_image(slot), reinterpret_cast<uintptr_t>(value(0)), value(1), &g_prev_a) ==
+              ChangeStatus::BytesMismatch);
+        CHECK(reg.swap_pointer(a, in_image(slot), reinterpret_cast<uintptr_t>(value(2)), value(1), &g_prev_a, &ha) ==
+              ChangeStatus::Ok);
+        CHECK(now() == value(1) && g_prev_a == value(2));
+        CHECK(reg.remove(a, ha) == ChangeStatus::Ok && now() == value(2));
+    });
+
+    run("pointer swap: refusals, conflicts, executable and outside memory", [] {
+        Scratch s(0x2000);
+        Scratch elsewhere(0x1000);  // e.g. a Direct3D 9 vtable
+        void* const shipped_value = value(0);
+        std::memcpy(s.base + 0x200, &shipped_value, sizeof(shipped_value));
+        ChangeRegistry reg(s.at(0), 0x2000);
+        std::vector<std::string> refusals;
+        reg.set_refusal_sink([&](OwnerId, const std::string& m) { refusals.push_back(m); });
+        const OwnerId a = reg.add_owner("a"), b = reg.add_owner("b");
+        alignas(8) uint8_t cells[16] = {};
+        CHECK(reg.swap_pointer(a, in_image(s.at(0x204)), 0, value(1), &g_prev_a) == ChangeStatus::UnsafeSite);
+        CHECK(refusals.back() == "pointer swap rva 0x204: not 8-byte aligned, so not atomic");
+        CHECK(reg.swap_pointer(a, in_image(s.at(0x200)), 0, value(1), reinterpret_cast<void**>(cells + 4)) ==
+              ChangeStatus::InvalidArgument);  // an unaligned previous
+        CHECK(reg.swap_pointer(a, in_image(s.at(0x1FFC)), 0, value(1), &g_prev_a) == ChangeStatus::InvalidArgument);
+        CHECK(reg.swap_pointer(a, outside(s.at(0x200)), 0, value(1), &g_prev_a) == ChangeStatus::NotDeclared);
+        CHECK(reg.swap_pointer(9, in_image(s.at(0x200)), 0, value(1), &g_prev_a) == ChangeStatus::InvalidArgument);
+        CHECK(reg.swap_pointer(a, in_image(s.at(0x200)), reinterpret_cast<uintptr_t>(value(3)), value(1), &g_prev_a) ==
+              ChangeStatus::BytesMismatch);
+        CHECK(refusals.back().find("pointer swap rva 0x200: holds at 0x") == 0);
+
+        // Executable read-only memory stays executable.
+        DWORD old = 0;
+        CHECK(VirtualProtect(s.base, 0x1000, PAGE_EXECUTE_READ, &old));
+        ChangeId ha = 0;
+        CHECK(reg.swap_pointer(a, in_image(s.at(0x200)), reinterpret_cast<uintptr_t>(value(0)), value(1), &g_prev_a,
+                               &ha) == ChangeStatus::Ok);
+        CHECK(*reinterpret_cast<void**>(s.base + 0x200) == value(1) && protection(s.base) == PAGE_EXECUTE_READ);
+        CHECK(VirtualProtect(s.base, 0x1000, PAGE_EXECUTE_READWRITE, &old));
+        // The slot is owned against other kinds and other addresses.
+        const uint8_t two[2] = {0x90, 0x90};
+        CHECK(reg.patch_bytes(b, in_image(s.at(0x206)), two, 2) == ChangeStatus::Conflict);
+        CHECK(refusals.back() == "byte patch rva 0x206 (2 B) overlaps the pointer swap rva 0x200 (8 B) of 'a'; refused");
+        CHECK(reg.patch_bytes(b, in_image(s.at(0x1FE)), two, 2) == ChangeStatus::Ok);
+        CHECK(reg.swap_pointer(a, in_image(s.at(0x1F8)), 0, value(1), &g_prev_b) == ChangeStatus::Conflict);
+        CHECK(reg.remove(a, ha) == ChangeStatus::Ok && *reinterpret_cast<void**>(s.base + 0x200) == value(0));
+        CHECK(reg.rollback(b) == 1);
+
+        // A function pointer outside the image: callers pass on through previous.
+        const uintptr_t entry = elsewhere.at(0x10);
+        const Fn shipped = &shipped_fn;
+        std::memcpy(elsewhere.base + 0x10, &shipped, sizeof(shipped));
+        const auto call = [&](int x) {
+            g_trace.clear();
+            return (*reinterpret_cast<Fn*>(entry))(x);
+        };
+        ChangeId hb = 0;
+        CHECK(reg.swap_pointer(b, outside(entry), reinterpret_cast<uintptr_t>(shipped),
+                               reinterpret_cast<void*>(&swapped_b), &g_prev_b, &hb) == ChangeStatus::Ok);
+        CHECK(reg.swap_pointer(a, outside(entry), 0, reinterpret_cast<void*>(&swapped_a), &g_prev_a, &ha) ==
+              ChangeStatus::Ok);
+        CHECK(call(1) == 104 && g_trace == "ab");
+        CHECK(reg.remove(b, hb) == ChangeStatus::Ok);
+        CHECK(call(1) == 102 && g_trace == "a");
+        CHECK(reg.rollback(a) == 1 && call(1) == 2 && g_trace.empty());
     });
 
     run("mid hooks: registers written in the callback are loaded on the way out", [] {

@@ -21,7 +21,7 @@ enum class ChangeStatus {
     NotDeclared,    // a raw pointer into eu4.exe, or an unknown symbol
     WrongKind,      // e.g. a function hook on a data symbol, a redirect on a site that is not `call rel32`
     Conflict,       // overlaps another change at a different address
-    UnsafeSite,     // the stolen bytes contain JRCXZ / LOOP* or do not decode
+    UnsafeSite,     // the stolen bytes contain JRCXZ / LOOP* or do not decode; a slot not 8-byte aligned
     BytesMismatch,  // expected bytes differ from the original ones
     OutOfMemory,
     WrongPhase,
@@ -32,9 +32,17 @@ enum class ChangeStatus {
 const char* change_status_name(ChangeStatus status);
 
 // Kinds in this registry. Function hooks, mid hooks and block replacements at
-// one address share one code site and its SafetyHook hook; pointer swaps (#44)
-// will chain like import replacements but on any declared slot.
-enum class ChangeKind { FunctionHook, MidHook, BlockReplacement, CallRedirect, BytePatch, ImportReplacement };
+// one address share one code site and its SafetyHook hook; pointer swaps chain
+// like import replacements but on any declared slot.
+enum class ChangeKind {
+    FunctionHook,
+    MidHook,
+    BlockReplacement,
+    CallRedirect,
+    BytePatch,
+    PointerSwap,
+    ImportReplacement,
+};
 
 const char* change_kind_name(ChangeKind kind);
 
@@ -119,6 +127,15 @@ public:
                                void** next, ChangeId* out = nullptr);
     ChangeStatus patch_bytes(OwnerId owner, const ChangeTarget& target, const void* bytes, size_t size,
                              ChangeId* out = nullptr);
+    // The 8-byte aligned pointer at target.address holds `value`, stored
+    // atomically, also in read-only memory. expected_value != 0 must be the
+    // original pointer (a slot's `points_to`). `previous` (optional, aligned)
+    // receives the next value in the chain: the following link's value or the
+    // original pointer. The registry keeps writing the current one there while
+    // the change lives, so it must stay valid until the change is removed, and
+    // the plugin reads it each time it passes on.
+    ChangeStatus swap_pointer(OwnerId owner, const ChangeTarget& target, uintptr_t expected_value, void* value,
+                              void** previous, ChangeId* out = nullptr);
     // An import of `image` (eu4.exe in the game), module case-insensitive.
     ChangeStatus replace_import(OwnerId owner, HMODULE image, const char* module, const char* function,
                                 void* replacement, void** next, ChangeId* out = nullptr);
@@ -179,11 +196,11 @@ private:
     ChangeStatus enable(std::vector<ChangeId> ids);
     bool relink(Site& site);
     void publish(Site& site, uintptr_t resume, const std::vector<Change*>& callbacks);
+    static void point(const Change& link, uintptr_t target);
     uintptr_t successor(const Site& site, const Change& link) const;
     bool live(const Site& site) const;
     size_t extent(const Site& site) const;
     std::string site_name(const Site& site) const;
-    bool installed_bytes(const Site& site, const std::vector<uint8_t>*& original) const;
     uint8_t* new_stub(uintptr_t target);
     bool in_image(uintptr_t address, size_t size) const;
     bool read_original_locked(uintptr_t address, void* out, size_t size) const;
