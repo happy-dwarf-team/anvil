@@ -64,6 +64,18 @@ cmake --build build --config Release --target my_plugin-deploy
 CI: build, then `anvil check <plugin folder> --format github` (from
 `bin/anvil.exe`) prints annotations on the repository's files.
 
+## Rust
+
+A Rust plugin is a `cdylib` that depends on the
+[`anvil-sys`](https://crates.io/crates/anvil-sys) crate (the raw API, the same version
+as the release) and exports `anvil_plugin_load`. `bin/anvil.exe gen --lang rust
+symbols.toml <out-dir>` writes `symbols.gen.rs`: symbol ids, a function type per
+`signature` and the values. `examples/hello-rust` in the repository (and in the
+release package, under `anvil/docs/examples`) shows it with a `build.rs`; link the C
+runtime statically (`-C target-feature=+crt-static`) and catch panics at every
+function Anvil or the game calls. See
+[docs/design.md §9](../docs/design.md#9-plugin-api-2).
+
 Release assets come with `SHA256SUMS.txt` and a build attestation
 (`gh attestation verify anvil-sdk-windows-x64.zip -R happy-dwarf-team/anvil`).
 The archive is tied to the Anvil release it comes from; a plugin whose
