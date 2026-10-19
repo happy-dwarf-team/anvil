@@ -387,6 +387,35 @@ int main(int argc, char** argv) {
         CHECK(none.error.empty() && contains(none.c, "declares no settings") && contains(none.cpp, "namespace cfg {"));
     });
 
+    run("gen rust: settings ids, enum options and key flags", [] {
+        const auto file = parse_settings_text(
+            "[setting.budget]\ntype = \"int\"\ndefault = 5\nmin = 1\nmax = 9\nlabel = \"Budget\"\n"
+            "[setting.mode]\ntype = \"enum\"\nvalues = [{ name = \"fast\", label = \"Fast one\" }, { name = \"slow\" }]\n"
+            "default = \"slow\"\nlabel = \"Mode\"\nrestart = false\n"
+            "[setting.toggle]\ntype = \"key\"\ndefault = \"\"\nlabel = \"Toggle\"\n");
+        CHECK(file.file.has_value());
+        const GeneratedHeaders h = generate_settings_headers(*file.file, "settings.toml", false, false, true);
+        CHECK(h.error.empty() && h.c.empty() && h.cpp.empty());
+        CHECK(contains(h.rust, "pub const BUDGET: ::anvil_sys::AnvilSetting = 0;"));
+        CHECK(contains(h.rust, "pub const MODE: ::anvil_sys::AnvilSetting = 1;"));
+        CHECK(contains(h.rust, "pub const TOGGLE: ::anvil_sys::AnvilSetting = 2;"));
+        CHECK(contains(h.rust, "/// Fast one\npub const MODE_FAST: i64 = 0;"));
+        CHECK(contains(h.rust, "pub const MODE_SLOW: i64 = 1;"));
+        CHECK(contains(h.rust, "pub const KEY_CTRL: i64 = 0x200;"));
+        CHECK(!contains(generate_settings_headers(*parse_settings_text("[setting.a]\ntype = \"bool\"\ndefault = true\nlabel = \"A\"\n").file,
+                                                  "settings.toml", false, false, true)
+                            .rust,
+                        "KEY_"));
+        // Names the module cannot hold twice.
+        const auto clash = parse_settings_text(
+            "[setting.m]\ntype = \"enum\"\nvalues = [{ name = \"b\" }, { name = \"c\" }]\ndefault = \"b\"\nlabel = \"M\"\n"
+            "[setting.m_b]\ntype = \"bool\"\ndefault = true\nlabel = \"X\"\n");
+        const GeneratedHeaders c = generate_settings_headers(*clash.file, "settings.toml", false, false, true);
+        CHECK(contains(c.error, "setting m: option b gives M_B, which setting m_b already gives") && c.line == 1);
+        const auto none = generate_settings_headers(SettingsFile{}, "settings.toml", false, false, true);
+        CHECK(none.error.empty() && contains(none.rust, "declares no settings"));
+    });
+
     run("check --exe verifies, writes symbols.lock, and check without it reads the lock", [&] {
         const fs::path dir = fx.plugin("good", kGoodSymbols);
         const auto missing = fx.check(dir, false);
@@ -578,6 +607,12 @@ int main(int argc, char** argv) {
                                               " " + quoted(set_out));
         CHECK(both.exit_code == 0 && contains(both.out, "settings.gen.hpp: written") && fs::exists(set_out / "symbols.gen.h"));
         CHECK(contains(read(set_out / "settings.gen.h"), "CFG_MODE_OFF = 0,"));
+        const fs::path rust_set = fx.root / "gen-set-rust";
+        CHECK(run_anvil(anvil, "gen --lang rust " + quoted(good / "symbols.toml") + " " + quoted(fx.root / "set" / "settings.toml") +
+                                   " " + quoted(rust_set))
+                  .exit_code == 0);
+        CHECK(contains(read(rust_set / "settings.gen.rs"), "pub const MODE_OFF: i64 = 0;") &&
+              fs::exists(rust_set / "symbols.gen.rs") && !fs::exists(rust_set / "settings.gen.h"));
         const fs::path by_content = fx.root / "gen-options";
         CHECK(run_anvil(anvil, "gen --lang cpp " + quoted(fx.root / "set" / "options.toml") + " " + quoted(by_content)).exit_code == 0);
         CHECK(fs::exists(by_content / "settings.gen.hpp") && !fs::exists(by_content / "settings.gen.h"));

@@ -8,6 +8,11 @@ mod sym {
     include!(concat!(env!("OUT_DIR"), "/symbols.gen.rs"));
 }
 
+#[allow(dead_code)]
+mod cfg {
+    include!(concat!(env!("OUT_DIR"), "/settings.gen.rs"));
+}
+
 use core::ffi::{
     c_char, c_int, c_long, c_longlong, c_schar, c_short, c_uchar, c_uint, c_ulong, c_ulonglong,
     c_ushort, c_void,
@@ -107,4 +112,18 @@ const _: () = {
     assert!(sym::TICK_SLOT == 11);
     assert!(sym::ROOT_AND_DATE_ROOT == 0x233FE78);
     assert!(sym::ROOT_AND_DATE_DATE_OFFSET == 0x1DD0);
+};
+
+// Settings: ids in declaration order, enum option indices and the key flags.
+const _: anvil_sys::AnvilSetting = cfg::MODE;
+const _: () = {
+    assert!(cfg::BUDGET_MB == 0);
+    assert!(cfg::MODE == 1);
+    assert!(cfg::TOGGLE == 2);
+    assert!(cfg::MODE_FAST == 0);
+    assert!(cfg::MODE_SLOW == 1);
+    assert!(cfg::KEY_SHIFT == 0x100);
+    assert!(cfg::KEY_CTRL == 0x200);
+    assert!(cfg::KEY_ALT == 0x400);
+    assert!(cfg::KEY_VK_MASK == 0xFF);
 };
