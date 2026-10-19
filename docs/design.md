@@ -39,7 +39,7 @@ This is verified for direct starts and through the Paradox launcher (EU4 engine 
     anvil.toml                         enabled, disabled_plugins, profile, log_level, allow_ironman/allow_multiplayer (§13)
     anvil.log, anvil.prev.log
     trust.toml                         approvals of Workshop plugins (§14)
-    crashes/<time>.json|.txt|.dmp      last 10 crash reports (§12); .dmp on a stack overflow
+    crashes/<time>.json|.txt|.dmp      last 10 crash reports with minidumps (§12)
     plugins/<plugin-id>/               local plugins: trusted by placement
         plugin.toml  symbols.toml  settings.toml  <entry>.dll  (+ read-only files)
     data/<plugin-id>/                  writable per plugin; settings.toml holds the player's values
@@ -296,7 +296,7 @@ The C ABI is [`include/anvil/anvil_plugin.h`](../include/anvil/anvil_plugin.h) (
 1. The proxy is set up (always); the entry-point hook is placed in `eu4.exe` only.
 2. At the entry point: no `anvil/` folder means nothing happens. `ANVIL_DISABLE=1` or `enabled = false` means the log only.
 3. **Safe mode:** two consecutive crashes before the game is ready (`anvil-game.ready`, §12, §13.1) mean this start loads no plugins except the standard ones the overlay needs to explain it.
-   - Each start counts itself in `anvil/data/anvil/unfinished-starts.txt` before anything can crash. `anvil-game.ready` removes the file; an exit before it without a crash puts the previous count back (a crash: a report was written, or a fatal-looking exception came in the last 30 s, which the game's own handler may have caught). A start that crashed, hung or was killed before the game was ready stays counted, whatever caught the crash.
+   - Each start counts itself in `anvil/data/anvil/unfinished-starts.txt` before anything can crash. `anvil-game.ready` removes the file, unless this start already wrote a crash report: EU4's handler may let the game go on to the menu after a crash on another thread, and such a start stays counted. An exit before readiness without a crash puts the previous count back (a crash: a report was written, or a fatal-looking exception came in the last 30 s, which the game's own handler may have caught). A start that crashed, hung or was killed before the game was ready stays counted, whatever caught the crash.
    - A count of 2 makes this start safe: the file is removed and the log says why. The plugins are listed as skipped ("safe mode"). The next start loads them again.
    - Without `anvil-game` (disabled or missing) there is no ready signal, so a crash at any time of a session counts. The standard plugins kept in safe mode (`anvil-game`, `anvil-overlay`) join the list with the overlay; today it is empty.
 4. The build is identified.
@@ -347,9 +347,10 @@ Decided in [Crash attribution to plugins](https://github.com/happy-dwarf-team/an
     - At `anvil-game.ready` the core checks that its filter is still the top-level one. A filter set through another module's import stays on top, and the log names it.
   - A helper thread prepared at start-up writes every report while the crashed thread waits. It has its own stack, `MiniDumpWriteDump` loaded and the minidump file already open.
     - The report is built in fixed buffers: no allocation and no lock. The registry is asked with try-locks, and the crashed thread's memory is read with `ReadProcessMemory`. A fault while writing leaves a partial report with a note.
-    - On a stack overflow the VEH hands over at once, because the filter may have no stack left. The helper adds a small minidump. The game's main thread gets a 64 KB stack guarantee for the handlers.
+    - After the report the helper adds a small minidump (`MiniDumpNormal` with thread info and unloaded modules) and rewrites the report to name it. A dump writer stuck on a lock of the crashed thread costs only the dump. Until then the file waits as `pending-<pid>.dmp`, which the system deletes when the process ends without a kept dump.
+    - On a stack overflow the VEH hands over at once, because the filter may have no stack left. The game's main thread gets a 64 KB stack guarantee for the handlers.
   - Not caught: `__fastfail` and `/GS` failures (they bypass both), `TerminateProcess`, and an exception that a frame handler of the game catches before the filter. One report per process.
-- **Report:** `anvil/crashes/<time>.json` and `.txt`, keeping the last 10. It contains:
+- **Report:** `anvil/crashes/<time>.json` and `.txt`, with the minidump `<time>.dmp`, keeping the last 10. It contains:
   - the code and the address as module + offset;
   - for `eu4.exe` addresses, the nearest declared symbol and whether a plugin's change covers it;
   - for stubs and trampolines, the change, plugin and symbol;

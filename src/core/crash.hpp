@@ -26,10 +26,13 @@ namespace anvil::crash {
 //  - A helper thread, started here with its own stack, the minidump writer
 //    loaded and a minidump file already open, writes every report while the
 //    crashed thread waits, so a crash with little stack or a broken heap is
-//    still written; on a stack overflow it adds a small minidump.
+//    still written. After the report it adds a small minidump and names it
+//    in the report.
 //
-// Reports go to <crash_dir>/<time>.json and .txt (and .dmp); the last 10 are
-// kept. Not caught: __fastfail and /GS failures (they bypass both handlers),
+// Reports go to <crash_dir>/<time>.json, .txt and .dmp; the last 10 are kept.
+// While the process runs, the minidump file waits as pending-<pid>.dmp, which
+// the system deletes when the process ends unless a crash kept it. Not
+// caught: __fastfail and /GS failures (they bypass both handlers),
 // TerminateProcess, and exceptions a frame handler of the game catches first.
 struct Setup {
     std::filesystem::path crash_dir;  // anvil/crashes
@@ -48,6 +51,11 @@ bool install(const Setup& setup, std::string& error);
 
 // The game is ready: later reports say "after game_ready".
 void set_game_ready();
+
+// A report was written (or is being written) in this process. Such a start
+// is not clean even when the game goes on: EU4's handler may let the process
+// run after a crash on another thread.
+bool reported();
 
 // A report was written, or a fatal-looking exception came in the last 30
 // seconds (one the game's own handler caught before exiting). The start

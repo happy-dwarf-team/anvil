@@ -70,10 +70,15 @@ std::string fmt_ms(double ms) {
 }
 
 // The game is ready (anvil-game.ready): logged, and this start no longer
-// counts for safe mode. Without anvil-game there is no such event.
+// counts for safe mode, unless it already wrote a crash report. Without
+// anvil-game there is no such event.
 void on_game_ready(const char*, const void*, void*) {
     log_info("game ready at " + fmt_ms(elapsed_ms()));
-    g_runtime->start_marker.game_ready();
+    const bool reported = crash::reported();
+    if (reported && g_runtime->start_marker.active()) {
+        log_warning("the game is ready after a crash report; this start still counts for safe mode");
+    }
+    g_runtime->start_marker.game_ready(reported);
     crash::set_game_ready();
     std::string by;
     if (!crash::check_filter(by)) {
