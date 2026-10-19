@@ -95,16 +95,21 @@ function(anvil_gen_headers out_var symbols dir)
     set(${out_var} ${dir}/symbols.gen.h ${dir}/symbols.gen.hpp PARENT_SCOPE)
 endfunction()
 
-# A plugin of this tree, laid out as Anvil loads it: <build>/plugins/<id>/ with
-# the DLL, plugin.toml and symbols.toml, one folder for every configuration.
-# Built with the headers of include/ and those `anvil gen` writes, without the
-# SDK (#53), warning free.
+# The tree builds its examples the way plugin repositories do: through the
+# AnvilPlugin package of the SDK (sdk/cmake), pointed at this tree's headers and
+# `anvil` target. The folder <build>/plugin/<id>/ holds each plugin as Anvil
+# loads it (one folder for every configuration).
+set(ANVIL_SDK_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
+set(ANVIL_SDK_TOOL anvil)
+set(ANVIL_SDK_VERSION ${PROJECT_VERSION})
+include(sdk/cmake/AnvilPluginConfig.cmake)
+
+# A test plugin of this tree: like anvil_add_plugin, but with a symbols.toml
+# shared by several plugins (tests/plugins/symbols.toml), so it is copied
+# rather than read from the plugin folder. Warning free.
 function(anvil_add_tree_plugin target)
     cmake_parse_arguments(ARG "" "ID;DIR;OUTPUT_NAME;SYMBOLS" "SOURCES" ${ARGN})
-    if(NOT ARG_SYMBOLS)
-        set(ARG_SYMBOLS ${ARG_DIR}/symbols.toml)
-    endif()
-    set(out ${CMAKE_BINARY_DIR}/plugins/${ARG_ID})
+    set(out ${CMAKE_BINARY_DIR}/plugin/${ARG_ID})
     anvil_gen_headers(headers ${ARG_SYMBOLS} ${CMAKE_CURRENT_BINARY_DIR}/gen/${ARG_ID})
     add_library(${target} SHARED ${ARG_SOURCES} ${headers})
     target_include_directories(${target} PRIVATE include ${CMAKE_CURRENT_BINARY_DIR}/gen/${ARG_ID})
@@ -116,15 +121,13 @@ function(anvil_add_tree_plugin target)
     configure_file(${ARG_SYMBOLS} ${out}/symbols.toml COPYONLY)
 endfunction()
 
-# The hello plugins in C and C++ (C++20, the wrapper's minimum), built as a
-# plugin repository would build them.
+# The hello plugins in C and C++: plain plugin repositories (CMakeLists.txt,
+# plugin.toml, symbols.toml, sources) that find the package already loaded.
 if(ANVIL_BUILD_EXAMPLES)
-    anvil_add_tree_plugin(hello_c ID hello-c DIR ${CMAKE_CURRENT_SOURCE_DIR}/examples/hello-c OUTPUT_NAME hello_c
-        SOURCES examples/hello-c/hello.c)
-    set_target_properties(hello_c PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
-    anvil_add_tree_plugin(hello_cpp ID hello-cpp DIR ${CMAKE_CURRENT_SOURCE_DIR}/examples/hello-cpp
-        OUTPUT_NAME hello_cpp SOURCES examples/hello-cpp/hello.cpp)
-    set_target_properties(hello_cpp PROPERTIES CXX_STANDARD 20)
+    set(CMAKE_COMPILE_WARNING_AS_ERROR ON)
+    add_subdirectory(examples/hello-c)
+    add_subdirectory(examples/hello-cpp)
+    unset(CMAKE_COMPILE_WARNING_AS_ERROR)
 endif()
 
 # anvil_bench: microbenchmarks per kind of change and of the start-up parsers
@@ -185,7 +188,7 @@ if(ANVIL_BUILD_TESTS)
         add_executable(anvil_plugin_tests tests/plugin_tests.cpp)
         target_link_libraries(anvil_plugin_tests PRIVATE anvil_loader)
         add_dependencies(anvil_plugin_tests anvil_probe_plugin anvil_throwing_plugin hello_c hello_cpp)
-        add_test(NAME anvil_plugin_tests COMMAND anvil_plugin_tests ${CMAKE_BINARY_DIR}/plugins)
+        add_test(NAME anvil_plugin_tests COMMAND anvil_plugin_tests ${CMAKE_BINARY_DIR}/plugin)
     endif()
 
     # The wrapper's signature checks: each source must fail to compile with
@@ -217,7 +220,7 @@ if(ANVIL_BUILD_TESTS)
 endif()
 
 # Release layout (cmake --install ... --component anvil): <prefix>/version.dll, <prefix>/anvil/...
-# anvil.exe is not part of the package yet; it ships with the SDK archive (design §16).
+# anvil.exe is not part of this package; it ships with the SDK archive (component sdk).
 install(TARGETS version_dll RUNTIME DESTINATION . COMPONENT anvil)
 install(FILES dist/anvil.toml DESTINATION anvil COMPONENT anvil)
 install(FILES dist/plugins-README.txt DESTINATION anvil/plugins RENAME README.txt COMPONENT anvil)
@@ -232,3 +235,20 @@ install(FILES ${tomlplusplus_SOURCE_DIR}/LICENSE DESTINATION anvil/docs/third-pa
 install(FILES ${safetyhook_SOURCE_DIR}/LICENSE DESTINATION anvil/docs/third-party RENAME safetyhook-LICENSE.txt COMPONENT anvil)
 install(FILES ${zydis_SOURCE_DIR}/LICENSE DESTINATION anvil/docs/third-party RENAME zydis-LICENSE.txt COMPONENT anvil)
 install(FILES ${zydis_SOURCE_DIR}/dependencies/zycore/LICENSE DESTINATION anvil/docs/third-party RENAME zycore-LICENSE.txt COMPONENT anvil)
+
+# SDK archive (cmake --install ... --component sdk): what plugin authors fetch
+# (design §16). FetchContent_MakeAvailable runs the CMakeLists.txt at its root;
+# find_package(AnvilPlugin) reads cmake/. The version file lets
+# find_package(AnvilPlugin 1.0) ask for a compatible release.
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/sdk/AnvilPluginConfigVersion.cmake
+    VERSION ${PROJECT_VERSION} COMPATIBILITY SameMajorVersion ARCH_INDEPENDENT)
+install(FILES include/anvil/anvil_plugin.h include/anvil/anvil.hpp include/anvil/anvil_symbols.hpp
+    DESTINATION include/anvil COMPONENT sdk)
+install(TARGETS anvil RUNTIME DESTINATION bin COMPONENT sdk)
+install(FILES sdk/cmake/AnvilPluginConfig.cmake ${CMAKE_CURRENT_BINARY_DIR}/sdk/AnvilPluginConfigVersion.cmake
+    DESTINATION cmake COMPONENT sdk)
+install(FILES sdk/CMakeLists.txt sdk/README.md version.txt LICENSE DESTINATION . COMPONENT sdk)
+install(FILES ${tomlplusplus_SOURCE_DIR}/LICENSE DESTINATION third-party RENAME tomlplusplus-LICENSE.txt COMPONENT sdk)
+install(FILES ${zydis_SOURCE_DIR}/LICENSE DESTINATION third-party RENAME zydis-LICENSE.txt COMPONENT sdk)
+install(FILES ${zydis_SOURCE_DIR}/dependencies/zycore/LICENSE DESTINATION third-party RENAME zycore-LICENSE.txt COMPONENT sdk)
