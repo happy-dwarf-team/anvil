@@ -141,18 +141,14 @@ function(anvil_add_plugin target)
         endif()
         set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${settings_path}")
         list(APPEND copied "${settings_path}")
-        # The settings accessors (settings.gen.h/.hpp) come with the settings
-        # service of `anvil gen`; until the SDK's tool writes them there is
-        # nothing to generate here.
-        if(ANVIL_SDK_GEN_SETTINGS)
-            add_custom_command(
-                OUTPUT "${gen_dir}/settings.gen.h" "${gen_dir}/settings.gen.hpp"
-                COMMAND ${ANVIL_SDK_TOOL} gen --settings "${settings_path}" "${gen_dir}"
-                DEPENDS ${ANVIL_SDK_TOOL} "${settings_path}"
-                COMMENT "anvil gen ${settings}"
-                VERBATIM)
-            list(APPEND generated "${gen_dir}/settings.gen.h" "${gen_dir}/settings.gen.hpp")
-        endif()
+        # The typed accessors: settings.gen.h (CFG_<NAME>) and settings.gen.hpp (cfg::<name>).
+        add_custom_command(
+            OUTPUT "${gen_dir}/settings.gen.h" "${gen_dir}/settings.gen.hpp"
+            COMMAND ${ANVIL_SDK_TOOL} gen --settings "${settings_path}" "${gen_dir}"
+            DEPENDS ${ANVIL_SDK_TOOL} "${settings_path}"
+            COMMENT "anvil gen ${settings}"
+            VERBATIM)
+        list(APPEND generated "${gen_dir}/settings.gen.h" "${gen_dir}/settings.gen.hpp")
     endif()
 
     add_library(${target} SHARED ${ARG_SOURCES} ${generated})

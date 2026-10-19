@@ -2,6 +2,7 @@
 
 #include "changes.hpp"
 #include "manifest.hpp"
+#include "plugin_settings.hpp"
 #include "plugin_symbols.hpp"
 #include "seh_guard.hpp"
 #include "services.hpp"
@@ -25,6 +26,7 @@ struct AnvilPlugin {
     anvil::Manifest manifest;
     anvil::OwnerId owner = 0;      // in the change registry; ids follow the load order
     anvil::PluginSymbols symbols;  // verified symbols.toml, by AnvilSymbol
+    anvil::PluginSettings settings;  // settings.toml and the player's values, by AnvilSetting
     std::wstring plugin_dir;
     std::wstring data_dir;
     HMODULE module = nullptr;
@@ -61,7 +63,8 @@ struct LoadOutcome {
 
 // Calls anvil_plugin_load as its own group (design §8.4): the changes it
 // requests are staged and enabled together when it returns ANVIL_OK;
-// otherwise none are, and the plugin's services and subscriptions are dropped.
+// otherwise none are, and the plugin's services and subscriptions (events and
+// settings) are dropped.
 LoadOutcome run_plugin_load(AnvilPlugin& plugin, const AnvilHost& host, PluginLoadFn fn);
 
 }  // namespace anvil

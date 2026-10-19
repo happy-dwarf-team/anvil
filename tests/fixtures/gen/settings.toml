@@ -1,0 +1,46 @@
+# Every type of setting (design §5.3), for anvil gen (tests/gen_compile.*).
+[setting.enabled]
+type = "bool"
+default = true
+label = "Enabled"
+restart = false
+
+[setting.budget_mb]
+type = "int"
+default = 1024
+min = 64
+max = 8192
+step = 64
+label = "RAM prefetch budget (MB)"
+description = "RAM for unpacked archive members the game has not taken yet."
+group = "RAM prefetch"
+
+[setting.scale]
+type = "float"
+default = 1
+min = 0.5
+max = 2.5
+step = 0.25
+label = "Scale"
+restart = false
+
+[setting.mode]
+type = "enum"
+values = [
+    { name = "off", label = "Off" },
+    { name = "verify", label = "Verify only" },
+    { name = "on" },
+]
+default = "verify"
+label = "Mode"
+
+[setting.greeting]
+type = "string"
+default = "Hello, \"world\"?? \\ é */"
+label = "Greeting"
+
+[setting.panel_key]
+type = "key"
+default = "Ctrl+Shift+F12"
+label = "Panel key"
+restart = false

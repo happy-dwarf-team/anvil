@@ -13,6 +13,9 @@
 //   - anvil::Host is a stateless value: anvil::Host{} works on any thread once
 //     the plugin is loading, also inside hooks and in threads it starts.
 //   - anvil::Change is a move-only handle: destroying it removes the change.
+//   - Typed settings from the header `anvil gen` writes (settings.gen.hpp):
+//     cfg::<name>.get(), and Host::subscribe_setting for restart = false
+//     settings.
 //
 // Function-hook detours, redirect targets and import replacements are plain
 // functions the game calls directly, so no adapter stands between them and the
@@ -48,8 +51,8 @@ constexpr const char* result_name(AnvilResult result) noexcept {
     switch (result) {
     case ANVIL_OK: return "ok";
     case ANVIL_ERROR_INVALID_ARGUMENT: return "invalid argument";
-    case ANVIL_ERROR_NOT_DECLARED: return "not declared in symbols.toml";
-    case ANVIL_ERROR_WRONG_KIND: return "wrong kind of symbol";
+    case ANVIL_ERROR_NOT_DECLARED: return "not declared in symbols.toml or settings.toml";
+    case ANVIL_ERROR_WRONG_KIND: return "wrong kind of symbol or setting";
     case ANVIL_ERROR_CONFLICT: return "conflict with another change";
     case ANVIL_ERROR_UNSAFE_SITE: return "unsafe site";
     case ANVIL_ERROR_BYTES_MISMATCH: return "bytes mismatch";
@@ -200,6 +203,29 @@ template <class F> struct EventCallback {
     }
 };
 
+// A setting subscription's callable: gets the new value (or nothing) on the
+// thread that changed it. Kept for the process.
+template <class S, class F> struct SettingCallback {
+    F fn;
+    S setting;
+    std::atomic<bool> reported{false};
+
+    static void invoke(AnvilSetting, void* context) noexcept {
+        auto* self = static_cast<SettingCallback*>(context);
+        try {
+            if constexpr (std::invocable<F&, typename S::Value>) {
+                self->fn(self->setting.get());
+            } else {
+                self->fn();
+            }
+        } catch (const std::exception& e) {
+            report(self->reported, "setting", S::setting_name, e.what());
+        } catch (...) {
+            report(self->reported, "setting", S::setting_name, "an unknown exception");
+        }
+    }
+};
+
 template <class F>
 concept CpuCallable = std::invocable<F&, Cpu&> || std::invocable<F&>;
 template <class F>
@@ -294,6 +320,52 @@ private:
     friend class Host;
     alignas(8) mutable void* previous_ = nullptr;
     Change change_;
+};
+
+// A key binding (settings.toml type "key", e.g. "Ctrl+Shift+F12"): the
+// Windows virtual-key code with the modifiers above it, as the Win32 hot-key
+// control encodes them. 0 is no binding.
+struct Key {
+    static constexpr std::int64_t shift_flag = 0x100;
+    static constexpr std::int64_t ctrl_flag = 0x200;
+    static constexpr std::int64_t alt_flag = 0x400;
+
+    std::int64_t code = 0;
+
+    constexpr int vk() const noexcept { return static_cast<int>(code & 0xFF); }
+    constexpr bool shift() const noexcept { return (code & shift_flag) != 0; }
+    constexpr bool ctrl() const noexcept { return (code & ctrl_flag) != 0; }
+    constexpr bool alt() const noexcept { return (code & alt_flag) != 0; }
+    constexpr explicit operator bool() const noexcept { return code != 0; }
+    friend constexpr bool operator==(const Key&, const Key&) = default;
+};
+
+// A setting of settings.toml, as settings.gen.hpp declares it (cfg::<name>):
+// get() reads the value Anvil validated (the default, the player's value or
+// an ANVIL_<ID>_<NAME> override). T is bool, std::int64_t, double,
+// std::string, anvil::Key or the setting's generated enum class.
+template <class T> struct Setting {
+    using Value = T;
+    AnvilSetting id;
+
+    T get() const {
+        const AnvilHost& h = detail::host();
+        if constexpr (std::is_same_v<T, bool>) {
+            return h.setting_bool(detail::self(), id) != 0;
+        } else if constexpr (std::is_same_v<T, std::int64_t>) {
+            return h.setting_int(detail::self(), id);
+        } else if constexpr (std::is_same_v<T, double>) {
+            return h.setting_float(detail::self(), id);
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            const char* text = h.setting_string(detail::self(), id);
+            return text != nullptr ? std::string(text) : std::string();
+        } else if constexpr (std::is_same_v<T, Key>) {
+            return Key{h.setting_int(detail::self(), id)};
+        } else {
+            static_assert(std::is_enum_v<T>, "anvil::Setting<T>: T must be a type settings.gen.hpp uses");
+            return static_cast<T>(h.setting_int(detail::self(), id));
+        }
+    }
 };
 
 // The host, as a stateless value: copy it, capture it, or write anvil::Host{}
@@ -581,6 +653,25 @@ public:
     }
     void publish(const char* event, const void* payload = nullptr) const {
         detail::check(c_api().publish(self(), event, payload), "publish", event);
+    }
+
+    // --- settings (settings.gen.hpp) ----------------------------------------------
+
+    // `handler(new value)` or `handler()` runs after a restart = false setting
+    // changes (in the overlay), on the thread that changed it; kept for the
+    // process. A restart = true setting does not compile: it changes at the
+    // next start only.
+    template <class S, class F> void subscribe_setting(const S& setting, F&& handler) const {
+        static_assert(!S::restart, "anvil::Host::subscribe_setting: this setting applies at the next start "
+                                   "(restart = true in settings.toml), so it never changes while the game runs");
+        static_assert(std::invocable<std::decay_t<F>&, typename S::Value> || std::invocable<std::decay_t<F>&>,
+                      "anvil::Host::subscribe_setting: the handler must be callable as (value) or ()");
+        if constexpr (!S::restart) {
+            using Callback = detail::SettingCallback<S, std::decay_t<F>>;
+            auto* callback = new Callback{std::forward<F>(handler), setting};
+            detail::check(c_api().subscribe_setting(self(), setting.id, &Callback::invoke, callback),
+                          "subscribe_setting", S::setting_name);
+        }
     }
 
 private:

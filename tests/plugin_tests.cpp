@@ -8,6 +8,7 @@
 #include "core/manifest.hpp"
 #include "core/plugin_symbols.hpp"
 #include "core/services.hpp"
+#include "core/settings.hpp"
 #include "core/symbol_check.hpp"
 #include "test_support.hpp"
 
@@ -157,6 +158,19 @@ struct Loader {
         plugin->symbols = PluginSymbols(declared, verified, game.address(0));
         plugin->owner = changes.add_owner(plugin->manifest.id);
         plugin->plugin_dir = dir.wstring();
+        if (!parsed.manifest->settings.empty()) {
+            SettingsFileResult settings = load_settings(dir / parsed.manifest->settings);
+            CHECK(settings.file.has_value());
+            if (!settings.file) return nullptr;
+            // The player's file in a fresh folder: each run starts from the defaults.
+            const auto data = std::filesystem::temp_directory_path() /
+                              ("anvil_plugin_tests_" + std::to_string(GetCurrentProcessId())) / plugin->manifest.id;
+            std::filesystem::remove_all(data);
+            plugin->data_dir = data.wstring();
+            const auto notes = plugin->settings.init(std::move(*settings.file), data / "settings.toml", plugin->manifest.id,
+                                                     [](const std::string&) { return std::optional<std::string>(); });
+            for (const auto& note : notes) log.push_back(plugin->manifest.id + ": " + note.message);
+        }
         plugin->module = LoadLibraryExW((dir / plugin->manifest.entry).c_str(), nullptr,
                                         LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
         CHECK(plugin->module != nullptr);
@@ -299,6 +313,20 @@ int main(int argc, char** argv) {
         CHECK(loader.logged_containing(", 2 so far)") == 1);
         loader.bus.publish(ANVIL_EVENT_PLUGINS_LOADED, nullptr);
         CHECK(loader.logged("hello-c: every plugin is loaded") && loader.logged("hello-cpp: every plugin is loaded"));
+
+        // Its setting (restart = false), changed as the overlay would: the
+        // subscription runs and the next return to the menu reads the new value.
+        CHECK(hello_cpp->settings.size() == 1 && loader.host.setting_bool(hello_cpp, 0) == 1);
+        const auto change = hello_cpp->settings.set_text(0, "false");
+        CHECK(change.result == ANVIL_OK && change.applied && change.saved && change.notified == 1);
+        CHECK(loader.logged("hello-cpp: logging returns to the menu: off"));
+        idle_exit();
+        CHECK(loader.logged_containing("hello-cpp: returning to the menu (rcx=0x") == 2);
+        CHECK(loader.logged_containing("hello-c: returning to the menu (rcx=0x") == 3);
+        hello_cpp->settings.reset(0);
+        CHECK(loader.logged("hello-cpp: logging returns to the menu: on"));
+        idle_exit();
+        CHECK(loader.logged_containing(", 4 so far)") == 1);
         if (g_failures != 0) loader.dump();
     });
 
@@ -345,9 +373,13 @@ int main(int argc, char** argv) {
         CHECK(h.symbol_value(probe, 5, "nope", &value) == ANVIL_ERROR_NOT_DECLARED);
         CHECK(h.address_of(probe, 0) == reinterpret_cast<void*>(game.address(0x1000)) && h.address_of(probe, 99) == nullptr);
         CHECK(h.publish(probe, "anvil.forged", nullptr) == ANVIL_ERROR_INVALID_ARGUMENT);
-        // Settings arrive with #48: defaults until then.
-        CHECK(h.setting_int(probe, 0) == 0 && std::string(h.setting_string(probe, 0)).empty());
-        CHECK(h.subscribe_setting(probe, 0, [](AnvilSetting, void*) {}, nullptr) == ANVIL_ERROR_UNSUPPORTED);
+        // The probe declares no settings: every one reads as 0 or "".
+        CHECK(h.setting_int(probe, 0) == 0 && h.setting_bool(probe, 0) == 0 && h.setting_float(probe, 0) == 0.0);
+        CHECK(std::string(h.setting_string(probe, 0)).empty());
+        CHECK(h.subscribe_setting(probe, 0, [](AnvilSetting, void*) {}, nullptr) == ANVIL_ERROR_NOT_DECLARED);
+        CHECK(loader.logged("probe: subscribe_setting setting 0 (not declared) refused: not declared in symbols.toml or "
+                            "settings.toml"));
+        CHECK(h.setting_int(nullptr, 0) == 0 && std::string(h.setting_string(nullptr, 0)).empty());
     });
 
     std::printf("%d checks, %d failed\n", g_checks, g_failures);

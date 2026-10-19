@@ -34,9 +34,10 @@ FetchContent_MakeAvailable(tomlplusplus safetyhook)
 
 # anvil_core: the rules shared by version.dll and anvil.exe (manifests, SemVer,
 # the resolver, the game build identity, symbols.toml and its verification
-# against a PE image, instruction boundaries (Zydis, from SafetyHook's fetch),
-# the log). Nothing here may depend on running inside the game process, so the
-# CLI applies the same rules as the loader.
+# against a PE image, settings.toml and the player's values, instruction
+# boundaries (Zydis, from SafetyHook's fetch), the log). Nothing here may
+# depend on running inside the game process, so the CLI applies the same rules
+# as the loader.
 add_library(anvil_core STATIC
     src/core/discovery.cpp
     src/core/game_build.cpp
@@ -46,6 +47,7 @@ add_library(anvil_core STATIC
     src/core/pe_image.cpp
     src/core/resolver.cpp
     src/core/semver.cpp
+    src/core/settings.cpp
     src/core/symbols.cpp)
 target_include_directories(anvil_core PUBLIC include src)
 target_link_libraries(anvil_core PUBLIC tomlplusplus::tomlplusplus Zydis bcrypt)
@@ -63,6 +65,7 @@ add_library(anvil_loader STATIC
     src/core/changes.cpp
     src/core/gameplay_policy.cpp
     src/core/host.cpp
+    src/core/plugin_settings.cpp
     src/core/plugin_symbols.cpp
     src/core/runtime.cpp
     src/core/seh_guard.cpp
@@ -94,6 +97,16 @@ function(anvil_gen_headers out_var symbols dir)
         DEPENDS anvil ${symbols}
         COMMENT "anvil gen ${symbols}")
     set(${out_var} ${dir}/symbols.gen.h ${dir}/symbols.gen.hpp PARENT_SCOPE)
+endfunction()
+
+# `anvil gen <settings> <dir>` at build time: settings.gen.h and settings.gen.hpp.
+function(anvil_gen_settings_headers out_var settings dir)
+    add_custom_command(
+        OUTPUT ${dir}/settings.gen.h ${dir}/settings.gen.hpp
+        COMMAND anvil gen --settings ${settings} ${dir}
+        DEPENDS anvil ${settings}
+        COMMENT "anvil gen ${settings}")
+    set(${out_var} ${dir}/settings.gen.h ${dir}/settings.gen.hpp PARENT_SCOPE)
 endfunction()
 
 # The tree builds its examples the way plugin repositories do: through the
@@ -149,7 +162,7 @@ endif()
 if(ANVIL_BUILD_TESTS)
     enable_testing()
     add_executable(anvil_tests tests/test_main.cpp tests/manifest_tests.cpp tests/resolver_tests.cpp
-        tests/change_tests.cpp tests/gameplay_tests.cpp)
+        tests/change_tests.cpp tests/gameplay_tests.cpp tests/settings_tests.cpp)
     target_link_libraries(anvil_tests PRIVATE anvil_loader)
     target_compile_definitions(anvil_tests PRIVATE ANVIL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_dependencies(anvil_tests version_dll)
@@ -168,16 +181,19 @@ if(ANVIL_BUILD_TESTS)
     add_dependencies(anvil_cli_tests anvil)
     add_test(NAME anvil_cli_tests COMMAND anvil_cli_tests $<TARGET_FILE:anvil>)
 
-    # anvil gen on the design §5.2 example: the headers must compile, warning
-    # free, as C11 and C++23 and declare what the fixture says.
+    # anvil gen on the design §5.2 example and on a settings.toml with every
+    # type: the headers must compile, warning free, as C11 and C++23 and
+    # declare what the fixtures say.
     set(ANVIL_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/gen_compile)
     add_custom_command(
         OUTPUT ${ANVIL_GEN_DIR}/symbols.gen.h ${ANVIL_GEN_DIR}/symbols.gen.hpp
         COMMAND anvil gen ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/gen/symbols.toml ${ANVIL_GEN_DIR}
         DEPENDS anvil ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/gen/symbols.toml
         COMMENT "anvil gen tests/fixtures/gen/symbols.toml")
+    anvil_gen_settings_headers(gen_settings_headers ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/gen/settings.toml
+        ${ANVIL_GEN_DIR})
     add_executable(anvil_gen_compile tests/gen_compile.c tests/gen_compile.cpp
-        ${ANVIL_GEN_DIR}/symbols.gen.h ${ANVIL_GEN_DIR}/symbols.gen.hpp)
+        ${ANVIL_GEN_DIR}/symbols.gen.h ${ANVIL_GEN_DIR}/symbols.gen.hpp ${gen_settings_headers})
     target_include_directories(anvil_gen_compile PRIVATE include ${ANVIL_GEN_DIR})
     set_target_properties(anvil_gen_compile PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
     if(MSVC)

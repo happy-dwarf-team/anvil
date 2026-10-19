@@ -54,10 +54,11 @@ Run 'hello_c-check' { cmake --build $pkg --config Release --target hello_c-check
 Run 'hello_c-deploy' { cmake --build $pkg --config Release --target hello_c-deploy }
 
 # 4. The layout: build/plugin/<id>/, and the deployed copy.
-foreach ($case in @{ build = $fetch; id = 'hello-cpp'; dll = 'hello_cpp.dll' }, @{ build = $pkg; id = 'hello-c'; dll = 'hello_c.dll' }) {
+foreach ($case in @{ build = $fetch; id = 'hello-cpp'; files = 'hello_cpp.dll', 'settings.toml' },
+                  @{ build = $pkg; id = 'hello-c'; files = @('hello_c.dll') }) {
     $folder = Join-Path $case.build "plugin/$($case.id)"
     $names = (Get-ChildItem $folder -File).Name | Sort-Object
-    $expected = @($case.dll, 'plugin.toml', 'symbols.toml') | Sort-Object
+    $expected = @($case.files) + @('plugin.toml', 'symbols.toml') | Sort-Object
     Assert (($names -join ',') -eq ($expected -join ',')) "$folder holds $($names -join ', '), expected $($expected -join ', ')"
     $deployed = Join-Path $game "anvil/plugins/$($case.id)"
     foreach ($name in $expected) { Assert (Test-Path (Join-Path $deployed $name)) "$deployed lacks $name" }

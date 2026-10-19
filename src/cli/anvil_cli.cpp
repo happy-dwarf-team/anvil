@@ -9,6 +9,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -31,12 +32,14 @@ void print_usage(std::FILE* out) {
                "Tools for Anvil plugin authors.\n"
                "\n"
                "Commands:\n"
-               "  gen [--lang c|cpp] <symbols.toml> <out-dir>\n"
-               "      write symbols.gen.h (C) and symbols.gen.hpp (C++) from symbols.toml;\n"
-               "      both without --lang. A file whose content would not change is not rewritten.\n"
+               "  gen [--lang c|cpp] [--settings <settings.toml>] <symbols.toml|settings.toml>... <out-dir>\n"
+               "      write symbols.gen.h (C) and symbols.gen.hpp (C++) from symbols.toml, and\n"
+               "      settings.gen.h and settings.gen.hpp from settings.toml (--settings, a file named\n"
+               "      *settings.toml or one with [setting.<name>] tables); both languages without --lang.\n"
+               "      A file whose content would not change is not rewritten.\n"
                "  check <plugin-dir> [--exe <eu4.exe>] [--format text|json|github]\n"
-               "      check plugin.toml and symbols.toml against their schemas. With --exe, also the\n"
-               "      game build, every symbol (bytes, memory, pointers, exports, values) and\n"
+               "      check plugin.toml, symbols.toml and settings.toml against their schemas. With\n"
+               "      --exe, also the game build, every symbol (bytes, memory, pointers, exports, values) and\n"
                "      instruction boundaries, and write symbols.lock; without it, check that\n"
                "      symbols.lock matches symbols.toml.\n"
                "  check --game <EU4 folder> [--format text|json|github]\n"
@@ -107,58 +110,101 @@ bool write_if_changed(const std::filesystem::path& path, const std::string& cont
     return static_cast<bool>(out);
 }
 
+// A settings.toml for gen: its name ends in "settings.toml", or its top level
+// holds [setting.<name>] tables (symbols.toml has `build` and `symbol`).
+bool is_settings_file(const std::filesystem::path& file) {
+    std::wstring name = file.filename().wstring();
+    for (wchar_t& ch : name) ch = static_cast<wchar_t>(towlower(ch));
+    if (name.ends_with(L"settings.toml")) return true;
+    std::ifstream in(file, std::ios::binary);
+    std::string line;
+    while (std::getline(in, line)) {
+        const size_t start = line.find_first_not_of(" \t\xEF\xBB\xBF");
+        if (start != std::string::npos && line.compare(start, 9, "[setting.") == 0) return true;
+    }
+    return false;
+}
+
 int run_gen(const std::vector<std::wstring>& args) {
     bool c = true, cpp = true;
     std::vector<std::wstring> positional;
+    std::vector<std::wstring> settings_files;  // --settings: whatever the name or content
     for (size_t i = 2; i < args.size(); ++i) {
         if (is_option(args[i], L"--lang")) {
             const auto lang = option_value(args, i, L"--lang");
             if (lang == L"c") cpp = false;
             else if (lang == L"cpp") c = false;
             else return usage_error("gen: --lang must be c or cpp");
+        } else if (is_option(args[i], L"--settings")) {
+            const auto file = option_value(args, i, L"--settings");
+            if (!file || file->empty()) return usage_error("gen: --settings needs the path of settings.toml");
+            settings_files.push_back(*file);
         } else if (args[i].starts_with(L"--")) {
             return usage_error("gen: unknown option " + utf8(args[i]));
         } else {
             positional.push_back(args[i]);
         }
     }
-    if (positional.size() != 2) return usage_error("gen needs <symbols.toml> and <out-dir>");
-    const std::filesystem::path source(positional[0]), out_dir(positional[1]);
+    if (positional.empty() || positional.size() + settings_files.size() < 2) {
+        return usage_error("gen needs <symbols.toml|settings.toml>... and <out-dir>");
+    }
+    const std::filesystem::path out_dir(positional.back());
+    positional.pop_back();
+    std::vector<std::pair<std::filesystem::path, bool>> inputs;  // the file, and whether it is a settings file
+    for (const auto& file : positional) inputs.emplace_back(file, is_settings_file(file));
+    for (const auto& file : settings_files) inputs.emplace_back(file, true);
 
-    const anvil::SymbolFileResult symbols = anvil::load_symbols(source);
-    if (!symbols.file) {
+    // Every input first, so that nothing is written when one of them fails.
+    struct Output {
+        std::string stem;  // "symbols" or "settings"
+        GeneratedHeaders headers;
+    };
+    std::vector<Output> outputs;
+    for (const auto& [source, settings] : inputs) {
         std::error_code ec;
         if (!std::filesystem::is_regular_file(source, ec)) {
             std::fprintf(stderr, "anvil gen: cannot read %s\n", shown(source).c_str());
             return kExitCannotCheck;
         }
-        std::string message = symbols.error;
-        if (message.starts_with("symbols.toml: ")) message.erase(0, 14);
-        std::printf("%s%s: error: %s\n", shown(source).c_str(),
-                    symbols.line != 0 ? (":" + std::to_string(symbols.line)).c_str() : "", message.c_str());
-        return kExitProblems;
-    }
-    const auto name = source.filename().u8string();
-    const GeneratedHeaders headers = generate_headers(*symbols.file, std::string(name.begin(), name.end()), c, cpp);
-    if (!headers.error.empty()) {
-        std::string message = headers.error;
-        if (message.starts_with("symbols.toml: ")) message.erase(0, 14);
-        std::printf("%s%s: error: %s\n", shown(source).c_str(),
-                    headers.line != 0 ? (":" + std::to_string(headers.line)).c_str() : "", message.c_str());
-        return kExitProblems;
+        const auto name_u8 = source.filename().u8string();
+        const std::string name(name_u8.begin(), name_u8.end());
+        const char* prefix = settings ? "settings.toml: " : "symbols.toml: ";
+        auto report = [&](std::string message, uint32_t line) {
+            if (message.starts_with(prefix)) message.erase(0, std::strlen(prefix));
+            std::printf("%s%s: error: %s\n", shown(source).c_str(), line != 0 ? (":" + std::to_string(line)).c_str() : "",
+                        message.c_str());
+            return kExitProblems;
+        };
+        Output out{settings ? "settings" : "symbols", {}};
+        if (settings) {
+            const anvil::SettingsFileResult parsed = anvil::load_settings(source);
+            if (!parsed.file) return report(parsed.error, parsed.line);
+            out.headers = generate_settings_headers(*parsed.file, name, c, cpp);
+        } else {
+            const anvil::SymbolFileResult parsed = anvil::load_symbols(source);
+            if (!parsed.file) return report(parsed.error, parsed.line);
+            out.headers = generate_headers(*parsed.file, name, c, cpp);
+        }
+        if (!out.headers.error.empty()) return report(out.headers.error, out.headers.line);
+        for (const auto& other : outputs) {
+            if (other.stem == out.stem) return usage_error("gen: more than one " + out.stem + " file");
+        }
+        outputs.push_back(std::move(out));
     }
     std::error_code ec;
     std::filesystem::create_directories(out_dir, ec);
-    for (const auto& [file, content, wanted] : {std::tuple{"symbols.gen.h", &headers.c, c},
-                                                std::tuple{"symbols.gen.hpp", &headers.cpp, cpp}}) {
-        if (!wanted) continue;
-        const std::filesystem::path path = out_dir / file;
-        bool written = false;
-        if (!write_if_changed(path, *content, written)) {
-            std::fprintf(stderr, "anvil gen: cannot write %s\n", shown(path).c_str());
-            return kExitCannotCheck;
+    for (const auto& output : outputs) {
+        for (const auto& [extension, content, wanted] : {std::tuple{".gen.h", &output.headers.c, c},
+                                                         std::tuple{".gen.hpp", &output.headers.cpp, cpp}}) {
+            if (!wanted) continue;
+            const std::filesystem::path path = out_dir / (output.stem + extension);
+            bool written = false;
+            if (!write_if_changed(path, *content, written)) {
+                std::fprintf(stderr, "anvil gen: cannot write %s\n", shown(path).c_str());
+                return kExitCannotCheck;
+            }
+            std::printf("%s: %s\n", shown(path).c_str(), written ? "written" : "unchanged");
         }
-        std::printf("%s: %s\n", shown(path).c_str(), written ? "written" : "unchanged");
     }
     return kExitOk;
 }

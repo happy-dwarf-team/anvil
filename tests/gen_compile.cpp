@@ -1,8 +1,9 @@
-// Compiles the C++ header `anvil gen` writes for tests/fixtures/gen/symbols.toml
-// (the design §5.2 example) and checks what it declares at compile time.
-// gen_compile.c does the same for the C header.
+// Compiles the C++ headers `anvil gen` writes for tests/fixtures/gen/symbols.toml
+// (the design §5.2 example) and settings.toml (every type) and checks what
+// they declare at compile time. gen_compile.c does the same for the C headers.
 struct Root;  // types named in symbols.toml are declared before the header
 
+#include "settings.gen.hpp"
 #include "symbols.gen.hpp"
 
 #include <cstdio>
@@ -20,10 +21,26 @@ static_assert(sym::root_and_date.root == 0x233FE78 && sym::root_and_date.date_of
 static_assert(std::is_same_v<decltype(sym::root)::Type, Root> && sym::root.id == 3);
 static_assert(std::string_view(sym::root.value) == "root");
 
-extern "C" int c_last_symbol();  // gen_compile.c
+static_assert(cfg::enabled.id == 0 && cfg::panel_key.id == 5);
+static_assert(std::is_same_v<decltype(cfg::enabled)::Value, bool> && cfg::enabled.default_value && !cfg::enabled.restart);
+static_assert(std::is_same_v<decltype(cfg::budget_mb)::Value, std::int64_t> && cfg::budget_mb.restart);
+static_assert(cfg::budget_mb.default_value == 1024 && cfg::budget_mb.minimum == 64 && cfg::budget_mb.maximum == 8192);
+static_assert(std::is_same_v<decltype(cfg::scale)::Value, double>);
+static_assert(cfg::scale.default_value == 1.0 && cfg::scale.minimum == 0.5 && cfg::scale.maximum == 2.5);
+static_assert(std::is_same_v<decltype(cfg::mode)::Value, cfg::Types::mode_value>);
+static_assert(cfg::mode.default_value == cfg::mode.verify && static_cast<int>(cfg::mode.on) == 2);
+static_assert(std::is_same_v<decltype(cfg::greeting)::Value, std::string>);
+static_assert(std::string_view(cfg::greeting.default_value) == "Hello, \"world\"?? \\ é */");
+static_assert(cfg::panel_key.default_value == anvil::Key{0x37B} && cfg::panel_key.default_value.ctrl() &&
+              cfg::panel_key.default_value.shift() && !cfg::panel_key.default_value.alt() &&
+              cfg::panel_key.default_value.vk() == 0x7B);
+static_assert(std::string_view(cfg::Types::panel_key::setting_name) == "panel_key");
+
+extern "C" int c_last_symbol();   // gen_compile.c
+extern "C" int c_last_setting();  // gen_compile.c
 
 int main() {
-    if (c_last_symbol() != 4) {
+    if (c_last_symbol() != 4 || c_last_setting() != static_cast<int>(cfg::panel_key.id)) {
         std::printf("the C header disagrees with the C++ header\n");
         return 1;
     }
