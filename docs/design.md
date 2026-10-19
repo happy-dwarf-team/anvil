@@ -443,6 +443,18 @@ Decided in [Performance budgets and how the lab measures them](https://github.co
 **Method**
 - In-game impact is per-call cost × counted calls; the optional counters are enabled with `profile = true`.
 - Microbenchmarks run in CI as a ±20% regression check. Binding numbers come from the lab: i9-13900KF, CPU4, median of ≥ 30.
+- **Microbenchmarks** (`anvil_bench`, `bench/`; built with the project, not a ctest):
+  - each case is a small function in scratch memory, changed through the change registry and called in a dependent loop. The cases are a plain call, a function hook and a call redirect with 1 and 8 links, a mid hook with 1 and 8 empty callbacks, and a block replacement next to the block's own code. The parser cases parse and resolve a typical set (10 `plugin.toml`, a 48-symbol `symbols.toml`);
+  - repetitions interleave the cases; each case reports the median in ns per call;
+  - a first link = 1 link − the unchanged code; each further link = (8 links − 1 link) / 7.
+- **CI gate** (`bench/check-regression.ps1`):
+  - Runners differ in CPU model and clock, so the gate never compares nanoseconds. It compares each case's ratio to the plain call of the same run.
+  - It compares only against a baseline from the same CPU model: `bench/baseline-ci.json` keeps one entry per runner CPU.
+  - Each case takes its lowest ratio of two runs. A case more than 20% slower than its baseline fails the build. A case more than 20% faster prints a notice to lower its baseline.
+  - On a CPU model without an entry the gate prints the entry to add and does not fail.
+  - A baseline is raised only with a reason in the pull request.
+- **Lab:** `bench/run-lab.ps1` runs `anvil_bench` pinned to CPU4 at high priority, with ≥ 30 repetitions and EU4 closed, and checks the budgets above.
+- Start-up: `anvil.log` times everything from `AnvilEntry`: `resolved … at`, `early phase done at`, and `plugins loaded at`, which is the end of the core start-up.
 - Start-up follows the lab procedure, with ≥ 5 runs per variant.
 - SIMULATION A/B through Tongs, with ≥ 5 valid trials, guards only against ≥ 2% regressions.
 

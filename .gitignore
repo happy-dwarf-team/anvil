@@ -9,3 +9,4 @@
 *.exp
 *.ilk
 *.log
+/bench-*.json

@@ -1,0 +1,6 @@
+{
+  "format": 1,
+  "about": "CI regression gate of design §17 (bench/check-regression.ps1): per CPU model of the CI runners, each case's ratio to a plain call in the same run. A case more than `tolerance` slower fails the build. Update an entry only with a reason in the pull request (a deliberate cost, or a new runner image).",
+  "tolerance": 0.2,
+  "runners": {}
+}

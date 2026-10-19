@@ -325,14 +325,17 @@ DWORD WINAPI main_phase(LPVOID) {
     for (auto& p : g_runtime->plugins) {
         if (p->manifest.phase == Phase::Main) load_plugin(*p);
     }
+    // The end of the core start-up of design §17 (entry point -> end of loading).
+    log_info("plugins loaded at " + fmt_ms(elapsed_ms()));
     g_runtime->bus.publish(ANVIL_EVENT_PLUGINS_LOADED, nullptr);
     write_summary();
     if (g_runtime->build != nullptr) {
+        const double begin = elapsed_ms();
         std::string actual;
         const bool ok = verify_build_file(*g_runtime->build, g_runtime->exe_path,
                                           g_runtime->anvil_dir / "data" / "anvil" / "build-cache.txt", actual);
         if (ok) {
-            log_info("eu4.exe SHA-256 verified");
+            log_info("eu4.exe SHA-256 verified (" + fmt_ms(elapsed_ms() - begin) + ", after loading)");
         } else {
             log_warning("eu4.exe SHA-256 " + (actual.empty() ? std::string("could not be computed") : actual) +
                         " differs from the known build; every change is still checked against expected bytes");
@@ -343,6 +346,8 @@ DWORD WINAPI main_phase(LPVOID) {
 
 void startup_impl(const std::filesystem::path& game_dir) {
     auto runtime = std::make_unique<Runtime>();
+    // Time 0 of every "at ... ms" in the log: AnvilEntry, before the game's
+    // C runtime starts (the start-up budget of design §17 counts from here).
     QueryPerformanceFrequency(&runtime->frequency);
     QueryPerformanceCounter(&runtime->start);
     runtime->game_dir = game_dir;
@@ -452,6 +457,7 @@ void startup_impl(const std::filesystem::path& game_dir) {
     ResolveResult resolved = resolve(input);
     g_runtime->skipped.insert(g_runtime->skipped.end(), resolved.skipped.begin(), resolved.skipped.end());
     for (const auto& s : g_runtime->skipped) log_warning(s.id + ": skipped — " + s.reason);
+    log_info("resolved " + std::to_string(resolved.order.size()) + " plugin(s) to load at " + fmt_ms(elapsed_ms()));
     for (auto& m : resolved.order) {
         auto plugin = std::make_unique<AnvilPlugin>();
         // Owners in load order: the earlier plugin is outermost in every chain.
