@@ -17,7 +17,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 option(ANVIL_BUILD_TESTS "Build unit tests" ON)
-option(ANVIL_BUILD_EXAMPLES "Build the example plugin" ON)
+option(ANVIL_BUILD_EXAMPLES "Build the example plugins" ON)
 option(ANVIL_BUILD_BENCH "Build the microbenchmarks (anvil_bench, not a ctest)" ON)
 
 include(FetchContent)
@@ -56,11 +56,12 @@ if(MSVC)
 endif()
 
 # anvil_loader: the parts that act on the running game (startup, the change
-# registry, symbols.toml checks against the running image and the verified
-# symbols per plugin, services, SEH guards).
+# registry, the plugin API 2 host table, symbols.toml checks against the
+# running image and the verified symbols per plugin, services, SEH guards).
 # Linked into version.dll and the tests, never into anvil.exe.
 add_library(anvil_loader STATIC
     src/core/changes.cpp
+    src/core/host.cpp
     src/core/plugin_symbols.cpp
     src/core/runtime.cpp
     src/core/seh_guard.cpp
@@ -84,10 +85,46 @@ target_link_libraries(anvil_tool PUBLIC anvil_core)
 add_executable(anvil src/cli/anvil_cli.cpp)
 target_link_libraries(anvil PRIVATE anvil_tool)
 
+# `anvil gen <symbols> <dir>` at build time; <out_var> receives the headers.
+function(anvil_gen_headers out_var symbols dir)
+    add_custom_command(
+        OUTPUT ${dir}/symbols.gen.h ${dir}/symbols.gen.hpp
+        COMMAND anvil gen ${symbols} ${dir}
+        DEPENDS anvil ${symbols}
+        COMMENT "anvil gen ${symbols}")
+    set(${out_var} ${dir}/symbols.gen.h ${dir}/symbols.gen.hpp PARENT_SCOPE)
+endfunction()
+
+# A plugin of this tree, laid out as Anvil loads it: <build>/plugins/<id>/ with
+# the DLL, plugin.toml and symbols.toml, one folder for every configuration.
+# Built with the headers of include/ and those `anvil gen` writes, without the
+# SDK (#53), warning free.
+function(anvil_add_tree_plugin target)
+    cmake_parse_arguments(ARG "" "ID;DIR;OUTPUT_NAME;SYMBOLS" "SOURCES" ${ARGN})
+    if(NOT ARG_SYMBOLS)
+        set(ARG_SYMBOLS ${ARG_DIR}/symbols.toml)
+    endif()
+    set(out ${CMAKE_BINARY_DIR}/plugins/${ARG_ID})
+    anvil_gen_headers(headers ${ARG_SYMBOLS} ${CMAKE_CURRENT_BINARY_DIR}/gen/${ARG_ID})
+    add_library(${target} SHARED ${ARG_SOURCES} ${headers})
+    target_include_directories(${target} PRIVATE include ${CMAKE_CURRENT_BINARY_DIR}/gen/${ARG_ID})
+    set_target_properties(${target} PROPERTIES OUTPUT_NAME ${ARG_OUTPUT_NAME} RUNTIME_OUTPUT_DIRECTORY ${out}$<0:>)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /WX /utf-8 /permissive-)
+    endif()
+    configure_file(${ARG_DIR}/plugin.toml ${out}/plugin.toml COPYONLY)
+    configure_file(${ARG_SYMBOLS} ${out}/symbols.toml COPYONLY)
+endfunction()
+
+# The hello plugins in C and C++ (C++20, the wrapper's minimum), built as a
+# plugin repository would build them.
 if(ANVIL_BUILD_EXAMPLES)
-    add_library(hello_plugin SHARED examples/hello/hello.c)
-    target_include_directories(hello_plugin PRIVATE include)
-    set_target_properties(hello_plugin PROPERTIES OUTPUT_NAME hello)
+    anvil_add_tree_plugin(hello_c ID hello-c DIR ${CMAKE_CURRENT_SOURCE_DIR}/examples/hello-c OUTPUT_NAME hello_c
+        SOURCES examples/hello-c/hello.c)
+    set_target_properties(hello_c PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+    anvil_add_tree_plugin(hello_cpp ID hello-cpp DIR ${CMAKE_CURRENT_SOURCE_DIR}/examples/hello-cpp
+        OUTPUT_NAME hello_cpp SOURCES examples/hello-cpp/hello.cpp)
+    set_target_properties(hello_cpp PROPERTIES CXX_STANDARD 20)
 endif()
 
 # anvil_bench: microbenchmarks per kind of change and of the start-up parsers
@@ -136,6 +173,37 @@ if(ANVIL_BUILD_TESTS)
         target_compile_options(anvil_gen_compile PRIVATE /W4 /WX /utf-8)
     endif()
     add_test(NAME anvil_gen_compile COMMAND anvil_gen_compile)
+
+    # Plugin API 2 end to end: the host table loads the hello examples and the
+    # test plugins against a synthetic image (tests/plugin_tests.cpp).
+    if(ANVIL_BUILD_EXAMPLES)
+        set(ANVIL_TEST_PLUGINS ${CMAKE_CURRENT_SOURCE_DIR}/tests/plugins)
+        anvil_add_tree_plugin(anvil_probe_plugin ID probe DIR ${ANVIL_TEST_PLUGINS}/probe OUTPUT_NAME probe
+            SYMBOLS ${ANVIL_TEST_PLUGINS}/symbols.toml SOURCES tests/plugins/probe/probe.cpp)
+        anvil_add_tree_plugin(anvil_throwing_plugin ID throwing DIR ${ANVIL_TEST_PLUGINS}/throwing
+            OUTPUT_NAME throwing SYMBOLS ${ANVIL_TEST_PLUGINS}/symbols.toml SOURCES tests/plugins/throwing/throwing.cpp)
+        add_executable(anvil_plugin_tests tests/plugin_tests.cpp)
+        target_link_libraries(anvil_plugin_tests PRIVATE anvil_loader)
+        add_dependencies(anvil_plugin_tests anvil_probe_plugin anvil_throwing_plugin hello_c hello_cpp)
+        add_test(NAME anvil_plugin_tests COMMAND anvil_plugin_tests ${CMAKE_BINARY_DIR}/plugins)
+    endif()
+
+    # The wrapper's signature checks: each source must fail to compile with
+    # the static_assert, and the compiler's note must name the symbol. The
+    # targets are not part of ALL; each test builds one.
+    anvil_gen_headers(wrong_headers ${CMAKE_CURRENT_SOURCE_DIR}/tests/plugins/symbols.toml
+        ${CMAKE_CURRENT_BINARY_DIR}/gen/wrong-signature)
+    foreach(wrong detour call)
+        add_library(anvil_wrong_${wrong} STATIC EXCLUDE_FROM_ALL tests/plugins/wrong-signature/wrong_${wrong}.cpp
+            ${wrong_headers})
+        target_include_directories(anvil_wrong_${wrong} PRIVATE include ${CMAKE_CURRENT_BINARY_DIR}/gen/wrong-signature)
+        add_test(NAME anvil_wrong_${wrong}
+            COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --config $<CONFIG> --target anvil_wrong_${wrong})
+    endforeach()
+    set_tests_properties(anvil_wrong_detour PROPERTIES PASS_REGULAR_EXPRESSION
+        "the detour does not match the signature symbols.toml declares.*sym::Types::add_one")
+    set_tests_properties(anvil_wrong_call PROPERTIES PASS_REGULAR_EXPRESSION
+        "the arguments do not match the signature symbols.toml declares.*sym::Types::twice")
 
     add_test(NAME anvil_cli_version COMMAND anvil --version)
     set_tests_properties(anvil_cli_version PROPERTIES PASS_REGULAR_EXPRESSION "^anvil ${PROJECT_VERSION}[\r\n]*$")

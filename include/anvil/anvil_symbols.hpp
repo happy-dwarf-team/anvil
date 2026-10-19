@@ -1,18 +1,21 @@
 // Symbol types for the C++ header that `anvil gen` writes (symbols.gen.hpp,
 // design §16). Each declared symbol becomes a constant in namespace `sym`
-// whose type says what it is, so the C++ wrapper (#46) can only hook a
-// function with a matching detour, swap a pointer slot, and so on.
+// whose type derives from one of these and carries the symbol's name
+// (sym::Types::<name>), so the C++ wrapper (anvil.hpp) can only hook a
+// function with a matching detour, swap a pointer slot, and so on, and its
+// compile errors name the symbol.
 //
-// This is the minimal set the generated header needs; the wrapper adds the
-// calls that use it. Header-only, C++17 or newer.
+// Header-only, C++17 or newer; the wrapper needs C++20.
 #pragma once
+
+#include <anvil/anvil_plugin.h>
 
 #include <cstdint>
 
 namespace anvil {
 
-// A symbol's id: its declaration order in symbols.toml (AnvilSymbol in the C API).
-using SymbolId = std::uint32_t;
+// A symbol's id: its declaration order in symbols.toml.
+using SymbolId = AnvilSymbol;
 
 // A place in code: a mid hook, a block replacement, a call redirect or a byte patch.
 struct Site {

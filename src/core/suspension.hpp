@@ -7,10 +7,9 @@
 
 namespace anvil {
 
-// Sent to the suspended or resumed plugin only (docs/api2/anvil_plugin.h;
-// the public header gets the macros with #46). Payload NULL.
-inline constexpr const char* kEventSuspended = "anvil.suspended";
-inline constexpr const char* kEventResumed = "anvil.resumed";
+// Sent to the suspended or resumed plugin only. Payload NULL.
+inline constexpr const char* kEventSuspended = ANVIL_EVENT_SUSPENDED;
+inline constexpr const char* kEventResumed = ANVIL_EVENT_RESUMED;
 
 // The core API behind the gameplay policy (design §8.4, §13; anvil-game uses
 // it for ironman and multiplayer sessions). Suspending first takes the

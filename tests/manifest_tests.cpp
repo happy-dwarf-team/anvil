@@ -195,9 +195,12 @@ id = "legacy"
         CHECK(load_manifest(folder).error == "plugin.toml not found");
     });
 
-    run("manifest v2: examples/hello", [] {
-        const auto hello = load_manifest(std::filesystem::path(ANVIL_SOURCE_DIR) / "examples" / "hello");
-        if (!hello.manifest) std::printf("  %s\n", hello.error.c_str());
-        CHECK(hello.manifest && hello.manifest->id == "hello" && hello.manifest->api == kManifestApi);
+    run("manifest v2: the hello examples", [] {
+        for (const char* id : {"hello-c", "hello-cpp"}) {
+            const auto hello = load_manifest(std::filesystem::path(ANVIL_SOURCE_DIR) / "examples" / id);
+            if (!hello.manifest) std::printf("  %s\n", hello.error.c_str());
+            CHECK(hello.manifest && hello.manifest->id == id && hello.manifest->api == kManifestApi &&
+                  hello.manifest->symbols == "symbols.toml");
+        }
     });
 }

@@ -1,0 +1,52 @@
+# The test plugins' symbols in the synthetic image of tests/plugin_tests.cpp,
+# which writes the same bytes at these RVAs.
+build = "eu4-1.37.5-steam-win64"
+
+[symbol.add_one]                   # a function hook
+rva = 0x1000
+bytes = "89 C8 83 C0 01 C3"        # mov eax, ecx; add eax, 1; ret
+memory = "code"
+signature = "int (int x)"
+
+[symbol.adjust]                    # a mid hook: returns rcx + 5
+rva = 0x1100
+bytes = "48 89 C8 48 83 C0 05"     # mov rax, rcx; add rax, 5 (ret follows)
+memory = "code"
+
+[symbol.triple]                    # a block replacement, resuming at the ret
+rva = 0x1200
+bytes = "48 89 C8 48 83 C0 05"
+memory = "code"
+
+[symbol.twice]                     # called through the typed call
+rva = 0x1300
+bytes = "8D 04 09 C3"              # lea eax, [rcx+rcx]; ret
+memory = "code"
+signature = "int (int x)"
+
+[symbol.thrower]                   # a mid hook whose callback throws
+rva = 0x1400
+bytes = "48 89 C8 48 83 C0 05"
+memory = "code"
+
+[symbol.load_counter]              # a function with a typed rip_relative value
+rva = 0x1500
+bytes = "8B 05 FA DA FF 00 C3"     # mov eax, [rip+0xFFDAFA] (-> 0xFFF000); ret
+memory = "code"
+signature = "int ()"
+values.counter_ref = { at = 2, rip_relative = 6, type = "int" }
+
+[symbol.patch_site]                # byte patches in a group
+rva = 0x1600
+bytes = "B8 01 00 00 00"           # mov eax, 1 (ret follows)
+memory = "code"
+
+[symbol.tick_slot]                 # a pointer swap; holds add_one
+rva = 0xFFE000
+memory = "read"
+points_to = 0x1000
+
+[symbol.counter]                   # typed data
+rva = 0xFFF000
+memory = "write"
+type = "int"

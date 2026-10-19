@@ -44,8 +44,9 @@ request description. Before 1.0.0 a breaking change bumps the minor version.
 
 The plugin API is a separate contract from the Anvil version:
 
-- Within plugin API 1, host functions and fields are only **appended** (plugins
-  detect them with `ANVIL_HOST_HAS`) and manifest keys only added. That is a
+- Within plugin API 2, host functions and fields are only **appended** after
+  the "end of API 2.0" line of `anvil_plugin.h` (plugins detect them with
+  `ANVIL_HOST_HAS`) and manifest keys only added. That is a
   `feat`, and plugins that need it declare `anvil = ">=x.y.z"`. Unknown
   manifest keys are errors, so an older Anvil skips a plugin that uses a newer
   key.

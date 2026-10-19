@@ -7,9 +7,10 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
 > [Releases](https://github.com/happy-dwarf-team/anvil/releases) and
 > [CHANGELOG.md](CHANGELOG.md). Supported game build: EU4 1.37.5 (Steam,
 > Windows 64-bit); on other builds only plugins that use no game addresses load. Design:
-> [docs/design.md](docs/design.md). Plugin SDK:
-> [include/anvil/anvil_plugin.h](include/anvil/anvil_plugin.h); example:
-> [examples/hello](examples/hello).
+> [docs/design.md](docs/design.md). Plugin API 2:
+> [include/anvil/anvil_plugin.h](include/anvil/anvil_plugin.h) (C) and
+> [include/anvil/anvil.hpp](include/anvil/anvil.hpp) (C++20 wrapper); examples:
+> [examples/hello-c](examples/hello-c) and [examples/hello-cpp](examples/hello-cpp).
 
 ## How it works (in short)
 

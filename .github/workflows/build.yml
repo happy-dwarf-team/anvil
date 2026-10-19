@@ -49,8 +49,11 @@ jobs:
         shell: pwsh
         run: |
           cmake --install build --config Release --component anvil --prefix dist/anvil-package
-          Copy-Item build/Release/hello.dll -Destination dist/anvil-package/anvil/docs/example-hello.dll
-          Copy-Item examples/hello/plugin.toml -Destination dist/anvil-package/anvil/docs/example-hello-plugin.toml
+          # The hello examples, laid out as plugin folders (not installed: docs only).
+          New-Item -ItemType Directory -Force dist/anvil-package/anvil/docs/examples | Out-Null
+          foreach ($example in 'hello-c', 'hello-cpp') {
+            Copy-Item build/plugins/$example -Destination dist/anvil-package/anvil/docs/examples/$example -Recurse
+          }
           $files = Get-ChildItem dist/anvil-package -Recurse -File
           $files | ForEach-Object {
             $relative = [IO.Path]::GetRelativePath('dist/anvil-package', $_.FullName).Replace('\', '/')
