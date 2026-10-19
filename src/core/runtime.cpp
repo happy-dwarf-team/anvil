@@ -1,5 +1,6 @@
 #include "runtime.hpp"
 
+#include "discovery.hpp"
 #include "game_build.hpp"
 #include "log.hpp"
 #include "manifest.hpp"
@@ -11,7 +12,6 @@
 #include "symbol_check.hpp"
 
 #include <anvil/anvil_plugin.h>
-#include <toml++/toml.hpp>
 #include <windows.h>
 
 #include <algorithm>
@@ -34,12 +34,6 @@ struct AnvilPlugin {
 
 namespace anvil {
 namespace {
-
-struct Settings {
-    bool enabled = true;
-    std::vector<std::string> disabled_plugins;
-    AnvilLogLevel log_level = ANVIL_LOG_INFO;
-};
 
 struct Runtime {
     std::filesystem::path game_dir;
@@ -69,27 +63,6 @@ std::string fmt_ms(double ms) {
     char buffer[32];
     std::snprintf(buffer, sizeof(buffer), "%.1f ms", ms);
     return buffer;
-}
-
-Settings read_settings(const std::filesystem::path& file) {
-    Settings s;
-    if (!std::filesystem::exists(file)) return s;
-    try {
-        const toml::table t = toml::parse_file(file.wstring());
-        s.enabled = t["enabled"].value_or(true);
-        if (const auto* list = t.get_as<toml::array>("disabled_plugins")) {
-            for (const auto& item : *list) {
-                if (auto v = item.value<std::string>()) s.disabled_plugins.push_back(*v);
-            }
-        }
-        const std::string level = t["log_level"].value_or<std::string>("info");
-        if (level == "debug") s.log_level = ANVIL_LOG_DEBUG;
-        else if (level == "warning") s.log_level = ANVIL_LOG_WARNING;
-        else if (level == "error") s.log_level = ANVIL_LOG_ERROR;
-    } catch (const toml::parse_error& e) {
-        log_warning(std::string("anvil.toml ignored: ") + std::string(e.description()));
-    }
-    return s;
 }
 
 const char* result_name(AnvilResult r) {
@@ -384,7 +357,8 @@ void startup_impl(const std::filesystem::path& game_dir) {
         log_info("ANVIL_DISABLE=1: no plugins loaded");
         return;
     }
-    const Settings settings = read_settings(g_runtime->anvil_dir / "anvil.toml");
+    const AnvilSettings settings = read_anvil_settings(g_runtime->anvil_dir / "anvil.toml");
+    if (!settings.error.empty()) log_warning("anvil.toml ignored: " + settings.error);
     Log::instance().set_min_level(settings.log_level);
     if (!settings.enabled) {
         log_info("disabled in anvil.toml: no plugins loaded");
@@ -449,21 +423,16 @@ void startup_impl(const std::filesystem::path& game_dir) {
         log_info(m.id + ": " + std::to_string(verified.symbols.size()) + " symbol(s) verified");
         return std::string();
     };
-    std::error_code ec;
     const auto plugins_dir = g_runtime->anvil_dir / "plugins";
-    std::vector<std::filesystem::path> folders;
-    for (const auto& entry : std::filesystem::directory_iterator(plugins_dir, ec)) {
-        if (entry.is_directory(ec)) folders.push_back(entry.path());
-    }
-    std::sort(folders.begin(), folders.end());
+    const std::vector<std::filesystem::path> folders = plugin_folders(plugins_dir);
     for (const auto& folder : folders) {
         const auto parsed = load_manifest(folder);
         if (!parsed.manifest) {
-            g_runtime->skipped.push_back({narrow(folder.filename().wstring()), parsed.error});
+            g_runtime->skipped.push_back({narrow(folder.filename().wstring()), parsed.error, folder});
             continue;
         }
-        if (!std::filesystem::exists(folder / parsed.manifest->entry)) {
-            g_runtime->skipped.push_back({parsed.manifest->id, "entry " + parsed.manifest->entry + " not found"});
+        if (std::string reason = missing_entry_reason(*parsed.manifest); !reason.empty()) {
+            g_runtime->skipped.push_back({parsed.manifest->id, std::move(reason), folder});
             continue;
         }
         input.manifests.push_back(*parsed.manifest);

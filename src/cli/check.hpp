@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/manifest.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -32,15 +34,32 @@ struct Problem {
 struct CheckOptions {
     std::filesystem::path plugin_dir;
     std::filesystem::path exe;  // empty: no --exe, check symbols.lock instead
+    // With an exe: write symbols.lock. check --game leaves the installed plugins alone.
+    bool write_lock = true;
     // The build id of an eu4.exe by its SHA-256 (upper-case hex), or nullptr
     // when the build is unknown. Empty: the table compiled into Anvil.
     std::function<const char*(std::string_view sha256)> build_of;
+};
+
+// A verified `memory = "code"` symbol with declared bytes: [rva, rva + size).
+struct CodeRange {
+    std::string symbol;
+    uint32_t line = 0;  // of the symbol in symbols.toml
+    uint32_t rva = 0;
+    uint32_t size = 0;
 };
 
 struct CheckReport {
     int exit_code = kExitOk;
     std::string cannot_check;  // why, with kExitCannotCheck
     std::string plugin;        // the plugin id, once plugin.toml parsed
+    std::optional<Manifest> manifest;
+    // Why the loader skips the plugin on its own account (a broken plugin.toml or
+    // symbols.toml, a build or symbol that does not match the exe), in the
+    // loader's words; empty = it passes. Only problems the loader acts on count:
+    // instruction boundaries are checked by anvil only.
+    std::string skip_reason;
+    std::vector<CodeRange> code_ranges;  // with an exe, in declaration order
     bool has_symbols = false;
     std::string build;         // symbols.toml `build`
     size_t symbols = 0;
@@ -59,6 +78,22 @@ struct CheckReport {
 CheckReport check_plugin(const CheckOptions& options);
 
 std::string format_report(const CheckReport& report, Format format);
+
+// The report as a JSON object, each line prefixed with `pad` (not the first).
+// With a `folder` it is one entry of anvil check --game: it names the folder
+// and, if given, its `status`, and leaves out the tool.
+std::string report_json(const CheckReport& report, const std::string& pad = {}, const std::string& folder = {},
+                        const std::string& status = {});
+
+// One line per problem as `file:line: <level>: message` or a GitHub workflow command.
+std::string problem_lines(const std::vector<Problem>& problems, Format format, const char* level);
+// "<plugin>: 3 symbol(s) for <build>, ...: OK"
+std::string report_summary(const CheckReport& report);
+
+std::string tool_name();  // "anvil <version>"
+std::string json_string(std::string_view text);
+// GitHub workflow commands: data escapes %, CR and LF; properties also : and ,.
+std::string github_escape(std::string_view text, bool property);
 
 // symbols.lock (design §16), next to plugin.toml.
 struct SymbolsLock {
