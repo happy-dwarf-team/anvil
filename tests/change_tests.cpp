@@ -1,7 +1,8 @@
 // Change registry tests (design §8): chains, mid hooks, block replacements,
 // pointer swaps, conflicts, shared byte patches, staging, handles, rollback,
-// suspension and `*_at`, on code written into scratch memory.
+// suspension, call counters and `*_at`, on code written into scratch memory.
 #include "core/changes.hpp"
+#include "core/discovery.hpp"
 #include "core/suspension.hpp"
 #include "test_support.hpp"
 
@@ -9,6 +10,8 @@
 #include <windows.h>
 
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -1072,5 +1075,97 @@ void change_tests() {
         CHECK((events == std::vector<std::string>{"p:anvil.suspended", "p:anvil.resumed"}));
         CHECK(bus.publish_to("q", kEventSuspended, nullptr) == 1 && events.back() == "q:anvil.suspended");
         CHECK(reg.rollback(p) == 1);
+    });
+
+    run("profile: calls counted per change, without counting code when off", [] {
+        Scratch s(0x1000);
+        s.put(0x40, kAddOne);
+        s.put(0x80, kSteps);
+        // int caller(int x) { return callee(x); }: sub rsp,28h; call 0x200; add rsp,28h; ret
+        s.put(0x10, {0x48, 0x83, 0xEC, 0x28, 0xE8, 0, 0, 0, 0, 0x48, 0x83, 0xC4, 0x28, 0xC3});
+        const int32_t rel = 0x200 - (0x14 + 5);
+        std::memcpy(s.base + 0x15, &rel, 4);
+        s.put(0x200, kAddOne);
+        const auto f = reinterpret_cast<Fn>(s.base + 0x40);
+        const auto g = reinterpret_cast<Fn>(s.base + 0x80);
+        const auto caller = reinterpret_cast<Fn>(s.base + 0x10);
+        // Where a next stub leads (its target at +8).
+        const auto leads_to = [](Fn next) { return *reinterpret_cast<const uintptr_t*>(reinterpret_cast<const uint8_t*>(next) + 8); };
+        {
+            ChangeRegistry reg(s.at(0), 0x1000);
+            const OwnerId a = reg.add_owner("a"), b = reg.add_owner("b");
+            CHECK(reg.hook_function(a, in_image(s.at(0x40)), reinterpret_cast<void*>(&detour_a), slot(g_next_a)) ==
+                  ChangeStatus::Ok);
+            CHECK(reg.hook_function(b, in_image(s.at(0x40)), reinterpret_cast<void*>(&detour_b), slot(g_next_b)) ==
+                  ChangeStatus::Ok);
+            CHECK(leads_to(g_next_a) == reinterpret_cast<uintptr_t>(&detour_b));  // straight to the detour
+            CHECK(traced(f, 1) == 104 && g_trace == "ab");
+            std::vector<CallCount> counts{{}};
+            CHECK(reg.call_counts(counts) && counts.empty());
+        }
+
+        ChangeRegistry reg(s.at(0), 0x1000);
+        reg.set_profile(true);
+        const OwnerId a = reg.add_owner("a"), b = reg.add_owner("b");
+        ChangeTarget hooked = in_image(s.at(0x40));
+        hooked.symbol = "add_one";
+        ChangeId ha = 0, hm = 0;
+        CHECK(reg.hook_function(a, hooked, reinterpret_cast<void*>(&detour_a), slot(g_next_a), &ha) == ChangeStatus::Ok);
+        CHECK(reg.hook_function(b, hooked, reinterpret_cast<void*>(&detour_b), slot(g_next_b)) == ChangeStatus::Ok);
+        CHECK(leads_to(g_next_a) != reinterpret_cast<uintptr_t>(&detour_b));  // b's counting stub
+        Probe pm{'m'}, block{'B', 0, 0, 1000}, jump{'j', s.at(0x8C), 50};  // to the final ret
+        CHECK(reg.mid_hook(a, in_image(s.at(0x83)), &probe, &pm, &hm) == ChangeStatus::Ok);
+        CHECK(reg.replace_block(b, in_image(s.at(0x83)), 6, 0, &probe, &block) == ChangeStatus::Ok);
+        CHECK(reg.redirect_call(b, in_image(s.at(0x14)), 0, reinterpret_cast<void*>(&detour_c), slot(g_next_c)) ==
+              ChangeStatus::Ok);
+        const uint8_t nop = 0x90;
+        CHECK(reg.patch_bytes(a, in_image(s.at(0x300)), &nop, 1) == ChangeStatus::Ok);  // not counted
+        for (int i = 0; i < 5; ++i) CHECK(traced(f, 1) == 104 && g_trace == "ab");
+        for (int i = 0; i < 3; ++i) CHECK(traced(g, 0) == 1009 && g_trace == "mB");
+        CHECK(traced(caller, 1) == 12);
+        CHECK(traced(g_next_a, 1) == 4 && g_trace == "b");  // a thread passing on from a counts b only
+        // A mid hook that ends the chain: the block is not called, not counted.
+        ChangeId hj = 0;
+        CHECK(reg.mid_hook(a, in_image(s.at(0x83)), &probe, &jump, &hj) == ChangeStatus::Ok);
+        CHECK(traced(g, 0) == 50 && g_trace == "mj");
+
+        std::vector<CallCount> counts;
+        CHECK(reg.call_counts(counts));
+        std::vector<std::string> lines;
+        for (const CallCount& c : counts) lines.push_back(reg.owner_name(c.owner) + " " + describe_call_count(c));
+        CHECK((lines == std::vector<std::string>{
+                            "a function hook rva 0x40 [add_one]: 5 calls",
+                            "b function hook rva 0x40 [add_one]: 6 calls",
+                            "a mid hook rva 0x83: 4 calls",
+                            "b block replacement rva 0x83 (6 B): 3 calls",
+                            "b call redirect rva 0x14: 1 call",
+                            "a mid hook rva 0x83: 1 call",
+                        }));
+        CHECK(counts[0].kind == ChangeKind::FunctionHook && counts[0].symbol == "add_one" && counts[2].symbol.empty());
+        // Removed changes keep their count; a removed one never called is left out.
+        CHECK(reg.remove(a, ha) == ChangeStatus::Ok && reg.remove(a, hj) == ChangeStatus::Ok);
+        ChangeId unused = 0;
+        CHECK(reg.hook_function(a, hooked, reinterpret_cast<void*>(&detour_a), slot(g_next_a), &unused) ==
+              ChangeStatus::Ok);
+        CHECK(reg.remove(a, unused) == ChangeStatus::Ok);
+        CHECK(traced(f, 1) == 4 && g_trace == "b");
+        CHECK(reg.call_counts(counts, false) && counts.size() == 6 && counts[0].calls == 5 && counts[1].calls == 7);
+        CHECK(reg.rollback(a) == 2 && reg.rollback(b) == 3);
+        CHECK(traced(f, 1) == 2 && traced(g, 0) == 15 && traced(caller, 1) == 2);
+        (void)hm;
+    });
+
+    run("profile: anvil.toml profile = true, false by default", [] {
+        const auto file = std::filesystem::temp_directory_path() /
+                          ("anvil_profile_" + std::to_string(GetCurrentProcessId()) + ".toml");
+        const auto settings = [&](const char* text) {
+            std::ofstream(file, std::ios::binary) << text;
+            return read_anvil_settings(file);
+        };
+        CHECK(!settings("log_level = \"debug\"\n").profile);
+        CHECK(settings("profile = true\n").profile);
+        CHECK(!settings("profile = false\n").profile);
+        std::error_code ignored;
+        std::filesystem::remove(file, ignored);
     });
 }

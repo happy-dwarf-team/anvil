@@ -63,7 +63,21 @@ struct ChangeTarget {
     const uint8_t* expected = nullptr;
     const uint8_t* mask = nullptr;
     size_t expected_size = 0;
+    // The declared symbol's name, for the call counters' report; may be null.
+    const char* symbol = nullptr;
 };
+
+// The calls one change has seen while counting was on (design §17).
+struct CallCount {
+    OwnerId owner = 0;
+    ChangeKind kind = ChangeKind::FunctionHook;
+    std::string label;   // as in describe(), e.g. "function hook rva 0x40"
+    std::string symbol;  // empty for a raw address or an API 1 RVA
+    uint64_t calls = 0;
+};
+
+// One line of the report, e.g. "function hook rva 0x8024D0 [speed_object]: 1234 calls".
+std::string describe_call_count(const CallCount& count);
 
 // All changes of game memory go through one registry (design §8):
 //  - one SafetyHook hook per address; Anvil chains the plugins itself, each
@@ -103,6 +117,11 @@ public:
     // the registry's lock; set it before the first change.
     using NoticeSink = std::function<void(OwnerId owner, const std::string& message)>;
     void set_notice_sink(NoticeSink sink);
+    // `profile = true` (design §17): every function hook, call redirect, mid
+    // hook and block replacement requested afterwards counts its calls
+    // atomically. Off by default, and then no counting code runs at all. Set
+    // it before the first change.
+    void set_profile(bool on);
 
     // --- requests: `next` receives the link's own next (never null on Ok);
     // `out` (optional) the handle. In an open group the change is staged and
@@ -186,6 +205,10 @@ public:
     size_t suspended_count(OwnerId owner) const;
     // Owners of the acting links at `address` in chain order (outermost first).
     std::vector<OwnerId> chain_at(uintptr_t address) const;
+    // The counted changes in request order, removed ones only if they saw a
+    // call. With wait = false (at process exit, where a killed thread may hold
+    // the lock) false when the registry is busy.
+    bool call_counts(std::vector<CallCount>& out, bool wait = true) const;
 
 private:
     struct Site;
@@ -195,6 +218,9 @@ private:
     struct CpuStub;
 
     static void dispatch(AnvilCpuContext* cpu);
+    static void dispatch_counted(AnvilCpuContext* cpu);
+    template <bool Count> static void run_callbacks(AnvilCpuContext* cpu);
+    static uintptr_t entry_of(const Change& link);
 
     ChangeStatus refuse(OwnerId owner, ChangeStatus status, const std::string& message);
     ChangeStatus check_owner(OwnerId owner) const;
@@ -208,7 +234,7 @@ private:
     bool add_call_stub(Site& code, const Site* call);
     ChangeStatus add_link(OwnerId owner, Site& site, ChangeKind kind, uintptr_t detour, std::vector<uint8_t> bytes,
                           std::string label, void** next, ChangeId* out, void* user = nullptr, uintptr_t resume = 0,
-                          size_t span = 0);
+                          size_t span = 0, const char* symbol = nullptr);
     ChangeStatus enable(std::vector<ChangeId> ids);
     ChangeStatus move_links(OwnerId owner, bool suspend);
     bool relink(Site& site);
@@ -233,6 +259,7 @@ private:
     RefusalSink sink_;
     std::mutex notice_mutex_;  // not the registry's lock: the sink runs inside game code
     NoticeSink notice_;
+    bool profile_ = false;
     struct Arena {
         uint8_t* base;
         size_t used;

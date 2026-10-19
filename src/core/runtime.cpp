@@ -43,6 +43,7 @@ struct Runtime {
     const KnownBuild* build = nullptr;
     AnvilGameInfo game{};
     std::unique_ptr<ChangeRegistry> changes;
+    bool profile = false;  // anvil.toml: count calls per change
     ServiceBus bus;
     std::vector<std::unique_ptr<AnvilPlugin>> plugins;  // resolved, in load order
     std::vector<Skipped> skipped;
@@ -377,6 +378,11 @@ void startup_impl(const std::filesystem::path& game_dir) {
     g_runtime->identity = *identity;
     g_runtime->build = find_known_build(*identity);
     g_runtime->changes = std::make_unique<ChangeRegistry>(identity->image_base, identity->size_of_image);
+    if (settings.profile) {
+        g_runtime->profile = true;
+        g_runtime->changes->set_profile(true);
+        log_info("profile = true: calls per change are counted and written here when the game exits");
+    }
     g_runtime->changes->set_refusal_sink([](OwnerId owner, const std::string& message) {
         // Names both owners of a conflict; the host call adds its own line.
         // Owner ids are the indices of g_runtime->plugins (both in load order).
@@ -475,7 +481,34 @@ void startup_impl(const std::filesystem::path& game_dir) {
     }
 }
 
+// The call counters (profile = true), one line per change under its plugin.
+void write_call_counts() {
+    std::vector<CallCount> counts;
+    if (!g_runtime->changes->call_counts(counts, false)) {
+        Log::instance().try_write(ANVIL_LOG_WARNING, "anvil", "call counters: the registry was busy at exit; not written");
+        return;
+    }
+    if (!Log::instance().try_write(ANVIL_LOG_INFO, "anvil",
+                                   "call counters at exit (profile = true): " + std::to_string(counts.size()) +
+                                       " counted change(s)")) {
+        return;
+    }
+    const auto& plugins = g_runtime->plugins;
+    for (const CallCount& c : counts) {
+        const std::string& id = c.owner < plugins.size() ? plugins[c.owner]->manifest.id : std::string("?");
+        if (!Log::instance().try_write(ANVIL_LOG_INFO, id, "calls: " + describe_call_count(c))) return;
+    }
+}
+
 }  // namespace
+
+void shutdown() {
+    try {
+        if (g_runtime != nullptr && g_runtime->changes && g_runtime->profile) write_call_counts();
+    } catch (...) {
+        // Never throw out of DllMain.
+    }
+}
 
 void startup(const std::filesystem::path& game_dir) {
     try {

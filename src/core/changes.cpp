@@ -58,6 +58,12 @@ const char* change_status_name(ChangeStatus status) {
     return "unknown";
 }
 
+std::string describe_call_count(const CallCount& count) {
+    std::string line = count.label;
+    if (!count.symbol.empty()) line += " [" + count.symbol + "]";
+    return line + ": " + std::to_string(count.calls) + (count.calls == 1 ? " call" : " calls");
+}
+
 const char* change_kind_name(ChangeKind kind) {
     switch (kind) {
     case ChangeKind::FunctionHook: return "function hook";
@@ -131,6 +137,20 @@ constexpr size_t kCpuStubState = 383;
 // jmp qword ptr [rip+6]; int3 x6; dq target. No register or flag changes;
 // the target sits 8-byte aligned at +32.
 constexpr size_t kCallStubSize = 40;
+
+// Counting stub (profile = true), in front of a function hook's or call
+// redirect's detour: push rax; mov rax, counter; lock inc qword [rax]; pop rax;
+// jmp qword ptr [rip+2]; int3 x2; dq target. Flags are dead at a function
+// entry and at a call, so only rax needs saving. The target sits at +24.
+constexpr size_t kCountingStubSize = 32;
+
+// Counters live apart from code, one per cache line: increments neither touch
+// code bytes nor contend with another change's counter.
+struct alignas(64) CallCounter {
+    std::atomic<uint64_t> calls{0};
+    uint8_t rest_of_the_line[56] = {};
+};
+static_assert(sizeof(CallCounter) == 64);
 
 void set_call_stub(uint8_t* stub, uintptr_t target) {
     InterlockedExchange64(reinterpret_cast<volatile LONG64*>(stub + 32), static_cast<LONG64>(target));
@@ -289,6 +309,9 @@ struct ChangeRegistry::Change {
     size_t span = 0;             // block: its size, owned from the site's address
     std::vector<uint8_t> bytes;  // byte patch
     std::string label;
+    std::string symbol;                     // the declared symbol, for the report
+    std::unique_ptr<CallCounter> counter;   // profile = true: function hook, redirect, mid hook, block
+    uint8_t* counting = nullptr;            // profile = true, chain kinds in code: the counting stub
 };
 
 // The callbacks behind a code site's context stub, published as a whole so a
@@ -300,6 +323,7 @@ struct ChangeRegistry::Dispatch {
         void* user;
         OwnerId owner;
         bool mid;  // a mid hook (a rip change ends the chain); else the block replacement
+        std::atomic<uint64_t>* counter;  // profile = true
     };
     uintptr_t resume = 0;     // where the game goes on unless a callback writes rip
     std::vector<Item> items;  // the mid hooks in chain order, then the block replacement
@@ -394,13 +418,25 @@ void ChangeRegistry::set_notice_sink(NoticeSink sink) {
     notice_ = std::move(sink);
 }
 
+void ChangeRegistry::set_profile(bool on) {
+    std::lock_guard lock(mutex_);
+    profile_ = on;
+}
+
 // Called by a code site's context stub on the game's thread, without the
-// registry's lock: it reads only the published list.
-void ChangeRegistry::dispatch(AnvilCpuContext* cpu) {
+// registry's lock: it reads only the published list. dispatch_counted is the
+// stub's target instead when the site was created with profile = true.
+void ChangeRegistry::dispatch(AnvilCpuContext* cpu) { run_callbacks<false>(cpu); }
+void ChangeRegistry::dispatch_counted(AnvilCpuContext* cpu) { run_callbacks<true>(cpu); }
+
+template <bool Count> void ChangeRegistry::run_callbacks(AnvilCpuContext* cpu) {
     auto* stub = reinterpret_cast<CpuStub*>(cpu->rip);  // kCpuStubState, pushed as rip
     const Dispatch* list = stub->current.load(std::memory_order_acquire);
     cpu->rip = list->resume;
     for (const Dispatch::Item& item : list->items) {
+        if constexpr (Count) {
+            if (item.counter != nullptr) item.counter->fetch_add(1, std::memory_order_relaxed);
+        }
         item.callback(cpu, item.user);
         if (cpu->rip == list->resume) continue;
         // A new rip ends the chain here (§8.2): the rest is skipped.
@@ -547,6 +583,11 @@ void ChangeRegistry::point(const Change& link, uintptr_t target) {
     }
 }
 
+// Where a chain enters a link: its counting stub when it counts, else its detour.
+uintptr_t ChangeRegistry::entry_of(const Change& link) {
+    return link.counting != nullptr ? reinterpret_cast<uintptr_t>(link.counting) : link.detour;
+}
+
 // The next chained link (function hook, redirect, pointer swap, import) after `link`.
 uintptr_t ChangeRegistry::successor(const Site& site, const Change& link) const {
     bool after = false;
@@ -554,7 +595,7 @@ uintptr_t ChangeRegistry::successor(const Site& site, const Change& link) const 
         if (c == &link) {
             after = true;
         } else if (after && chains(c->kind) && c->state == LinkState::Active) {
-            return c->detour;
+            return entry_of(*c);
         }
     }
     return site.terminal;
@@ -569,8 +610,9 @@ void ChangeRegistry::publish(Site& site, uintptr_t resume, const std::vector<Cha
         if (now == nullptr || now->resume != resume || now->items.size() != callbacks.size()) return false;
         for (size_t i = 0; i < callbacks.size(); ++i) {
             const Dispatch::Item& item = now->items[i];
+            const std::atomic<uint64_t>* counter = callbacks[i]->counter ? &callbacks[i]->counter->calls : nullptr;
             if (item.callback != reinterpret_cast<AnvilCpuCallback>(callbacks[i]->detour) ||
-                item.user != callbacks[i]->user || item.owner != callbacks[i]->owner) {
+                item.user != callbacks[i]->user || item.owner != callbacks[i]->owner || item.counter != counter) {
                 return false;
             }
         }
@@ -580,8 +622,8 @@ void ChangeRegistry::publish(Site& site, uintptr_t resume, const std::vector<Cha
     auto list = std::make_unique<Dispatch>();
     list->resume = resume;
     for (const Change* c : callbacks) {
-        list->items.push_back(
-            {reinterpret_cast<AnvilCpuCallback>(c->detour), c->user, c->owner, c->kind == ChangeKind::MidHook});
+        list->items.push_back({reinterpret_cast<AnvilCpuCallback>(c->detour), c->user, c->owner,
+                               c->kind == ChangeKind::MidHook, c->counter ? &c->counter->calls : nullptr});
     }
     cpu.current.store(list.get(), std::memory_order_release);
     cpu.published.push_back(std::move(list));
@@ -607,9 +649,9 @@ bool ChangeRegistry::relink(Site& site) {
         }
     }
     for (size_t i = chained.size(); i-- > 0;) {
-        point(*chained[i], i + 1 < chained.size() ? chained[i + 1]->detour : site.terminal);
+        point(*chained[i], i + 1 < chained.size() ? entry_of(*chained[i + 1]) : site.terminal);
     }
-    const uintptr_t chain = chained.empty() ? site.terminal : chained.front()->detour;
+    const uintptr_t chain = chained.empty() ? site.terminal : entry_of(*chained.front());
     const bool want = !active.empty();
     switch (site.kind) {
     case ChangeKind::FunctionHook:
@@ -681,7 +723,7 @@ bool ChangeRegistry::relink(Site& site) {
 
 ChangeStatus ChangeRegistry::add_link(OwnerId owner, Site& site, ChangeKind kind, uintptr_t detour,
                                       std::vector<uint8_t> bytes, std::string label, void** next, ChangeId* out,
-                                      void* user, uintptr_t resume, size_t span) {
+                                      void* user, uintptr_t resume, size_t span, const char* symbol) {
     auto change = std::make_unique<Change>();
     change->id = changes_.size() + 1;
     change->owner = owner;
@@ -693,6 +735,28 @@ ChangeStatus ChangeRegistry::add_link(OwnerId owner, Site& site, ChangeKind kind
     change->span = span;
     change->bytes = std::move(bytes);
     change->label = std::move(label);
+    if (symbol != nullptr) change->symbol = symbol;
+    if (profile_ && (kind == ChangeKind::FunctionHook || kind == ChangeKind::CallRedirect ||
+                     kind == ChangeKind::MidHook || kind == ChangeKind::BlockReplacement)) {
+        change->counter = std::make_unique<CallCounter>();
+        if (kind == ChangeKind::FunctionHook || kind == ChangeKind::CallRedirect) {
+            change->counting = static_cast<uint8_t*>(alloc_near_locked(kCountingStubSize));
+            if (change->counting == nullptr) {
+                return refuse(owner, ChangeStatus::OutOfMemory, change->label + ": no stub memory");
+            }
+            const uintptr_t counter = reinterpret_cast<uintptr_t>(&change->counter->calls);
+            const uint8_t code[24] = {0x50,                                      // push rax
+                                      0x48, 0xB8, 0, 0, 0, 0, 0, 0, 0, 0,        // mov rax, counter
+                                      0xF0, 0x48, 0xFF, 0x00,                    // lock inc qword [rax]
+                                      0x58,                                      // pop rax
+                                      0xFF, 0x25, 0x02, 0x00, 0x00, 0x00,        // jmp qword [rip+2]
+                                      0xCC, 0xCC};
+            std::memcpy(change->counting, code, sizeof(code));
+            std::memcpy(change->counting + 3, &counter, sizeof(counter));
+            std::memcpy(change->counting + 24, &detour, sizeof(detour));
+            FlushInstructionCache(GetCurrentProcess(), change->counting, kCountingStubSize);
+        }
+    }
     if (kind == ChangeKind::PointerSwap) {
         change->previous = next;  // a value has no stub: the plugin's cell is re-pointed
     } else if (chains(kind)) {
@@ -842,7 +906,8 @@ ChangeStatus ChangeRegistry::code_site(OwnerId owner, const ChangeTarget& target
         if (code == nullptr) return refuse(owner, ChangeStatus::OutOfMemory, label + ": no stub memory");
         auto cpu = std::make_unique<CpuStub>();
         std::memcpy(code, kCpuStub, sizeof(kCpuStub));
-        const uintptr_t destination = reinterpret_cast<uintptr_t>(&ChangeRegistry::dispatch);
+        const uintptr_t destination = reinterpret_cast<uintptr_t>(profile_ ? &ChangeRegistry::dispatch_counted
+                                                                           : &ChangeRegistry::dispatch);
         const uintptr_t state = reinterpret_cast<uintptr_t>(cpu.get());
         std::memcpy(code + kCpuStubDestination, &destination, sizeof(destination));
         std::memcpy(code + kCpuStubState, &state, sizeof(state));
@@ -894,7 +959,8 @@ ChangeStatus ChangeRegistry::hook_function(OwnerId owner, const ChangeTarget& ta
     if (const ChangeStatus s = code_site(owner, target, ChangeKind::FunctionHook, 0, label, site); s != ChangeStatus::Ok) {
         return s;
     }
-    return add_link(owner, *site, ChangeKind::FunctionHook, reinterpret_cast<uintptr_t>(detour), {}, label, next, out);
+    return add_link(owner, *site, ChangeKind::FunctionHook, reinterpret_cast<uintptr_t>(detour), {}, label, next, out,
+                    nullptr, 0, 0, target.symbol);
 }
 
 ChangeStatus ChangeRegistry::mid_hook(OwnerId owner, const ChangeTarget& target, AnvilCpuCallback callback,
@@ -909,7 +975,7 @@ ChangeStatus ChangeRegistry::mid_hook(OwnerId owner, const ChangeTarget& target,
         return s;
     }
     return add_link(owner, *site, ChangeKind::MidHook, reinterpret_cast<uintptr_t>(callback), {}, label, nullptr, out,
-                    user);
+                    user, 0, 0, target.symbol);
 }
 
 ChangeStatus ChangeRegistry::replace_block(OwnerId owner, const ChangeTarget& target, size_t size, uintptr_t resume,
@@ -941,7 +1007,7 @@ ChangeStatus ChangeRegistry::replace_block(OwnerId owner, const ChangeTarget& ta
         return s;
     }
     return add_link(owner, *site, ChangeKind::BlockReplacement, reinterpret_cast<uintptr_t>(callback), {}, label,
-                    nullptr, out, user, resume, size);
+                    nullptr, out, user, resume, size, target.symbol);
 }
 
 ChangeStatus ChangeRegistry::redirect_call(OwnerId owner, const ChangeTarget& target, uintptr_t expected_callee,
@@ -1001,7 +1067,7 @@ ChangeStatus ChangeRegistry::redirect_call(OwnerId owner, const ChangeTarget& ta
         }
     }
     return add_link(owner, *site, ChangeKind::CallRedirect, reinterpret_cast<uintptr_t>(new_target), {}, label, next,
-                    out);
+                    out, nullptr, 0, 0, target.symbol);
 }
 
 ChangeStatus ChangeRegistry::patch_bytes(OwnerId owner, const ChangeTarget& target, const void* bytes, size_t size,
@@ -1362,6 +1428,23 @@ size_t ChangeRegistry::suspended_count(OwnerId owner) const {
 size_t ChangeRegistry::staged_count(OwnerId owner) const {
     std::lock_guard lock(mutex_);
     return owner < owners_.size() ? owners_[owner].staged.size() : 0;
+}
+
+bool ChangeRegistry::call_counts(std::vector<CallCount>& out, bool wait) const {
+    std::unique_lock lock(mutex_, std::defer_lock);
+    if (wait) {
+        lock.lock();
+    } else if (!lock.try_lock()) {
+        return false;
+    }
+    out.clear();
+    for (const auto& c : changes_) {
+        if (!c->counter) continue;
+        const uint64_t calls = c->counter->calls.load(std::memory_order_relaxed);
+        if (c->state == LinkState::Removed && calls == 0) continue;
+        out.push_back({c->owner, c->kind, c->label, c->symbol, calls});
+    }
+    return true;
 }
 
 std::vector<OwnerId> ChangeRegistry::chain_at(uintptr_t address) const {

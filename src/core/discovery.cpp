@@ -22,6 +22,7 @@ AnvilSettings read_anvil_settings(const std::filesystem::path& file) {
         if (level == "debug") s.log_level = ANVIL_LOG_DEBUG;
         else if (level == "warning") s.log_level = ANVIL_LOG_WARNING;
         else if (level == "error") s.log_level = ANVIL_LOG_ERROR;
+        s.profile = t["profile"].value_or(false);
     } catch (const toml::parse_error& e) {
         s = AnvilSettings{};
         s.error = std::string(e.description());

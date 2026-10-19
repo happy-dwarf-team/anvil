@@ -66,6 +66,10 @@ bool install_entry_hook() {
 }  // namespace
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
+    if (reason == DLL_PROCESS_DETACH) {
+        anvil::shutdown();  // the call counters, if profile = true
+        return TRUE;
+    }
     if (reason != DLL_PROCESS_ATTACH) return TRUE;
     DisableThreadLibraryCalls(instance);
     wchar_t path[MAX_PATH * 2] = {};

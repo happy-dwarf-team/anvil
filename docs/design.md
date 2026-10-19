@@ -448,6 +448,20 @@ Decided in [Performance budgets and how the lab measures them](https://github.co
 
 Exceeding a budget blocks the release and any change to stubs, chains or core start-up.
 
+**Call counters** (`profile = true` in `anvil/anvil.toml`, default `false`)
+- Every function hook, call redirect, mid hook and block replacement requested while it is on counts its calls in its own atomic 64-bit counter, one per cache line.
+- Function hooks and call redirects:
+  - The chain enters the link through a 32-byte counting stub: `push rax; mov rax, counter; lock inc qword [rax]; pop rax; jmp detour`.
+  - Flags are dead at a function entry and at a call, so the stub only saves `rax`.
+  - The link's own `next` is unchanged.
+- Mid hooks and block replacements: the site's context stub calls a counting copy of the dispatch loop, which counts each callback it calls. A callback skipped because an earlier mid hook changed `rip` is not counted.
+- Off, none of this exists: chains enter detours directly and the context stubs call the plain dispatch loop. The setting is read at start-up.
+- Pointer swaps, byte patches and import replacements are not counted: their cost is 0 (see the table above).
+- **Report:** when the process exits, `anvil.log` gets one line per counted change under its plugin's id (at info level), e.g. `calls: function hook rva 0x8024D0 [speed_object]: 1234 calls`.
+  - Removed changes that saw calls are included.
+  - The report is written from `DLL_PROCESS_DETACH` and never waits for a lock: if a killed thread holds one, the report is skipped with a warning.
+  - A process that is terminated (rather than exiting) writes no report.
+
 ## 18. Logging and status
 
 `anvil/anvil.log` is UTF-8 and rotated. It records the Anvil version, the build, each plugin's status and reason, its changes, verification failures with the symbol and byte, timings and the call counters. The same status is published as the `anvil.status` service and event for the overlay and the Manager.
