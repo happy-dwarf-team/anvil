@@ -31,6 +31,10 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
   change the simulation need it: in ironman and multiplayer games Anvil takes
   their changes out unless the player allows them in `anvil/anvil.toml`.
 - Each start writes `anvil/anvil.log`: what was loaded, what was skipped and why.
+- A crash writes a report to `anvil/crashes/` (the last 10 are kept): where it
+  happened and which plugins were involved, with each plugin's `issues` link.
+  After two starts in a row that ended before the game was ready, the next
+  start loads no plugins (safe mode).
 
 ## Install / uninstall
 

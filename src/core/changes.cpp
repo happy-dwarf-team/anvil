@@ -64,6 +64,17 @@ std::string describe_call_count(const CallCount& count) {
     return line + ": " + std::to_string(count.calls) + (count.calls == 1 ? " call" : " calls");
 }
 
+const char* address_role_name(AddressRole role) {
+    switch (role) {
+    case AddressRole::None: return "none";
+    case AddressRole::ChangedBytes: return "changed bytes";
+    case AddressRole::Stub: return "stub";
+    case AddressRole::Trampoline: return "trampoline";
+    case AddressRole::StubMemory: return "stub memory";
+    }
+    return "?";
+}
+
 const char* change_kind_name(ChangeKind kind) {
     switch (kind) {
     case ChangeKind::FunctionHook: return "function hook";
@@ -130,6 +141,13 @@ constexpr uint8_t kCpuStub[391] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 constexpr size_t kCpuStubDestination = 375;
 constexpr size_t kCpuStubState = 383;
+// After the stub's `call qword [rip+0xA8]` (to +375): a return address there
+// means rbx holds the saved context (the stub's `mov rbx, rsp`).
+constexpr size_t kCpuStubReturn = 207;
+static_assert(kCpuStub[kCpuStubReturn - 6] == 0xFF && kCpuStub[kCpuStubReturn - 5] == 0x15 &&
+              kCpuStubReturn + 0xA8 == kCpuStubDestination);
+static_assert(kCpuStub[kCpuStubReturn - 17] == 0x48 && kCpuStub[kCpuStubReturn - 16] == 0x89 &&
+              kCpuStub[kCpuStubReturn - 15] == 0xE3);  // mov rbx, rsp (rsp = the context), then the alignment
 
 // Call stub: the original `call rel32` of a code site, so mid hooks at a call
 // pass on to the callee or to the redirect chain with the game's own return
@@ -1447,6 +1465,81 @@ std::vector<OwnerId> ChangeRegistry::chain_at(uintptr_t address) const {
         add(*s, false);
     }
     return out;
+}
+
+size_t ChangeRegistry::context_stub_return() { return kCpuStubReturn; }
+
+bool ChangeRegistry::attribute(uintptr_t address, AddressAttribution& out) const {
+    out = AddressAttribution{};
+    std::unique_lock lock(mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) return false;
+    const auto inside = [address](const void* start, size_t size) {
+        const auto begin = reinterpret_cast<uintptr_t>(start);
+        return start != nullptr && address >= begin && address - begin < size;
+    };
+    const auto add = [&out](const Change& c) {
+        if (out.count < AddressAttribution::kMaxChanges) {
+            out.changes[out.count++] = {c.id, c.owner, c.kind, c.label.c_str(), c.symbol.c_str()};
+        }
+        ++out.total;
+    };
+    // The site's acting links; while none acts (staged, suspended), all of them.
+    const auto add_site = [&](const Site& site) {
+        out.site = site.address;
+        const bool any_active =
+            std::any_of(site.links.begin(), site.links.end(), [](const Change* c) { return c->state == LinkState::Active; });
+        for (const Change* c : site.links) {
+            if (!any_active || c->state == LinkState::Active) add(*c);
+        }
+    };
+    // A link's own stubs belong to that link, even after its removal: a
+    // thread may still pass through them.
+    for (const auto& c : changes_) {
+        if (inside(c->next, kStubSize) || inside(c->counting, kCountingStubSize)) {
+            out.role = AddressRole::Stub;
+            out.site = c->site != nullptr ? c->site->address : 0;
+            add(*c);
+            return true;
+        }
+    }
+    for (const auto& site : sites_) {
+        const Site& s = *site;
+        if (inside(s.entry, kStubSize) || inside(s.call_stub, kCallStubSize) ||
+            (s.cpu && inside(s.cpu->code, sizeof(kCpuStub)))) {
+            out.role = AddressRole::Stub;
+            out.context_return = s.cpu && address == reinterpret_cast<uintptr_t>(s.cpu->code) + kCpuStubReturn;
+            add_site(s);
+            return true;
+        }
+        if (s.hook) {
+            const auto& trampoline = s.hook->trampoline();
+            if (inside(reinterpret_cast<const void*>(trampoline.address()), trampoline.size())) {
+                out.role = AddressRole::Trampoline;
+                // The stolen instructions are copied one to one (SafetyHook
+                // refuses what it would have to widen); past them is its jump back.
+                const size_t offset = address - trampoline.address();
+                if (offset < s.hook->original_bytes().size()) out.original = s.address + offset;
+                add_site(s);
+                return true;
+            }
+        }
+    }
+    for (const auto& site : sites_) {
+        const Site& s = *site;
+        if (!s.installed || s.links.empty() || !inside(reinterpret_cast<const void*>(s.address), extent(s))) continue;
+        out.role = AddressRole::ChangedBytes;
+        add_site(s);
+        // Shared byte patches and a redirect inside a code site: keep looking
+        // only to count the other owners, the role stays.
+    }
+    if (out.role != AddressRole::None) return true;
+    for (const Arena& a : arenas_) {
+        if (inside(a.base, a.size)) {
+            out.role = AddressRole::StubMemory;
+            return true;
+        }
+    }
+    return true;
 }
 
 }  // namespace anvil

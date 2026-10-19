@@ -39,11 +39,12 @@ This is verified for direct starts and through the Paradox launcher (EU4 engine 
     anvil.toml                         enabled, disabled_plugins, profile, log_level, allow_ironman/allow_multiplayer (§13)
     anvil.log, anvil.prev.log
     trust.toml                         approvals of Workshop plugins (§14)
-    crashes/<time>.json|.txt           last 10 crash reports (§12)
+    crashes/<time>.json|.txt|.dmp      last 10 crash reports (§12); .dmp on a stack overflow
     plugins/<plugin-id>/               local plugins: trusted by placement
         plugin.toml  symbols.toml  settings.toml  <entry>.dll  (+ read-only files)
     data/<plugin-id>/                  writable per plugin; settings.toml holds the player's values
     data/anvil/approved/<id>/<hash>/   the previously approved copy of a Workshop plugin
+    data/anvil/unfinished-starts.txt   starts in a row that ended before the game was ready (§10)
 <mod folder of an enabled mod>/anvil/<plugin-id>/   Workshop plugins (§14)
 ```
 
@@ -285,6 +286,9 @@ The C ABI is [`include/anvil/anvil_plugin.h`](../include/anvil/anvil_plugin.h) (
 1. The proxy is set up (always); the entry-point hook is placed in `eu4.exe` only.
 2. At the entry point: no `anvil/` folder means nothing happens. `ANVIL_DISABLE=1` or `enabled = false` means the log only.
 3. **Safe mode:** two consecutive crashes before the game is ready (`anvil-game.ready`, §12, §13.1) mean this start loads no plugins except the standard ones the overlay needs to explain it.
+   - Each start counts itself in `anvil/data/anvil/unfinished-starts.txt` before anything can crash. `anvil-game.ready` removes the file; an exit before it without a crash puts the previous count back (a crash: a report was written, or a fatal-looking exception came in the last 30 s, which the game's own handler may have caught). A start that crashed, hung or was killed before the game was ready stays counted, whatever caught the crash.
+   - A count of 2 makes this start safe: the file is removed and the log says why. The plugins are listed as skipped ("safe mode"). The next start loads them again.
+   - Without `anvil-game` (disabled or missing) there is no ready signal, so a crash at any time of a session counts. The standard plugins kept in safe mode (`anvil-game`, `anvil-overlay`) join the list with the overlay; today it is empty.
 4. The build is identified.
 5. Plugins are discovered: local `anvil/plugins/*`, and Workshop plugins in enabled mods (approved versions only, §14).
 6. Resolve and verify:
@@ -329,14 +333,22 @@ Decided in [Crash attribution to plugins](https://github.com/happy-dwarf-team/an
 - **Capture**
   - The core registers a VEH at the entry point. It records fatal-looking exceptions in memory only: no IO, at most 8.
   - An unhandled-exception filter chained ahead of EU4's writes the report, then hands over to EU4's own crash reporter.
-  - On stack overflow, a helper thread prepared at start-up writes the report and a small minidump.
+    - Anvil sets its filter before the game's C runtime starts and replaces eu4.exe's import of `SetUnhandledExceptionFilter` (1.37.5 imports it from `KERNEL32.dll`). The game's own calls then only record their filter as Anvil's next one and get back the filter they replaced. Anvil's filter stays on top: it has the report written, calls the game's filter and returns its result.
+    - At `anvil-game.ready` the core checks that its filter is still the top-level one. A filter set through another module's import stays on top, and the log names it.
+  - A helper thread prepared at start-up writes every report while the crashed thread waits. It has its own stack, `MiniDumpWriteDump` loaded and the minidump file already open.
+    - The report is built in fixed buffers: no allocation and no lock. The registry is asked with try-locks, and the crashed thread's memory is read with `ReadProcessMemory`. A fault while writing leaves a partial report with a note.
+    - On a stack overflow the VEH hands over at once, because the filter may have no stack left. The helper adds a small minidump. The game's main thread gets a 64 KB stack guarantee for the handlers.
+  - Not caught: `__fastfail` and `/GS` failures (they bypass both), `TerminateProcess`, and an exception that a frame handler of the game catches before the filter. One report per process.
 - **Report:** `anvil/crashes/<time>.json` and `.txt`, keeping the last 10. It contains:
   - the code and the address as module + offset;
   - for `eu4.exe` addresses, the nearest declared symbol and whether a plugin's change covers it;
   - for stubs and trampolines, the change, plugin and symbol;
   - the unwound stack with every frame attributed;
-  - the registers, the plugins with versions, the build, and the tail of the log.
+    - frames come from unwind data (`RtlVirtualUnwind`). Anvil's stubs have none: a return address in a context stub continues from its saved `AnvilCpuContext` at the site, and a trampoline is unwound as the game instructions it copies. Anything else without unwind data (other stubs, code of no module) switches to a scan of the stack for return addresses, marked "scan" (they may be stale);
+    - repeated frames (a recursion) are counted, not listed;
+  - the registers, the plugins with versions and `issues` links, the build, the earlier fatal-looking exceptions of the VEH, and the tail of the log.
 - **Levels:** "in plugin X's code", "in plugin X's change", "plugin X on the stack", or "no plugin involved". Never "X caused it".
+  - In X's code: the crash address is in X's DLL. In X's change: it is in game bytes, a stub or a trampoline of X's change (every owner of a shared one). On the stack: a later frame is in X's DLL or change. The JSON has the level as `in_plugin_code`, `in_plugin_change`, `plugin_on_stack` or `no_plugin`.
 - **Next start:** a notice in the overlay with "disable X at the next start" (only on click), and safe mode after two crashes before the game is ready (`anvil-game.ready`). Nothing is uploaded; "copy report" plus the `issues` link.
 
 ## 13. Gameplay-affecting plugins

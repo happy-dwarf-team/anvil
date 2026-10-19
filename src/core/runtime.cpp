@@ -7,8 +7,10 @@
 #include "log.hpp"
 #include "manifest.hpp"
 #include "changes.hpp"
+#include "crash.hpp"
 #include "plugin_symbols.hpp"
 #include "resolver.hpp"
+#include "safe_mode.hpp"
 #include "seh_guard.hpp"
 #include "services.hpp"
 #include "settings.hpp"
@@ -26,6 +28,8 @@
 #include <string>
 #include <vector>
 
+extern "C" IMAGE_DOS_HEADER __ImageBase;  // version.dll
+
 namespace anvil {
 namespace {
 
@@ -33,6 +37,7 @@ struct Runtime {
     std::filesystem::path game_dir;
     std::filesystem::path anvil_dir;
     std::filesystem::path exe_path;
+    std::string exe_name;  // e.g. eu4.exe, for crash reports
     PeIdentity identity;
     const KnownBuild* build = nullptr;
     AnvilGameInfo game{};
@@ -44,6 +49,7 @@ struct Runtime {
     AnvilHost host{};
     std::vector<std::unique_ptr<AnvilPlugin>> plugins;  // resolved, in load order
     std::vector<Skipped> skipped;
+    StartMarker start_marker;  // safe mode: starts that ended before game_ready
     LARGE_INTEGER start{};
     LARGE_INTEGER frequency{};
 };
@@ -61,6 +67,19 @@ std::string fmt_ms(double ms) {
     char buffer[32];
     std::snprintf(buffer, sizeof(buffer), "%.1f ms", ms);
     return buffer;
+}
+
+// The game is ready (anvil-game.ready): logged, and this start no longer
+// counts for safe mode. Without anvil-game there is no such event.
+void on_game_ready(const char*, const void*, void*) {
+    log_info("game ready at " + fmt_ms(elapsed_ms()));
+    g_runtime->start_marker.game_ready();
+    crash::set_game_ready();
+    std::string by;
+    if (!crash::check_filter(by)) {
+        log_warning("the unhandled-exception filter was replaced by " + by +
+                    "; Anvil's crash reports depend on that filter calling the one it replaced");
+    }
 }
 
 // ---- loading ---------------------------------------------------------------
@@ -229,6 +248,37 @@ void startup_impl(const std::filesystem::path& game_dir) {
         const auto& plugins = g_runtime->plugins;
         Log::instance().write(ANVIL_LOG_INFO, owner < plugins.size() ? plugins[owner]->manifest.id : "?", message);
     });
+
+    // Safe mode (design §10): counted before anything can crash.
+    const StartRecord record =
+        g_runtime->start_marker.begin(g_runtime->anvil_dir / "data" / "anvil" / "unfinished-starts.txt");
+    if (record.safe_mode) {
+        log_warning("safe mode: the last " + std::to_string(record.unfinished) +
+                    " starts ended before the game was ready (a crash, a hang or a killed process); no plugins "
+                    "are loaded on this start, the next one loads them again (reports: anvil/crashes)");
+    } else if (record.unfinished > 0) {
+        log_warning(std::to_string(record.unfinished) + " previous start(s) ended before the game was ready; safe mode "
+                    "after " + std::to_string(kSafeModeAfter));
+    }
+    // Crash capture (design §12): the vectored handler, the filter ahead of
+    // the game's and the helper thread, before any plugin code runs.
+    crash::Setup capture;
+    capture.crash_dir = g_runtime->anvil_dir / "crashes";
+    capture.log_file = g_runtime->anvil_dir / "anvil.log";
+    capture.image = exe;
+    capture.sources.changes = g_runtime->changes.get();
+    capture.sources.plugins = &g_runtime->plugins;
+    capture.sources.image_base = identity->image_base;
+    capture.sources.image_size = identity->size_of_image;
+    g_runtime->exe_name = narrow(g_runtime->exe_path.filename().wstring());
+    capture.sources.image_name = g_runtime->exe_name.c_str();
+    capture.sources.build_id = g_runtime->build ? g_runtime->build->id : nullptr;
+    capture.sources.anvil_base = reinterpret_cast<uintptr_t>(&__ImageBase);
+    capture.anvil_version = kAnvilVersion;
+    capture.start = g_runtime->start;
+    capture.unfinished_starts = record.unfinished;
+    capture.safe_mode = record.safe_mode;
+    if (std::string error; !crash::install(capture, error)) log_warning("crash capture: " + error);
     AnvilGameInfo& game = g_runtime->game;
     game.size = sizeof(AnvilGameInfo);
     game.build_id = g_runtime->build ? g_runtime->build->id : nullptr;
@@ -245,9 +295,7 @@ void startup_impl(const std::filesystem::path& game_dir) {
             Log::instance().write(level, id, message);
         });
     g_runtime->policy->subscribe();
-    g_runtime->bus.subscribe(
-        "anvil", ANVIL_GAME_EVENT_READY,
-        [](const char*, const void*, void*) { log_info("game ready at " + fmt_ms(elapsed_ms())); }, nullptr);
+    g_runtime->bus.subscribe("anvil", ANVIL_GAME_EVENT_READY, on_game_ready, nullptr);
     char header[160];
     std::snprintf(header, sizeof(header), "timestamp 0x%08X, image 0x%X, checksum 0x%08X, entry 0x%X",
                   identity->pe_timestamp, identity->size_of_image, identity->pe_checksum, identity->entry_point_rva);
@@ -297,6 +345,10 @@ void startup_impl(const std::filesystem::path& game_dir) {
             g_runtime->skipped.push_back({parsed.manifest->id, std::move(reason), folder});
             continue;
         }
+        if (record.safe_mode && !loads_in_safe_mode(parsed.manifest->id)) {
+            g_runtime->skipped.push_back({parsed.manifest->id, "safe mode", folder});
+            continue;
+        }
         input.manifests.push_back(*parsed.manifest);
     }
     log_info("discovered " + std::to_string(folders.size()) + " plugin folder(s) in " + narrow(plugins_dir.wstring()));
@@ -304,6 +356,8 @@ void startup_impl(const std::filesystem::path& game_dir) {
     g_runtime->skipped.insert(g_runtime->skipped.end(), resolved.skipped.begin(), resolved.skipped.end());
     for (const auto& s : g_runtime->skipped) log_warning(s.id + ": skipped — " + s.reason);
     log_info("resolved " + std::to_string(resolved.order.size()) + " plugin(s) to load at " + fmt_ms(elapsed_ms()));
+    // No reallocation later: the crash writer may read the list from another thread.
+    g_runtime->plugins.reserve(resolved.order.size());
     for (auto& m : resolved.order) {
         auto plugin = std::make_unique<AnvilPlugin>();
         plugin->context = &g_runtime->context;
@@ -370,6 +424,10 @@ PluginSettings* plugin_settings(std::string_view plugin_id) {
 void shutdown() {
     try {
         if (g_runtime != nullptr && g_runtime->changes && g_runtime->profile) write_call_counts();
+        // Closed before the game was ready, without a crash: not counted.
+        if (g_runtime != nullptr && g_runtime->start_marker.active() && !crash::crashed()) {
+            g_runtime->start_marker.clean_exit();
+        }
     } catch (...) {
         // Never throw out of DllMain.
     }

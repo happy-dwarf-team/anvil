@@ -59,15 +59,19 @@ endif()
 
 # anvil_loader: the parts that act on the running game (startup, the change
 # registry, the plugin API 2 host table, symbols.toml checks against the
-# running image and the verified symbols per plugin, services, SEH guards).
+# running image and the verified symbols per plugin, services, SEH guards,
+# crash capture and safe mode).
 # Linked into version.dll and the tests, never into anvil.exe.
 add_library(anvil_loader STATIC
     src/core/changes.cpp
+    src/core/crash.cpp
+    src/core/crash_report.cpp
     src/core/gameplay_policy.cpp
     src/core/host.cpp
     src/core/plugin_settings.cpp
     src/core/plugin_symbols.cpp
     src/core/runtime.cpp
+    src/core/safe_mode.cpp
     src/core/seh_guard.cpp
     src/core/services.cpp
     src/core/suspension.cpp
@@ -167,6 +171,10 @@ if(ANVIL_BUILD_TESTS)
     target_compile_definitions(anvil_tests PRIVATE ANVIL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_dependencies(anvil_tests version_dll)
     add_test(NAME anvil_tests COMMAND anvil_tests $<TARGET_FILE:version_dll>)
+    # Crash capture and safe mode; crashes for real in child processes of itself.
+    add_executable(anvil_crash_tests tests/crash_tests.cpp)
+    target_link_libraries(anvil_crash_tests PRIVATE anvil_loader)
+    add_test(NAME anvil_crash_tests COMMAND anvil_crash_tests)
     add_executable(anvil_symbols_tests tests/test_symbols.cpp)
     target_link_libraries(anvil_symbols_tests PRIVATE anvil_loader)
     add_test(NAME anvil_symbols_tests COMMAND anvil_symbols_tests)

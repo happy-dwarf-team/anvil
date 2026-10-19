@@ -17,7 +17,8 @@ void startup(const std::filesystem::path& game_dir);
 
 // Runs from DllMain when the process exits (DLL_PROCESS_DETACH, before the
 // DLL's own static objects go): with profile = true it writes the call
-// counters to anvil.log. Other threads are gone by then and may have died
+// counters to anvil.log; an exit before game_ready without a crash is not
+// counted for safe mode. Other threads are gone by then and may have died
 // holding a lock, so it never waits for one; it writes nothing instead.
 void shutdown();
 
