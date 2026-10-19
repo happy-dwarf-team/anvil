@@ -189,6 +189,16 @@ if(ANVIL_BUILD_TESTS)
     add_dependencies(anvil_cli_tests anvil)
     add_test(NAME anvil_cli_tests COMMAND anvil_cli_tests $<TARGET_FILE:anvil>)
 
+    # The SDK from Anvil's sources in a plugin project with C++ only (#81):
+    # configuring must not need the C language.
+    set(sdk_cxx_only_args -G "${CMAKE_GENERATOR}")
+    if(CMAKE_GENERATOR_PLATFORM)
+        list(APPEND sdk_cxx_only_args -A "${CMAKE_GENERATOR_PLATFORM}")
+    endif()
+    add_test(NAME anvil_sdk_cxx_only
+        COMMAND ${CMAKE_COMMAND} ${sdk_cxx_only_args} -S ${CMAKE_CURRENT_SOURCE_DIR}/tests/sdk/cxx-only
+            -B ${CMAKE_CURRENT_BINARY_DIR}/sdk-cxx-only -DANVIL_ROOT=${CMAKE_CURRENT_SOURCE_DIR})
+
     # anvil gen on the design §5.2 example and on a settings.toml with every
     # type: the headers must compile, warning free, as C11 and C++23 and
     # declare what the fixtures say.

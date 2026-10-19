@@ -154,11 +154,12 @@ function(anvil_add_plugin target)
     add_library(${target} SHARED ${ARG_SOURCES} ${generated})
     target_include_directories(${target} PRIVATE "${ANVIL_SDK_INCLUDE_DIR}" "${gen_dir}")
     # C++20 is the wrapper's minimum (anvil.hpp); C11 for plain C sources.
-    get_property(languages GLOBAL PROPERTY ENABLED_LANGUAGES)
-    if("CXX" IN_LIST languages)
+    # Only for the languages the calling project enabled: the global list also
+    # has those of Anvil's own project when the SDK comes from its sources.
+    if(CMAKE_CXX_COMPILER_LOADED)
         target_compile_features(${target} PRIVATE cxx_std_20)
     endif()
-    if("C" IN_LIST languages)
+    if(CMAKE_C_COMPILER_LOADED)
         target_compile_features(${target} PRIVATE c_std_11)
     endif()
     set_target_properties(${target} PROPERTIES
