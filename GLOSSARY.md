@@ -29,12 +29,16 @@ A game address that a plugin declares together with what must be found there, su
 _Avoid_: offset, signature, address (for a declared one)
 
 **Change**:
-One modification of the game's code or data by a plugin: a function hook, a mid hook, a call redirect, a byte patch, a pointer swap or an import replacement.
+One modification of the game's code or data by a plugin: a function hook, a mid hook, a block replacement, a call redirect, a byte patch, a pointer swap or an import replacement.
 _Avoid_: patch (as the general word; a byte patch is one kind of change), modification, tweak
 
 **Hook**:
 A change that runs plugin code when the game reaches a symbol: a function hook at the start of a function, or a mid hook at any instruction.
 _Avoid_: detour (for the whole change), interception
+
+**Block replacement**:
+A change that runs plugin code instead of a declared block of game instructions, which never run, and then resumes at the block's end or at another declared symbol.
+_Avoid_: mid hook (for this; a mid hook lets the original code run), code cave, skip hook
 
 **Chain**:
 The ordered changes of several plugins at one address, each passing control or the previous value to the next.
