@@ -2,6 +2,8 @@
 
 #include "log.hpp"
 
+#include <anvil/anvil_game.h>
+
 #include <algorithm>
 #include <iterator>
 #include <map>
@@ -99,7 +101,13 @@ void prune_dependencies(std::map<std::string, Manifest>& candidates, std::vector
             for (const auto& d : m.dependencies) {
                 const auto dep = candidates.find(d.id);
                 if (dep == candidates.end()) {
-                    if (!d.optional) reason = "requires plugin '" + d.id + "' (" + d.range.text() + "), which is not loaded";
+                    if (d.implied) {
+                        reason = "affects gameplay, so it needs plugin '" + d.id +
+                                 "', which is not loaded (Anvil suspends gameplay plugins in ironman and multiplayer "
+                                 "through it)";
+                    } else if (!d.optional) {
+                        reason = "requires plugin '" + d.id + "' (" + d.range.text() + "), which is not loaded";
+                    }
                 } else if (!d.range.matches(dep->second.version)) {
                     if (!d.optional) {
                         reason = "requires '" + d.id + "' " + d.range.text() + ", found " + dep->second.version.to_string();
@@ -196,7 +204,14 @@ ResolveResult resolve(const ResolveInput& input) {
                 continue;
             }
         }
-        candidates.emplace(m.id, m);
+        Manifest& added = candidates.emplace(m.id, m).first->second;
+        // Only anvil-game reports ironman and multiplayer sessions, so a
+        // plugin that affects gameplay cannot run without it (design §13).
+        if (m.affects_gameplay && m.id != ANVIL_GAME_ID &&
+            std::none_of(m.dependencies.begin(), m.dependencies.end(),
+                         [](const Dependency& d) { return d.id == ANVIL_GAME_ID; })) {
+            added.dependencies.push_back({ANVIL_GAME_ID, *VersionRange::parse("*"), false, true});
+        }
     }
 
     // 2. Declared conflicts; the declaring plugin is skipped.

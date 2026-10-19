@@ -22,6 +22,18 @@ _Avoid_: built-in plugin, core plugin, official module
 A named set of functions with a major version that one plugin publishes under its own id and other plugins look up.
 _Avoid_: interface, API (for one plugin's offer), export
 
+**Gameplay plugin**:
+A plugin that declares it can change the simulation's state or results. Anvil takes its changes out of ironman and multiplayer games unless both the plugin's author and the player allow it there.
+_Avoid_: cheat plugin, unsafe plugin
+
+**Game session**:
+One loaded save or new game while it runs, from the moment it is playable until the player leaves it or loads another; it is ironman, multiplayer, both or neither.
+_Avoid_: game (for this), campaign, match
+
+**Suspension**:
+The state of a plugin whose changes are all taken out of the game for a while, keeping their place, and come back unchanged when it is resumed.
+_Avoid_: disabling (that lasts until the next start), unloading, pausing
+
 ### Changing the game
 
 **Symbol**:

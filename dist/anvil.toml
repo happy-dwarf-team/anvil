@@ -12,3 +12,12 @@ log_level = "info"
 # true = count the calls of every hook, call redirect and block replacement and
 # write them to anvil.log when the game exits. Costs a little per call.
 profile = false
+
+# Plugins that change the game (affects_gameplay = true) are taken out of
+# ironman and multiplayer games. List a plugin here to let it act there; this
+# works only for plugins whose plugin.toml offers it (allow_ironman = "opt-in").
+# Achievements stay enabled in ironman, but a plugin that changes the game may
+# break Paradox's rules for them. In multiplayer, every player needs the same
+# plugins. Example: allow_ironman = ["my-plugin"]
+allow_ironman = []
+allow_multiplayer = []

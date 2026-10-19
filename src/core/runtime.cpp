@@ -2,6 +2,7 @@
 
 #include "discovery.hpp"
 #include "game_build.hpp"
+#include "gameplay_policy.hpp"
 #include "host.hpp"
 #include "log.hpp"
 #include "manifest.hpp"
@@ -12,6 +13,7 @@
 #include "services.hpp"
 #include "symbol_check.hpp"
 
+#include <anvil/anvil_game.h>
 #include <anvil/anvil_plugin.h>
 #include <windows.h>
 
@@ -36,6 +38,7 @@ struct Runtime {
     std::unique_ptr<ChangeRegistry> changes;
     bool profile = false;  // anvil.toml: count calls per change
     ServiceBus bus;
+    std::unique_ptr<GameplayPolicy> policy;  // design §13, fed by anvil-game's session event
     HostContext context;  // what every plugin's host calls act on
     AnvilHost host{};
     std::vector<std::unique_ptr<AnvilPlugin>> plugins;  // resolved, in load order
@@ -59,27 +62,44 @@ std::string fmt_ms(double ms) {
     return buffer;
 }
 
-// The game's readiness, until anvil-game (#54) publishes it; not part of API 2.
-constexpr const char* kEventGameReady = "anvil.game_ready";
-
-uintptr_t rva_to_address(uint32_t rva) { return g_runtime->identity.image_base + rva; }
-
 // ---- loading ---------------------------------------------------------------
+
+// Empty when every required dependency loaded (they come earlier in the
+// load order); otherwise why the plugin is not loaded either.
+std::string failed_dependency(const AnvilPlugin& plugin) {
+    for (const auto& d : plugin.manifest.dependencies) {
+        if (d.optional) continue;
+        for (const auto& p : g_runtime->plugins) {
+            if (p->manifest.id == d.id && p->state != "loaded") {
+                return "requires plugin '" + d.id + "', which failed to load";
+            }
+        }
+    }
+    return {};
+}
 
 void load_plugin(AnvilPlugin& plugin) {
     const double begin = elapsed_ms();
     const std::filesystem::path dll = std::filesystem::path(plugin.plugin_dir) / plugin.manifest.entry;
     const std::string label = plugin.manifest.id + " " + plugin.manifest.version.to_string();
+    if (std::string reason = failed_dependency(plugin); !reason.empty()) {
+        plugin.state = "failed";
+        g_runtime->policy->forget(plugin.owner);
+        log_error(label + ": not loaded; " + reason);
+        return;
+    }
     plugin.module = LoadLibraryExW(dll.c_str(), nullptr,
                                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (plugin.module == nullptr) {
         plugin.state = "failed";
+        g_runtime->policy->forget(plugin.owner);
         log_error(label + ": cannot load " + narrow(dll.wstring()) + " (error " + std::to_string(GetLastError()) + ")");
         return;
     }
     const auto fn = reinterpret_cast<PluginLoadFn>(GetProcAddress(plugin.module, "anvil_plugin_load"));
     if (fn == nullptr) {
         plugin.state = "failed";
+        g_runtime->policy->forget(plugin.owner);
         log_error(label + ": entry DLL does not export anvil_plugin_load");
         FreeLibrary(plugin.module);
         plugin.module = nullptr;
@@ -94,6 +114,7 @@ void load_plugin(AnvilPlugin& plugin) {
     }
     if (outcome.result != ANVIL_OK) {
         plugin.state = "failed";
+        g_runtime->policy->forget(plugin.owner);
         char code[32] = {};
         if (outcome.exception != 0) std::snprintf(code, sizeof(code), "0x%08lX", outcome.exception);
         log_error(label + ": anvil_plugin_load " +
@@ -123,20 +144,6 @@ void write_summary() {
     log_info("status: " + std::to_string(loaded) + " loaded, " + std::to_string(failed) + " failed, " +
              std::to_string(g_runtime->skipped.size()) + " skipped");
     for (const auto& s : g_runtime->bus.describe()) log_info("service " + s);
-}
-
-DWORD WINAPI ready_watcher(LPVOID) {
-    const auto* marker = reinterpret_cast<const volatile uint8_t*>(rva_to_address(g_runtime->build->ready_marker_rva));
-    for (int i = 0; i < 20 * 60 * 30; ++i) {  // up to 30 minutes
-        if (*marker == 1) {
-            log_info("game ready at " + fmt_ms(elapsed_ms()));
-            g_runtime->bus.publish(kEventGameReady, nullptr);
-            return 0;
-        }
-        Sleep(50);
-    }
-    log_warning("game ready signal not observed within 30 minutes");
-    return 0;
 }
 
 DWORD WINAPI main_phase(LPVOID) {
@@ -228,7 +235,18 @@ void startup_impl(const std::filesystem::path& game_dir) {
     game.image_size = identity->size_of_image;
     game.sha256 = nullptr;  // set when the file hash is verified, after loading
     g_runtime->host = make_host(&game);
-    const bool ready_signal_known = g_runtime->build != nullptr && g_runtime->build->ready_marker_rva != 0;
+    // The game's readiness and its sessions come from anvil-game (design §4,
+    // §13); the core only listens. Its subscriptions come first, so the
+    // policy acts before any plugin hears of a session.
+    g_runtime->policy = std::make_unique<GameplayPolicy>(
+        *g_runtime->changes, g_runtime->bus, GameplayOptIns{settings.allow_ironman, settings.allow_multiplayer},
+        [](AnvilLogLevel level, const std::string& id, const std::string& message) {
+            Log::instance().write(level, id, message);
+        });
+    g_runtime->policy->subscribe();
+    g_runtime->bus.subscribe(
+        "anvil", ANVIL_GAME_EVENT_READY,
+        [](const char*, const void*, void*) { log_info("game ready at " + fmt_ms(elapsed_ms())); }, nullptr);
     char header[160];
     std::snprintf(header, sizeof(header), "timestamp 0x%08X, image 0x%X, checksum 0x%08X, entry 0x%X",
                   identity->pe_timestamp, identity->size_of_image, identity->pe_checksum, identity->entry_point_rva);
@@ -288,6 +306,7 @@ void startup_impl(const std::filesystem::path& game_dir) {
         plugin->plugin_dir = m.folder.wstring();
         plugin->data_dir = (g_runtime->anvil_dir / "data" / m.id).wstring();
         plugin->manifest = std::move(m);
+        g_runtime->policy->add(plugin->manifest, plugin->owner);
         g_runtime->plugins.push_back(std::move(plugin));
     }
 
@@ -297,9 +316,6 @@ void startup_impl(const std::filesystem::path& game_dir) {
     }
     log_info("early phase done at " + fmt_ms(elapsed_ms()));
 
-    if (ready_signal_known) {
-        if (HANDLE t = CreateThread(nullptr, 0, ready_watcher, nullptr, 0, nullptr)) CloseHandle(t);
-    }
     if (HANDLE t = CreateThread(nullptr, 0, main_phase, nullptr, 0, nullptr)) {
         CloseHandle(t);
     } else {

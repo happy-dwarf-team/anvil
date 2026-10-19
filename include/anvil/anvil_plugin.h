@@ -194,7 +194,10 @@ typedef struct AnvilHost {
     AnvilResult (*register_service)(AnvilPlugin *self, const char *name, uint32_t version, const void *service);
     const void *(*get_service)(AnvilPlugin *self, const char *name, uint32_t version);
 
-    /* --- events: synchronous, on the publishing thread; "anvil." names are Anvil's --- */
+    /* --- events: synchronous, on the publishing thread ---
+     * A plugin publishes only events named "<plugin-id>.<name>" (lower-case
+     * letters, digits, '-', '_', '.'); "anvil." names are Anvil's. It may
+     * subscribe to any name. */
     AnvilResult (*subscribe)(AnvilPlugin *self, const char *event, AnvilEventCallback callback, void *context);
     AnvilResult (*publish)(AnvilPlugin *self, const char *event, const void *payload);
 

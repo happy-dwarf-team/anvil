@@ -35,7 +35,9 @@ struct ResolveResult {
 // Validates plugins against the host (and, through `verify`, the game), skips
 // plugins that declare a `conflicts` entry matching another loaded plugin,
 // resolves required and optional dependencies (SemVer ranges) and load_after,
-// and orders them topologically (ties broken by id). Plugins that cannot be
+// and orders them topologically (ties broken by id). A plugin with
+// affects_gameplay = true depends on anvil-game (any version) without
+// declaring it (design §13): the resolver adds that dependency, `implied`. Plugins that cannot be
 // loaded are listed in `skipped` with a human-readable reason; anything
 // depending on them is skipped too. Conflict edge cases: docs/design.md §10.
 ResolveResult resolve(const ResolveInput& input);

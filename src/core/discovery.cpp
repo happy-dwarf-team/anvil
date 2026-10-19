@@ -6,6 +6,18 @@
 
 namespace anvil {
 
+namespace {
+
+void read_ids(const toml::table& t, const char* key, std::vector<std::string>& out) {
+    if (const auto* list = t.get_as<toml::array>(key)) {
+        for (const auto& item : *list) {
+            if (auto v = item.value<std::string>()) out.push_back(*v);
+        }
+    }
+}
+
+}  // namespace
+
 AnvilSettings read_anvil_settings(const std::filesystem::path& file) {
     AnvilSettings s;
     std::error_code ec;
@@ -13,11 +25,9 @@ AnvilSettings read_anvil_settings(const std::filesystem::path& file) {
     try {
         const toml::table t = toml::parse_file(file.wstring());
         s.enabled = t["enabled"].value_or(true);
-        if (const auto* list = t.get_as<toml::array>("disabled_plugins")) {
-            for (const auto& item : *list) {
-                if (auto v = item.value<std::string>()) s.disabled_plugins.push_back(*v);
-            }
-        }
+        read_ids(t, "disabled_plugins", s.disabled_plugins);
+        read_ids(t, "allow_ironman", s.allow_ironman);
+        read_ids(t, "allow_multiplayer", s.allow_multiplayer);
         const std::string level = t["log_level"].value_or<std::string>("info");
         if (level == "debug") s.log_level = ANVIL_LOG_DEBUG;
         else if (level == "warning") s.log_level = ANVIL_LOG_WARNING;

@@ -16,7 +16,6 @@ struct KnownBuild {
     uint32_t entry_point_rva;
     uint64_t file_size;
     const char* sha256;            // upper-case hex of the whole file
-    uint32_t ready_marker_rva;     // byte that becomes 1 when initialization finished; 0 = unknown
 };
 
 struct PeIdentity {

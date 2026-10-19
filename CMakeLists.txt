@@ -61,6 +61,7 @@ endif()
 # Linked into version.dll and the tests, never into anvil.exe.
 add_library(anvil_loader STATIC
     src/core/changes.cpp
+    src/core/gameplay_policy.cpp
     src/core/host.cpp
     src/core/plugin_symbols.cpp
     src/core/runtime.cpp
@@ -130,6 +131,13 @@ if(ANVIL_BUILD_EXAMPLES)
     unset(CMAKE_COMPILE_WARNING_AS_ERROR)
 endif()
 
+# anvil-game, the standard plugin of design §4 and §13.1 (readiness, frames,
+# main-thread work, sessions), built like any plugin repository and released
+# with Anvil in anvil/plugins/anvil-game/.
+set(CMAKE_COMPILE_WARNING_AS_ERROR ON)
+add_subdirectory(plugins/anvil-game)
+unset(CMAKE_COMPILE_WARNING_AS_ERROR)
+
 # anvil_bench: microbenchmarks per kind of change and of the start-up parsers
 # (design §17). CI runs it as its own step against bench/baseline-ci.json; the
 # lab runs it pinned through bench/run-lab.ps1. Not part of ctest.
@@ -141,7 +149,7 @@ endif()
 if(ANVIL_BUILD_TESTS)
     enable_testing()
     add_executable(anvil_tests tests/test_main.cpp tests/manifest_tests.cpp tests/resolver_tests.cpp
-        tests/change_tests.cpp)
+        tests/change_tests.cpp tests/gameplay_tests.cpp)
     target_link_libraries(anvil_tests PRIVATE anvil_loader)
     target_compile_definitions(anvil_tests PRIVATE ANVIL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_dependencies(anvil_tests version_dll)
@@ -191,6 +199,18 @@ if(ANVIL_BUILD_TESTS)
         add_test(NAME anvil_plugin_tests COMMAND anvil_plugin_tests ${CMAKE_BINARY_DIR}/plugin)
     endif()
 
+    # anvil-game end to end on a synthetic image laid out like eu4.exe, with
+    # the gameplay policy listening (tests/anvil_game_plugin_tests.cpp).
+    add_executable(anvil_game_plugin_tests tests/anvil_game_plugin_tests.cpp plugins/anvil-game/src/session.cpp
+        plugins/anvil-game/src/work_queue.cpp)
+    target_link_libraries(anvil_game_plugin_tests PRIVATE anvil_loader)
+    add_dependencies(anvil_game_plugin_tests anvil_game)
+    add_test(NAME anvil_game_plugin_tests COMMAND anvil_game_plugin_tests ${CMAKE_BINARY_DIR}/plugin)
+
+    # anvil-game's symbols.lock matches its symbols.toml (anvil check without
+    # --exe; the lock comes from anvil check --exe on the real eu4.exe).
+    add_test(NAME anvil_game_symbols_lock COMMAND anvil check ${CMAKE_CURRENT_SOURCE_DIR}/plugins/anvil-game)
+
     # The wrapper's signature checks: each source must fail to compile with
     # the static_assert, and the compiler's note must name the symbol. The
     # targets are not part of ALL; each test builds one.
@@ -224,6 +244,8 @@ endif()
 install(TARGETS version_dll RUNTIME DESTINATION . COMPONENT anvil)
 install(FILES dist/anvil.toml DESTINATION anvil COMPONENT anvil)
 install(FILES dist/plugins-README.txt DESTINATION anvil/plugins RENAME README.txt COMPONENT anvil)
+install(FILES $<TARGET_FILE:anvil_game> plugins/anvil-game/plugin.toml plugins/anvil-game/symbols.toml
+    DESTINATION anvil/plugins/anvil-game COMPONENT anvil)
 install(FILES LICENSE README.md DESTINATION anvil/docs COMPONENT anvil)
 # Third-party code compiled into version.dll: ship its license texts.
 # Zydis is declared inside SafetyHook's scope; fetch its properties here.
@@ -244,7 +266,7 @@ include(CMakePackageConfigHelpers)
 write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/sdk/AnvilPluginConfigVersion.cmake
     VERSION ${PROJECT_VERSION} COMPATIBILITY SameMajorVersion ARCH_INDEPENDENT)
 install(FILES include/anvil/anvil_plugin.h include/anvil/anvil.hpp include/anvil/anvil_symbols.hpp
-    DESTINATION include/anvil COMPONENT sdk)
+    include/anvil/anvil_game.h DESTINATION include/anvil COMPONENT sdk)
 install(TARGETS anvil RUNTIME DESTINATION bin COMPONENT sdk)
 install(FILES sdk/cmake/AnvilPluginConfig.cmake ${CMAKE_CURRENT_BINARY_DIR}/sdk/AnvilPluginConfigVersion.cmake
     DESTINATION cmake COMPONENT sdk)
