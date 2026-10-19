@@ -36,6 +36,23 @@
         "resolve_set": 76056.768,
         "symbols_parse": 128585.068
       }
+    },
+    "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz": {
+      "source": "windows-2022 runner, PR #70 (1 CI attempt x 3 runs, the highest ratio of the runs), 2026-10-19",
+      "ratios": {
+        "function_hook_1": 2.834,
+        "function_hook_8": 7.334,
+        "call_site": 1.333,
+        "call_redirect_1": 2.333,
+        "call_redirect_8": 7.005,
+        "mid_hook_1": 25.093,
+        "mid_hook_8": 29.208,
+        "block_native": 1.0,
+        "block_replacement": 24.269,
+        "manifest_parse_set": 107502.299,
+        "resolve_set": 135890.349,
+        "symbols_parse": 224477.088
+      }
     }
   }
 }
