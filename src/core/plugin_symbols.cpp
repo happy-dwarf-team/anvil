@@ -98,9 +98,18 @@ ChangeStatus patch_bytes(ChangeRegistry& registry, OwnerId owner, const PluginSy
                          const void* bytes, size_t size, ChangeId* out) {
     const PluginSymbol* s = symbols.get(site);
     if (s == nullptr) return ChangeStatus::NotDeclared;
-    if (s->declaration.kind == SymbolKind::Slot) return ChangeStatus::WrongKind;  // swap_pointer (#44)
+    if (s->declaration.kind == SymbolKind::Slot) return ChangeStatus::WrongKind;  // swap_pointer
     if (size == 0 || size > s->declaration.bytes.size()) return ChangeStatus::InvalidArgument;
     return registry.patch_bytes(owner, target_of(*s), bytes, size, out);
+}
+
+ChangeStatus swap_pointer(ChangeRegistry& registry, OwnerId owner, const PluginSymbols& symbols, uint32_t slot,
+                          void* value, void** previous, ChangeId* out) {
+    const PluginSymbol* s = symbols.get(slot);
+    if (s == nullptr) return ChangeStatus::NotDeclared;
+    if (s->declaration.kind != SymbolKind::Slot || !s->declaration.points_to) return ChangeStatus::WrongKind;
+    const uintptr_t image_base = s->address - s->rva;
+    return registry.swap_pointer(owner, target_of(*s), image_base + *s->declaration.points_to, value, previous, out);
 }
 
 }  // namespace anvil

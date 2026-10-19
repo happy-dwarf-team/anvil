@@ -488,6 +488,24 @@ signature = "const char* ()"
         CHECK(redirect_call(changes, owner, syms, 1, detour, &next) == ChangeStatus::WrongKind);  // not call rel32
         const uint8_t nops[2] = {0x90, 0x90};
         CHECK(patch_bytes(changes, owner, syms, 2, nops, 2) == ChangeStatus::WrongKind);       // swap_pointer
+        // A slot in read-only memory: the pointer must still be its points_to.
+        CHECK(VirtualProtect(mapped.base + 0x2000, 0x1000, PAGE_READONLY, &old));
+        void* previous = nullptr;
+        int replacement = 0;
+        CHECK(swap_pointer(changes, owner, syms, 99, &replacement, &previous) == ChangeStatus::NotDeclared);
+        CHECK(swap_pointer(changes, owner, syms, 0, &replacement, &previous) == ChangeStatus::WrongKind);
+        ChangeId swapped = 0;
+        CHECK(swap_pointer(changes, owner, syms, 2, &replacement, &previous, &swapped) == ChangeStatus::Ok);
+        CHECK(previous == mapped.base + 0x1000 && swapped != 0);
+        CHECK(*reinterpret_cast<void**>(mapped.base + 0x2000) == &replacement);
+        CHECK(changes.remove(owner, swapped) == ChangeStatus::Ok);
+        CHECK(*reinterpret_cast<void**>(mapped.base + 0x2000) == mapped.base + 0x1000);
+        CHECK(VirtualProtect(mapped.base + 0x2000, 0x1000, PAGE_READWRITE, &old));
+        void* const moved = mapped.base + 0x1008;
+        std::memcpy(mapped.base + 0x2000, &moved, sizeof(moved));
+        CHECK(swap_pointer(changes, owner, syms, 2, &replacement, &previous) == ChangeStatus::BytesMismatch);
+        void* const back = mapped.base + 0x1000;
+        std::memcpy(mapped.base + 0x2000, &back, sizeof(back));
         CHECK(patch_bytes(changes, owner, syms, 4, nops, 2) == ChangeStatus::InvalidArgument);  // no declared bytes
         CHECK(patch_bytes(changes, owner, syms, 1, nops, 14) == ChangeStatus::InvalidArgument);  // past the bytes
         ChangeId patched = 0;

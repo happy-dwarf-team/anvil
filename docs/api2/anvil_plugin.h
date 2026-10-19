@@ -107,6 +107,9 @@ typedef struct AnvilHost {
                                  AnvilChange **out);
     AnvilResult (*redirect_call)(AnvilPlugin *self, AnvilSymbol call_site, void *target, void **next, AnvilChange **out);
     AnvilResult (*patch_bytes)(AnvilPlugin *self, AnvilSymbol site, const void *bytes, size_t size, AnvilChange **out);
+    /* *previous is rewritten by Anvil whenever the chain changes, until the
+     * change is removed: keep it in a lasting place and read it on each use
+     * (may be NULL). */
     AnvilResult (*swap_pointer)(AnvilPlugin *self, AnvilSymbol slot, void *value, void **previous, AnvilChange **out);
     AnvilResult (*replace_import)(AnvilPlugin *self, const char *module, const char *function, void *replacement,
                                   void **next, AnvilChange **out);

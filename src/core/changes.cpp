@@ -65,6 +65,7 @@ const char* change_kind_name(ChangeKind kind) {
     case ChangeKind::BlockReplacement: return "block replacement";
     case ChangeKind::CallRedirect: return "call redirect";
     case ChangeKind::BytePatch: return "byte patch";
+    case ChangeKind::PointerSwap: return "pointer swap";
     case ChangeKind::ImportReplacement: return "import replacement";
     }
     return "change";
@@ -75,6 +76,13 @@ namespace {
 // A link's life. Only Active links are part of a chain or keep a byte patch
 // written; suspension (#45) adds a state that is skipped the same way.
 enum class LinkState { Staged, Active, Removed };
+
+// Kinds whose links pass on to the next one: through a `next` stub, or (a
+// pointer swap) through the plugin's `previous` cell.
+bool chains(ChangeKind kind) {
+    return kind == ChangeKind::FunctionHook || kind == ChangeKind::CallRedirect || kind == ChangeKind::PointerSwap ||
+           kind == ChangeKind::ImportReplacement;
+}
 
 // Jump stub: jmp qword ptr [rip+2]; int3 x2; dq target. The target sits 8-byte
 // aligned at +8, so re-pointing a link is one atomic store.
@@ -174,6 +182,28 @@ bool write_code_or_data(uintptr_t address, const void* data, size_t size) {
     return write_memory(reinterpret_cast<void*>(address), data, size);
 }
 
+// An aligned pointer in one atomic store, in any memory: the page is made
+// writable for the store (keeping it executable if it was) and restored.
+bool store_pointer(uintptr_t address, uintptr_t value) {
+    constexpr DWORD kWritable = PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (VirtualQuery(reinterpret_cast<const void*>(address), &mbi, sizeof(mbi)) == 0 || mbi.State != MEM_COMMIT) {
+        return false;
+    }
+    auto* slot = reinterpret_cast<void*>(address);
+    const bool code = executable(address);
+    const bool unprotect = (mbi.Protect & kWritable) == 0;
+    DWORD old = 0;
+    if (unprotect && !VirtualProtect(slot, sizeof(value), code ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE, &old)) {
+        return false;
+    }
+    InterlockedExchangePointer(static_cast<void* volatile*>(slot), reinterpret_cast<void*>(value));
+    DWORD ignored = 0;
+    if (unprotect) VirtualProtect(slot, sizeof(value), old, &ignored);
+    if (code) FlushInstructionCache(GetCurrentProcess(), slot, sizeof(value));
+    return true;
+}
+
 std::string hex(uintptr_t value) {
     std::ostringstream s;
     s << "0x" << std::hex << std::uppercase << value;
@@ -251,7 +281,8 @@ struct ChangeRegistry::Change {
     ChangeKind kind = ChangeKind::BytePatch;
     LinkState state = LinkState::Staged;
     uintptr_t detour = 0;        // chain kinds: where this link goes; mid hook, block: the callback
-    uint8_t* next = nullptr;     // chain kinds: this link's own next stub
+    uint8_t* next = nullptr;     // chain kinds but pointer swaps: this link's own next stub
+    void** previous = nullptr;   // pointer swap: the plugin's cell for the next value, or none
     void* user = nullptr;        // mid hook, block: the callback's argument
     uintptr_t resume = 0;        // block: where the game goes on
     size_t span = 0;             // block: its size, owned from the site's address
@@ -292,7 +323,7 @@ struct ChangeRegistry::Site {
     uintptr_t address = 0;
     size_t footprint = 0;           // bytes this site owns: stolen bytes, call, slot, patch
     std::vector<uint8_t> original;  // those bytes as the game shipped them
-    uintptr_t terminal = 0;         // where the innermost next leads: trampoline (or call stub), callee, import
+    uintptr_t terminal = 0;         // where the innermost next leads: trampoline (or call stub), callee, pointer
     uint8_t* entry = nullptr;       // code site, redirect: the stub the game jumps to first
     std::unique_ptr<safetyhook::InlineHook> hook;  // code site
     std::unique_ptr<CpuStub> cpu;   // code site with mid hooks or a block replacement (once)
@@ -504,13 +535,23 @@ uint8_t* ChangeRegistry::new_stub(uintptr_t target) {
     return stub;
 }
 
-// The next chained link (function hook, redirect, import) after `link`.
+// Points a chained link at `target`: its next stub, or the value in its
+// previous cell. One atomic store either way.
+void ChangeRegistry::point(const Change& link, uintptr_t target) {
+    if (link.next != nullptr) {
+        set_stub(link.next, target);
+    } else if (link.previous != nullptr) {
+        InterlockedExchangePointer(reinterpret_cast<void* volatile*>(link.previous), reinterpret_cast<void*>(target));
+    }
+}
+
+// The next chained link (function hook, redirect, pointer swap, import) after `link`.
 uintptr_t ChangeRegistry::successor(const Site& site, const Change& link) const {
     bool after = false;
     for (const Change* c : site.links) {
         if (c == &link) {
             after = true;
-        } else if (after && c->next != nullptr && c->state == LinkState::Active) {
+        } else if (after && chains(c->kind) && c->state == LinkState::Active) {
             return c->detour;
         }
     }
@@ -552,19 +593,19 @@ bool ChangeRegistry::relink(Site& site) {
     for (Change* c : site.links) {
         if (c->state == LinkState::Active) active.push_back(c);
     }
-    // The chained links (function hooks, redirects, imports): each next leads
-    // to the following Active one.
+    // The chained links (function hooks, redirects, pointer swaps, imports):
+    // each next (or previous) leads to the following Active one.
     std::vector<Change*> chained;
     for (Change* c : site.links) {
-        if (c->next == nullptr) continue;
+        if (!chains(c->kind)) continue;
         if (c->state == LinkState::Active) {
             chained.push_back(c);
         } else {
-            set_stub(c->next, successor(site, *c));
+            point(*c, successor(site, *c));
         }
     }
     for (size_t i = chained.size(); i-- > 0;) {
-        set_stub(chained[i]->next, i + 1 < chained.size() ? chained[i + 1]->detour : site.terminal);
+        point(*chained[i], i + 1 < chained.size() ? chained[i + 1]->detour : site.terminal);
     }
     const uintptr_t chain = chained.empty() ? site.terminal : chained.front()->detour;
     const bool want = !active.empty();
@@ -614,12 +655,14 @@ bool ChangeRegistry::relink(Site& site) {
         }
         break;
     }
+    case ChangeKind::PointerSwap:
     case ChangeKind::ImportReplacement: {
-        const uintptr_t value = want ? active.front()->detour : site.terminal;
+        // The slot last: every previous already leads on.
+        const uintptr_t value = want ? chain : site.terminal;
         if (want || site.installed) {
             uintptr_t current = 0;
             std::memcpy(&current, reinterpret_cast<const void*>(site.address), sizeof(current));
-            if (current != value && !write_code_or_data(site.address, &value, sizeof(value))) return false;
+            if (current != value && !store_pointer(site.address, value)) return false;
         }
         break;
     }
@@ -648,7 +691,9 @@ ChangeStatus ChangeRegistry::add_link(OwnerId owner, Site& site, ChangeKind kind
     change->span = span;
     change->bytes = std::move(bytes);
     change->label = std::move(label);
-    if (kind == ChangeKind::FunctionHook || kind == ChangeKind::CallRedirect || kind == ChangeKind::ImportReplacement) {
+    if (kind == ChangeKind::PointerSwap) {
+        change->previous = next;  // a value has no stub: the plugin's cell is re-pointed
+    } else if (chains(kind)) {
         change->next = new_stub(site.terminal);
         if (change->next == nullptr) return refuse(owner, ChangeStatus::OutOfMemory, change->label + ": no stub memory");
     }
@@ -658,8 +703,8 @@ ChangeStatus ChangeRegistry::add_link(OwnerId owner, Site& site, ChangeKind kind
     });
     site.links.insert(position, link);
     changes_.push_back(std::move(change));
-    if (link->next != nullptr) set_stub(link->next, successor(site, *link));
-    if (next != nullptr) *next = link->next;
+    if (chains(kind)) point(*link, successor(site, *link));
+    if (next != nullptr && kind != ChangeKind::PointerSwap) *next = link->next;
     if (out != nullptr) *out = link->id;
     Owner& o = owners_[owner];
     o.staged.push_back(link->id);
@@ -987,6 +1032,51 @@ ChangeStatus ChangeRegistry::patch_bytes(OwnerId owner, const ChangeTarget& targ
     return add_link(owner, *site, ChangeKind::BytePatch, 0, std::move(patch), label, nullptr, out);
 }
 
+ChangeStatus ChangeRegistry::swap_pointer(OwnerId owner, const ChangeTarget& target, uintptr_t expected_value,
+                                          void* value, void** previous, ChangeId* out) {
+    if (previous != nullptr && reinterpret_cast<uintptr_t>(previous) % alignof(void*) != 0) {
+        return ChangeStatus::InvalidArgument;  // stored atomically like the slot
+    }
+    std::lock_guard lock(mutex_);
+    if (check_owner(owner) != ChangeStatus::Ok) return ChangeStatus::InvalidArgument;
+    const std::string label = "pointer swap " + where(target.address);
+    if (const ChangeStatus s = check_target(owner, target, sizeof(uintptr_t), "pointer swap"); s != ChangeStatus::Ok) {
+        return s;
+    }
+    if (target.address % sizeof(uintptr_t) != 0) {
+        return refuse(owner, ChangeStatus::UnsafeSite, label + ": not 8-byte aligned, so not atomic");
+    }
+    Site* site = find_site(target.address, ChangeKind::PointerSwap);
+    if (const ChangeStatus s =
+            check_overlap(owner, site, target.address, sizeof(uintptr_t), ChangeKind::PointerSwap, label);
+        s != ChangeStatus::Ok) {
+        return s;
+    }
+    if (site != nullptr && site->links.empty()) {
+        // Unused since its last link left: take the pointer as it is now.
+        std::memcpy(site->original.data(), reinterpret_cast<const void*>(target.address), sizeof(uintptr_t));
+        std::memcpy(&site->terminal, site->original.data(), sizeof(uintptr_t));
+    }
+    uintptr_t original = 0;
+    if (site != nullptr) {
+        original = site->terminal;
+    } else if (!read_original_locked(target.address, &original, sizeof(original))) {
+        return ChangeStatus::InvalidArgument;
+    }
+    if (expected_value != 0 && original != expected_value) {
+        return refuse(owner, ChangeStatus::BytesMismatch,
+                      label + ": holds " + where(original) + ", expected " + where(expected_value));
+    }
+    if (site == nullptr) {
+        site = &add_site(target.address, ChangeKind::PointerSwap, sizeof(uintptr_t));
+        site->original.resize(sizeof(uintptr_t));
+        std::memcpy(site->original.data(), &original, sizeof(original));
+        site->terminal = original;
+    }
+    return add_link(owner, *site, ChangeKind::PointerSwap, reinterpret_cast<uintptr_t>(value), {}, label, previous,
+                    out);
+}
+
 ChangeStatus ChangeRegistry::replace_import(OwnerId owner, HMODULE image, const char* module, const char* function,
                                             void* replacement, void** next, ChangeId* out) {
     if (image == nullptr || module == nullptr || function == nullptr || replacement == nullptr || next == nullptr) {
@@ -1224,7 +1314,7 @@ std::vector<OwnerId> ChangeRegistry::chain_at(uintptr_t address) const {
     // In the order the game runs them: mid hooks, the rest of the code site,
     // then a redirect at the same call.
     for (const ChangeKind kind : {ChangeKind::FunctionHook, ChangeKind::CallRedirect, ChangeKind::BytePatch,
-                                  ChangeKind::ImportReplacement}) {
+                                  ChangeKind::PointerSwap, ChangeKind::ImportReplacement}) {
         const Site* s = find_site(address, kind);
         if (kind == ChangeKind::BytePatch) {
             s = nullptr;

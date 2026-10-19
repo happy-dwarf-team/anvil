@@ -200,11 +200,21 @@ In addition, `address_of(sym)` gives a verified address to call or read.
 
 Every call that touches `eu4.exe` takes a declared symbol, never a raw RVA. Raw pointers are accepted only **outside** the `eu4.exe` image (`hook_function_at` and friends, e.g. Direct3D 9 vtables). Those still go through the registry and chains, with an optional prologue check.
 
+**Pointer swap.**
+- It takes a slot symbol whose pointer still holds its `points_to`; the slot must be 8-byte aligned.
+- The slot is written with one atomic store. In read-only memory, Anvil changes the page's protection only for that store, keeping it executable if it was.
+- `previous` is a value, not code, so there is no stub to re-point. Instead Anvil keeps the plugin's `previous` location: it writes the next value of the chain there at the request and again, atomically, whenever the chain changes.
+  - When an inner link leaves, the link outside it reads the following value through its `previous`.
+  - Anvil stops writing to a location once its change is removed.
+  - The location must therefore stay valid while the change lives (a global or a field of a long-lived object), and the plugin reads it each time it passes on, never a copy.
+- `previous` may be NULL when the plugin does not pass on.
+- When the last link leaves, the slot gets back the pointer it held before the chain began. A slot that the game rewrote while nobody swapped it starts the next chain from its current value.
+
 ### 8.2 Chains
 
 - Anvil owns one SafetyHook hook per address and chains the plugins itself.
 - Order follows the load order (dependencies, `load_after`): the earlier plugin is outermost. There are no priorities.
-- Every link has its own `next`. Redirects and pointer swaps chain with `next` being the previous target or value.
+- Every link has its own `next`. Redirects and pointer swaps chain with `next` being the previous target or value; a pointer swap's `previous` follows the chain as §8.1 describes.
 - Links can be removed in any order. Executable memory (stubs, trampolines) is never freed.
 - At one address, mid hooks run first, then a block replacement or the function-hook chain or the redirected call.
 - A mid hook that changes `rip` ends the chain; the first occurrence per address and session is logged.

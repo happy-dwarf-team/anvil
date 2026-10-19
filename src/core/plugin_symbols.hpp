@@ -61,6 +61,10 @@ ChangeStatus redirect_call(ChangeRegistry& registry, OwnerId owner, const Plugin
 // The patch must lie within the symbol's declared bytes.
 ChangeStatus patch_bytes(ChangeRegistry& registry, OwnerId owner, const PluginSymbols& symbols, uint32_t site,
                          const void* bytes, size_t size, ChangeId* out = nullptr);
+// On a slot symbol: the pointer must still hold its `points_to`. `previous`
+// follows the chain (ChangeRegistry::swap_pointer).
+ChangeStatus swap_pointer(ChangeRegistry& registry, OwnerId owner, const PluginSymbols& symbols, uint32_t slot,
+                          void* value, void** previous, ChangeId* out = nullptr);
 
 // The declared target of a symbol: its address and declared bytes and mask.
 ChangeTarget target_of(const PluginSymbol& symbol);
