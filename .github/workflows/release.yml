@@ -85,6 +85,39 @@ jobs:
         working-directory: dist
         run: gh release upload "$TAG" anvil-windows-x64.zip anvil-sdk-windows-x64.zip SHA256SUMS.txt --clobber
 
+  # anvil-sys goes to crates.io once the package is built (the tests have passed).
+  # Without a CARGO_REGISTRY_TOKEN secret the job only warns: add the secret (a
+  # crates.io token with publish-new and publish-update for anvil-sys) and
+  # publish the missing release by hand (`cargo publish -p anvil-sys` at the tag).
+  publish-crate:
+    needs: [release-please, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Publish anvil-sys to crates.io
+        if: env.CARGO_REGISTRY_TOKEN != ''
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --no-self-update
+          rustup default 1.99.1
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "anvil-sys") | .version')"
+          if [ "v${version}" != "${TAG}" ]; then
+            echo "::error::anvil-sys is ${version} but the release is ${TAG}"
+            exit 1
+          fi
+          cargo publish -p anvil-sys
+
+      - name: Skip crates.io (no CARGO_REGISTRY_TOKEN)
+        if: env.CARGO_REGISTRY_TOKEN == ''
+        run: echo "::warning::CARGO_REGISTRY_TOKEN is not set; anvil-sys ${TAG} was not published to crates.io"
+
   notify-website:
     needs: [release-please, publish]
     runs-on: ubuntu-24.04

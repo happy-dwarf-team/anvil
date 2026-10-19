@@ -12,3 +12,6 @@
 /bench-*.json
 /dist/anvil-sdk/
 /dist/anvil-sdk-windows-x64*.zip
+/target/
+/bindings.generated.rs
+/Cargo.lock

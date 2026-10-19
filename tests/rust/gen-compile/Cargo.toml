@@ -1,0 +1,15 @@
+# anvil gen --lang rust on tests/rust/gen-compile/symbols.toml must compile, and
+# every function type must be the one the signature says (src/lib.rs).
+[package]
+name = "gen-compile"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+anvil-sys = { path = "../../../sdk/rust/anvil-sys" }

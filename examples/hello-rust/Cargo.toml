@@ -1,0 +1,16 @@
+[package]
+name = "hello-rust"
+version = "0.1.0"
+description = "Example Anvil plugin in Rust"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "hello_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+anvil-sys = { path = "../../sdk/rust/anvil-sys" }

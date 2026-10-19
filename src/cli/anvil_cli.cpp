@@ -32,10 +32,11 @@ void print_usage(std::FILE* out) {
                "Tools for Anvil plugin authors.\n"
                "\n"
                "Commands:\n"
-               "  gen [--lang c|cpp] [--settings <settings.toml>] <symbols.toml|settings.toml>... <out-dir>\n"
+               "  gen [--lang c|cpp|rust] [--settings <settings.toml>] <symbols.toml|settings.toml>... <out-dir>\n"
                "      write symbols.gen.h (C) and symbols.gen.hpp (C++) from symbols.toml, and\n"
                "      settings.gen.h and settings.gen.hpp from settings.toml (--settings, a file named\n"
                "      *settings.toml or one with [setting.<name>] tables); both languages without --lang.\n"
+               "      --lang rust writes symbols.gen.rs and settings.gen.rs only.\n"
                "      A file whose content would not change is not rewritten.\n"
                "  check <plugin-dir> [--exe <eu4.exe>] [--format text|json|github]\n"
                "      check plugin.toml, symbols.toml and settings.toml against their schemas. With\n"
@@ -126,7 +127,7 @@ bool is_settings_file(const std::filesystem::path& file) {
 }
 
 int run_gen(const std::vector<std::wstring>& args) {
-    bool c = true, cpp = true;
+    bool c = true, cpp = true, rust = false;
     std::vector<std::wstring> positional;
     std::vector<std::wstring> settings_files;  // --settings: whatever the name or content
     for (size_t i = 2; i < args.size(); ++i) {
@@ -134,7 +135,8 @@ int run_gen(const std::vector<std::wstring>& args) {
             const auto lang = option_value(args, i, L"--lang");
             if (lang == L"c") cpp = false;
             else if (lang == L"cpp") c = false;
-            else return usage_error("gen: --lang must be c or cpp");
+            else if (lang == L"rust") c = cpp = false, rust = true;
+            else return usage_error("gen: --lang must be c, cpp or rust");
         } else if (is_option(args[i], L"--settings")) {
             const auto file = option_value(args, i, L"--settings");
             if (!file || file->empty()) return usage_error("gen: --settings needs the path of settings.toml");
@@ -179,13 +181,17 @@ int run_gen(const std::vector<std::wstring>& args) {
         if (settings) {
             const anvil::SettingsFileResult parsed = anvil::load_settings(source);
             if (!parsed.file) return report(parsed.error, parsed.line);
-            out.headers = generate_settings_headers(*parsed.file, name, c, cpp);
+            out.headers = generate_settings_headers(*parsed.file, name, c, cpp, rust);
         } else {
             const anvil::SymbolFileResult parsed = anvil::load_symbols(source);
             if (!parsed.file) return report(parsed.error, parsed.line);
-            out.headers = generate_headers(*parsed.file, name, c, cpp);
+            out.headers = generate_headers(*parsed.file, name, c, cpp, rust);
         }
         if (!out.headers.error.empty()) return report(out.headers.error, out.headers.line);
+        for (const auto& warning : out.headers.warnings) {
+            std::printf("%s%s: warning: %s\n", shown(source).c_str(),
+                        warning.line != 0 ? (":" + std::to_string(warning.line)).c_str() : "", warning.message.c_str());
+        }
         for (const auto& other : outputs) {
             if (other.stem == out.stem) return usage_error("gen: more than one " + out.stem + " file");
         }
@@ -195,7 +201,8 @@ int run_gen(const std::vector<std::wstring>& args) {
     std::filesystem::create_directories(out_dir, ec);
     for (const auto& output : outputs) {
         for (const auto& [extension, content, wanted] : {std::tuple{".gen.h", &output.headers.c, c},
-                                                         std::tuple{".gen.hpp", &output.headers.cpp, cpp}}) {
+                                                         std::tuple{".gen.hpp", &output.headers.cpp, cpp},
+                                                         std::tuple{".gen.rs", &output.headers.rust, rust}}) {
             if (!wanted) continue;
             const std::filesystem::path path = out_dir / (output.stem + extension);
             bool written = false;

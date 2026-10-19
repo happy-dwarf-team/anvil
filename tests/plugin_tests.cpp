@@ -330,6 +330,39 @@ int main(int argc, char** argv) {
         if (g_failures != 0) loader.dump();
     });
 
+    // examples/hello-rust is built by cargo, not CMake: CI lays it out in the
+    // plugins folder before ctest (ANVIL_REQUIRE_HELLO_RUST then makes a missing
+    // plugin a failure); elsewhere the test is skipped when it is not there.
+    run("api 2: the Rust hello example", [&] {
+        const bool required = GetEnvironmentVariableA("ANVIL_REQUIRE_HELLO_RUST", nullptr, 0) != 0;
+        if (!std::filesystem::exists(plugins_dir / "hello-rust" / "hello_rust.dll")) {
+            std::printf("  hello-rust is not built (cargo build -p hello-rust --release); skipped\n");
+            CHECK(!required);
+            return;
+        }
+        LoadOutcome outcome;
+        AnvilPlugin* hello_rust = loader.load("hello-rust", &outcome);
+        CHECK(hello_rust != nullptr && outcome.result == ANVIL_OK && outcome.staged == 2);
+        if (hello_rust == nullptr) return;
+        CHECK(loader.logged("hello-rust: hello from Rust on Anvil " ANVIL_VERSION ", game build eu4-1.37.5-steam-win64"));
+        // After hello-c and hello-cpp on speed_object: the third change of the chain.
+        const auto chain = loader.changes.chain_at(game.address(0x8024D0));
+        CHECK(chain.size() == 3 && chain.back() == hello_rust->owner);
+        alignas(8) uint8_t session[0x420] = {};
+        void* const speed = &session[0];
+        std::memcpy(session + 0x418, &speed, sizeof(speed));
+        const auto speed_object = game.function<void* (*)(void*)>(0x8024D0);
+        CHECK(speed_object(session) == speed);
+        CHECK(speed_object(session) == speed);
+        CHECK(loader.logged_containing("hello-rust: first game-speed object: 0x") == 1);
+        const auto idle_exit = game.function<uintptr_t (*)()>(0x815CAE);
+        idle_exit();
+        CHECK(loader.logged_containing("hello-rust: returning to the menu (rcx=0x") == 1);
+        loader.bus.publish(ANVIL_EVENT_PLUGINS_LOADED, nullptr);
+        CHECK(loader.logged("hello-rust: every plugin is loaded"));
+        if (g_failures != 0) loader.dump();
+    });
+
     run("api 2: anvil::Host and Change after load", [&] {
         const auto adjusted = export_of<int (*)()>(probe, "probe_adjusted");
         const auto remove_adjust = export_of<void (*)()>(probe, "probe_remove_adjust");

@@ -24,7 +24,58 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      # Rust (design §9): the bindings match the header, anvil gen's Rust output
+      # compiles, and the Rust hello builds and loads in the tests below.
+      - name: Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --component clippy --component rustfmt --no-self-update
+          rustup default 1.99.1
+          rustup target add x86_64-pc-windows-msvc
+          cargo --version
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: bindgen
+        with:
+          path: ~/.cargo/bin/bindgen.exe
+          key: bindgen-0.73.2-${{ runner.os }}
+
+      - name: Install bindgen
+        if: steps.bindgen.outputs.cache-hit != 'true'
+        shell: bash
+        run: cargo install bindgen-cli --version 0.73.2 --locked
+
+      - name: Rust bindings match the header
+        shell: pwsh
+        env:
+          LIBCLANG_PATH: C:\Program Files\LLVM\bin
+        run: |
+          sdk/rust/regen-bindings.ps1 -Check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ failure() }}
+        with:
+          name: anvil-sys-bindings
+          path: bindings.generated.rs
+          if-no-files-found: ignore
+
+      - name: Rust checks
+        shell: bash
+        env:
+          ANVIL: ${{ github.workspace }}\build\Release\anvil.exe
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+          cargo build -p hello-rust --release --target x86_64-pc-windows-msvc
+          cargo publish -p anvil-sys --dry-run
+          mkdir -p build/plugin/hello-rust
+          cp target/x86_64-pc-windows-msvc/release/hello_rust.dll examples/hello-rust/plugin.toml examples/hello-rust/symbols.toml build/plugin/hello-rust/
+
       - name: Test
+        env:
+          ANVIL_REQUIRE_HELLO_RUST: '1'
         run: ctest --test-dir build -C Release --output-on-failure
 
       # Microbenchmarks (design §17): three runs, gated on each case's ratio to a
@@ -51,7 +102,7 @@ jobs:
           cmake --install build --config Release --component anvil --prefix dist/anvil-package
           # The hello examples, laid out as plugin folders (not installed: docs only).
           New-Item -ItemType Directory -Force dist/anvil-package/anvil/docs/examples | Out-Null
-          foreach ($example in 'hello-c', 'hello-cpp') {
+          foreach ($example in 'hello-c', 'hello-cpp', 'hello-rust') {
             Copy-Item build/plugin/$example -Destination dist/anvil-package/anvil/docs/examples/$example -Recurse
           }
           $files = Get-ChildItem dist/anvil-package -Recurse -File

@@ -266,6 +266,64 @@ int main(int argc, char** argv) {
                        "gives SYMVAL_A_B_C, which another value already gives@7"));
     });
 
+    run("gen rust: ids, function types, values and warnings", [] {
+        const auto file = parse_symbols_text(kGoodSymbols);
+        const GeneratedHeaders h = generate_headers(*file.file, "symbols.toml", false, false, true);
+        CHECK(h.error.empty() && h.c.empty() && h.cpp.empty() && h.warnings.empty());
+        CHECK(contains(h.rust, "pub const SPEED_OBJECT: ::anvil_sys::AnvilSymbol = 0;"));
+        CHECK(contains(h.rust, "pub const SHORT_SITE: ::anvil_sys::AnvilSymbol = 6;"));
+        CHECK(contains(h.rust, "/// function, rva 0x1000: returns the */ speed object\n"));
+        CHECK(contains(h.rust, "pub type SpeedObjectFn = unsafe extern \"C\" fn(session: *mut c_void) -> *mut c_void;"));
+        CHECK(contains(h.rust, "pub type ExportedFn = unsafe extern \"C\" fn(a: c_int, b: *const c_char) -> c_int;"));
+        CHECK(contains(h.rust, "pub const ROOT_AND_DATE_ROOT: u64 = 0x3008;"));
+        CHECK(contains(h.rust, "pub const ROOT_AND_DATE_DATE_OFFSET: u64 = 0x1DD0;"));
+        CHECK(!contains(h.rust, "TickSlot"));  // only functions get a type
+
+        // What gen reads: pointers (const placement), integers, floating point, bool, void, "...".
+        auto fn_of = [](const std::string& signature, std::vector<GenWarning>* warnings = nullptr) {
+            const auto parsed =
+                parse_symbols_text("build = \"b\"\n[symbol.f]\nexport = \"F\"\nsignature = \"" + signature + "\"\n");
+            if (!parsed.file) return "parse: " + parsed.error;
+            const GeneratedHeaders g = generate_headers(*parsed.file, "symbols.toml", false, false, true);
+            if (warnings != nullptr) *warnings = g.warnings;
+            const auto at = g.rust.find("pub type FFn = ");
+            if (at == std::string::npos) return "none: " + g.error;
+            const auto end = g.rust.find(";\n", at);
+            return g.rust.substr(at + 15, end - at - 15);
+        };
+        const std::string pre = "unsafe extern \"C\" fn(";
+        CHECK(fn_of("void ()") == pre + ")");
+        CHECK(fn_of("bool (void)") == pre + ") -> bool");
+        CHECK(fn_of("unsigned long long (unsigned x, long y)") == pre + "x: c_uint, y: c_long) -> c_ulonglong");
+        CHECK(fn_of("float (double d, short s, signed char c)") == pre + "d: f64, s: c_short, c: c_schar) -> f32");
+        CHECK(fn_of("uint32_t (size_t n, int64_t m)") == pre + "n: usize, m: i64) -> u32");
+        CHECK(fn_of("char* (const char* a, char* const b, const char* const* c, void** d)") ==
+              pre + "a: *const c_char, b: *mut c_char, c: *const *const c_char, d: *mut *mut c_void) -> *mut c_char");
+        CHECK(fn_of("int (int, const char*)") == pre + "arg0: c_int, arg1: *const c_char) -> c_int");
+        CHECK(fn_of("int (int type, int fn)") == pre + "type_: c_int, fn_: c_int) -> c_int");
+        CHECK(fn_of("int (const char* format, ...)") == pre + "format: *const c_char, ...) -> c_int");
+        CHECK(fn_of("struct Root* (const Root* r)") == pre + "r: *const c_void) -> *mut c_void");
+
+        // Anything else by value is *mut c_void and a warning, at the symbol's line; behind a pointer it is quiet.
+        std::vector<GenWarning> warnings;
+        CHECK(fn_of("Root (Root r, void (*cb)(int), int t[4])", &warnings) ==
+              pre + "r: *mut c_void, arg1: *mut c_void, arg2: *mut c_void) -> *mut c_void");
+        CHECK(warnings.size() == 4 && warnings[0].line == 2 && contains(warnings[0].message, "symbol f: parameter 1 (Root r)"));
+        CHECK(contains(warnings[0].message, "does not know the type 'Root' passed by value"));
+        CHECK(contains(warnings[1].message, "parameter 2") && contains(warnings[1].message, "does not translate this syntax"));
+        CHECK(contains(warnings[3].message, "symbol f: result (Root)"));
+        fn_of("Root* (Root* r)", &warnings);
+        CHECK(warnings.empty());
+
+        // Names the module cannot hold twice.
+        const auto clash = parse_symbols_text(
+            "build = \"b\"\n[symbol.a_b]\nrva = 0x10\nbytes = \"48\"\nmemory = \"code\"\nvalues.c = { at = 0, size = 1 }\n"
+            "[symbol.a]\nrva = 0x20\nbytes = \"48\"\nmemory = \"code\"\nvalues.b_c = { at = 0, size = 1 }\n");
+        const GeneratedHeaders c = generate_headers(*clash.file, "symbols.toml", false, false, true);
+        CHECK(contains(c.error, "the Rust name A_B_C is already symbol a_b: value c") && c.line == 7);
+        CHECK(c.rust.empty() && c.warnings.empty());
+    });
+
     run("check without symbols, and the files it needs", [&] {
         const auto report = fx.check(fx.plugin("plain", ""), false);
         CHECK(report.exit_code == kExitOk && report.problems.empty() && report.plugin == "plain");
@@ -487,7 +545,20 @@ int main(int argc, char** argv) {
         const fs::path c_only = fx.root / "gen-c";
         CHECK(run_anvil(anvil, "gen --lang c " + quoted(good / "symbols.toml") + " " + quoted(c_only)).exit_code == 0);
         CHECK(fs::exists(c_only / "symbols.gen.h") && !fs::exists(c_only / "symbols.gen.hpp"));
-        CHECK(run_anvil(anvil, "gen --lang rust " + quoted(good / "symbols.toml") + " " + quoted(out)).exit_code == 2);
+        const fs::path rust_only = fx.root / "gen-rust";
+        const Run rust = run_anvil(anvil, "gen --lang rust " + quoted(good / "symbols.toml") + " " + quoted(rust_only));
+        CHECK(rust.exit_code == 0 && contains(rust.out, "symbols.gen.rs: written"));
+        CHECK(fs::exists(rust_only / "symbols.gen.rs") && !fs::exists(rust_only / "symbols.gen.h") &&
+              !fs::exists(rust_only / "symbols.gen.hpp"));
+        CHECK(!fs::exists(out / "symbols.gen.rs"));  // without --lang: C and C++ only
+        CHECK(contains(run_anvil(anvil, "gen --lang rust " + quoted(good / "symbols.toml") + " " + quoted(rust_only)).out,
+                       "symbols.gen.rs: unchanged"));
+        CHECK(run_anvil(anvil, "gen --lang go " + quoted(good / "symbols.toml") + " " + quoted(out)).exit_code == 2);
+        write(fx.root / "warn" / "symbols.toml",
+              "build = \"b\"\n[symbol.f]\nexport = \"F\"\nsignature = \"Root ()\"\n");
+        const Run warned =
+            run_anvil(anvil, "gen --lang rust " + quoted(fx.root / "warn" / "symbols.toml") + " " + quoted(fx.root / "warn"));
+        CHECK(warned.exit_code == 0 && contains(warned.out, "symbols.toml:2: warning: symbol f: result (Root)"));
         CHECK(run_anvil(anvil, "gen " + quoted(fx.root / "none.toml") + " " + quoted(out)).exit_code == 2);
         CHECK(run_anvil(anvil, "gen " + quoted(good / "symbols.toml")).exit_code == 2);
         write(fx.root / "kw" / "symbols.toml", symbol("new", "rva = 0x10\nbytes = \"48\"\nmemory = \"code\"\n"));

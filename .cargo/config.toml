@@ -1,0 +1,4 @@
+# Plugins load into a game that does not ship the Visual C++ redistributable:
+# link the C runtime statically, as the plugins built with CMake do.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
