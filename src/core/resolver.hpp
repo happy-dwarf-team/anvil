@@ -29,11 +29,12 @@ struct ResolveResult {
     std::vector<Skipped> skipped;
 };
 
-// Validates plugins against the host (and, through `verify`, the game), resolves required and
-// optional dependencies (SemVer ranges) and load_after, and orders them
-// topologically (ties broken by id). Plugins that cannot be loaded are listed
-// in `skipped` with a human-readable reason; anything depending on them is
-// skipped too.
+// Validates plugins against the host (and, through `verify`, the game), skips
+// plugins that declare a `conflicts` entry matching another loaded plugin,
+// resolves required and optional dependencies (SemVer ranges) and load_after,
+// and orders them topologically (ties broken by id). Plugins that cannot be
+// loaded are listed in `skipped` with a human-readable reason; anything
+// depending on them is skipped too. Conflict edge cases: docs/design.md §10.
 ResolveResult resolve(const ResolveInput& input);
 
 }  // namespace anvil
