@@ -52,7 +52,7 @@ jobs:
           # The hello examples, laid out as plugin folders (not installed: docs only).
           New-Item -ItemType Directory -Force dist/anvil-package/anvil/docs/examples | Out-Null
           foreach ($example in 'hello-c', 'hello-cpp') {
-            Copy-Item build/plugins/$example -Destination dist/anvil-package/anvil/docs/examples/$example -Recurse
+            Copy-Item build/plugin/$example -Destination dist/anvil-package/anvil/docs/examples/$example -Recurse
           }
           $files = Get-ChildItem dist/anvil-package -Recurse -File
           $files | ForEach-Object {
@@ -66,3 +66,27 @@ jobs:
         with:
           name: anvil-${{ github.sha }}
           path: dist/anvil-${{ github.sha }}.zip
+
+      # SDK archive for plugin authors (design §16): headers, anvil.exe and the
+      # AnvilPlugin CMake package. Built from the same build as the package above.
+      - name: Package SDK
+        shell: pwsh
+        run: |
+          cmake --install build --config Release --component sdk --prefix dist/anvil-sdk
+          $files = Get-ChildItem dist/anvil-sdk -Recurse -File
+          $files | ForEach-Object {
+            $relative = [IO.Path]::GetRelativePath('dist/anvil-sdk', $_.FullName).Replace('\', '/')
+            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $relative
+          } | Set-Content dist/anvil-sdk/SHA256SUMS.txt
+          Compress-Archive -Path dist/anvil-sdk/* -DestinationPath dist/anvil-sdk-windows-x64-${{ github.sha }}.zip
+
+      # What a plugin repository does with the archive: FetchContent of it, or
+      # find_package on the unpacked copy; build, check and deploy the examples.
+      - name: Verify SDK
+        shell: pwsh
+        run: tests/sdk/verify-sdk.ps1 -Archive dist/anvil-sdk-windows-x64-${{ github.sha }}.zip -Work sdk-verify
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: anvil-sdk-${{ github.sha }}
+          path: dist/anvil-sdk-windows-x64-${{ github.sha }}.zip

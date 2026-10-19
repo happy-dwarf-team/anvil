@@ -423,10 +423,29 @@ Decided in [Player UI: in-game overlay and Anvil Manager](https://github.com/hap
   ```
 
   It lies next to `plugin.toml` and is committed. `--exe` writes it also when it finds problems, so CI fails until they are fixed, but not when a file does not parse or the exe cannot be read. Without `--exe`, a plugin with `symbols` fails on a missing lock, a different digest, `result = "problems"`, an unknown key or a newer `format`.
-- **SDK:**
-  - an archive on every release, consumed with `FetchContent`;
-  - `anvil_add_plugin(<target> SOURCES …)` runs `anvil gen`, builds with the static CRT and lays out `plugin/<id>/`;
-  - `<target>-check` (with `EU4_EXE`) and `<target>-deploy` (with `EU4_DIR`).
+- **SDK:** `anvil-sdk-windows-x64.zip`, an asset of every release next to `anvil-windows-x64.zip`, in `SHA256SUMS.txt` and with the same build attestation. CI builds it with the release's own `anvil.exe` and builds the examples from it before it is published. [`sdk/`](../sdk) holds its CMake files and README.
+  ```
+  include/anvil/{anvil_plugin.h, anvil.hpp, anvil_symbols.hpp}
+  bin/anvil.exe
+  cmake/AnvilPluginConfig.cmake, AnvilPluginConfigVersion.cmake
+  CMakeLists.txt  README.md  LICENSE  version.txt  third-party/  SHA256SUMS.txt
+  ```
+  - **Use.** A plugin repository takes the package with `FetchContent` of the release URL (the root `CMakeLists.txt` of the archive defines `anvil_add_plugin`), or with `find_package(AnvilPlugin REQUIRED)` on an unpacked archive (`-DAnvilPlugin_DIR=<sdk>/cmake`; `AnvilPluginConfigVersion.cmake` accepts a release of the same major version):
+    ```cmake
+    cmake_minimum_required(VERSION 3.25)
+    project(my_plugin LANGUAGES CXX)
+
+    include(FetchContent)
+    FetchContent_Declare(anvil_sdk
+        URL https://github.com/happy-dwarf-team/anvil/releases/download/v1.0.0/anvil-sdk-windows-x64.zip
+        URL_HASH SHA256=<hash from the release's SHA256SUMS.txt>)
+    FetchContent_MakeAvailable(anvil_sdk)
+
+    anvil_add_plugin(my_plugin SOURCES src/plugin.cpp)
+    ```
+  - **`anvil_add_plugin(<target> SOURCES <files>… [PLUGIN_DIR <dir>])`** reads `plugin.toml` in the calling `CMakeLists.txt`'s folder (`PLUGIN_DIR` names another one): `id`, `entry`, `symbols`, `settings` and `api`, which must be the API the SDK builds for (2), or configuring fails. It runs `anvil gen` on `symbols.toml` at build time (`symbols.gen.h`, `symbols.gen.hpp`, plus the settings headers when `settings` is set), builds `<entry>` as a shared library with the static CRT, C++20 (C11 for C sources) and `/W4`, and lays out `<build>/plugin/<id>/{plugin.toml, symbols.toml, settings.toml?, <entry>.dll}`, one folder for every configuration. Warnings are not errors unless the repository says so (`CMAKE_COMPILE_WARNING_AS_ERROR`).
+  - **`<target>-check`** runs `anvil check <plugin folder>`, and with `-DEU4_EXE=<eu4.exe>` `anvil check <plugin folder> --exe <eu4.exe>`, which also rewrites `symbols.lock` for the author to commit. **`<target>-deploy`** exists when `-DEU4_DIR=<game folder>` is set and copies the plugin folder to `<EU4_DIR>/anvil/plugins/<id>`.
+  - **CI of a plugin repository:** build, `<target>-check` (the lock check) or `bin/anvil.exe check <folder> --format github`. The tree builds `examples/hello-*` through the same package, and `tests/sdk/verify-sdk.ps1` builds them from the archive both ways (`FetchContent`, `find_package`).
 - **Template:** `happy-dwarf-team/anvil-plugin-template`. Its CI runs `anvil check --format github` and the lock check; its release workflow zips the plugin folder, or a mod folder for the Workshop. The README covers a first plugin in 15 minutes.
 
 ## 17. Performance budgets

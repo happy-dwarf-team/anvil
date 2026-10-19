@@ -10,3 +10,5 @@
 *.ilk
 *.log
 /bench-*.json
+/dist/anvil-sdk/
+/dist/anvil-sdk-windows-x64*.zip
