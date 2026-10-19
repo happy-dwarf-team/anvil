@@ -1,6 +1,6 @@
 # Anvil: design
 
-Status: **draft 3 (plugin API 2), not accepted.** It collects the decisions of [Map: Anvil 2 specification](https://github.com/happy-dwarf-team/anvil/issues/12). Each section links the ticket that holds the reasoning. Items still open are marked **Q** and listed in §21. Stage 1 (Anvil 0.2, API 1) is described by draft 2 in the git history.
+Status: **draft 3, accepted 2026-10-19.** It specifies Anvil 1.0 with plugin API 2 and collects the decisions of [Map: Anvil 2 specification](https://github.com/happy-dwarf-team/anvil/issues/12). Each section links the ticket that holds the reasoning. How it is delivered is in §22. This document describes the target; the code reaches it through the pull requests of §22.3. Stage 1 (Anvil 0.2, API 1) is described by draft 2 in the git history.
 
 Words in **bold** at first use are defined in [GLOSSARY.md](../GLOSSARY.md).
 
@@ -147,7 +147,7 @@ signature = "const char* ()"
 - **Kinds:** a symbol is a function (`signature`), a pointer slot (`points_to`), data (`type`) or a site (anything else).
 - **Values:** they must lie on fixed bytes.
 - **Exports:** an `export` symbol is resolved through the export table; `bytes`, if given, check the prologue.
-- **Imports:** the format accepts symbols imported from a shared address library (**Q**: the library itself is fog, §21).
+- **Imports:** the format accepts symbols imported from a shared address library (the library itself is fog, §21).
 
 ### 5.3 `settings.toml`
 
@@ -167,7 +167,7 @@ restart = true                # true: applies at the next start
 
 ## 6. Game build identity
 
-Anvil reads the PE header of the running image (TimeDateStamp, SizeOfImage, CheckSum, entry point) and maps it to a build id from a compiled-in table. The full SHA-256 is checked off the critical path and cached. With an unknown build, plugins with `symbols` are skipped with "game build unknown (EU4 updated?)", and the overlay says so: it runs on every build. Other storefront builds are covered by [Other distributions of EU4 1.37.5](https://github.com/happy-dwarf-team/anvil/issues/36) (**Q**).
+Anvil reads the PE header of the running image (TimeDateStamp, SizeOfImage, CheckSum, entry point) and maps it to a build id from a compiled-in table. The full SHA-256 is checked off the critical path and cached. With an unknown build, plugins with `symbols` are skipped with "game build unknown (EU4 updated?)", and the overlay says so: it runs on every build. Other storefront builds are not supported yet ([Other distributions of EU4 1.37.5](https://github.com/happy-dwarf-team/anvil/issues/36), §21).
 
 ## 7. Verification before loading
 
@@ -393,13 +393,8 @@ Plugins are native code with the game's permissions:
 - **Lab checks:** the vanilla copy, the proxy without `anvil/`, each standard plugin, the budgets, and E1/E2 for the Workshop.
 - **Releases:** release-please and Conventional Commits, squash-merged PRs; the release workflow attaches the Anvil zip, the SDK archive, `anvil.exe`, the Manager and `anvil-sys`.
 
-## 21. Open questions and fog
+## 21. Open items and fog
 
-- **Q, needs [Rewrite or evolve, and the pull request sequence to Anvil 2](https://github.com/happy-dwarf-team/anvil/issues/28):**
-  - the version number of the first release with API 2 (Anvil 1.0.0?);
-  - the repository layout of the standard plugins and the Manager;
-  - the scope of the first release;
-  - the migration of Bellows and Tongs.
 - **Other storefront builds** ([#36](https://github.com/happy-dwarf-team/anvil/issues/36)): GOG ships two different `eu4.exe` builds (1.37.5.0 and 1.37.5.2), and the Microsoft Store exe is encrypted on disk. Unknown builds are skipped safely; GOG support needs a GOG binary (fog).
 - **Workshop rules:** the Paradox forum's mod rules were not readable (E3).
 - **Fog** (from the map):
@@ -414,3 +409,56 @@ Plugins are native code with the game's permissions:
   - setting profiles;
   - automatic multiplayer plugin-set exchange;
   - the safe Rust crate.
+
+## 22. Delivery
+
+Decided in [Rewrite or evolve, and the pull request sequence to Anvil 2](https://github.com/happy-dwarf-team/anvil/issues/28).
+
+### 22.1 Evolve, not rewrite
+
+- **Kept:** the proxy and entry-point hook, log, semver, resolver, services and events, build identity, CI and release-please.
+- **Rewritten:** the change layer (`PatchRegistry` → a change registry with chains) and the public header.
+- **Replaced:** `[[expect]]`, by `symbols.toml` verification.
+
+### 22.2 Versions, repositories, releases
+
+- **Versions:** the first release with plugin API 2 is **Anvil 1.0.0**. The Anvil version and the plugin API version are separate numbers.
+- **Repositories:** `plugins/anvil-game`, `plugins/anvil-overlay` and `tools/manager` live in this repository (one CI, one release archive). `anvil-plugin-template`, Bellows and Tongs have their own repositories.
+- **Releases:**
+  - **1.0:** core with API 2, `anvil.exe`, SDK, template, `anvil-game`, settings, crash capture with safe mode, `anvil-sys`, and the migrated Bellows and Tongs.
+  - **1.1:** `anvil-overlay` with the settings panel.
+  - **1.2:** the Manager.
+  - **1.3:** Workshop discovery and trust.
+- **API 1:** no compatibility layer. Anvil 1.0 skips `api = 1` plugins with "plugin API 1: update the plugin". Bellows and Tongs migrate before 1.0 and release with it.
+
+### 22.3 Pull-request sequence
+
+One PR per line, Conventional Commits, squash-merged. Implementation issues and milestones track them.
+
+**1.0**
+- **A. Foundations**
+  1. Split the core into a library shared by the loader and a CLI target.
+  2. Manifest v2.
+  3. `symbols.toml` parsing and verification.
+  4. `anvil.exe gen` and `check` (`symbols.lock`, `--format json|github`).
+- **B. Changes** (after A)
+  5. Change registry with chains, staging and handles: function hook, call redirect, byte patch, import replacement, `*_at`.
+  6. Mid hooks and block replacement.
+  7. Pointer swap.
+  8. Suspend and resume of a plugin's changes.
+  9. The API 2 header, the C++ wrapper, and hello examples in C and C++.
+  10. Microbenchmarks with a CI regression gate.
+- **C. Around the plugins** (after B; independent of each other)
+  11. Settings.
+  12. Crash capture and attribution with safe mode.
+  13. `conflicts` in the resolver.
+  14. `anvil check --game`.
+  15. Call counters.
+  16. SDK archive and CMake package.
+- **D**
+  17. `plugins/anvil-game` with the gameplay policy.
+  18. `anvil-sys` with `anvil gen --lang rust`.
+- **E. Elsewhere:** the `anvil-plugin-template` repository; the Bellows migration; the Tongs migration.
+- **F:** lab measurements against §17, then the release-please PR.
+
+**1.1:** `plugins/anvil-overlay`. **1.2:** `tools/manager`. **1.3:** Workshop discovery, `trust.toml`, approved copies, and the approval UI in the overlay and the Manager.
