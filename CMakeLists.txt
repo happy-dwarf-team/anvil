@@ -82,7 +82,7 @@ endif()
 
 if(ANVIL_BUILD_TESTS)
     enable_testing()
-    add_executable(anvil_tests tests/test_main.cpp tests/manifest_tests.cpp)
+    add_executable(anvil_tests tests/test_main.cpp tests/manifest_tests.cpp tests/resolver_tests.cpp)
     target_link_libraries(anvil_tests PRIVATE anvil_loader)
     target_compile_definitions(anvil_tests PRIVATE ANVIL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_dependencies(anvil_tests version_dll)

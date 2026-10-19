@@ -78,6 +78,7 @@ int main(int argc, char** argv) {
     });
 
     manifest_tests();
+    resolver_tests();
 
     run("resolver: order, dependencies, builds", [] {
         ResolveInput in;

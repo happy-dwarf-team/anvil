@@ -39,3 +39,4 @@ inline std::string plugin_toml(const std::string& id, const std::string& extra =
 }
 
 void manifest_tests();  // manifest_tests.cpp
+void resolver_tests();  // resolver_tests.cpp

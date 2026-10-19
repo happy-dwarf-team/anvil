@@ -256,9 +256,17 @@ The C ABI is in `include/anvil/anvil_plugin.h`; the draft is [`docs/api2/anvil_p
    - API version and the `anvil` range;
    - the build of `symbols`;
    - duplicates (the local plugin wins over a Workshop one with the same id);
-   - disabled ids and `conflicts` (the declaring plugin is skipped);
+   - disabled ids;
    - the symbols (§7);
+   - `conflicts` (the declaring plugin is skipped, see below);
    - dependencies and cycles.
+
+   **Conflicts.** A plugin that declares a `conflicts` entry is skipped when a plugin with that id and a version in the range is among the candidates that passed the checks above; the other plugin loads normally. The log says `conflicts with <id> <version>; disable one of them`. Whatever depends on a skipped plugin is skipped by the dependency check, as usual. Edge cases are resolved the same way on every start, whatever the discovery order:
+
+   - A plugin that is itself skipped for a conflict does not count as a target. Plugins that conflict with nothing alive are kept first, and whoever declares a conflict with one of them is skipped. So with `a` conflicting with `b` and `b` with `c`, `b` is skipped and `a` and `c` load.
+   - When only cycles are left, the smallest id (byte order) is skipped and the rest is resolved again. Two plugins that conflict with each other leave the one with the larger id; in `a -> b -> c -> a`, `a` is skipped, then `b` because of `c`, and `c` loads.
+   - A conflict with a plugin that is absent, disabled, rejected by the API, `anvil` or symbols checks, or outside the version range is ignored.
+   - A candidate that is skipped later, because its own dependency is missing or in a cycle, still counts as a conflict target: conflicts are resolved before dependencies.
 7. `early` plugins are loaded at the entry point, then `main` plugins on an Anvil thread. Each plugin's staged changes are enabled when its load returns.
 8. `anvil.plugins_loaded` is published and the status is recorded.
 

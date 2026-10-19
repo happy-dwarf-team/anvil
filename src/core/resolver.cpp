@@ -3,13 +3,90 @@
 #include "log.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <map>
 #include <set>
+#include <utility>
 
 namespace anvil {
 namespace {
 
 std::string phase_name(Phase p) { return p == Phase::Early ? "early" : "main"; }
+
+// Skips plugins that declare a conflict with a plugin that stays loaded. A plugin's
+// conflicts are checked against the candidates that passed the earlier filters
+// (a candidate that is only removed later, for its dependencies, still counts).
+// The declaring plugin is the one skipped; its dependents are pruned afterwards.
+//
+// A plugin that is itself skipped for a conflict does not count as a target. So
+// resolution starts from plugins with no live conflict targets, which are always
+// kept, and skips whoever conflicts with them (A -> B -> C keeps A and C, skips B).
+// When only conflict cycles are left, the smallest id is skipped and the rest is
+// resolved again (A <-> B keeps B).
+void prune_conflicts(std::map<std::string, Manifest>& candidates, std::vector<Skipped>& skipped) {
+    // Ids (by id order) of the candidates each plugin conflicts with, with the reason text.
+    std::map<std::string, std::map<std::string, std::string>> targets;
+    for (const auto& [id, m] : candidates) {
+        for (const auto& c : m.conflicts) {
+            const auto other = candidates.find(c.id);
+            if (other != candidates.end() && c.range.matches(other->second.version)) {
+                targets[id].emplace(c.id, "conflicts with " + c.id + " " + other->second.version.to_string() +
+                                              "; disable one of them");
+            }
+        }
+    }
+    std::set<std::string> alive;
+    for (const auto& [id, m] : candidates) alive.insert(id);
+
+    const auto live_targets = [&](const std::string& id) {
+        std::vector<std::string> out;
+        if (const auto it = targets.find(id); it != targets.end()) {
+            for (const auto& [other, reason] : it->second) {
+                if (alive.contains(other)) out.push_back(other);
+            }
+        }
+        return out;
+    };
+    const auto drop = [&](const std::string& id, const std::string& other) {
+        skipped.push_back({id, targets.at(id).at(other)});
+        alive.erase(id);
+    };
+
+    for (;;) {
+        // Plugins without live targets are settled: nothing can skip them any more.
+        std::set<std::string> settled;
+        for (const auto& id : alive) {
+            if (live_targets(id).empty()) settled.insert(id);
+        }
+        std::vector<std::pair<std::string, std::string>> losers;  // (declaring id, settled target)
+        for (const auto& id : alive) {
+            for (const auto& other : live_targets(id)) {
+                if (settled.contains(other)) {
+                    losers.emplace_back(id, other);
+                    break;
+                }
+            }
+        }
+        if (!losers.empty()) {
+            for (const auto& [id, other] : losers) drop(id, other);
+            continue;
+        }
+        // No settled target is left to decide; what remains is in conflict cycles.
+        std::string first;
+        for (const auto& id : alive) {
+            if (!live_targets(id).empty()) {
+                first = id;
+                break;
+            }
+        }
+        if (first.empty()) break;
+        drop(first, live_targets(first).front());
+    }
+
+    for (auto it = candidates.begin(); it != candidates.end();) {
+        it = alive.contains(it->first) ? std::next(it) : candidates.erase(it);
+    }
+}
 
 // Removes plugins whose required dependencies are missing or mismatched, until stable.
 void prune_dependencies(std::map<std::string, Manifest>& candidates, std::vector<Skipped>& skipped) {
@@ -121,7 +198,10 @@ ResolveResult resolve(const ResolveInput& input) {
         candidates.emplace(m.id, m);
     }
 
-    // 2./3. Dependencies, then topological order per phase. A cycle removes its
+    // 2. Declared conflicts; the declaring plugin is skipped.
+    prune_conflicts(candidates, result.skipped);
+
+    // 3. Dependencies, then topological order per phase. A cycle removes its
     // members and restarts, because other plugins may depend on them.
     for (;;) {
         prune_dependencies(candidates, result.skipped);
