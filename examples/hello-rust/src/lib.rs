@@ -13,9 +13,9 @@ use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 use anvil_sys::{
-    AnvilCpuContext, AnvilHost, AnvilLogLevel, AnvilPlugin, AnvilPluginLoadFn, AnvilResult, ANVIL_API_VERSION,
-    ANVIL_ERROR_INTERNAL, ANVIL_ERROR_INVALID_ARGUMENT, ANVIL_ERROR_UNSUPPORTED, ANVIL_EVENT_PLUGINS_LOADED,
-    ANVIL_LOG_ERROR, ANVIL_LOG_INFO, ANVIL_OK,
+    AnvilCpuContext, AnvilHost, AnvilLogLevel, AnvilPlugin, AnvilPluginLoadFn, AnvilResult,
+    ANVIL_API_VERSION, ANVIL_ERROR_INTERNAL, ANVIL_ERROR_INVALID_ARGUMENT, ANVIL_ERROR_UNSUPPORTED,
+    ANVIL_EVENT_PLUGINS_LOADED, ANVIL_LOG_ERROR, ANVIL_LOG_INFO, ANVIL_OK,
 };
 
 /// Symbol ids and function types from `symbols.toml` (`anvil gen --lang rust`, see build.rs).
@@ -37,11 +37,19 @@ fn log(level: AnvilLogLevel, message: &str) {
     if host.is_null() {
         return;
     }
-    let text: Vec<u8> = message.bytes().filter(|&byte| byte != 0).chain(std::iter::once(0)).collect();
+    let text: Vec<u8> = message
+        .bytes()
+        .filter(|&byte| byte != 0)
+        .chain(std::iter::once(0))
+        .collect();
     // SAFETY: the host table is valid for the life of the process; the message is NUL-terminated.
     unsafe {
         if let Some(write) = (*host).log {
-            write(SELF.load(Ordering::Acquire), level, text.as_ptr().cast::<c_char>());
+            write(
+                SELF.load(Ordering::Acquire),
+                level,
+                text.as_ptr().cast::<c_char>(),
+            );
         }
     }
 }
@@ -71,7 +79,10 @@ unsafe extern "C" fn on_speed_object(session: *mut c_void) -> *mut c_void {
     let speed = unsafe { next(session) };
     guard((), "speed_object hook", || {
         if FIRST_SPEED_OBJECT.swap(false, Ordering::Relaxed) {
-            log(ANVIL_LOG_INFO, &format!("first game-speed object: {speed:p}"));
+            log(
+                ANVIL_LOG_INFO,
+                &format!("first game-speed object: {speed:p}"),
+            );
         }
     });
     speed
@@ -82,12 +93,21 @@ unsafe extern "C" fn on_idle_exit(cpu: *mut AnvilCpuContext, _user: *mut c_void)
     guard((), "idle_exit mid hook", || {
         // SAFETY: the context is valid during the callback.
         let rcx = unsafe { (*cpu).rcx };
-        log(ANVIL_LOG_INFO, &format!("returning to the menu (rcx={rcx:#x})"));
+        log(
+            ANVIL_LOG_INFO,
+            &format!("returning to the menu (rcx={rcx:#x})"),
+        );
     });
 }
 
-unsafe extern "C" fn on_plugins_loaded(_event: *const c_char, _payload: *const c_void, _context: *mut c_void) {
-    guard((), "plugins_loaded handler", || log(ANVIL_LOG_INFO, "every plugin is loaded"));
+unsafe extern "C" fn on_plugins_loaded(
+    _event: *const c_char,
+    _payload: *const c_void,
+    _context: *mut c_void,
+) {
+    guard((), "plugins_loaded handler", || {
+        log(ANVIL_LOG_INFO, "every plugin is loaded")
+    });
 }
 
 /// # Safety
@@ -102,19 +122,31 @@ unsafe fn load(host: *const AnvilHost, me: *mut AnvilPlugin) -> AnvilResult {
     }
     HOST.store(host.cast_mut(), Ordering::Release);
     SELF.store(me, Ordering::Release);
-    std::panic::set_hook(Box::new(|info| log(ANVIL_LOG_ERROR, &format!("panic: {info}"))));
+    std::panic::set_hook(Box::new(|info| {
+        log(ANVIL_LOG_ERROR, &format!("panic: {info}"))
+    }));
 
     // SAFETY: the host fills game and anvil_version; build_id may be NULL.
-    let version = unsafe { CStr::from_ptr(table.anvil_version) }.to_string_lossy().into_owned();
+    let version = unsafe { CStr::from_ptr(table.anvil_version) }
+        .to_string_lossy()
+        .into_owned();
     let build = unsafe { table.game.as_ref() }
         .filter(|game| !game.build_id.is_null())
         .map_or_else(
             || "unknown".to_owned(),
-            |game| unsafe { CStr::from_ptr(game.build_id) }.to_string_lossy().into_owned(),
+            |game| {
+                unsafe { CStr::from_ptr(game.build_id) }
+                    .to_string_lossy()
+                    .into_owned()
+            },
         );
-    log(ANVIL_LOG_INFO, &format!("hello from Rust on Anvil {version}, game build {build}"));
+    log(
+        ANVIL_LOG_INFO,
+        &format!("hello from Rust on Anvil {version}, game build {build}"),
+    );
 
-    let (Some(hook_function), Some(mid_hook), Some(subscribe)) = (table.hook_function, table.mid_hook, table.subscribe)
+    let (Some(hook_function), Some(mid_hook), Some(subscribe)) =
+        (table.hook_function, table.mid_hook, table.subscribe)
     else {
         return ANVIL_ERROR_UNSUPPORTED;
     };
@@ -124,18 +156,39 @@ unsafe fn load(host: *const AnvilHost, me: *mut AnvilPlugin) -> AnvilResult {
     let detour: sym::SpeedObjectFn = on_speed_object;
     // SAFETY: the symbol is declared and verified; the detour keeps its signature and never unwinds.
     let result = unsafe {
-        hook_function(me, sym::SPEED_OBJECT, detour as usize as *mut c_void, SPEED_NEXT.as_ptr(), ptr::null_mut())
+        hook_function(
+            me,
+            sym::SPEED_OBJECT,
+            detour as usize as *mut c_void,
+            SPEED_NEXT.as_ptr(),
+            ptr::null_mut(),
+        )
     };
     if result != ANVIL_OK {
         return result;
     }
     // SAFETY: as above; the callback never unwinds.
-    let result = unsafe { mid_hook(me, sym::IDLE_EXIT, Some(on_idle_exit), ptr::null_mut(), ptr::null_mut()) };
+    let result = unsafe {
+        mid_hook(
+            me,
+            sym::IDLE_EXIT,
+            Some(on_idle_exit),
+            ptr::null_mut(),
+            ptr::null_mut(),
+        )
+    };
     if result != ANVIL_OK {
         return result;
     }
     // SAFETY: the event name is NUL-terminated; the handler never unwinds.
-    unsafe { subscribe(me, ANVIL_EVENT_PLUGINS_LOADED.as_ptr().cast::<c_char>(), Some(on_plugins_loaded), ptr::null_mut()) }
+    unsafe {
+        subscribe(
+            me,
+            ANVIL_EVENT_PLUGINS_LOADED.as_ptr().cast::<c_char>(),
+            Some(on_plugins_loaded),
+            ptr::null_mut(),
+        )
+    }
 }
 
 /// The entry point Anvil calls once, in the phase `plugin.toml` names.
@@ -143,9 +196,14 @@ unsafe fn load(host: *const AnvilHost, me: *mut AnvilPlugin) -> AnvilResult {
 /// # Safety
 /// Called by Anvil with its host table and this plugin's handle.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn anvil_plugin_load(host: *const AnvilHost, me: *mut AnvilPlugin) -> AnvilResult {
+pub unsafe extern "C" fn anvil_plugin_load(
+    host: *const AnvilHost,
+    me: *mut AnvilPlugin,
+) -> AnvilResult {
     // SAFETY: forwarded from the caller.
-    guard(ANVIL_ERROR_INTERNAL, "anvil_plugin_load", || unsafe { load(host, me) })
+    guard(ANVIL_ERROR_INTERNAL, "anvil_plugin_load", || unsafe {
+        load(host, me)
+    })
 }
 
 // The export has the type the header declares.
@@ -164,8 +222,13 @@ mod tests {
     #[test]
     fn a_failed_load_is_a_result_not_an_unwind() {
         // SAFETY: a null host is refused.
-        assert_eq!(unsafe { anvil_plugin_load(ptr::null(), ptr::null_mut()) }, ANVIL_ERROR_INVALID_ARGUMENT);
-        let panicking = guard(ANVIL_ERROR_INTERNAL, "load", || -> AnvilResult { panic!("on purpose") });
+        assert_eq!(
+            unsafe { anvil_plugin_load(ptr::null(), ptr::null_mut()) },
+            ANVIL_ERROR_INVALID_ARGUMENT
+        );
+        let panicking = guard(ANVIL_ERROR_INTERNAL, "load", || -> AnvilResult {
+            panic!("on purpose")
+        });
         assert_eq!(panicking, ANVIL_ERROR_INTERNAL);
     }
 
