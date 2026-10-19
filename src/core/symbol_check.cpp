@@ -3,8 +3,9 @@
 namespace anvil {
 
 std::string check_plugin_symbols(const std::filesystem::path& symbols_file, const char* build_id,
-                                 const PatchRegistry& patches, uintptr_t image_base, SymbolVerification* verified) {
-    const SymbolFileResult parsed = load_symbols(symbols_file);
+                                 const ChangeRegistry& patches, uintptr_t image_base, SymbolVerification* verified,
+                                 SymbolFile* declared) {
+    SymbolFileResult parsed = load_symbols(symbols_file);
     if (!parsed.file) return parsed.error;
     if (build_id == nullptr) return "game build unknown (EU4 updated?)";
     if (parsed.file->build != build_id) {
@@ -21,6 +22,7 @@ std::string check_plugin_symbols(const std::filesystem::path& symbols_file, cons
         return reason;
     }
     if (verified != nullptr) *verified = std::move(result);
+    if (declared != nullptr) *declared = std::move(*parsed.file);
     return {};
 }
 

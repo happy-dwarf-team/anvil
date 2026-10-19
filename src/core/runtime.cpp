@@ -3,7 +3,8 @@
 #include "game_build.hpp"
 #include "log.hpp"
 #include "manifest.hpp"
-#include "patching.hpp"
+#include "changes.hpp"
+#include "plugin_symbols.hpp"
 #include "resolver.hpp"
 #include "seh_guard.hpp"
 #include "services.hpp"
@@ -14,6 +15,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <map>
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -22,6 +24,8 @@
 // Opaque handle given to plugins.
 struct AnvilPlugin {
     anvil::Manifest manifest;
+    anvil::OwnerId owner = 0;      // in the change registry; ids follow the load order
+    anvil::PluginSymbols symbols;  // verified symbols.toml, by AnvilSymbol
     std::wstring plugin_dir;
     std::wstring data_dir;
     HMODULE module = nullptr;
@@ -44,7 +48,7 @@ struct Runtime {
     PeIdentity identity;
     const KnownBuild* build = nullptr;
     AnvilGameInfo game{};
-    std::unique_ptr<PatchRegistry> patches;
+    std::unique_ptr<ChangeRegistry> changes;
     ServiceBus bus;
     std::vector<std::unique_ptr<AnvilPlugin>> plugins;  // resolved, in load order
     std::vector<Skipped> skipped;
@@ -104,6 +108,26 @@ const char* result_name(AnvilResult r) {
     return "unknown";
 }
 
+// API 1 has no codes for some refusals of the change registry; the closest
+// API 1 meaning is used (WrongKind: the bytes at the site are not what the call
+// needs). API 2 (#46) maps every status one to one.
+AnvilResult api1_result(ChangeStatus status) {
+    switch (status) {
+    case ChangeStatus::Ok: return ANVIL_OK;
+    case ChangeStatus::InvalidArgument:
+    case ChangeStatus::NotDeclared: return ANVIL_ERROR_INVALID_ARGUMENT;
+    case ChangeStatus::WrongKind:
+    case ChangeStatus::BytesMismatch: return ANVIL_ERROR_BYTES_MISMATCH;
+    case ChangeStatus::Conflict: return ANVIL_ERROR_CONFLICT;
+    case ChangeStatus::UnsafeSite: return ANVIL_ERROR_UNSUPPORTED;
+    case ChangeStatus::OutOfMemory: return ANVIL_ERROR_OUT_OF_MEMORY;
+    case ChangeStatus::WrongPhase: return ANVIL_ERROR_WRONG_PHASE;
+    case ChangeStatus::NotFound: return ANVIL_ERROR_NOT_FOUND;
+    case ChangeStatus::Internal: return ANVIL_ERROR_INTERNAL;
+    }
+    return ANVIL_ERROR_INTERNAL;
+}
+
 // ---- AnvilHost implementation -------------------------------------------
 
 bool valid(AnvilPlugin* self) { return self != nullptr && g_runtime != nullptr; }
@@ -131,39 +155,59 @@ AnvilResult note(AnvilPlugin* self, const char* what, AnvilResult r) {
     return r;
 }
 
+// API 1 change calls, bridged to the change registry until the API 2 header
+// (#46) replaces them with symbol calls (plugin_symbols.hpp). An RVA is a
+// target inside eu4.exe whose expected bytes the plugin passes itself; they are
+// compared with the original bytes, so a plugin can join another plugin's chain.
+ChangeTarget rva_target(uint32_t rva, const void* expected, size_t size) {
+    ChangeTarget t;
+    t.address = rva_to_address(rva);
+    t.inside_image = true;
+    t.expected = static_cast<const uint8_t*>(expected);
+    t.expected_size = expected != nullptr ? size : 0;
+    return t;
+}
+
 AnvilResult host_patch_bytes(AnvilPlugin* self, uint32_t rva, const void* expected, const void* replacement, size_t size) {
-    if (!valid(self)) return ANVIL_ERROR_INVALID_ARGUMENT;
-    return note(self, "patch_bytes", g_runtime->patches->patch_bytes(self->manifest.id, rva_to_address(rva), expected,
-                                                                      replacement, size));
+    if (!valid(self) || expected == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
+    return note(self, "patch_bytes",
+                api1_result(g_runtime->changes->patch_bytes(self->owner, rva_target(rva, expected, size), replacement,
+                                                            size)));
 }
 
 AnvilResult host_redirect_call(AnvilPlugin* self, uint32_t call_rva, uint32_t expected_target_rva, void* new_target) {
     if (!valid(self)) return ANVIL_ERROR_INVALID_ARGUMENT;
+    void* next = nullptr;  // API 1 has no next: the plugin calls the old target itself
     return note(self, "redirect_call",
-                g_runtime->patches->redirect_call(self->manifest.id, rva_to_address(call_rva),
-                                                  rva_to_address(expected_target_rva), new_target));
+                api1_result(g_runtime->changes->redirect_call(self->owner, rva_target(call_rva, nullptr, 0),
+                                                              rva_to_address(expected_target_rva), new_target, &next)));
 }
 
 AnvilResult host_hook_function(AnvilPlugin* self, uint32_t rva, const void* expected, size_t size, void* detour,
                                void** original) {
-    if (!valid(self)) return ANVIL_ERROR_INVALID_ARGUMENT;
-    return note(self, "hook_function", g_runtime->patches->hook_function(self->manifest.id, rva_to_address(rva), expected,
-                                                                          size, detour, original));
+    if (!valid(self) || expected == nullptr || size == 0 || size > 64 || original == nullptr) {
+        return ANVIL_ERROR_INVALID_ARGUMENT;
+    }
+    return note(self, "hook_function",
+                api1_result(g_runtime->changes->hook_function(self->owner, rva_target(rva, expected, size), detour,
+                                                              original)));
 }
 
 AnvilResult host_replace_import(AnvilPlugin* self, const char* module, const char* function, void* replacement,
                                 void** original) {
     if (!valid(self)) return ANVIL_ERROR_INVALID_ARGUMENT;
-    return note(self, "replace_import",
-                g_runtime->patches->replace_import(self->manifest.id, GetModuleHandleW(nullptr), module, function,
-                                                   replacement, original));
+    void* next = nullptr;
+    const AnvilResult r = api1_result(g_runtime->changes->replace_import(self->owner, GetModuleHandleW(nullptr), module,
+                                                                         function, replacement, &next));
+    if (r == ANVIL_OK && original != nullptr) *original = next;
+    return note(self, "replace_import", r);
 }
 
 AnvilResult host_expect_bytes(AnvilPlugin* self, uint32_t rva, const void* expected, const void* mask, size_t size) {
     if (!valid(self)) return ANVIL_ERROR_INVALID_ARGUMENT;
     std::string detail;
-    const AnvilResult r =
-        g_runtime->patches->expect_bytes(self->manifest.id, rva_to_address(rva), expected, mask, size, &detail);
+    const AnvilResult r = api1_result(
+        g_runtime->changes->expect_bytes(self->owner, rva_to_address(rva), expected, mask, size, &detail));
     if (r == ANVIL_ERROR_BYTES_MISMATCH) {
         char where[48];
         std::snprintf(where, sizeof(where), "rva 0x%X, %zu B", rva, size);
@@ -175,7 +219,7 @@ AnvilResult host_expect_bytes(AnvilPlugin* self, uint32_t rva, const void* expec
 }
 
 void* host_alloc_near_image(AnvilPlugin* self, size_t size) {
-    return valid(self) ? g_runtime->patches->alloc_near(size) : nullptr;
+    return valid(self) ? g_runtime->changes->alloc_near(size) : nullptr;
 }
 
 AnvilResult host_register_service(AnvilPlugin* self, const char* name, uint32_t version, const void* service) {
@@ -244,27 +288,36 @@ void load_plugin(AnvilPlugin& plugin) {
         plugin.module = nullptr;
         return;
     }
+    // Changes requested during anvil_plugin_load are staged and enabled together
+    // after it returns ANVIL_OK; on failure none are (design §8.4).
+    ChangeRegistry& changes = *g_runtime->changes;
+    changes.begin_group(plugin.owner);
     unsigned long exception = 0;
-    const AnvilResult result = call_plugin_load(fn, &g_host, &plugin, &exception);
+    AnvilResult result = call_plugin_load(fn, &g_host, &plugin, &exception);
+    const size_t staged = changes.staged_count(plugin.owner);
+    if (result == ANVIL_OK && changes.commit_group(plugin.owner) != ChangeStatus::Ok) {
+        log_error(label + ": its " + std::to_string(staged) + " change(s) could not be enabled");
+        result = ANVIL_ERROR_INTERNAL;
+    }
     if (result != ANVIL_OK) {
         plugin.state = "failed";
-        const size_t undone = g_runtime->patches->rollback(plugin.manifest.id);
+        changes.rollback(plugin.owner);
         g_runtime->bus.remove_owner(plugin.manifest.id);
         char code[32] = {};
         if (exception != 0) std::snprintf(code, sizeof(code), "0x%08lX", exception);
         log_error(label + ": anvil_plugin_load " +
                   (exception != 0 ? std::string("crashed with exception ") + code : std::string("returned ") + result_name(result)) +
-                  "; " + std::to_string(undone) + " patch(es) rolled back; plugin stays inactive");
+                  "; " + std::to_string(staged) + " change(s) rolled back; plugin stays inactive");
         // The DLL is not unloaded: threads it may have started could still run.
         return;
     }
     plugin.state = "loaded";
     std::string summary = label + ": loaded (" + (plugin.manifest.phase == Phase::Early ? "early" : "main") + ", " +
-                          fmt_ms(elapsed_ms() - begin) + ", " + std::to_string(g_runtime->patches->count(plugin.manifest.id)) +
-                          " patch(es))";
+                          fmt_ms(elapsed_ms() - begin) + ", " + std::to_string(changes.count(plugin.owner)) +
+                          " change(s))";
     if (plugin.manifest.affects_gameplay) summary += " — declares gameplay changes";
     log_info(summary);
-    for (const auto& line : g_runtime->patches->describe(plugin.manifest.id)) {
+    for (const auto& line : changes.describe(plugin.owner)) {
         Log::instance().write(ANVIL_LOG_DEBUG, plugin.manifest.id, line);
     }
 }
@@ -308,7 +361,7 @@ DWORD WINAPI main_phase(LPVOID) {
             log_info("eu4.exe SHA-256 verified");
         } else {
             log_warning("eu4.exe SHA-256 " + (actual.empty() ? std::string("could not be computed") : actual) +
-                        " differs from the known build; every patch is still checked against expected bytes");
+                        " differs from the known build; every change is still checked against expected bytes");
         }
     }
     return 0;
@@ -349,7 +402,13 @@ void startup_impl(const std::filesystem::path& game_dir) {
     }
     g_runtime->identity = *identity;
     g_runtime->build = find_known_build(*identity);
-    g_runtime->patches = std::make_unique<PatchRegistry>(identity->image_base, identity->size_of_image);
+    g_runtime->changes = std::make_unique<ChangeRegistry>(identity->image_base, identity->size_of_image);
+    g_runtime->changes->set_refusal_sink([](OwnerId owner, const std::string& message) {
+        // Names both owners of a conflict; the host call adds its own line.
+        // Owner ids are the indices of g_runtime->plugins (both in load order).
+        const auto& plugins = g_runtime->plugins;
+        Log::instance().write(ANVIL_LOG_WARNING, owner < plugins.size() ? plugins[owner]->manifest.id : "?", message);
+    });
     AnvilGameInfo& game = g_runtime->game;
     game.size = sizeof(AnvilGameInfo);
     game.build_id = g_runtime->build ? g_runtime->build->id : nullptr;
@@ -375,13 +434,20 @@ void startup_impl(const std::filesystem::path& game_dir) {
     // symbols.toml: its build and every symbol are checked here, before any
     // plugin is loaded. The image is read through the registry, so bytes a
     // plugin has already changed read in their original form (design §7).
+    // The verified symbols are kept per plugin folder for address_of and the
+    // symbol change calls.
+    std::map<std::wstring, PluginSymbols> verified_symbols;
     input.verify = [&](const Manifest& m) {
         if (m.symbols.empty()) return std::string();
+        const auto file = m.folder / m.symbols;
         SymbolVerification verified;
-        std::string reason = check_plugin_symbols(m.folder / m.symbols, game.build_id, *g_runtime->patches,
-                                                  identity->image_base, &verified);
-        if (reason.empty()) log_info(m.id + ": " + std::to_string(verified.symbols.size()) + " symbol(s) verified");
-        return reason;
+        SymbolFile declared;
+        std::string reason = check_plugin_symbols(file, game.build_id, *g_runtime->changes, identity->image_base,
+                                                  &verified, &declared);
+        if (!reason.empty()) return reason;
+        verified_symbols[m.folder.wstring()] = PluginSymbols(declared, verified, identity->image_base);
+        log_info(m.id + ": " + std::to_string(verified.symbols.size()) + " symbol(s) verified");
+        return std::string();
     };
     std::error_code ec;
     const auto plugins_dir = g_runtime->anvil_dir / "plugins";
@@ -408,6 +474,11 @@ void startup_impl(const std::filesystem::path& game_dir) {
     for (const auto& s : g_runtime->skipped) log_warning(s.id + ": skipped — " + s.reason);
     for (auto& m : resolved.order) {
         auto plugin = std::make_unique<AnvilPlugin>();
+        // Owners in load order: the earlier plugin is outermost in every chain.
+        plugin->owner = g_runtime->changes->add_owner(m.id);
+        if (const auto it = verified_symbols.find(m.folder.wstring()); it != verified_symbols.end()) {
+            plugin->symbols = std::move(it->second);
+        }
         plugin->plugin_dir = m.folder.wstring();
         plugin->data_dir = (g_runtime->anvil_dir / "data" / m.id).wstring();
         plugin->manifest = std::move(m);

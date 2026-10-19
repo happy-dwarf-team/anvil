@@ -1,6 +1,6 @@
 #pragma once
 
-#include "patching.hpp"
+#include "changes.hpp"
 #include "pe_image.hpp"
 #include "symbols.hpp"
 
@@ -15,24 +15,24 @@ namespace anvil {
 // function (design §7).
 class OriginalImageReader final : public ImageReader {
 public:
-    OriginalImageReader(const PatchRegistry& patches, uintptr_t image_base) : patches_(patches), base_(image_base) {}
+    OriginalImageReader(const ChangeRegistry& patches, uintptr_t image_base) : patches_(patches), base_(image_base) {}
     bool read(uint32_t rva, void* out, size_t size) const override {
         return patches_.read_original(base_ + rva, out, size);
     }
     uint64_t base() const override { return base_; }
 
 private:
-    const PatchRegistry& patches_;
+    const ChangeRegistry& patches_;
     uintptr_t base_;
 };
 
 // Loads a plugin's symbols.toml, checks its `build` against the running game
 // (`build_id`; nullptr when the build is unknown) and verifies every symbol
 // against the image at `image_base`. Returns an empty string when the plugin
-// may be loaded, otherwise why it must be skipped. `verified`, if given,
-// receives the resolved symbols on success.
+// may be loaded, otherwise why it must be skipped. On success `verified` and
+// `declared`, if given, receive the resolved symbols and the parsed file.
 std::string check_plugin_symbols(const std::filesystem::path& symbols_file, const char* build_id,
-                                 const PatchRegistry& patches, uintptr_t image_base,
-                                 SymbolVerification* verified = nullptr);
+                                 const ChangeRegistry& patches, uintptr_t image_base,
+                                 SymbolVerification* verified = nullptr, SymbolFile* declared = nullptr);
 
 }  // namespace anvil

@@ -8,7 +8,7 @@
 // the original entry bytes, runs the plugin loader and continues into the game.
 // In any other process (or if anything fails) the DLL is a pure proxy.
 #include "core/log.hpp"
-#include "core/patching.hpp"
+#include "core/changes.hpp"
 #include "core/runtime.hpp"
 
 #include <windows.h>

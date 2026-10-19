@@ -34,7 +34,7 @@ entry, so commits of hidden types alone never start one; they ship with the
 next release.
 
 Scopes in use: `api` (plugin SDK / `AnvilHost`), `manifest`, `core` (loader,
-resolver, patch registry), `proxy` (`version.dll` exports, entry hook), `log`,
+resolver, change registry), `proxy` (`version.dll` exports, entry hook), `log`,
 `cli` (`anvil.exe`).
 A scope is optional; leave it out when a change spans several.
 

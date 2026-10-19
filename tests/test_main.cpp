@@ -1,10 +1,11 @@
 // Unit tests for the Anvil core. Usage: anvil_tests <path-to-built-version.dll>
 #include "core/manifest.hpp"
-#include "core/patching.hpp"
 #include "core/resolver.hpp"
 #include "core/semver.hpp"
 #include "core/services.hpp"
 #include "test_support.hpp"
+
+#include <anvil/anvil_plugin.h>
 
 #include <windows.h>
 
@@ -37,19 +38,6 @@ bool skipped(const ResolveResult& r, const std::string& id) {
     }
     return false;
 }
-
-// Executable scratch "image" for patch tests.
-struct Scratch {
-    uint8_t* base;
-    explicit Scratch(size_t size) {
-        base = static_cast<uint8_t*>(VirtualAlloc(nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE));
-        std::memset(base, 0xCC, size);
-    }
-    ~Scratch() { VirtualFree(base, 0, MEM_RELEASE); }
-};
-
-int detour_returns_42() { return 42; }
-DWORD WINAPI fake_tick_count() { return 12345u; }
 
 }  // namespace
 
@@ -122,86 +110,6 @@ int main(int argc, char** argv) {
         CHECK(r.order.size() == 1 && r.order[0].version.to_string() == "1.5.0");
     });
 
-    run("patch registry: bytes, conflicts, rollback", [] {
-        Scratch s(0x1000);
-        PatchRegistry reg(reinterpret_cast<uintptr_t>(s.base), 0x1000);
-        const uint8_t expected[4] = {0xCC, 0xCC, 0xCC, 0xCC};
-        const uint8_t replacement[4] = {1, 2, 3, 4};
-        const auto addr = reinterpret_cast<uintptr_t>(s.base) + 0x100;
-        CHECK(reg.patch_bytes("a", addr, expected, replacement, 4) == ANVIL_OK);
-        CHECK(std::memcmp(s.base + 0x100, replacement, 4) == 0);
-        CHECK(reg.patch_bytes("b", addr + 2, expected, replacement, 4) == ANVIL_ERROR_CONFLICT);
-        CHECK(reg.patch_bytes("b", addr + 0x10, replacement, expected, 4) == ANVIL_ERROR_BYTES_MISMATCH);
-        CHECK(reg.patch_bytes("b", reinterpret_cast<uintptr_t>(s.base) + 0xFFE, expected, replacement, 4) ==
-              ANVIL_ERROR_INVALID_ARGUMENT);
-        CHECK(reg.count("a") == 1);
-        CHECK(reg.rollback("a") == 1);
-        CHECK(std::memcmp(s.base + 0x100, expected, 4) == 0);
-        CHECK(reg.patch_bytes("b", addr + 2, expected, replacement, 4) == ANVIL_OK);  // free again
-    });
-
-    run("patch registry: redirect_call", [] {
-        Scratch s(0x1000);
-        PatchRegistry reg(reinterpret_cast<uintptr_t>(s.base), 0x1000);
-        // call +0x200 at offset 0x10: E8 rel32 with rel = 0x200 - (0x10 + 5)
-        const int32_t rel = 0x200 - 0x15;
-        s.base[0x10] = 0xE8;
-        std::memcpy(s.base + 0x11, &rel, 4);
-        const uintptr_t base = reinterpret_cast<uintptr_t>(s.base);
-        CHECK(reg.redirect_call("a", base + 0x10, base + 0x300, reinterpret_cast<void*>(&detour_returns_42)) ==
-              ANVIL_ERROR_BYTES_MISMATCH);
-        CHECK(reg.redirect_call("a", base + 0x10, base + 0x200, reinterpret_cast<void*>(&detour_returns_42)) == ANVIL_OK);
-        int32_t now = 0;
-        std::memcpy(&now, s.base + 0x11, 4);
-        const uintptr_t target = base + 0x15 + static_cast<intptr_t>(now);
-        // Either directly the detour or a near stub that jumps to it.
-        CHECK(target == reinterpret_cast<uintptr_t>(&detour_returns_42) ||
-              (reinterpret_cast<const uint8_t*>(target)[0] == 0xFF && reinterpret_cast<const uint8_t*>(target)[1] == 0x25));
-        CHECK(reg.rollback("a") == 1);
-        std::memcpy(&now, s.base + 0x11, 4);
-        CHECK(now == rel);
-    });
-
-    run("patch registry: hook_function (SafetyHook)", [] {
-        Scratch s(0x1000);
-        // int f() { return 1; } padded so a 14-byte jump also fits: mov eax,1; 9x nop; ret
-        const uint8_t code[] = {0xB8, 0x01, 0x00, 0x00, 0x00, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0xC3};
-        std::memcpy(s.base + 0x40, code, sizeof(code));
-        FlushInstructionCache(GetCurrentProcess(), s.base, 0x1000);
-        using Fn = int (*)();
-        const auto f = reinterpret_cast<Fn>(s.base + 0x40);
-        CHECK(f() == 1);
-        PatchRegistry reg(reinterpret_cast<uintptr_t>(s.base), 0x1000);
-        void* original = nullptr;
-        const uint8_t wrong[] = {0xB8, 0x02};
-        CHECK(reg.hook_function("a", reinterpret_cast<uintptr_t>(f), wrong, sizeof(wrong),
-                                reinterpret_cast<void*>(&detour_returns_42), &original) == ANVIL_ERROR_BYTES_MISMATCH);
-        CHECK(reg.hook_function("a", reinterpret_cast<uintptr_t>(f), code, 5, reinterpret_cast<void*>(&detour_returns_42),
-                                &original) == ANVIL_OK);
-        CHECK(f() == 42);
-        CHECK(original != nullptr && reinterpret_cast<Fn>(original)() == 1);
-        CHECK(reg.patch_bytes("b", reinterpret_cast<uintptr_t>(f) + 1, code + 1, code + 1, 2) == ANVIL_ERROR_CONFLICT);
-        CHECK(reg.rollback("a") == 1);
-        CHECK(f() == 1);
-    });
-
-    run("patch registry: replace_import", [] {
-        HMODULE self = GetModuleHandleW(nullptr);
-        PatchRegistry reg(reinterpret_cast<uintptr_t>(self), 0x7FFFFFFF);
-        const DWORD real = GetTickCount();
-        void* original = nullptr;
-        CHECK(reg.replace_import("a", self, "kernel32.dll", "GetTickCount", reinterpret_cast<void*>(&fake_tick_count),
-                                 &original) == ANVIL_OK);
-        CHECK(GetTickCount() == 12345u);
-        CHECK(original != nullptr);
-        CHECK(reg.replace_import("b", self, "KERNEL32.dll", "GetTickCount", reinterpret_cast<void*>(&fake_tick_count),
-                                 nullptr) == ANVIL_ERROR_CONFLICT);
-        CHECK(reg.replace_import("a", self, "kernel32.dll", "NoSuchFunction", reinterpret_cast<void*>(&fake_tick_count),
-                                 nullptr) == ANVIL_ERROR_NOT_FOUND);
-        CHECK(reg.rollback("a") == 1);
-        CHECK(GetTickCount() - real < 60000u);
-    });
-
     run("byte patterns", [] {
         std::vector<uint8_t> bytes, mask;
         std::string error;
@@ -219,56 +127,7 @@ int main(int argc, char** argv) {
         CHECK(!parse_byte_pattern(std::string(2 * ANVIL_MAX_EXPECT_BYTES + 2, '0'), bytes, mask, error));
     });
 
-    run("patch registry: expect_bytes", [] {
-        Scratch s(0x2000);
-        const uintptr_t base = reinterpret_cast<uintptr_t>(s.base);
-        PatchRegistry reg(base, 0x2000);
-        const uint8_t code[] = {0x48, 0x89, 0x5C, 0x24, 0x08};
-        std::memcpy(s.base + 0x100, code, sizeof(code));
-        const uintptr_t addr = base + 0x100;
-        std::string detail;
-        CHECK(reg.expect_bytes("mine", addr, code, nullptr, sizeof(code)) == ANVIL_OK);
-        const uint8_t other[] = {0x48, 0x89, 0x5C, 0x24, 0x10};
-        CHECK(reg.expect_bytes("mine", addr, other, nullptr, sizeof(other), &detail) == ANVIL_ERROR_BYTES_MISMATCH);
-        CHECK(detail == "byte +0x4: expected 0x10, found 0x08");
-        const uint8_t wildcard[] = {0xFF, 0xFF, 0xFF, 0xFF, 0x00};
-        CHECK(reg.expect_bytes("mine", addr, other, wildcard, sizeof(other)) == ANVIL_OK);
-        const uint8_t lowNibble[] = {0xFF, 0xFF, 0xFF, 0xFF, 0x0F};  // 0x08 vs 0x18: low nibble equal
-        const uint8_t eighteen[] = {0x48, 0x89, 0x5C, 0x24, 0x18};
-        CHECK(reg.expect_bytes("mine", addr, eighteen, lowNibble, sizeof(eighteen)) == ANVIL_OK);
-
-        // Arguments, image bounds and unreadable memory.
-        CHECK(reg.expect_bytes("mine", addr, nullptr, nullptr, 4) == ANVIL_ERROR_INVALID_ARGUMENT);
-        CHECK(reg.expect_bytes("mine", addr, code, nullptr, 0) == ANVIL_ERROR_INVALID_ARGUMENT);
-        CHECK(reg.expect_bytes("mine", addr, code, nullptr, ANVIL_MAX_EXPECT_BYTES + 1) == ANVIL_ERROR_INVALID_ARGUMENT);
-        CHECK(reg.expect_bytes("mine", base + 0x1FFE, code, nullptr, 4) == ANVIL_ERROR_INVALID_ARGUMENT);
-        CHECK(VirtualFree(s.base + 0x1000, 0x1000, MEM_DECOMMIT));
-        CHECK(reg.expect_bytes("mine", base + 0x1000, code, nullptr, 1) == ANVIL_ERROR_INVALID_ARGUMENT);
-        CHECK(reg.expect_bytes("mine", base + 0xFFE, code, nullptr, 4) == ANVIL_ERROR_INVALID_ARGUMENT);
-
-        // Patches of other owners are compared in their original form.
-        const uint8_t nops[] = {0x90, 0x90};
-        CHECK(reg.patch_bytes("other", addr, code, nops, 2) == ANVIL_OK);
-        CHECK(s.base[0x100] == 0x90);
-        CHECK(reg.expect_bytes("mine", addr, code, nullptr, sizeof(code)) == ANVIL_OK);
-        const uint8_t fn[] = {0xB8, 0x01, 0x00, 0x00, 0x00, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0xC3};
-        std::memcpy(s.base + 0x200, fn, sizeof(fn));
-        FlushInstructionCache(GetCurrentProcess(), s.base + 0x200, sizeof(fn));
-        void* original = nullptr;
-        CHECK(reg.hook_function("other", base + 0x200, fn, 5, reinterpret_cast<void*>(&detour_returns_42), &original) ==
-              ANVIL_OK);
-        CHECK(std::memcmp(s.base + 0x200, fn, sizeof(fn)) != 0);
-        CHECK(reg.expect_bytes("mine", base + 0x200, fn, nullptr, sizeof(fn)) == ANVIL_OK);
-
-        // Own patches first: dependencies must be verified before patching.
-        const uint8_t cc[] = {0xCC, 0xCC};
-        CHECK(reg.patch_bytes("mine", base + 0x400, cc, nops, 2) == ANVIL_OK);
-        CHECK(reg.expect_bytes("mine", addr, code, nullptr, sizeof(code)) == ANVIL_ERROR_WRONG_PHASE);
-        CHECK(reg.expect_bytes("third", addr, code, nullptr, sizeof(code)) == ANVIL_OK);
-        CHECK(reg.rollback("mine") == 1);
-        CHECK(reg.expect_bytes("mine", addr, code, nullptr, sizeof(code)) == ANVIL_OK);
-        CHECK(reg.rollback("other") == 2);
-    });
+    change_tests();
 
     run("resolver: verify skips plugins and dependents", [] {
         ResolveInput in;

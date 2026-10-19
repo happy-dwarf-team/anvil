@@ -1,6 +1,7 @@
 // Unit tests for symbols.toml: parsing, and verification against a small
 // synthetic PE image, both as a file and mapped in memory. Usage: anvil_symbols_tests
-#include "core/patching.hpp"
+#include "core/changes.hpp"
+#include "core/plugin_symbols.hpp"
 #include "core/pe_image.hpp"
 #include "core/symbol_check.hpp"
 #include "core/symbols.hpp"
@@ -501,10 +502,11 @@ signature = "const char* ()"
 
     run("loader: bytes another plugin changed are compared in their original form", [&] {
         const MappedImage mapped(test_image);
-        PatchRegistry patches(mapped.address(), TestImage::kSize);
+        ChangeRegistry patches(mapped.address(), TestImage::kSize);
         const uint8_t original[] = {0x48, 0x8B, 0x81, 0x18, 0x04, 0x00, 0x00, 0xC3};
         const uint8_t nops[] = {0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90};
-        CHECK(patches.patch_bytes("other", mapped.address() + 0x1000, original, nops, sizeof(nops)) == ANVIL_OK);
+        const ChangeTarget at{mapped.address() + 0x1000, true, original, nullptr, sizeof(original)};
+        CHECK(patches.patch_bytes(patches.owner("other"), at, nops, sizeof(nops)) == ChangeStatus::Ok);
         CHECK(mapped.base[0x1000] == 0x90);
 
         const MemoryImageReader live(mapped.address(), TestImage::kSize);
@@ -520,7 +522,7 @@ signature = "const char* ()"
 
     run("loader: check_plugin_symbols applies the build of the file", [&] {
         const MappedImage mapped(test_image);
-        PatchRegistry patches(mapped.address(), TestImage::kSize);
+        ChangeRegistry patches(mapped.address(), TestImage::kSize);
         const auto folder = std::filesystem::temp_directory_path() /
                             ("anvil-symbols-tests-" + std::to_string(GetCurrentProcessId()));
         std::filesystem::create_directories(folder);
@@ -546,6 +548,54 @@ signature = "const char* ()"
                        "cannot read missing.toml"));
         std::error_code ignored;
         std::filesystem::remove_all(folder, ignored);
+    });
+
+    run("loader: verified symbols per plugin and changes on symbols", [&] {
+        MappedImage mapped(test_image);
+        DWORD old = 0;
+        CHECK(VirtualProtect(mapped.base + 0x1000, 0x1000, PAGE_EXECUTE_READWRITE, &old));
+        ChangeRegistry changes(mapped.address(), TestImage::kSize);
+        const OwnerId owner = changes.add_owner("p");
+        const SymbolFile file = symbols(kGoodSymbols);
+        const OriginalImageReader reader(changes, mapped.address());
+        std::string error;
+        const auto image = PeImage::parse(reader, error);
+        CHECK(image.has_value());
+        if (!image) return;
+        const SymbolVerification verified = verify_symbols(file, *image);
+        CHECK(verified.ok());
+        const PluginSymbols syms(file, verified, mapped.address());
+        CHECK(syms.size() == 6 && syms.get(6) == nullptr);
+        CHECK(syms.get(0)->declaration.name == "speed_object" && syms.get(0)->address == mapped.address() + 0x1000);
+        CHECK(syms.address_of(3) == mapped.base + 0x1040);  // resolved export
+        CHECK(syms.address_of(99) == nullptr);
+        CHECK(syms.value(1, "root") == 0x3008u && syms.value(1, "date_offset") == 0x1DD0u);
+        CHECK(!syms.value(1, "missing") && !syms.value(42, "root"));
+
+        void* next = nullptr;
+        auto* detour = reinterpret_cast<void*>(+[](void*) -> void* { return nullptr; });
+        CHECK(hook_function(changes, owner, syms, 99, detour, &next) == ChangeStatus::NotDeclared);
+        CHECK(hook_function(changes, owner, syms, 2, detour, &next) == ChangeStatus::WrongKind);  // a slot
+        CHECK(redirect_call(changes, owner, syms, 0, detour, &next) == ChangeStatus::WrongKind);  // a function
+        CHECK(redirect_call(changes, owner, syms, 1, detour, &next) == ChangeStatus::WrongKind);  // not call rel32
+        const uint8_t nops[2] = {0x90, 0x90};
+        CHECK(patch_bytes(changes, owner, syms, 2, nops, 2) == ChangeStatus::WrongKind);       // swap_pointer
+        CHECK(patch_bytes(changes, owner, syms, 4, nops, 2) == ChangeStatus::InvalidArgument);  // no declared bytes
+        CHECK(patch_bytes(changes, owner, syms, 1, nops, 14) == ChangeStatus::InvalidArgument);  // past the bytes
+        ChangeId patched = 0;
+        CHECK(patch_bytes(changes, owner, syms, 1, nops, 2, &patched) == ChangeStatus::Ok);
+        CHECK(mapped.base[0x1010] == 0x90 && patched != 0);
+        // A function symbol: mov rax, [rcx+0x418]; ret.
+        CHECK(hook_function(changes, owner, syms, 0, detour, &next) == ChangeStatus::Ok);
+        CHECK(next != nullptr && mapped.base[0x1000] != 0x48);
+        using Speed = void* (*)(void*);
+        struct Session {
+            uint8_t pad[0x418];
+            void* speed;
+        } session{{}, &session};
+        CHECK(reinterpret_cast<Speed>(next)(&session) == &session);  // the original through the chain
+        CHECK(reinterpret_cast<Speed>(mapped.base + 0x1000)(&session) == nullptr);
+        CHECK(changes.rollback(owner) == 2 && mapped.base[0x1000] == 0x48 && mapped.base[0x1010] == 0x48);
     });
 
     std::printf("\n%d checks, %d failed\n", g_checks, g_failures);

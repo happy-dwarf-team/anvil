@@ -83,14 +83,19 @@ typedef struct AnvilHost {
     const wchar_t *(*data_dir)(AnvilPlugin *self);   /* writable folder, created on first call */
 
     /* --- code patching (all addresses are RVAs inside eu4.exe) ---
-     * Every call verifies the expected bytes first, refuses overlaps with
-     * patches of other plugins and records the original bytes so the patch
-     * can be rolled back if the plugin fails to load. */
+     * Every call verifies the expected bytes against the game's original
+     * bytes, refuses overlaps with other changes at a different address (also
+     * the plugin's own) and records the original bytes so the change can be
+     * rolled back. Hooks, redirects and import replacements at the same
+     * address chain in load order (the earlier plugin is called first);
+     * identical byte patches are shared. Changes requested during
+     * anvil_plugin_load are enabled together after it returns ANVIL_OK. */
     AnvilResult (*patch_bytes)(AnvilPlugin *self, uint32_t rva, const void *expected,
                                const void *replacement, size_t size);
-    /* Retarget a 5-byte `call rel32` at call_rva (currently calling
-     * expected_target_rva) to new_target; a stub is allocated near the image
-     * when new_target is out of rel32 range. */
+    /* Retarget a 5-byte `call rel32` at call_rva (originally calling
+     * expected_target_rva) to new_target, through a stub near the image. API 1
+     * gives no next: a plugin that calls the original target itself skips
+     * later plugins' redirects of the same call. */
     AnvilResult (*redirect_call)(AnvilPlugin *self, uint32_t call_rva, uint32_t expected_target_rva,
                                  void *new_target);
     /* Inline hook at the start of a function (SafetyHook inside Anvil).
@@ -144,8 +149,9 @@ typedef struct AnvilHost {
  *   phase "early": at the game's entry point, before the C runtime of
  *                  eu4.exe initializes (only the main thread runs game code);
  *   phase "main":  on an Anvil thread, concurrently with game start-up.
+ * Changes requested here are staged and enabled together after it returns.
  * Return ANVIL_OK to stay loaded; any other value unloads the plugin and
- * rolls back its patches.
+ * rolls back its patches (staged ones are never enabled).
  */
 ANVIL_PLUGIN_EXPORT AnvilResult anvil_plugin_load(const AnvilHost *host, AnvilPlugin *self);
 
