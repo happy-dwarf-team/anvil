@@ -51,11 +51,13 @@ if(MSVC)
     target_compile_options(anvil_core PUBLIC /W4 /utf-8 /permissive- /EHsc)
 endif()
 
-# anvil_loader: the parts that act on the running game (startup, the patch
-# registry, symbols.toml checks against the running image, services, SEH guards).
+# anvil_loader: the parts that act on the running game (startup, the change
+# registry, symbols.toml checks against the running image and the verified
+# symbols per plugin, services, SEH guards).
 # Linked into version.dll and the tests, never into anvil.exe.
 add_library(anvil_loader STATIC
-    src/core/patching.cpp
+    src/core/changes.cpp
+    src/core/plugin_symbols.cpp
     src/core/runtime.cpp
     src/core/seh_guard.cpp
     src/core/services.cpp
@@ -82,7 +84,8 @@ endif()
 
 if(ANVIL_BUILD_TESTS)
     enable_testing()
-    add_executable(anvil_tests tests/test_main.cpp tests/manifest_tests.cpp tests/resolver_tests.cpp)
+    add_executable(anvil_tests tests/test_main.cpp tests/manifest_tests.cpp tests/resolver_tests.cpp
+        tests/change_tests.cpp)
     target_link_libraries(anvil_tests PRIVATE anvil_loader)
     target_compile_definitions(anvil_tests PRIVATE ANVIL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_dependencies(anvil_tests version_dll)
