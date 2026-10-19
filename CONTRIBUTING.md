@@ -82,3 +82,14 @@ ctest --test-dir build -C Release --output-on-failure
 
 A change that touches game memory or the loader should also be tried on a copy
 of the game; say in the pull request what was and was not tested.
+
+A change to stubs, chains or the core start-up also runs the microbenchmarks
+(design §17). CI runs them and fails when a case is more than 20% slower than
+`bench/baseline-ci.json` on the same runner CPU:
+
+```powershell
+build/Release/anvil_bench.exe --out bench-1.json
+bench/check-regression.ps1 -Result bench-1.json
+```
+
+Binding numbers come from the lab machine: `bench/run-lab.ps1`.

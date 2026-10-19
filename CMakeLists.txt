@@ -18,6 +18,7 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 option(ANVIL_BUILD_TESTS "Build unit tests" ON)
 option(ANVIL_BUILD_EXAMPLES "Build the example plugin" ON)
+option(ANVIL_BUILD_BENCH "Build the microbenchmarks (anvil_bench, not a ctest)" ON)
 
 include(FetchContent)
 FetchContent_Declare(tomlplusplus
@@ -87,6 +88,14 @@ if(ANVIL_BUILD_EXAMPLES)
     add_library(hello_plugin SHARED examples/hello/hello.c)
     target_include_directories(hello_plugin PRIVATE include)
     set_target_properties(hello_plugin PROPERTIES OUTPUT_NAME hello)
+endif()
+
+# anvil_bench: microbenchmarks per kind of change and of the start-up parsers
+# (design §17). CI runs it as its own step against bench/baseline-ci.json; the
+# lab runs it pinned through bench/run-lab.ps1. Not part of ctest.
+if(ANVIL_BUILD_BENCH)
+    add_executable(anvil_bench bench/anvil_bench.cpp)
+    target_link_libraries(anvil_bench PRIVATE anvil_loader)
 endif()
 
 if(ANVIL_BUILD_TESTS)
