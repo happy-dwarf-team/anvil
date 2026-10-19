@@ -61,10 +61,11 @@ cmake --install build --config Release --component anvil --prefix dist   # versi
 
 The build also produces `anvil.exe`, the command-line tool for plugin authors.
 It shares the `anvil_core` library (manifests, `symbols.toml` and its
-verification, the game build identity) with `version.dll`:
+verification, `settings.toml`, the game build identity) with `version.dll`:
 
 ```powershell
 anvil gen symbols.toml build\generated            # symbols.gen.h and symbols.gen.hpp
+anvil gen settings.toml build\generated           # settings.gen.h and settings.gen.hpp
 anvil check my-plugin --exe "C:\...\eu4.exe"     # verify against the game, write symbols.lock
 anvil check my-plugin --format github             # in CI, without the game: schemas and symbols.lock
 ```

@@ -179,11 +179,14 @@ typedef struct AnvilHost {
     AnvilResult (*symbol_value)(AnvilPlugin *self, AnvilSymbol symbol, const char *name, uint64_t *out);
 
     /* --- settings (docs/design.md §11); values are validated by Anvil ---
-     * An unknown setting reads as 0, 0.0 or "". */
+     * An unknown setting, or a getter that does not fit its type, reads as
+     * 0, 0.0 or "". A key code is the virtual-key code in bits 0-7 with
+     * 0x100 Shift, 0x200 Ctrl and 0x400 Alt (0: no binding). */
     int (*setting_bool)(AnvilPlugin *self, AnvilSetting setting);
-    int64_t (*setting_int)(AnvilPlugin *self, AnvilSetting setting); /* int, enum index, key code */
-    double (*setting_float)(AnvilPlugin *self, AnvilSetting setting);
-    const char *(*setting_string)(AnvilPlugin *self, AnvilSetting setting); /* UTF-8; valid until the next change */
+    int64_t (*setting_int)(AnvilPlugin *self, AnvilSetting setting); /* int, bool, enum index, key code */
+    double (*setting_float)(AnvilPlugin *self, AnvilSetting setting); /* float, int */
+    /* UTF-8: a string, an enum option's name or a key ("Ctrl+F12"); valid until the next change */
+    const char *(*setting_string)(AnvilPlugin *self, AnvilSetting setting);
     AnvilResult (*subscribe_setting)(AnvilPlugin *self, AnvilSetting setting, AnvilSettingCallback callback,
                                      void *context); /* restart = false settings only */
 

@@ -1,7 +1,8 @@
 // Hello in C++: the same plugin as hello-c, written with the C++ wrapper
-// (anvil.hpp) and the C++ header `anvil gen` writes.
+// (anvil.hpp) and the C++ headers `anvil gen` writes, plus a setting.
 #include <anvil/anvil.hpp>
 
+#include "settings.gen.hpp"
 #include "symbols.gen.hpp"
 
 #include <atomic>
@@ -29,9 +30,13 @@ struct Hello : anvil::Plugin {
         host.hook(g_speed, sym::speed_object, on_speed_object);
         // Any callable; the Host is a value, so capturing it is safe.
         menu_return = host.mid_hook(sym::idle_exit, [host, this](anvil::Cpu& cpu) {
-            host.info("returning to the menu (rcx={:#x}, {} so far)", cpu.rcx, ++returns);
+            ++returns;
+            // restart = false: read it each time, so a change applies at once.
+            if (cfg::log_menu_returns.get()) host.info("returning to the menu (rcx={:#x}, {} so far)", cpu.rcx, returns);
         });
         host.subscribe(ANVIL_EVENT_PLUGINS_LOADED, [host] { host.info("every plugin is loaded"); });
+        host.subscribe_setting(cfg::log_menu_returns,
+                               [host](bool on) { host.info("logging returns to the menu: {}", on ? "on" : "off"); });
     }
 };
 

@@ -6,6 +6,7 @@
 #include "cli/gen.hpp"
 #include "core/game_build.hpp"
 #include "core/manifest.hpp"
+#include "core/settings.hpp"
 #include "core/symbols.hpp"
 #include "test_image.hpp"
 #include "test_support.hpp"
@@ -286,6 +287,48 @@ int main(int argc, char** argv) {
         CHECK(broken.problems[0].file.ends_with("broken/symbols.toml"));
     });
 
+    run("check settings.toml: the schema at its line, and the loader's reason", [&] {
+        const fs::path dir = fx.plugin("with-settings", "");
+        write(dir / "plugin.toml", plugin_toml("with-settings", "settings = \"settings.toml\"\n"));
+        write(dir / "settings.toml", "[setting.enabled]\ntype = \"bool\"\ndefault = true\nlabel = \"Enabled\"\n");
+        const auto ok = fx.check(dir, false);
+        CHECK(ok.exit_code == kExitOk && ok.has_settings && ok.settings == 1 && ok.skip_reason.empty());
+        CHECK(contains(format_report(ok, Format::Text),
+                       "with-settings: no symbols.toml (runs on every game build); 1 setting(s): OK"));
+        CHECK(contains(report_json(ok), "\"settings\": 1,"));
+        write(dir / "settings.toml", "\xEF\xBB\xBF[setting.enabled]\ntype = \"bool\"\ndefault = 1\nlabel = \"Enabled\"\n");
+        const auto bad = fx.check(dir, false);
+        CHECK(bad.exit_code == kExitProblems && has_problem(bad, 3, "setting enabled: default must be true or false"));
+        CHECK(bad.problems.size() == 1 && bad.problems[0].file.ends_with("with-settings/settings.toml"));
+        CHECK(bad.skip_reason == "settings.toml: setting enabled: default must be true or false");
+    });
+
+    run("gen writes settings headers and refuses names they cannot hold", [] {
+        auto error = [](const std::string& text, bool c, bool cpp) {
+            const auto file = parse_settings_text(text);
+            if (!file.file) return "parse: " + file.error;
+            const GeneratedHeaders h = generate_settings_headers(*file.file, "settings.toml", c, cpp);
+            return h.error + "@" + std::to_string(h.line);
+        };
+        auto with_options = [](const std::string& name, const std::string& options) {
+            return "[setting." + name + "]\ntype = \"enum\"\nvalues = [" + options + "]\ndefault = \"a\"\nlabel = \"X\"\n";
+        };
+        const std::string keyword = with_options("m", "{ name = \"a\" }, { name = \"delete\" }");
+        CHECK(contains(error(keyword, false, true), "setting m: option delete: 'delete' is a C++ keyword; rename it@1"));
+        CHECK(error(keyword, true, false) == "@0");  // C only
+        CHECK(contains(error(with_options("m", "{ name = \"a\" }, { name = \"get\" }"), false, true),
+                       "would hide the setting's 'get' member"));
+        CHECK(contains(error(with_options("m", "{ name = \"a\" }") + with_options("m_value", "{ name = \"a\" }"), false, true),
+                       "the options of setting m: cfg::Types::m_value is already setting m_value"));
+        CHECK(contains(error(with_options("m", "{ name = \"a\" }, { name = \"b\" }") + with_options("m_b", "{ name = \"a\" }"),
+                             true, false),
+                       "setting m: option b gives CFG_M_B, which setting m_b already gives@1"));
+        CHECK(contains(error("[setting.new]\ntype = \"bool\"\ndefault = true\nlabel = \"X\"\n", true, true),
+                       "'new' is a C++ keyword"));
+        const auto none = generate_settings_headers(SettingsFile{}, "settings.toml", true, true);
+        CHECK(none.error.empty() && contains(none.c, "declares no settings") && contains(none.cpp, "namespace cfg {"));
+    });
+
     run("check --exe verifies, writes symbols.lock, and check without it reads the lock", [&] {
         const fs::path dir = fx.plugin("good", kGoodSymbols);
         const auto missing = fx.check(dir, false);
@@ -453,6 +496,27 @@ int main(int argc, char** argv) {
         write(fx.root / "bad" / "symbols.toml", "build = \"b\"\nbogus = 1\n");
         const Run bad = run_anvil(anvil, "gen " + quoted(fx.root / "bad" / "symbols.toml") + " " + quoted(fx.root / "bad"));
         CHECK(bad.exit_code == 1 && contains(bad.out, "symbols.toml:2: error: unknown key 'bogus'"));
+
+        // settings.toml, by name or by its [setting.<name>] tables, with symbols.toml in one call.
+        const std::string options = "[setting.mode]\ntype = \"enum\"\nvalues = [{ name = \"off\" }]\ndefault = \"off\"\n"
+                                    "label = \"Mode\"\n";
+        write(fx.root / "set" / "settings.toml", options);
+        write(fx.root / "set" / "options.toml", "# options\n" + options);
+        const fs::path set_out = fx.root / "gen-set";
+        const Run both = run_anvil(anvil, "gen " + quoted(good / "symbols.toml") + " " + quoted(fx.root / "set" / "settings.toml") +
+                                              " " + quoted(set_out));
+        CHECK(both.exit_code == 0 && contains(both.out, "settings.gen.hpp: written") && fs::exists(set_out / "symbols.gen.h"));
+        CHECK(contains(read(set_out / "settings.gen.h"), "CFG_MODE_OFF = 0,"));
+        const fs::path by_content = fx.root / "gen-options";
+        CHECK(run_anvil(anvil, "gen --lang cpp " + quoted(fx.root / "set" / "options.toml") + " " + quoted(by_content)).exit_code == 0);
+        CHECK(fs::exists(by_content / "settings.gen.hpp") && !fs::exists(by_content / "settings.gen.h"));
+        CHECK(run_anvil(anvil, "gen " + quoted(fx.root / "set" / "settings.toml") + " " + quoted(fx.root / "set" / "options.toml") +
+                                   " " + quoted(set_out))
+                  .exit_code == 2);
+        write(fx.root / "set-bad" / "settings.toml", "[setting.x]\ntype = \"int\"\ndefault = 1\nlabel = \"X\"\nmin = 2\n");
+        const Run set_bad = run_anvil(anvil, "gen " + quoted(fx.root / "set-bad" / "settings.toml") + " " + quoted(fx.root / "set-bad"));
+        CHECK(set_bad.exit_code == 1 && contains(set_bad.out, "settings.toml:3: error: setting x: default: 1 is below the minimum 2"));
+        CHECK(!fs::exists(fx.root / "set-bad" / "settings.gen.h"));
     });
 
     std::printf("%d checks, %d failed\n", g_checks, g_failures);

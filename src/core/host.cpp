@@ -196,14 +196,36 @@ AnvilResult host_symbol_value(AnvilPlugin* self, AnvilSymbol symbol, const char*
     return ANVIL_OK;
 }
 
-// ---- settings: declared in API 2.0, implemented with settings.toml (#48) ----------
+// ---- settings (design §11) ------------------------------------------------------------
 
-int host_setting_bool(AnvilPlugin*, AnvilSetting) { return 0; }
-int64_t host_setting_int(AnvilPlugin*, AnvilSetting) { return 0; }
-double host_setting_float(AnvilPlugin*, AnvilSetting) { return 0.0; }
-const char* host_setting_string(AnvilPlugin*, AnvilSetting) { return ""; }
-AnvilResult host_subscribe_setting(AnvilPlugin*, AnvilSetting, AnvilSettingCallback, void*) {
-    return ANVIL_ERROR_UNSUPPORTED;
+int host_setting_bool(AnvilPlugin* self, AnvilSetting setting) {
+    return valid(self) ? self->settings.get_bool(setting) : 0;
+}
+
+int64_t host_setting_int(AnvilPlugin* self, AnvilSetting setting) {
+    return valid(self) ? self->settings.get_int(setting) : 0;
+}
+
+double host_setting_float(AnvilPlugin* self, AnvilSetting setting) {
+    return valid(self) ? self->settings.get_float(setting) : 0.0;
+}
+
+const char* host_setting_string(AnvilPlugin* self, AnvilSetting setting) {
+    return valid(self) ? self->settings.get_string(setting) : "";
+}
+
+AnvilResult host_subscribe_setting(AnvilPlugin* self, AnvilSetting setting, AnvilSettingCallback callback,
+                                   void* context) {
+    if (!valid(self)) return ANVIL_ERROR_INVALID_ARGUMENT;
+    const AnvilResult r = self->settings.subscribe(setting, callback, context);
+    if (r != ANVIL_OK) {
+        const Setting* s = self->settings.schema().get(setting);
+        const std::string what = s != nullptr ? s->name : "setting " + std::to_string(setting) + " (not declared)";
+        write_log(*self, ANVIL_LOG_WARNING,
+                  "subscribe_setting " + what + " refused: " +
+                      (r == ANVIL_ERROR_WRONG_KIND ? "it applies at the next start (restart = true)" : result_name(r)));
+    }
+    return r;
 }
 
 // ---- services and events ------------------------------------------------------------
@@ -265,8 +287,8 @@ const char* result_name(AnvilResult result) {
     switch (result) {
     case ANVIL_OK: return "ok";
     case ANVIL_ERROR_INVALID_ARGUMENT: return "invalid argument";
-    case ANVIL_ERROR_NOT_DECLARED: return "not declared in symbols.toml";
-    case ANVIL_ERROR_WRONG_KIND: return "wrong kind of symbol";
+    case ANVIL_ERROR_NOT_DECLARED: return "not declared in symbols.toml or settings.toml";
+    case ANVIL_ERROR_WRONG_KIND: return "wrong kind of symbol or setting";
     case ANVIL_ERROR_CONFLICT: return "conflict with another change";
     case ANVIL_ERROR_UNSAFE_SITE: return "unsafe site";
     case ANVIL_ERROR_BYTES_MISMATCH: return "bytes mismatch";
@@ -331,6 +353,7 @@ LoadOutcome run_plugin_load(AnvilPlugin& plugin, const AnvilHost& host, PluginLo
     if (out.result != ANVIL_OK) {
         changes.rollback(plugin.owner);
         plugin.context->bus->remove_owner(plugin.manifest.id);
+        plugin.settings.drop_subscriptions();
     }
     return out;
 }

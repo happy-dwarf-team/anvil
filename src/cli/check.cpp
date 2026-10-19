@@ -4,6 +4,7 @@
 #include "core/instructions.hpp"
 #include "core/manifest.hpp"
 #include "core/pe_image.hpp"
+#include "core/settings.hpp"
 #include "core/symbols.hpp"
 
 #include <toml++/toml.hpp>
@@ -335,7 +336,7 @@ CheckReport check_plugin(const CheckOptions& options) {
             report.skip_reason = report.cannot_check;
             return report;
         }
-        if (text.starts_with("ï»¿")) text.erase(0, 3);  // saved by Notepad, as load_symbols allows
+        if (text.starts_with("\xEF\xBB\xBF")) text.erase(0, 3);  // saved by Notepad, as load_symbols allows
         const SymbolFileResult symbols = parse_symbols_text(text);
         if (!symbols.file) {
             report.problems.push_back({symbols_path, symbols.line, without_prefix(symbols.error, "symbols.toml: ")});
@@ -350,6 +351,27 @@ CheckReport check_plugin(const CheckOptions& options) {
             if (report.exit_code == kExitCannotCheck) return report;
         } else {
             check_lock(options, text, symbols_path, report);
+        }
+    }
+    // settings.toml: the loader skips a plugin whose declarations do not parse.
+    if (!m.settings.empty()) {
+        const std::filesystem::path relative = utf8_path(m.settings);
+        const std::string settings_path = shown_path(options.plugin_dir, relative);
+        std::string text;
+        if (!read_file(options.plugin_dir / relative, text)) {
+            report.exit_code = kExitCannotCheck;
+            report.cannot_check = "cannot read " + settings_path;
+            if (report.skip_reason.empty()) report.skip_reason = report.cannot_check;
+            return report;
+        }
+        if (text.starts_with("\xEF\xBB\xBF")) text.erase(0, 3);  // saved by Notepad, as load_settings allows
+        const SettingsFileResult settings = parse_settings_text(text);
+        report.has_settings = true;
+        if (settings.file) {
+            report.settings = settings.file->settings.size();
+        } else {
+            report.problems.push_back({settings_path, settings.line, without_prefix(settings.error, "settings.toml: ")});
+            if (report.skip_reason.empty()) report.skip_reason = settings.error;
         }
     }
     // In file order, so the output reads like a compiler's.
@@ -381,6 +403,7 @@ std::string report_json(const CheckReport& report, const std::string& pad, const
         out += in + "\"build\": " + json_string(report.build) + ",\n";
         out += in + "\"symbols\": " + std::to_string(report.symbols) + ",\n";
     }
+    if (report.has_settings) out += in + "\"settings\": " + std::to_string(report.settings) + ",\n";
     if (report.with_exe && !report.exe_sha256.empty()) {
         out += in + "\"exe\": {\"sha256\": " + json_string(report.exe_sha256) + ", \"build\": " +
                (report.exe_build.empty() ? std::string("null") : json_string(report.exe_build)) + "},\n";
@@ -422,6 +445,7 @@ std::string report_summary(const CheckReport& report) {
         }
         if (!report.lock.empty()) summary += "; " + std::string(kLockFile) + " " + report.lock;
     }
+    if (report.has_settings) summary += "; " + std::to_string(report.settings) + " setting(s)";
     summary += report.problems.empty() ? ": OK" : ": " + std::to_string(report.problems.size()) + " problem(s)";
     return summary;
 }

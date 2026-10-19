@@ -11,6 +11,7 @@
 #include "resolver.hpp"
 #include "seh_guard.hpp"
 #include "services.hpp"
+#include "settings.hpp"
 #include "symbol_check.hpp"
 
 #include <anvil/anvil_game.h>
@@ -264,16 +265,24 @@ void startup_impl(const std::filesystem::path& game_dir) {
     // The verified symbols are kept per plugin folder for address_of and the
     // symbol change calls.
     std::map<std::wstring, PluginSymbols> verified_symbols;
+    // settings.toml: a plugin whose declarations do not parse is skipped, as
+    // it could not read its settings (design §11).
+    std::map<std::wstring, SettingsFile> declared_settings;
     input.verify = [&](const Manifest& m) {
-        if (m.symbols.empty()) return std::string();
-        const auto file = m.folder / m.symbols;
-        SymbolVerification verified;
-        SymbolFile declared;
-        std::string reason = check_plugin_symbols(file, game.build_id, *g_runtime->changes, identity->image_base,
-                                                  &verified, &declared);
-        if (!reason.empty()) return reason;
-        verified_symbols[m.folder.wstring()] = PluginSymbols(declared, verified, identity->image_base);
-        log_info(m.id + ": " + std::to_string(verified.symbols.size()) + " symbol(s) verified");
+        if (!m.symbols.empty()) {
+            SymbolVerification verified;
+            SymbolFile declared;
+            std::string reason = check_plugin_symbols(m.folder / m.symbols, game.build_id, *g_runtime->changes,
+                                                      identity->image_base, &verified, &declared);
+            if (!reason.empty()) return reason;
+            verified_symbols[m.folder.wstring()] = PluginSymbols(declared, verified, identity->image_base);
+            log_info(m.id + ": " + std::to_string(verified.symbols.size()) + " symbol(s) verified");
+        }
+        if (!m.settings.empty()) {
+            SettingsFileResult parsed = load_settings(m.folder / m.settings);
+            if (!parsed.file) return parsed.error;
+            declared_settings[m.folder.wstring()] = std::move(*parsed.file);
+        }
         return std::string();
     };
     const auto plugins_dir = g_runtime->anvil_dir / "plugins";
@@ -305,6 +314,12 @@ void startup_impl(const std::filesystem::path& game_dir) {
         }
         plugin->plugin_dir = m.folder.wstring();
         plugin->data_dir = (g_runtime->anvil_dir / "data" / m.id).wstring();
+        // The player's values and the ANVIL_<ID>_<NAME> overrides, before any plugin loads.
+        if (const auto it = declared_settings.find(m.folder.wstring()); it != declared_settings.end()) {
+            const auto notes = plugin->settings.init(std::move(it->second),
+                                                     std::filesystem::path(plugin->data_dir) / "settings.toml", m.id);
+            for (const auto& note : notes) Log::instance().write(note.level, m.id, note.message);
+        }
         plugin->manifest = std::move(m);
         g_runtime->policy->add(plugin->manifest, plugin->owner);
         g_runtime->plugins.push_back(std::move(plugin));
@@ -343,6 +358,14 @@ void write_call_counts() {
 }
 
 }  // namespace
+
+PluginSettings* plugin_settings(std::string_view plugin_id) {
+    if (g_runtime == nullptr) return nullptr;
+    for (const auto& p : g_runtime->plugins) {
+        if (p->manifest.id == plugin_id) return &p->settings;
+    }
+    return nullptr;
+}
 
 void shutdown() {
     try {

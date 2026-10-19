@@ -38,7 +38,9 @@ configure with `-DAnvilPlugin_DIR=<sdk>/cmake` (or put the folder in
 `anvil_add_plugin(<target> SOURCES <files>...)` reads `plugin.toml` next to the
 `CMakeLists.txt` (`id`, `entry`, `symbols`, `settings`, `api`), then:
 
-- runs `anvil gen` on `symbols.toml` at build time (`symbols.gen.h`, `symbols.gen.hpp`),
+- runs `anvil gen` on `symbols.toml` at build time (`symbols.gen.h`, `symbols.gen.hpp`)
+  and on `settings.toml` (`settings.gen.h`, `settings.gen.hpp`: `CFG_<NAME>` in C,
+  `cfg::<name>.get()` in C++),
 - builds `<entry>.dll` with the static CRT, C++20 (C11 for C sources) and `/W4`,
 - lays out `<build>/plugin/<id>/` with `plugin.toml`, `symbols.toml`, `settings.toml`
   (when the manifest names one) and the DLL, the same for every configuration.

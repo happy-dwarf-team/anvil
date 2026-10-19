@@ -63,6 +63,8 @@ struct CheckReport {
     bool has_symbols = false;
     std::string build;         // symbols.toml `build`
     size_t symbols = 0;
+    bool has_settings = false;  // plugin.toml names a settings.toml that could be read
+    size_t settings = 0;        // declared settings, once settings.toml parsed
     bool with_exe = false;
     std::string exe_name;      // the --exe file name
     std::string exe_sha256;
@@ -72,7 +74,7 @@ struct CheckReport {
 };
 
 // `anvil check <plugin-dir> [--exe <eu4.exe>]` (design §16): the strict
-// plugin.toml and symbols.toml schemas (the loader's parsers); with an exe the
+// plugin.toml, symbols.toml and settings.toml schemas (the loader's parsers); with an exe the
 // build, every symbol (verify_symbols) and instruction boundaries, then
 // writes symbols.lock; without one, that symbols.lock matches symbols.toml.
 CheckReport check_plugin(const CheckOptions& options);

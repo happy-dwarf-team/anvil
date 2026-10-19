@@ -164,7 +164,23 @@ label = "RAM prefetch budget (MB)"
 description = "RAM for unpacked archive members the game has not taken yet."
 group = "RAM prefetch"
 restart = true                # true: applies at the next start
+
+[setting.mode]
+type = "enum"
+values = [{ name = "off", label = "Off" }, { name = "verify", label = "Verify only" }, { name = "on", label = "On" }]
+default = "verify"
+label = "Mode"
+restart = false               # false: applies at once; the plugin may subscribe
+
+[setting.panel_key]
+type = "key"
+default = "Ctrl+Shift+F12"
+label = "Panel key"
 ```
+
+- **Schema:** unknown keys are errors, as in the other files. Names match `[a-z][a-z0-9_]*` (max 64; they become identifiers in generated headers), and a setting's id (`AnvilSetting`) is its position in the file. `type`, `default` and `label` are required; `description` and `group` (empty: ungrouped) are optional, and `restart` defaults to `true`, the safe choice for a plugin that reads a value once.
+- **Types and values:** `bool`; `int` (64-bit) and `float` (finite; an integer is accepted) with optional `min`, `max` and `step` (the editor's increment, greater than 0, not a rule for values); `enum` with `values`, an array of `{ name, label }` (the label defaults to the name), whose `default` and stored values are option names; `string` (UTF-8, no NUL); `key`, a binding such as `"Ctrl+Shift+F12"` or `""` for none. `min`/`max` belong to `int` and `float` only, `values` to `enum` only, and `default` must satisfy the limits.
+- **Keys:** modifiers `Ctrl` (or `Control`), `Shift`, `Alt`, each at most once, then one key: `A`–`Z`, `0`–`9`, `F1`–`F24`, `Space`, `Enter`, `Escape`, `Tab`, `Backspace`, `Insert`, `Delete`, `Home`, `End`, `PageUp`, `PageDown`, the arrows (`Up`, `Down`, `Left`, `Right`), `Pause`, `PrintScreen`, `CapsLock`, `NumLock`, `ScrollLock`, `Numpad0`–`Numpad9`, `NumpadAdd`/`Subtract`/`Multiply`/`Divide`/`Decimal`, and the US-layout punctuation keys `Semicolon`, `Equals`, `Comma`, `Minus`, `Period`, `Slash`, `Backquote`, `LeftBracket`, `Backslash`, `RightBracket`, `Quote`; names are case-insensitive. The value a plugin reads is the Windows virtual-key code in bits 0–7 with `0x100` Shift, `0x200` Ctrl and `0x400` Alt, as the Win32 hot-key control encodes it.
 
 ## 6. Game build identity
 
@@ -291,12 +307,20 @@ The C ABI is [`include/anvil/anvil_plugin.h`](../include/anvil/anvil_plugin.h) (
 
 ## 11. Settings
 
-- Defaults live in `settings.toml` in the plugin folder, read-only.
-- The player's values live in `anvil/data/<id>/settings.toml`, only the values that differ from the default; the file can be edited by hand.
-- An invalid value falls back to the default, with a warning in the log and the overlay.
-- `ANVIL_<ID>_<NAME>` environment variables override values for testing, and Anvil logs it.
-- Plugins read validated values through generated accessors. For `restart = false` settings they can subscribe to changes.
-- The overlay and the Manager edit the values. Settings are global per plugin; profiles are fog.
+- Defaults live in `settings.toml` in the plugin folder, read-only (§5.3). A plugin whose `settings.toml` does not parse is skipped with the parser's reason, like a broken `symbols.toml` (§7); `anvil check` reports it at its line.
+- The player's values live in `anvil/data/<id>/settings.toml`, only the values that differ from the default; the file can be edited by hand. It is a flat table, `name = value` in the types of §5.3 (an enum option's name, a key binding as text):
+  ```toml
+  ram_prefetch_budget_mb = 2048
+  mode = "on"
+  ```
+- An invalid value (wrong type, out of range, not an option, not a key) falls back to the default, with a warning in the log and the overlay; so does a name the plugin does not declare (ignored), and a file that does not parse leaves every setting at its default.
+- `ANVIL_<ID>_<NAME>` environment variables override values for testing (the plugin id and the name in upper case, `-` as `_`), and Anvil logs each one: `true`/`false`/`1`/`0`, a decimal int, a number, an option's name, any string, a key binding. An invalid one is a warning and is ignored. An override changes what the plugin reads in this session, never the player's file.
+- The values are read once, before the plugin loads, and are always valid when the plugin sees them.
+- Plugins read validated values through generated accessors (§16): `cfg::<name>.get()` in C++; `host->setting_bool/int/float/string(self, CFG_<NAME>)` in C. `setting_int` also reads a bool (0/1), an enum (the option's index, `CFG_<NAME>_<OPTION>`) and a key (the code); `setting_float` an int; `setting_string` an enum (the option's name) and a key (`"Ctrl+F12"`). Any other combination, and an unknown id, reads 0, 0.0 or `""`. A string stays valid for the process.
+- For `restart = false` settings plugins can subscribe to changes (`subscribe_setting`, or `anvil::Host::subscribe_setting(cfg::<name>, handler)`, which does not compile for a `restart = true` setting). The host refuses an unknown setting with `ANVIL_ERROR_NOT_DECLARED` and a `restart = true` one with `ANVIL_ERROR_WRONG_KIND`. Callbacks run synchronously on the thread that made the change, after the new value is in place; a plugin whose load fails loses its subscriptions.
+- **Changing a value while the game runs** (the overlay, 1.1): the core holds each resolved plugin's settings in a `PluginSettings` (`src/core/plugin_settings.hpp`), found by `anvil::plugin_settings(id)` (`runtime.hpp`). `set(id, value)` (or `set_text`, `reset`) checks the value, saves the player's file (atomically, through a temporary file; with only defaults it is removed), and for a `restart = false` setting makes it the current value and runs the callbacks; a `restart = true` setting keeps its current value until the next start (`current` and `saved` tell the editor whether to show "applies at the next start"). A change replaces an environment override for the rest of the session. The overlay, a plugin itself, reaches these calls through an Anvil service defined with it (#58); the warnings of the start-up are in `warnings()`.
+- **Outside the game** (the Manager, 1.2): `anvil_core` has the same rules without the running game: `load_settings`, `load_player_settings` and `write_player_settings` (`src/core/settings.hpp`), `parse_setting_text` and `setting_toml` for text, `check_setting_value`. Edits are safe only while the game is closed: a running game rewrites the file on the next change in the overlay.
+- Settings are global per plugin; profiles are fog.
 
 ## 12. Crash capture and attribution
 
@@ -396,12 +420,16 @@ Decided in [Player UI: in-game overlay and Anvil Manager](https://github.com/hap
 
 - **`anvil.exe`** (in the SDK archive) is built from the core's own library:
   - `anvil gen [--lang c|cpp|rust]`;
-  - `anvil check` with strict schemas, which also verifies, with `--exe`, the build, bytes, memory, pointers, exports, values and instruction boundaries; with `--game <folder>`, every installed plugin and the conflicts between them;
+  - `anvil check` with strict schemas (`plugin.toml`, `symbols.toml`, `settings.toml`), which also verifies, with `--exe`, the build, bytes, memory, pointers, exports, values and instruction boundaries; with `--game <folder>`, every installed plugin and the conflicts between them;
   - `--format text|json|github`; exit codes 0 OK, 1 problems, 2 cannot check.
 - **`anvil gen [--lang c|cpp] <symbols.toml> <out-dir>`** writes both headers without `--lang` and leaves a file alone when its content would not change:
   - `symbols.gen.h`: `SYM_<NAME>` ids, `sym_<name>_fn` pointer types from `signature`, `SYMVAL_<SYMBOL>_<VALUE>` constants;
   - `symbols.gen.hpp`: namespace `sym` with a constant per symbol whose type `sym::Types::<name>` derives from `anvil::Function<signature>`, `Site`, `Slot` or `Data<type>` ([`anvil_symbols.hpp`](../include/anvil/anvil_symbols.hpp)) and holds `symbol_name`, values as `static constexpr` members (`sym::root_and_date.date_offset`), and an `anvil::Data<type>` for each typed `rip_relative` value (`sym::root`);
   - a value is the integer in the declared bytes, or for `rip_relative` an RVA, which gen cannot know for an `export` symbol. The plugin declares the types named in `signature` and `type` before including the header. Names the C++ header cannot hold (keywords, a value called `id`, `value` or `symbol_name`, two `sym::` names alike) are errors.
+- **`anvil gen [--lang c|cpp] [--settings <file>] <settings.toml> <out-dir>`** does the same for settings; one call may take `symbols.toml` and `settings.toml` together. A file is a settings file when `--settings` names it, its name ends in `settings.toml` or it has `[setting.<name>]` tables. Nothing is written when an input fails.
+  - `settings.gen.h`: `CFG_<NAME>` ids with the type, default, limits and label in a comment, `CFG_<NAME>_<OPTION>` indices of enum options, and with a key setting `ANVIL_KEY_SHIFT`/`CTRL`/`ALT` and `ANVIL_KEY_VK(code)`;
+  - `settings.gen.hpp` (includes `anvil.hpp`): namespace `cfg` with a constant per setting whose type `cfg::Types::<name>` derives from `anvil::Setting<T>` (`get()`; T is `bool`, `std::int64_t`, `double`, `std::string`, `anvil::Key`, or for an enum the generated `enum class cfg::Types::<name>_value`) and holds `setting_name`, `restart`, `default_value`, `minimum`/`maximum` when declared, and the options as members (`cfg::mode.get() == cfg::mode.on`);
+  - names the headers cannot hold are errors: C++ keywords, an option called `id`, `get`, `setting_name`, `restart`, `default_value`, `minimum` or `maximum`, a setting named like another enum's `<name>_value`, and two `CFG_` names alike.
 - **Problems carry lines:** the parsers report the line of the key (one error per file, as the loader stops at it); `--exe` reports every failing symbol at its `[symbol.<name>]` line. `--format github` prints `::error file=<path>,line=<n>,title=anvil check::<message>` with the path as passed, so CI runs it from the repository root.
 - **Instruction boundaries** (`--exe`): `symbols.toml` does not say how a symbol is used, so the rule covers every function or site in code with at least 5 declared bytes (a `jmp rel32`):
   - decoded from the first byte (Zydis, x86-64; `??` bytes take the image's values), the declared bytes are valid instructions and the last one ends exactly at their end, so a block replacement owns whole instructions and a hook's stolen bytes lie in verified bytes;
@@ -414,7 +442,7 @@ Decided in [Player UI: in-game overlay and Anvil Manager](https://github.com/hap
   - The plugins that pass discovery (a readable `plugin.toml`, the entry DLL present) go to the loader's own resolver (`ResolveInput`, shared code in `anvil_core`): API and `anvil` range, build and symbols, duplicates, disabled ids, `conflicts`, dependencies and cycles. The result is what loads, in which order, and what is skipped and why, in the words of the loader's log. Only what the loader acts on skips a plugin: a failing instruction-boundary check is a problem of the plugin, which still loads.
   - **Overlapping ranges (warning).** `symbols.toml` does not say which symbols a plugin will change, so every verified symbol with `memory = "code"` and declared `bytes` counts as a range `[rva, rva + length)`. For each pair of plugins that load together, ranges that overlap are reported as one warning, at the symbol of the plugin that loads first (`file:line: warning: …`; `::warning` with `github`), naming both symbols, and counting further overlaps of the pair. An identical range (same address and length) is the normal case of a chain (§8.2) and is not reported. Whether two plugins really change the same bytes is decided at load by the change registry, which refuses the second change (§8.3). A warning never changes the exit code, and plugins that are skipped overlap nothing. Symbols of other memory kinds and symbols without `bytes` are not compared.
   - **Exit codes** as in `check`. 0: nothing is wrong. 1: a plugin has problems, a plugin that is not disabled by the player is skipped, or `anvil.toml` does not parse. What the player disabled (`disabled_plugins`, `enabled = false`) is listed but does not count, and neither do its problems (text and `github` print them as warnings). 2: no folder, no `eu4.exe` (or not a readable game image), no `anvil` folder, or a plugin whose files cannot be read. With 2 for the whole folder nothing else is printed.
-  - **JSON** is one object, which the Manager (§15) reads. `plugins[]` has one entry per folder of `anvil/plugins`, each the result `anvil check` prints for one plugin (`result`, `exit_code`, `plugin`, `build`, `symbols`, `exe`, `problems`) plus `folder` and `status`; the other sections are always present, empty when there is nothing:
+  - **JSON** is one object, which the Manager (§15) reads. `plugins[]` has one entry per folder of `anvil/plugins`, each the result `anvil check` prints for one plugin (`result`, `exit_code`, `plugin`, `build` and `symbols` with a `symbols.toml`, `settings` (their number) with a `settings.toml`, `exe`, `problems`) plus `folder` and `status`; the other sections are always present, empty when there is nothing:
     ```json
     {
       "tool": "anvil 1.0.0",

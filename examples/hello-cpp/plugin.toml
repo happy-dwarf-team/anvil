@@ -7,6 +7,7 @@ api = 2
 entry = "hello_cpp.dll"
 phase = "main"
 symbols = "symbols.toml"   # the game build comes from here
+settings = "settings.toml"
 # Required: true if the plugin can change the simulation's state or results.
 affects_gameplay = false
 issues = "https://github.com/happy-dwarf-team/anvil/issues"
