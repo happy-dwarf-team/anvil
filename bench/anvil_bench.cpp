@@ -247,7 +247,7 @@ int main(int argc, char** argv) {
     for (int i = 0; i < kLinks; ++i) owners.push_back(reg.add_owner("p" + std::to_string(i)));
     std::vector<void*> fns;
     std::vector<void**> nexts;
-    detours(std::make_integer_sequence<int, 4 * kLinks>{}, fns, nexts);
+    detours(std::make_integer_sequence<int, 2 * kLinks + 2>{}, fns, nexts);
     int used = 0;
     bool setup = true;
     auto ok = [&](ChangeStatus st) { setup = setup && st == ChangeStatus::Ok; };
