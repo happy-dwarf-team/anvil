@@ -1,0 +1,19 @@
+# settings.gen.rs: ids, enum options and key flags.
+[setting.budget_mb]
+type = "int"
+default = 1024
+min = 64
+max = 8192
+label = "Budget (MB)"
+
+[setting.mode]
+type = "enum"
+values = [{ name = "fast", label = "Fast" }, { name = "slow" }]
+default = "fast"
+label = "Mode"
+restart = false
+
+[setting.toggle]
+type = "key"
+default = "Ctrl+F12"
+label = "Toggle key"

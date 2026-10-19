@@ -70,8 +70,21 @@ verification, `settings.toml`, the game build identity) with `version.dll`:
 ```powershell
 anvil gen symbols.toml build\generated            # symbols.gen.h and symbols.gen.hpp
 anvil gen settings.toml build\generated           # settings.gen.h and settings.gen.hpp
+anvil gen --lang rust symbols.toml out            # symbols.gen.rs (Rust plugins, anvil-sys)
 anvil check my-plugin --exe "C:\...\eu4.exe"     # verify against the game, write symbols.lock
 anvil check my-plugin --format github             # in CI, without the game: schemas and symbols.lock
+```
+
+The Rust side (`sdk/rust/anvil-sys`, `examples/hello-rust`, see
+[§9](docs/design.md#9-plugin-api-2)) is a Cargo workspace at the root; it needs
+Rust 1.82 or newer and the `anvil.exe` built above, which the hello's `build.rs`
+runs. CI uses Rust 1.99.1, and `sdk/rust/regen-bindings.ps1` (bindgen 0.73.2 and
+libclang) regenerates the committed bindings after a change to the header:
+
+```powershell
+$env:ANVIL = "$PWD\build\Release\anvil.exe"
+cargo build --workspace
+cargo test --workspace
 ```
 
 See [docs/design.md §16](docs/design.md#16-tooling-for-authors) for the

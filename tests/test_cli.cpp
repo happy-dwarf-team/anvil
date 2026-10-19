@@ -266,6 +266,64 @@ int main(int argc, char** argv) {
                        "gives SYMVAL_A_B_C, which another value already gives@7"));
     });
 
+    run("gen rust: ids, function types, values and warnings", [] {
+        const auto file = parse_symbols_text(kGoodSymbols);
+        const GeneratedHeaders h = generate_headers(*file.file, "symbols.toml", false, false, true);
+        CHECK(h.error.empty() && h.c.empty() && h.cpp.empty() && h.warnings.empty());
+        CHECK(contains(h.rust, "pub const SPEED_OBJECT: ::anvil_sys::AnvilSymbol = 0;"));
+        CHECK(contains(h.rust, "pub const SHORT_SITE: ::anvil_sys::AnvilSymbol = 6;"));
+        CHECK(contains(h.rust, "/// function, rva 0x1000: returns the */ speed object\n"));
+        CHECK(contains(h.rust, "pub type SpeedObjectFn = unsafe extern \"C\" fn(session: *mut c_void) -> *mut c_void;"));
+        CHECK(contains(h.rust, "pub type ExportedFn = unsafe extern \"C\" fn(a: c_int, b: *const c_char) -> c_int;"));
+        CHECK(contains(h.rust, "pub const ROOT_AND_DATE_ROOT: u64 = 0x3008;"));
+        CHECK(contains(h.rust, "pub const ROOT_AND_DATE_DATE_OFFSET: u64 = 0x1DD0;"));
+        CHECK(!contains(h.rust, "TickSlot"));  // only functions get a type
+
+        // What gen reads: pointers (const placement), integers, floating point, bool, void, "...".
+        auto fn_of = [](const std::string& signature, std::vector<GenWarning>* warnings = nullptr) {
+            const auto parsed =
+                parse_symbols_text("build = \"b\"\n[symbol.f]\nexport = \"F\"\nsignature = \"" + signature + "\"\n");
+            if (!parsed.file) return "parse: " + parsed.error;
+            const GeneratedHeaders g = generate_headers(*parsed.file, "symbols.toml", false, false, true);
+            if (warnings != nullptr) *warnings = g.warnings;
+            const auto at = g.rust.find("pub type FFn = ");
+            if (at == std::string::npos) return "none: " + g.error;
+            const auto end = g.rust.find(";\n", at);
+            return g.rust.substr(at + 15, end - at - 15);
+        };
+        const std::string pre = "unsafe extern \"C\" fn(";
+        CHECK(fn_of("void ()") == pre + ")");
+        CHECK(fn_of("bool (void)") == pre + ") -> bool");
+        CHECK(fn_of("unsigned long long (unsigned x, long y)") == pre + "x: c_uint, y: c_long) -> c_ulonglong");
+        CHECK(fn_of("float (double d, short s, signed char c)") == pre + "d: f64, s: c_short, c: c_schar) -> f32");
+        CHECK(fn_of("uint32_t (size_t n, int64_t m)") == pre + "n: usize, m: i64) -> u32");
+        CHECK(fn_of("char* (const char* a, char* const b, const char* const* c, void** d)") ==
+              pre + "a: *const c_char, b: *mut c_char, c: *const *const c_char, d: *mut *mut c_void) -> *mut c_char");
+        CHECK(fn_of("int (int, const char*)") == pre + "arg0: c_int, arg1: *const c_char) -> c_int");
+        CHECK(fn_of("int (int type, int fn)") == pre + "type_: c_int, fn_: c_int) -> c_int");
+        CHECK(fn_of("int (const char* format, ...)") == pre + "format: *const c_char, ...) -> c_int");
+        CHECK(fn_of("struct Root* (const Root* r)") == pre + "r: *const c_void) -> *mut c_void");
+
+        // Anything else by value is *mut c_void and a warning, at the symbol's line; behind a pointer it is quiet.
+        std::vector<GenWarning> warnings;
+        CHECK(fn_of("Root (Root r, void (*cb)(int), int t[4])", &warnings) ==
+              pre + "r: *mut c_void, arg1: *mut c_void, arg2: *mut c_void) -> *mut c_void");
+        CHECK(warnings.size() == 4 && warnings[0].line == 2 && contains(warnings[0].message, "symbol f: parameter 1 (Root r)"));
+        CHECK(contains(warnings[0].message, "does not know the type 'Root' passed by value"));
+        CHECK(contains(warnings[1].message, "parameter 2") && contains(warnings[1].message, "does not translate this syntax"));
+        CHECK(contains(warnings[3].message, "symbol f: result (Root)"));
+        fn_of("Root* (Root* r)", &warnings);
+        CHECK(warnings.empty());
+
+        // Names the module cannot hold twice.
+        const auto clash = parse_symbols_text(
+            "build = \"b\"\n[symbol.a_b]\nrva = 0x10\nbytes = \"48\"\nmemory = \"code\"\nvalues.c = { at = 0, size = 1 }\n"
+            "[symbol.a]\nrva = 0x20\nbytes = \"48\"\nmemory = \"code\"\nvalues.b_c = { at = 0, size = 1 }\n");
+        const GeneratedHeaders c = generate_headers(*clash.file, "symbols.toml", false, false, true);
+        CHECK(contains(c.error, "the Rust name A_B_C is already symbol a_b: value c") && c.line == 7);
+        CHECK(c.rust.empty() && c.warnings.empty());
+    });
+
     run("check without symbols, and the files it needs", [&] {
         const auto report = fx.check(fx.plugin("plain", ""), false);
         CHECK(report.exit_code == kExitOk && report.problems.empty() && report.plugin == "plain");
@@ -327,6 +385,35 @@ int main(int argc, char** argv) {
                        "'new' is a C++ keyword"));
         const auto none = generate_settings_headers(SettingsFile{}, "settings.toml", true, true);
         CHECK(none.error.empty() && contains(none.c, "declares no settings") && contains(none.cpp, "namespace cfg {"));
+    });
+
+    run("gen rust: settings ids, enum options and key flags", [] {
+        const auto file = parse_settings_text(
+            "[setting.budget]\ntype = \"int\"\ndefault = 5\nmin = 1\nmax = 9\nlabel = \"Budget\"\n"
+            "[setting.mode]\ntype = \"enum\"\nvalues = [{ name = \"fast\", label = \"Fast one\" }, { name = \"slow\" }]\n"
+            "default = \"slow\"\nlabel = \"Mode\"\nrestart = false\n"
+            "[setting.toggle]\ntype = \"key\"\ndefault = \"\"\nlabel = \"Toggle\"\n");
+        CHECK(file.file.has_value());
+        const GeneratedHeaders h = generate_settings_headers(*file.file, "settings.toml", false, false, true);
+        CHECK(h.error.empty() && h.c.empty() && h.cpp.empty());
+        CHECK(contains(h.rust, "pub const BUDGET: ::anvil_sys::AnvilSetting = 0;"));
+        CHECK(contains(h.rust, "pub const MODE: ::anvil_sys::AnvilSetting = 1;"));
+        CHECK(contains(h.rust, "pub const TOGGLE: ::anvil_sys::AnvilSetting = 2;"));
+        CHECK(contains(h.rust, "/// Fast one\npub const MODE_FAST: i64 = 0;"));
+        CHECK(contains(h.rust, "pub const MODE_SLOW: i64 = 1;"));
+        CHECK(contains(h.rust, "pub const KEY_CTRL: i64 = 0x200;"));
+        CHECK(!contains(generate_settings_headers(*parse_settings_text("[setting.a]\ntype = \"bool\"\ndefault = true\nlabel = \"A\"\n").file,
+                                                  "settings.toml", false, false, true)
+                            .rust,
+                        "KEY_"));
+        // Names the module cannot hold twice.
+        const auto clash = parse_settings_text(
+            "[setting.m]\ntype = \"enum\"\nvalues = [{ name = \"b\" }, { name = \"c\" }]\ndefault = \"b\"\nlabel = \"M\"\n"
+            "[setting.m_b]\ntype = \"bool\"\ndefault = true\nlabel = \"X\"\n");
+        const GeneratedHeaders c = generate_settings_headers(*clash.file, "settings.toml", false, false, true);
+        CHECK(contains(c.error, "setting m: option b gives M_B, which setting m_b already gives") && c.line == 1);
+        const auto none = generate_settings_headers(SettingsFile{}, "settings.toml", false, false, true);
+        CHECK(none.error.empty() && contains(none.rust, "declares no settings"));
     });
 
     run("check --exe verifies, writes symbols.lock, and check without it reads the lock", [&] {
@@ -487,7 +574,20 @@ int main(int argc, char** argv) {
         const fs::path c_only = fx.root / "gen-c";
         CHECK(run_anvil(anvil, "gen --lang c " + quoted(good / "symbols.toml") + " " + quoted(c_only)).exit_code == 0);
         CHECK(fs::exists(c_only / "symbols.gen.h") && !fs::exists(c_only / "symbols.gen.hpp"));
-        CHECK(run_anvil(anvil, "gen --lang rust " + quoted(good / "symbols.toml") + " " + quoted(out)).exit_code == 2);
+        const fs::path rust_only = fx.root / "gen-rust";
+        const Run rust = run_anvil(anvil, "gen --lang rust " + quoted(good / "symbols.toml") + " " + quoted(rust_only));
+        CHECK(rust.exit_code == 0 && contains(rust.out, "symbols.gen.rs: written"));
+        CHECK(fs::exists(rust_only / "symbols.gen.rs") && !fs::exists(rust_only / "symbols.gen.h") &&
+              !fs::exists(rust_only / "symbols.gen.hpp"));
+        CHECK(!fs::exists(out / "symbols.gen.rs"));  // without --lang: C and C++ only
+        CHECK(contains(run_anvil(anvil, "gen --lang rust " + quoted(good / "symbols.toml") + " " + quoted(rust_only)).out,
+                       "symbols.gen.rs: unchanged"));
+        CHECK(run_anvil(anvil, "gen --lang go " + quoted(good / "symbols.toml") + " " + quoted(out)).exit_code == 2);
+        write(fx.root / "warn" / "symbols.toml",
+              "build = \"b\"\n[symbol.f]\nexport = \"F\"\nsignature = \"Root ()\"\n");
+        const Run warned =
+            run_anvil(anvil, "gen --lang rust " + quoted(fx.root / "warn" / "symbols.toml") + " " + quoted(fx.root / "warn"));
+        CHECK(warned.exit_code == 0 && contains(warned.out, "symbols.toml:2: warning: symbol f: result (Root)"));
         CHECK(run_anvil(anvil, "gen " + quoted(fx.root / "none.toml") + " " + quoted(out)).exit_code == 2);
         CHECK(run_anvil(anvil, "gen " + quoted(good / "symbols.toml")).exit_code == 2);
         write(fx.root / "kw" / "symbols.toml", symbol("new", "rva = 0x10\nbytes = \"48\"\nmemory = \"code\"\n"));
@@ -507,6 +607,12 @@ int main(int argc, char** argv) {
                                               " " + quoted(set_out));
         CHECK(both.exit_code == 0 && contains(both.out, "settings.gen.hpp: written") && fs::exists(set_out / "symbols.gen.h"));
         CHECK(contains(read(set_out / "settings.gen.h"), "CFG_MODE_OFF = 0,"));
+        const fs::path rust_set = fx.root / "gen-set-rust";
+        CHECK(run_anvil(anvil, "gen --lang rust " + quoted(good / "symbols.toml") + " " + quoted(fx.root / "set" / "settings.toml") +
+                                   " " + quoted(rust_set))
+                  .exit_code == 0);
+        CHECK(contains(read(rust_set / "settings.gen.rs"), "pub const MODE_OFF: i64 = 0;") &&
+              fs::exists(rust_set / "symbols.gen.rs") && !fs::exists(rust_set / "settings.gen.h"));
         const fs::path by_content = fx.root / "gen-options";
         CHECK(run_anvil(anvil, "gen --lang cpp " + quoted(fx.root / "set" / "options.toml") + " " + quoted(by_content)).exit_code == 0);
         CHECK(fs::exists(by_content / "settings.gen.hpp") && !fs::exists(by_content / "settings.gen.h"));

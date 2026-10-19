@@ -1,5 +1,6 @@
 #include "cli/gen.hpp"
 
+#include <cctype>
 #include <charconv>
 #include <cstdio>
 #include <cstring>
@@ -8,6 +9,7 @@
 #include <optional>
 #include <set>
 #include <string_view>
+#include <vector>
 
 namespace anvil::cli {
 namespace {
@@ -391,13 +393,332 @@ std::string generate_settings_cpp(const SettingsFile& file, const std::string& s
     return out;
 }
 
+// ---- Rust (symbols.gen.rs) --------------------------------------------------
+
+// Words that cannot name a parameter of a Rust function type as they are.
+const std::set<std::string_view> kRustKeywords = {
+    "abstract", "as",     "async",   "await",  "become", "box",   "break",  "const",   "continue", "crate",
+    "do",       "dyn",    "else",    "enum",   "extern", "false", "final",  "fn",      "for",      "gen",
+    "if",       "impl",   "in",      "let",    "loop",   "macro", "match",  "mod",     "move",     "mut",
+    "override", "priv",   "pub",     "ref",    "return", "self",  "static", "struct",  "super",    "trait",
+    "true",     "try",    "type",    "typeof", "unsafe", "unsized", "use",  "virtual", "where",    "while",
+    "yield"};
+
+// The words of the C types gen translates; sizes are those of Windows x64 (long is 32 bits).
+const std::set<std::string_view> kBuiltinWords = {"void",   "char",     "short", "int",  "long",  "float",
+                                                  "double", "signed",   "unsigned", "bool", "_Bool"};
+const std::map<std::string_view, std::string_view> kTypedefs = {
+    {"int8_t", "i8"},     {"int16_t", "i16"},     {"int32_t", "i32"},    {"int64_t", "i64"},
+    {"uint8_t", "u8"},    {"uint16_t", "u16"},    {"uint32_t", "u32"},   {"uint64_t", "u64"},
+    {"size_t", "usize"},  {"uintptr_t", "usize"}, {"intptr_t", "isize"}, {"ptrdiff_t", "isize"},
+    {"ssize_t", "isize"}, {"wchar_t", "u16"},     {"char16_t", "u16"},   {"char32_t", "u32"}};
+const std::set<std::string_view> kQualifiers = {"volatile", "restrict", "__restrict"};
+const std::set<std::string_view> kTags = {"struct", "union", "enum"};
+
+bool is_word(std::string_view token) {
+    return !token.empty() && (std::isalpha(static_cast<unsigned char>(token[0])) != 0 || token[0] == '_');
+}
+
+// Words, '*', "..." and any other single character, in order.
+std::vector<std::string> tokenize_c(std::string_view text) {
+    std::vector<std::string> tokens;
+    for (size_t i = 0; i < text.size();) {
+        const unsigned char c = static_cast<unsigned char>(text[i]);
+        if (std::isspace(c) != 0) {
+            ++i;
+        } else if (std::isalpha(c) != 0 || c == '_') {
+            size_t j = i;
+            while (j < text.size() && (std::isalnum(static_cast<unsigned char>(text[j])) != 0 || text[j] == '_')) ++j;
+            tokens.emplace_back(text.substr(i, j - i));
+            i = j;
+        } else if (text.substr(i, 3) == "...") {
+            tokens.emplace_back("...");
+            i += 3;
+        } else {
+            tokens.emplace_back(1, text[i]);
+            ++i;
+        }
+    }
+    return tokens;
+}
+
+// One C type with the name that may follow it (a parameter), as far as gen reads it.
+struct CType {
+    bool ok = false;        // false: syntax gen does not translate (function pointers, arrays, references, ...)
+    bool variadic = false;  // "..."
+    std::string base;       // Rust type of the base, without pointers; empty for void and for unknown types
+    std::string unknown;    // the C name of an unknown base
+    bool is_void = false;
+    bool base_const = false;
+    std::vector<bool> star_const;  // const after each '*'
+    std::string name;
+};
+
+CType parse_c_type(std::string_view text) {
+    CType t;
+    const auto tokens = tokenize_c(text);
+    if (tokens.size() == 1 && tokens[0] == "...") {
+        t.ok = t.variadic = true;
+        return t;
+    }
+    std::vector<std::string> words;  // before the first '*', without qualifiers
+    size_t i = 0;
+    for (; i < tokens.size() && tokens[i] != "*"; ++i) {
+        const std::string& w = tokens[i];
+        if (!is_word(w)) return t;
+        if (w == "const") t.base_const = true;
+        else if (!kQualifiers.contains(w) && !kTags.contains(w)) words.push_back(w);
+    }
+    size_t stars = 0;
+    for (; i < tokens.size(); ++i) {
+        const std::string& w = tokens[i];
+        if (w == "*") {
+            ++stars;
+            t.star_const.push_back(false);
+        } else if (w == "const") {
+            t.star_const.back() = true;
+        } else if (kQualifiers.contains(w)) {
+            continue;
+        } else if (is_word(w) && t.name.empty()) {
+            t.name = w;
+        } else {
+            return t;
+        }
+    }
+
+    size_t builtin = 0;
+    while (builtin < words.size() && kBuiltinWords.contains(words[builtin])) ++builtin;
+    if (builtin > 0) {
+        if (builtin < words.size()) {  // a name after the type, which no pointer separates
+            if (stars > 0 || builtin + 1 != words.size() || !t.name.empty()) return t;
+            t.name = words[builtin];
+        }
+        int longs = 0;
+        bool is_unsigned = false, is_signed = false, is_char = false, is_short = false, is_float = false,
+             is_double = false, is_bool = false;
+        for (size_t k = 0; k < builtin; ++k) {
+            const std::string& w = words[k];
+            if (w == "long") ++longs;
+            else if (w == "unsigned") is_unsigned = true;
+            else if (w == "signed") is_signed = true;
+            else if (w == "char") is_char = true;
+            else if (w == "short") is_short = true;
+            else if (w == "float") is_float = true;
+            else if (w == "double") is_double = true;
+            else if (w == "bool" || w == "_Bool") is_bool = true;
+        }
+        if (words[0] == "void") t.is_void = true;
+        else if (is_bool) t.base = "bool";
+        else if (is_float) t.base = "f32";
+        else if (is_double) t.base = "f64";  // long double is a double on Windows x64
+        else if (is_char) t.base = is_unsigned ? "c_uchar" : is_signed ? "c_schar" : "c_char";
+        else if (is_short) t.base = is_unsigned ? "c_ushort" : "c_short";
+        else if (longs >= 2) t.base = is_unsigned ? "c_ulonglong" : "c_longlong";
+        else if (longs == 1) t.base = is_unsigned ? "c_ulong" : "c_long";
+        else t.base = is_unsigned ? "c_uint" : "c_int";
+    } else {
+        // A typedef name or a type gen does not know, then perhaps a name.
+        if (words.empty() || words.size() > 2 || (words.size() == 2 && (stars > 0 || !t.name.empty()))) return t;
+        if (words.size() == 2) t.name = words[1];
+        const auto known = kTypedefs.find(words[0]);
+        if (known != kTypedefs.end()) t.base = std::string(known->second);
+        else t.unknown = words[0];
+    }
+    t.ok = true;
+    return t;
+}
+
+// The Rust spelling of `t` as a parameter or result type, or empty for void by
+// value. An unknown type by value becomes `*mut c_void` and a warning (what the
+// game passes does not necessarily fit a pointer); behind a pointer it is an
+// opaque pointee, quietly. `where` names the place for the warning.
+std::string rust_type_of(const CType& t, const std::string& where, const std::string& written, uint32_t line,
+                         std::vector<GenWarning>& warnings) {
+    auto fallback = [&](const std::string& why) {
+        warnings.push_back({where + " (" + comment_text(written, false) + "): " + why +
+                                "; the Rust function type has *mut c_void there",
+                            line});
+        return std::string("*mut c_void");
+    };
+    if (!t.ok) return fallback("anvil gen does not translate this syntax to Rust");
+    if (t.star_const.empty()) {
+        if (t.is_void) return {};
+        if (t.base.empty()) return fallback("anvil gen does not know the type '" + t.unknown + "' passed by value");
+        return t.base;
+    }
+    std::string out = t.base.empty() ? "c_void" : t.base;
+    for (size_t level = 0; level < t.star_const.size(); ++level) {
+        const bool is_const = level == 0 ? t.base_const : t.star_const[level - 1];
+        out = std::string(is_const ? "*const " : "*mut ") + out;
+    }
+    return out;
+}
+
+std::string camel_case(std::string_view name) {
+    std::string out;
+    bool up = true;
+    for (char c : name) {
+        if (c == '_') {
+            up = true;
+        } else {
+            out.push_back(up && c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c);
+            up = false;
+        }
+    }
+    return out;
+}
+
+// `unsafe extern "C" fn(a: T, ...) -> R` for a symbol's signature.
+std::string rust_fn_type(const Symbol& s, std::vector<GenWarning>& warnings) {
+    const Signature sig = split_signature(s.signature);
+    std::vector<std::string> parameters;
+    int depth = 0;
+    std::string current;
+    for (char c : sig.parameters) {
+        if (c == '(' || c == '[') ++depth;
+        if (c == ')' || c == ']') --depth;
+        if (c == ',' && depth == 0) {
+            parameters.push_back(current);
+            current.clear();
+        } else {
+            current.push_back(c);
+        }
+    }
+    if (!trim(current).empty() || !parameters.empty()) parameters.push_back(current);
+
+    std::string list;
+    bool variadic = false;
+    const std::string symbol = "symbol " + s.name;
+    if (!(parameters.size() == 1 && trim(parameters[0]) == "void")) {
+        for (size_t i = 0; i < parameters.size(); ++i) {
+            const std::string written(trim(parameters[i]));
+            const CType t = parse_c_type(written);
+            if (t.variadic) {
+                variadic = true;
+                continue;
+            }
+            std::string name = t.name;
+            if (name.empty()) name = "arg" + std::to_string(i);
+            else if (kRustKeywords.contains(name)) name += "_";
+            if (!list.empty()) list += ", ";
+            list += name + ": " + rust_type_of(t, symbol + ": parameter " + std::to_string(i + 1), written, s.line, warnings);
+        }
+    }
+    if (variadic) list += list.empty() ? "..." : ", ...";
+    const std::string written_result(trim(sig.result));
+    const std::string result = rust_type_of(parse_c_type(written_result), symbol + ": result", written_result, s.line, warnings);
+    return "unsafe extern \"C\" fn(" + list + ")" + (result.empty() ? "" : " -> " + result);
+}
+
+std::string generate_rust(const SymbolFile& file, const std::string& source, std::vector<GenWarning>& warnings) {
+    // Ids, function types and values share the module's namespace.
+    std::map<std::string, std::string> names;
+    auto claim = [&](const std::string& name, const std::string& owner, uint32_t line) {
+        const auto [it, added] = names.emplace(name, owner);
+        if (!added) throw Fail{owner + ": the Rust name " + name + " is already " + it->second, line};
+    };
+    for (const auto& s : file.symbols) {
+        claim(upper(s.name), "symbol " + s.name, s.line);
+        if (s.kind == SymbolKind::Function) claim(camel_case(s.name) + "Fn", "the function type of symbol " + s.name, s.line);
+    }
+    for (const auto& s : file.symbols) {
+        for (const auto& v : s.values) {
+            claim(upper(s.name) + "_" + upper(v.name), "symbol " + s.name + ": value " + v.name, s.line);
+        }
+    }
+
+    std::string out = "// " + header_comment(file, source) + "\n";
+    out += "// Include it in a module: #[allow(dead_code)] mod sym { include!(\"symbols.gen.rs\"); }\n\n";
+    out += "#[allow(unused_imports)]\nuse ::core::ffi::{\n    c_char, c_int, c_long, c_longlong, c_schar, c_short, c_uchar, c_uint, c_ulong, c_ulonglong,\n    c_ushort, c_void,\n};\n\n";
+    out += "// Symbol ids (anvil_sys::AnvilSymbol): the declaration order in symbols.toml.\n";
+    for (const auto& s : file.symbols) {
+        out += "/// " + where_of(s) + (s.note.empty() ? "" : ": " + comment_text(s.note, false)) + "\n";
+        out += "pub const " + upper(s.name) + ": ::anvil_sys::AnvilSymbol = " + std::to_string(s.id) + ";\n";
+    }
+
+    std::string types;
+    for (const auto& s : file.symbols) {
+        if (s.kind != SymbolKind::Function) continue;
+        const size_t before = warnings.size();
+        const std::string fn = rust_fn_type(s, warnings);
+        types += "/// `" + comment_text(s.signature, false) + "`\n";
+        for (size_t w = before; w < warnings.size(); ++w) types += "// warning: " + comment_text(warnings[w].message, false) + "\n";
+        types += "pub type " + camel_case(s.name) + "Fn = " + fn + ";\n";
+    }
+    if (!types.empty()) out += "\n// Function types (signature).\n" + types;
+
+    std::string values;
+    for (const auto& s : file.symbols) {
+        for (const auto& v : s.values) {
+            const std::string name = upper(s.name) + "_" + upper(v.name);
+            const auto constant = constant_of(s, v);
+            if (!constant) {
+                values += "// " + name + ": an rva resolved when the game loads (export)\n";
+                continue;
+            }
+            values += "/// " + std::string(v.rip_relative != 0 ? "rva" : std::to_string(v.size) + " bytes") +
+                      (v.type.empty() ? "" : ", type " + comment_text(v.type, false)) + "\n";
+            values += "pub const " + name + ": u64 = " + hex(*constant) + ";\n";
+        }
+    }
+    if (!values.empty()) out += "\n// Values (values.<name>) from the verified bytes; rip_relative values are RVAs.\n" + values;
+    return out;
+}
+
+// ---- settings.gen.rs ---------------------------------------------------------------
+
+std::string generate_settings_rust(const SettingsFile& file, const std::string& source) {
+    std::string out = "// " + settings_comment(source) + "\n";
+    out += "// Include it in a module: #[allow(dead_code)] mod cfg { include!(\"settings.gen.rs\"); }\n";
+    if (file.settings.empty()) return out + "\n// settings.toml declares no settings.\n";
+    // Ids, enum options and the key flags share the module's namespace.
+    std::map<std::string, std::string> names;
+    auto claim = [&](const std::string& name, const std::string& owner, uint32_t line) {
+        const auto [it, added] = names.emplace(name, owner);
+        if (!added) throw Fail{owner + " gives " + name + ", which " + it->second + " already gives", line};
+    };
+    bool keys = false;
+    for (const auto& s : file.settings) {
+        claim(upper(s.name), "setting " + s.name, s.line);
+        keys = keys || s.type == SettingType::Key;
+    }
+    std::string options;
+    for (const auto& s : file.settings) {
+        for (size_t i = 0; i < s.options.size(); ++i) {
+            const std::string name = upper(s.name) + "_" + upper(s.options[i].name);
+            claim(name, "setting " + s.name + ": option " + s.options[i].name, s.line);
+            options += "/// " + settings_text(s.options[i].label, false) + "\npub const " + name + ": i64 = " + std::to_string(i) + ";\n";
+        }
+    }
+    if (keys) {
+        for (const char* name : {"KEY_SHIFT", "KEY_CTRL", "KEY_ALT", "KEY_VK_MASK"}) {
+            claim(name, std::string("the key flag ") + name, file.settings.front().line);
+        }
+    }
+    out += "\n// Setting ids (anvil_sys::AnvilSetting): the declaration order in settings.toml.\n"
+           "// Read them with host.setting_bool/int/float/string(self, <NAME>).\n";
+    for (const auto& s : file.settings) {
+        out += "/// " + settings_text(describe(s), false) + "\n";
+        out += "pub const " + upper(s.name) + ": ::anvil_sys::AnvilSetting = " + std::to_string(s.id) + ";\n";
+    }
+    if (!options.empty()) out += "\n// Options of enum settings: the index setting_int reads.\n" + options;
+    if (keys) {
+        out += "\n// Key bindings: setting_int reads the virtual-key code with the modifiers above it.\n"
+               "pub const KEY_SHIFT: i64 = 0x100;\npub const KEY_CTRL: i64 = 0x200;\npub const KEY_ALT: i64 = 0x400;\n"
+               "pub const KEY_VK_MASK: i64 = 0xFF;\n";
+    }
+    return out;
+}
+
 }  // namespace
 
-GeneratedHeaders generate_settings_headers(const SettingsFile& file, const std::string& source, bool c, bool cpp) {
+GeneratedHeaders generate_settings_headers(const SettingsFile& file, const std::string& source, bool c, bool cpp,
+                                           bool rust) {
     GeneratedHeaders out;
     try {
         if (c) out.c = generate_settings_c(file, source);
         if (cpp) out.cpp = generate_settings_cpp(file, source);
+        if (rust) out.rust = generate_settings_rust(file, source);
     } catch (const Fail& f) {
         out = {};
         out.error = "settings.toml: " + f.message;
@@ -406,11 +727,12 @@ GeneratedHeaders generate_settings_headers(const SettingsFile& file, const std::
     return out;
 }
 
-GeneratedHeaders generate_headers(const SymbolFile& file, const std::string& source, bool c, bool cpp) {
+GeneratedHeaders generate_headers(const SymbolFile& file, const std::string& source, bool c, bool cpp, bool rust) {
     GeneratedHeaders out;
     try {
         if (c) out.c = generate_c(file, source);
         if (cpp) out.cpp = generate_cpp(file, source);
+        if (rust) out.rust = generate_rust(file, source, out.warnings);
     } catch (const Fail& f) {
         out = {};
         out.error = "symbols.toml: " + f.message;

@@ -1,0 +1,54 @@
+# Signatures in every shape `anvil gen --lang rust` reads.
+build = "eu4-1.37.5-steam-win64"
+
+[symbol.scalars]
+export = "scalars"
+signature = "double (int a, unsigned b, long c, unsigned long d, long long e, unsigned long long f, short g, unsigned short h, signed char i, unsigned char j, char k, float l, bool m)"
+
+[symbol.fixed_width]
+export = "fixed_width"
+signature = "uint64_t (int8_t a, int16_t b, int32_t c, int64_t d, uint8_t e, uint16_t f, uint32_t g, uint64_t h, size_t i, intptr_t j, uintptr_t k, unsigned long int l, long unsigned m)"
+
+[symbol.pointers]
+export = "pointers"
+signature = "const char* (const char* text, void* user, void** out, const char* const* names, uint8_t* bytes, Root* root, const Root* croot, struct Root* tagged, unsigned char *const fixed)"
+
+[symbol.no_args]
+export = "no_args"
+signature = "void ()"
+
+[symbol.void_args]
+export = "void_args"
+signature = "bool (void)"
+
+[symbol.unnamed]
+export = "unnamed"
+signature = "int (int, const char*, double)"
+
+[symbol.keywords]
+export = "keywords"
+signature = "int (int type, int fn, int match)"
+
+[symbol.unknown_value]
+export = "unknown_value"
+signature = "Root (Root r, int n)"
+
+[symbol.callback]
+export = "callback"
+signature = "void (void (*cb)(int), int n, int table[4])"
+
+[symbol.variadic]
+export = "variadic"
+signature = "int (const char* format, ...)"
+
+[symbol.root_and_date]
+rva = 0x14321FC
+bytes = "48 8B 05 75 DC F0 00 8B 98 D0 1D 00 00"
+memory = "code"
+values.root        = { at = 3, rip_relative = 7, type = "Root" }
+values.date_offset = { at = 9, size = 4 }
+
+[symbol.tick_slot]
+rva = 0x1D5A8E8
+memory = "read"
+points_to = 0x10D2E80
