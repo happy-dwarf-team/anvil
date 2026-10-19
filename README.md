@@ -51,6 +51,11 @@ ctest --test-dir build -C Release --output-on-failure
 cmake --install build --config Release --component anvil --prefix dist   # version.dll + anvil/ layout
 ```
 
+The build also produces `anvil.exe`, the command-line tool for plugin authors.
+It shares the `anvil_core` library (manifests, versions, the resolver, the game
+build identity) with `version.dll`; its `gen` and `check` commands are not
+implemented yet.
+
 Contributions, the commit convention and the release process: see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 

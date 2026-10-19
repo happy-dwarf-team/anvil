@@ -31,33 +31,45 @@ FetchContent_Declare(safetyhook
     GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(tomlplusplus safetyhook)
 
-# Core: everything except DllMain and the proxy exports, so tests can link it.
+# anvil_core: the rules shared by version.dll and anvil.exe (manifests, SemVer,
+# the resolver, the game build identity, the log). Nothing here may depend on
+# running inside the game process, so the CLI applies the same rules as the loader.
 add_library(anvil_core STATIC
-    src/core/expectations.cpp
     src/core/game_build.cpp
     src/core/log.cpp
     src/core/manifest.cpp
-    src/core/patching.cpp
     src/core/resolver.cpp
-    src/core/runtime.cpp
-    src/core/semver.cpp
-    src/core/seh_guard.cpp
-    src/core/services.cpp)
+    src/core/semver.cpp)
 target_include_directories(anvil_core PUBLIC include src)
-target_link_libraries(anvil_core PUBLIC tomlplusplus::tomlplusplus safetyhook::safetyhook bcrypt)
+target_link_libraries(anvil_core PUBLIC tomlplusplus::tomlplusplus bcrypt)
 target_compile_definitions(anvil_core PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE
     ANVIL_VERSION="${PROJECT_VERSION}")
 if(MSVC)
     target_compile_options(anvil_core PUBLIC /W4 /utf-8 /permissive- /EHsc)
 endif()
 
+# anvil_loader: the parts that act on the running game (startup, the patch
+# registry, [[expect]] checks against live memory, services, SEH guards).
+# Linked into version.dll and the tests, never into anvil.exe.
+add_library(anvil_loader STATIC
+    src/core/expectations.cpp
+    src/core/patching.cpp
+    src/core/runtime.cpp
+    src/core/seh_guard.cpp
+    src/core/services.cpp)
+target_link_libraries(anvil_loader PUBLIC anvil_core safetyhook::safetyhook)
+
 # version.dll = proxy + loader
 # File version shown in the DLL's Properties, from the same version.txt.
 configure_file(src/proxy/version.rc.in ${CMAKE_CURRENT_BINARY_DIR}/anvil_version.rc @ONLY)
-add_library(anvil SHARED src/anvil_main.cpp src/proxy/version_proxy.cpp src/proxy/version.def
+add_library(version_dll SHARED src/anvil_main.cpp src/proxy/version_proxy.cpp src/proxy/version.def
     ${CMAKE_CURRENT_BINARY_DIR}/anvil_version.rc)
+target_link_libraries(version_dll PRIVATE anvil_loader)
+set_target_properties(version_dll PROPERTIES OUTPUT_NAME version)
+
+# anvil.exe = the command-line tool for plugin authors (design §16).
+add_executable(anvil src/cli/anvil_cli.cpp)
 target_link_libraries(anvil PRIVATE anvil_core)
-set_target_properties(anvil PROPERTIES OUTPUT_NAME version)
 
 if(ANVIL_BUILD_EXAMPLES)
     add_library(hello_plugin SHARED examples/hello/hello.c)
@@ -68,13 +80,24 @@ endif()
 if(ANVIL_BUILD_TESTS)
     enable_testing()
     add_executable(anvil_tests tests/test_main.cpp)
-    target_link_libraries(anvil_tests PRIVATE anvil_core)
-    add_dependencies(anvil_tests anvil)
-    add_test(NAME anvil_tests COMMAND anvil_tests $<TARGET_FILE:anvil>)
+    target_link_libraries(anvil_tests PRIVATE anvil_loader)
+    add_dependencies(anvil_tests version_dll)
+    add_test(NAME anvil_tests COMMAND anvil_tests $<TARGET_FILE:version_dll>)
+
+    add_test(NAME anvil_cli_version COMMAND anvil --version)
+    set_tests_properties(anvil_cli_version PROPERTIES PASS_REGULAR_EXPRESSION "^anvil ${PROJECT_VERSION}[\r\n]*$")
+    add_test(NAME anvil_cli_help COMMAND anvil --help)
+    set_tests_properties(anvil_cli_help PROPERTIES PASS_REGULAR_EXPRESSION "Usage: anvil <command>")
+    # gen and check are not implemented yet and, like unknown commands, exit non-zero.
+    add_test(NAME anvil_cli_gen COMMAND anvil gen)
+    add_test(NAME anvil_cli_check COMMAND anvil check)
+    add_test(NAME anvil_cli_unknown COMMAND anvil frobnicate)
+    set_tests_properties(anvil_cli_gen anvil_cli_check anvil_cli_unknown PROPERTIES WILL_FAIL TRUE)
 endif()
 
 # Release layout (cmake --install ... --component anvil): <prefix>/version.dll, <prefix>/anvil/...
-install(TARGETS anvil RUNTIME DESTINATION . COMPONENT anvil)
+# anvil.exe is not part of the package yet; it ships with the SDK archive (design §16).
+install(TARGETS version_dll RUNTIME DESTINATION . COMPONENT anvil)
 install(FILES dist/anvil.toml DESTINATION anvil COMPONENT anvil)
 install(FILES dist/plugins-README.txt DESTINATION anvil/plugins RENAME README.txt COMPONENT anvil)
 install(FILES LICENSE README.md DESTINATION anvil/docs COMPONENT anvil)
