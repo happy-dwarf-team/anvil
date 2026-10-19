@@ -17,6 +17,9 @@ public:
 
     void open(const std::filesystem::path& file);
     void write(AnvilLogLevel level, std::string_view source, std::string_view message);
+    // The same without waiting: false when another thread holds the log (at
+    // process exit that thread may have been killed holding it).
+    bool try_write(AnvilLogLevel level, std::string_view source, std::string_view message);
     void set_min_level(AnvilLogLevel level);
     bool is_open() const;
 

@@ -18,6 +18,7 @@ struct AnvilSettings {
     bool enabled = true;
     std::vector<std::string> disabled_plugins;
     AnvilLogLevel log_level = ANVIL_LOG_INFO;
+    bool profile = false;  // count calls per change, reported at exit (design §17)
     std::string error;
     uint32_t line = 0;
 };

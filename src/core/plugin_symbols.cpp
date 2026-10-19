@@ -42,6 +42,7 @@ ChangeTarget target_of(const PluginSymbol& symbol) {
     t.expected = symbol.declaration.bytes.data();
     t.mask = symbol.declaration.mask.empty() ? nullptr : symbol.declaration.mask.data();
     t.expected_size = symbol.declaration.bytes.size();
+    t.symbol = symbol.declaration.name.c_str();
     return t;
 }
 

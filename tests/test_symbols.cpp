@@ -604,6 +604,7 @@ memory = "write"
         CHECK(mid_hook(changes, owner, syms, 1, callback, nullptr) == ChangeStatus::Ok);  // outside the block
         CHECK(changes.describe(owner) ==
               (std::vector<std::string>{"block replacement rva 0x1010 (13 B)", "mid hook rva 0x1000"}));
+        CHECK(target_of(*syms.get(0)).symbol == std::string("block"));  // named in the call counters
         CHECK(changes.rollback(owner) == 2 && mapped.base[0x1010] == 0x48 && mapped.base[0x1000] == 0x48);
     });
 

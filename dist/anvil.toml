@@ -8,3 +8,7 @@ disabled_plugins = []
 
 # "debug" | "info" | "warning" | "error"
 log_level = "info"
+
+# true = count the calls of every hook, call redirect and block replacement and
+# write them to anvil.log when the game exits. Costs a little per call.
+profile = false

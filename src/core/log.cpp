@@ -79,11 +79,10 @@ void Log::open(const std::filesystem::path& file) {
     s.pending.shrink_to_fit();
 }
 
-void Log::write(AnvilLogLevel level, std::string_view source, std::string_view message) {
+namespace {
+
+std::string format_line(AnvilLogLevel level, std::string_view source, std::string_view message) {
     LogState& s = state();
-    if (level < s.minimum) {
-        return;
-    }
     LARGE_INTEGER now{};
     QueryPerformanceCounter(&now);
     const double ms = static_cast<double>(now.QuadPart - s.start.QuadPart) * 1000.0 /
@@ -96,7 +95,11 @@ void Log::write(AnvilLogLevel level, std::string_view source, std::string_view m
     line += "] ";
     line.append(message.data(), message.size());
     line += "\r\n";
-    std::lock_guard lock(s.mutex);
+    return line;
+}
+
+// Under the log's lock.
+void append_line(LogState& s, std::string line) {
     if (s.file == INVALID_HANDLE_VALUE) {
         if (s.pending.size() < 4096) {
             s.pending.push_back(std::move(line));
@@ -104,6 +107,32 @@ void Log::write(AnvilLogLevel level, std::string_view source, std::string_view m
         return;
     }
     write_raw(s.file, line);
+}
+
+}  // namespace
+
+void Log::write(AnvilLogLevel level, std::string_view source, std::string_view message) {
+    LogState& s = state();
+    if (level < s.minimum) {
+        return;
+    }
+    std::string line = format_line(level, source, message);
+    std::lock_guard lock(s.mutex);
+    append_line(s, std::move(line));
+}
+
+bool Log::try_write(AnvilLogLevel level, std::string_view source, std::string_view message) {
+    LogState& s = state();
+    if (level < s.minimum) {
+        return true;
+    }
+    std::string line = format_line(level, source, message);
+    std::unique_lock lock(s.mutex, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        return false;
+    }
+    append_line(s, std::move(line));
+    return true;
 }
 
 void Log::set_min_level(AnvilLogLevel level) {
