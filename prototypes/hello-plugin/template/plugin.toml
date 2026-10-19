@@ -1,0 +1,10 @@
+id = "hello"
+name = "Hello"
+version = "0.1.0"
+authors = ["Your Name"]
+description = "Logs when the game asks for its speed object and when it returns to the menu."
+api = 2
+entry = "hello.dll"
+symbols = "symbols.toml"   # game builds come from here
+phase = "main"
+affects_gameplay = false
