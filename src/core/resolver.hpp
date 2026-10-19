@@ -15,7 +15,7 @@ struct ResolveInput {
     const char* game_build = nullptr;  // nullptr = unknown build
     std::vector<std::string> disabled;  // ids disabled in anvil.toml
     // Optional check after the API and Anvil version checks (the plugin's
-    // symbols, #40); returns why the plugin must be skipped, empty = keep it.
+    // symbols.toml); returns why the plugin must be skipped, empty = keep it.
     std::function<std::string(const Manifest&)> verify;
 };
 

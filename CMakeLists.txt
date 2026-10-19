@@ -52,7 +52,7 @@ if(MSVC)
 endif()
 
 # anvil_loader: the parts that act on the running game (startup, the patch
-# registry, services, SEH guards).
+# registry, symbols.toml checks against the running image, services, SEH guards).
 # Linked into version.dll and the tests, never into anvil.exe.
 add_library(anvil_loader STATIC
     src/core/patching.cpp

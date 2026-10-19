@@ -7,6 +7,7 @@
 #include "resolver.hpp"
 #include "seh_guard.hpp"
 #include "services.hpp"
+#include "symbol_check.hpp"
 
 #include <anvil/anvil_plugin.h>
 #include <toml++/toml.hpp>
@@ -371,10 +372,16 @@ void startup_impl(const std::filesystem::path& game_dir) {
     input.host_version = Version::parse(kAnvilVersion);
     input.game_build = game.build_id;
     input.disabled = settings.disabled_plugins;
-    // symbols.toml is parsed and verified from #40 on; until then a plugin that
-    // declares game addresses is not loaded unverified.
-    input.verify = [](const Manifest& m) {
-        return m.symbols.empty() ? std::string() : std::string("symbols.toml is not verified by this Anvil build yet");
+    // symbols.toml: its build and every symbol are checked here, before any
+    // plugin is loaded. The image is read through the registry, so bytes a
+    // plugin has already changed read in their original form (design §7).
+    input.verify = [&](const Manifest& m) {
+        if (m.symbols.empty()) return std::string();
+        SymbolVerification verified;
+        std::string reason = check_plugin_symbols(m.folder / m.symbols, game.build_id, *g_runtime->patches,
+                                                  identity->image_base, &verified);
+        if (reason.empty()) log_info(m.id + ": " + std::to_string(verified.symbols.size()) + " symbol(s) verified");
+        return reason;
     };
     std::error_code ec;
     const auto plugins_dir = g_runtime->anvil_dir / "plugins";
