@@ -89,6 +89,26 @@ AnvilResult PatchRegistry::patch_bytes(const std::string& owner, uintptr_t addre
     return ANVIL_OK;
 }
 
+bool PatchRegistry::read_original_locked(uintptr_t address, void* out, size_t size) const {
+    if (!in_image(address, size) || !readable(address, size)) return false;
+    auto* actual = static_cast<uint8_t*>(out);
+    std::memcpy(actual, reinterpret_cast<const void*>(address), size);
+    // Show the game's own bytes: undo every owner's patches in the copy.
+    for (const auto& e : entries_) {
+        const auto& original = e->kind == Entry::Kind::Hook ? e->hook->original_bytes() : e->original;
+        const uintptr_t begin = std::max(address, e->address);
+        const uintptr_t end = std::min(address + size, e->address + original.size());
+        for (uintptr_t a = begin; a < end; ++a) actual[a - address] = original[a - e->address];
+    }
+    return true;
+}
+
+bool PatchRegistry::read_original(uintptr_t address, void* out, size_t size) const {
+    if (size == 0) return in_image(address, 0);
+    std::lock_guard lock(mutex_);
+    return read_original_locked(address, out, size);
+}
+
 AnvilResult PatchRegistry::expect_bytes(const std::string& owner, uintptr_t address, const void* expected,
                                         const void* mask, size_t size, std::string* mismatch) const {
     if (expected == nullptr || size == 0 || size > ANVIL_MAX_EXPECT_BYTES) return ANVIL_ERROR_INVALID_ARGUMENT;
@@ -97,15 +117,9 @@ AnvilResult PatchRegistry::expect_bytes(const std::string& owner, uintptr_t addr
     for (const auto& e : entries_) {
         if (e->owner == owner) return ANVIL_ERROR_WRONG_PHASE;  // dependencies are verified before patching
     }
-    const auto* live = reinterpret_cast<const uint8_t*>(address);
-    std::vector<uint8_t> actual(live, live + size);
-    // Compare with the game's own bytes: undo other owners' patches in the copy.
-    for (const auto& e : entries_) {
-        const auto& original = e->kind == Entry::Kind::Hook ? e->hook->original_bytes() : e->original;
-        const uintptr_t begin = std::max(address, e->address);
-        const uintptr_t end = std::min(address + size, e->address + original.size());
-        for (uintptr_t a = begin; a < end; ++a) actual[a - address] = original[a - e->address];
-    }
+    // Compare with the game's own bytes (other owners' patches undone).
+    std::vector<uint8_t> actual(size);
+    read_original_locked(address, actual.data(), size);
     const auto* want = static_cast<const uint8_t*>(expected);
     const auto* bits = static_cast<const uint8_t*>(mask);
     for (size_t i = 0; i < size; ++i) {
