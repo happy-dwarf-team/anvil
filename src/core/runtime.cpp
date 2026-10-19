@@ -1,6 +1,5 @@
 #include "runtime.hpp"
 
-#include "expectations.hpp"
 #include "game_build.hpp"
 #include "log.hpp"
 #include "manifest.hpp"
@@ -324,7 +323,7 @@ void startup_impl(const std::filesystem::path& game_dir) {
 
     if (!std::filesystem::is_directory(g_runtime->anvil_dir)) return;  // not installed: pure proxy, no files
     Log::instance().open(g_runtime->anvil_dir / "anvil.log");
-    log_info(std::string("Anvil ") + kAnvilVersion + " (plugin API " + std::to_string(ANVIL_API_VERSION) + ")");
+    log_info(std::string("Anvil ") + kAnvilVersion + " (plugin API " + std::to_string(kManifestApi) + ")");
 
     wchar_t disable[8] = {};
     if (GetEnvironmentVariableW(L"ANVIL_DISABLE", disable, 8) == 1 && disable[0] == L'1') {
@@ -368,18 +367,14 @@ void startup_impl(const std::filesystem::path& game_dir) {
 
     // Discovery: anvil/plugins/<folder>/plugin.toml
     ResolveInput input;
-    input.host_api = ANVIL_API_VERSION;
+    input.host_api = kManifestApi;
     input.host_version = Version::parse(kAnvilVersion);
     input.game_build = game.build_id;
     input.disabled = settings.disabled_plugins;
-    // [[expect]]: compared now, before any plugin is loaded or has patched anything.
-    input.verify = [&](const Manifest& m) {
-        size_t checked = 0;
-        std::string reason = check_expectations(m, game.build_id, *g_runtime->patches, identity->image_base, checked);
-        if (reason.empty() && checked > 0) {
-            log_info(m.id + ": " + std::to_string(checked) + " expected byte range(s) match");
-        }
-        return reason;
+    // symbols.toml is parsed and verified from #40 on; until then a plugin that
+    // declares game addresses is not loaded unverified.
+    input.verify = [](const Manifest& m) {
+        return m.symbols.empty() ? std::string() : std::string("symbols.toml is not verified by this Anvil build yet");
     };
     std::error_code ec;
     const auto plugins_dir = g_runtime->anvil_dir / "plugins";
@@ -398,7 +393,6 @@ void startup_impl(const std::filesystem::path& game_dir) {
             g_runtime->skipped.push_back({parsed.manifest->id, "entry " + parsed.manifest->entry + " not found"});
             continue;
         }
-        for (const auto& n : parsed.manifest->notes) log_warning(parsed.manifest->id + ": " + n);
         input.manifests.push_back(*parsed.manifest);
     }
     log_info("discovered " + std::to_string(folders.size()) + " plugin folder(s) in " + narrow(plugins_dir.wstring()));

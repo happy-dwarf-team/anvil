@@ -46,7 +46,9 @@ The plugin API is a separate contract from the Anvil version:
 
 - Within plugin API 1, host functions and fields are only **appended** (plugins
   detect them with `ANVIL_HOST_HAS`) and manifest keys only added. That is a
-  `feat`, and plugins that need it declare `anvil = ">=x.y.z"`.
+  `feat`, and plugins that need it declare `anvil = ">=x.y.z"`. Unknown
+  manifest keys are errors, so an older Anvil skips a plugin that uses a newer
+  key.
 - Removing or changing anything a plugin can see increments
   `ANVIL_API_VERSION` and is a breaking change (`feat(api)!`).
 
