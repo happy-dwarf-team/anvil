@@ -1,5 +1,8 @@
 #include "services.hpp"
 
+#include <algorithm>
+#include <iterator>
+
 namespace anvil {
 
 bool is_valid_service_name(const std::string& owner, const std::string& name) {
@@ -54,6 +57,20 @@ size_t ServiceBus::publish(const std::string& event, const void* payload) {
         std::lock_guard lock(mutex_);
         const auto it = subscribers_.find(event);
         if (it != subscribers_.end()) copy = it->second;
+    }
+    for (const auto& s : copy) s.callback(event.c_str(), payload, s.context);
+    return copy.size();
+}
+
+size_t ServiceBus::publish_to(const std::string& owner, const std::string& event, const void* payload) {
+    std::vector<Subscriber> copy;
+    {
+        std::lock_guard lock(mutex_);
+        const auto it = subscribers_.find(event);
+        if (it != subscribers_.end()) {
+            std::copy_if(it->second.begin(), it->second.end(), std::back_inserter(copy),
+                         [&](const Subscriber& s) { return s.owner == owner; });
+        }
     }
     for (const auto& s : copy) s.callback(event.c_str(), payload, s.context);
     return copy.size();

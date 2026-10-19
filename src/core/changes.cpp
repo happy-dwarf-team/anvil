@@ -74,8 +74,9 @@ const char* change_kind_name(ChangeKind kind) {
 namespace {
 
 // A link's life. Only Active links are part of a chain or keep a byte patch
-// written; suspension (#45) adds a state that is skipped the same way.
-enum class LinkState { Staged, Active, Removed };
+// written. Staged and Suspended links are skipped, but they keep their place in
+// the chain and their bytes reserved; Removed ones have left the site.
+enum class LinkState { Staged, Active, Suspended, Removed };
 
 // Kinds whose links pass on to the next one: through a `next` stub, or (a
 // pointer swap) through the plugin's `previous` cell.
@@ -335,6 +336,7 @@ struct ChangeRegistry::Site {
 struct ChangeRegistry::Owner {
     std::string name;
     bool group = false;
+    bool suspended = false;  // its enabled changes are Suspended, new ones too
     std::vector<ChangeId> staged;  // in request order
 };
 
@@ -724,7 +726,7 @@ ChangeStatus ChangeRegistry::enable(std::vector<ChangeId> ids) {
     for (ChangeId id : ids) {
         Change& c = *changes_[id - 1];
         if (c.state != LinkState::Staged) continue;
-        c.state = LinkState::Active;
+        c.state = owners_[c.owner].suspended ? LinkState::Suspended : LinkState::Active;
         if (std::find(sites.begin(), sites.end(), c.site) == sites.end()) sites.push_back(c.site);
     }
     for (Site* site : sites) {
@@ -1176,7 +1178,7 @@ size_t ChangeRegistry::rollback(OwnerId owner) {
     for (auto it = changes_.rbegin(); it != changes_.rend(); ++it) {
         Change& c = **it;
         if (c.owner != owner || c.state == LinkState::Removed) continue;
-        undone += c.state == LinkState::Active ? 1 : 0;
+        undone += c.state == LinkState::Active || c.state == LinkState::Suspended ? 1 : 0;
         c.state = LinkState::Removed;
         std::erase(c.site->links, &c);
         relink(*c.site);
@@ -1184,6 +1186,59 @@ size_t ChangeRegistry::rollback(OwnerId owner) {
     owners_[owner].group = false;
     owners_[owner].staged.clear();
     return undone;
+}
+
+// Moves the owner's enabled links between Active and Suspended, one site at a
+// time. A site whose memory cannot be written gets its links back.
+ChangeStatus ChangeRegistry::move_links(OwnerId owner, bool suspend) {
+    const LinkState from = suspend ? LinkState::Active : LinkState::Suspended;
+    const LinkState to = suspend ? LinkState::Suspended : LinkState::Active;
+    std::vector<Site*> sites;
+    for (const auto& c : changes_) {
+        if (c->owner != owner || c->state != from) continue;
+        if (std::find(sites.begin(), sites.end(), c->site) == sites.end()) sites.push_back(c->site);
+    }
+    ChangeStatus status = ChangeStatus::Ok;
+    for (Site* site : sites) {
+        std::vector<Change*> moved;
+        for (Change* c : site->links) {
+            if (c->owner != owner || c->state != from) continue;
+            c->state = to;
+            moved.push_back(c);
+        }
+        if (relink(*site)) continue;
+        for (Change* c : moved) c->state = from;
+        relink(*site);
+        status = refuse(owner, ChangeStatus::Internal,
+                        std::string(change_kind_name(site->kind)) + " " + where(site->address) +
+                            ": cannot write the game's memory; not " + (suspend ? "suspended" : "resumed") + " there");
+    }
+    return status;
+}
+
+ChangeStatus ChangeRegistry::suspend(OwnerId owner, bool* changed) {
+    std::lock_guard lock(mutex_);
+    if (changed != nullptr) *changed = false;
+    if (check_owner(owner) != ChangeStatus::Ok) return ChangeStatus::InvalidArgument;
+    if (owners_[owner].suspended) return ChangeStatus::Ok;
+    owners_[owner].suspended = true;
+    if (changed != nullptr) *changed = true;
+    return move_links(owner, true);
+}
+
+ChangeStatus ChangeRegistry::resume(OwnerId owner, bool* changed) {
+    std::lock_guard lock(mutex_);
+    if (changed != nullptr) *changed = false;
+    if (check_owner(owner) != ChangeStatus::Ok) return ChangeStatus::InvalidArgument;
+    if (!owners_[owner].suspended) return ChangeStatus::Ok;
+    owners_[owner].suspended = false;
+    if (changed != nullptr) *changed = true;
+    return move_links(owner, false);
+}
+
+bool ChangeRegistry::suspended(OwnerId owner) const {
+    std::lock_guard lock(mutex_);
+    return owner < owners_.size() && owners_[owner].suspended;
 }
 
 bool ChangeRegistry::read_original_locked(uintptr_t address, void* out, size_t size) const {
@@ -1294,6 +1349,13 @@ size_t ChangeRegistry::count(OwnerId owner) const {
     std::lock_guard lock(mutex_);
     size_t n = 0;
     for (const auto& c : changes_) n += c->owner == owner && c->state == LinkState::Active ? 1 : 0;
+    return n;
+}
+
+size_t ChangeRegistry::suspended_count(OwnerId owner) const {
+    std::lock_guard lock(mutex_);
+    size_t n = 0;
+    for (const auto& c : changes_) n += c->owner == owner && c->state == LinkState::Suspended ? 1 : 0;
     return n;
 }
 

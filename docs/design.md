@@ -231,6 +231,11 @@ Every call that touches `eu4.exe` takes a declared symbol, never a raw RVA. Raw 
 - Later changes are atomic one by one or as an explicit group.
 - Every change returns a handle and can be removed. A failed load rolls back everything the plugin had.
 - The core can **suspend and resume all changes of a plugin**: it bypasses its links, reverts its patches and restores its pointers (§13).
+  - A suspended link keeps its place in its chain. Its own `next` (or `previous`) still leads to the rest, so a thread inside it passes on.
+  - A byte patch shared with a plugin that is not suspended stays written.
+  - Suspended changes keep their bytes reserved: a suspended block replacement still owns its block. Changes the plugin requests while suspended are enabled suspended.
+  - Suspending and resuming are idempotent. The plugin alone gets `anvil.suspended` after its changes are out of the game and `anvil.resumed` after they are back, once per change of state, so it can stop and restart its threads.
+  - Removing a suspended change or rolling the plugin back works as for any other change.
 - All kinds are allowed in every phase; SafetyHook's page trapping covers threads.
 
 ### 8.5 `AnvilCpuContext`
