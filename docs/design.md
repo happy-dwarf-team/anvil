@@ -1,305 +1,413 @@
-# Anvil — design
+# Anvil: design
 
-Status: draft 2 (2026-10-15), stage 1 implemented. Decisions marked **D** are
-agreed; **Q** are open.
+Status: **draft 3 (plugin API 2), not accepted.** It collects the decisions of [Map: Anvil 2 specification](https://github.com/happy-dwarf-team/anvil/issues/12). Each section links the ticket that holds the reasoning. Items still open are marked **Q** and listed in §21. Stage 1 (Anvil 0.2, API 1) is described by draft 2 in the git history.
+
+Words in **bold** at first use are defined in [GLOSSARY.md](../GLOSSARY.md).
 
 ## 1. Goals
 
-- Load native plugins into EU4 (Windows, 64-bit, Steam) **without modifying
-  `eu4.exe` or any game file**.
-- Removing Anvil (or all plugins) returns the game to vanilla behaviour without
-  restoring files.
-- Runtime cost of loading a plugin ≈ cost of patching the same change into the
-  executable: plugins run in-process, as early as the game's own code.
-- Safe failure: an unknown game build, a broken manifest or a crashing plugin
-  initializer must never prevent the game from starting.
-- Clear status for the player: a log of what was loaded and what was skipped.
-- Distributable to the community via GitHub Releases (later also Steam
-  Workshop for plugins).
+For players:
+- Native plugins load into EU4 1.37.5 (Windows, 64-bit) **without modifying `eu4.exe` or any game file**. Removing Anvil returns the game to vanilla.
+- An unknown game build, a broken plugin or a crash never prevents the game from starting, and the player is told what happened and why.
+- Plugins that change the simulation never act in ironman or multiplayer unless both the author and the player allow it.
 
-Non-goals (for now): Linux/macOS builds of EU4, 32-bit, other Paradox games,
-an in-game overlay (stage 4), scripting languages inside plugins.
+For plugin authors:
+- A modder who already writes hooks ports one hook in an evening. Every game address is declared once, verified before load and typed in code. The author writes no register-save assembly, no byte profiles and no own proxy DLL.
+- Mistakes surface early: a signature mismatch fails to compile, and `anvil check` finds byte, memory and conflict problems without starting the game.
 
-## 2. Injection mechanism — proxy `version.dll` (D)
+For both:
+- Anvil's own cost stays within published budgets (§17), and everything Anvil does is visible in its log.
 
-`eu4.exe` 1.37.5 statically imports `VERSION.dll` and `WINMM.dll`; neither is
-in `KnownDLLs`, so the Windows loader searches the application directory
-first. Anvil ships as `version.dll` next to `eu4.exe`:
+Non-goals: Linux/macOS, 32-bit, other Paradox games, game builds other than 1.37.5, loading EU4DLL-style `plugins/*.dll` (EU4DLL is treated as legacy), a scripting layer for modders without C/C++.
 
-- It loads the real `%SystemRoot%\System32\version.dll` (explicit full path)
-  and forwards all 17 exports (`GetFileVersionInfoA/W`, `…ExA/ExW`,
-  `GetFileVersionInfoSizeA/W/ExA/ExW`, `VerFindFileA/W`, `VerInstallFileA/W`,
-  `VerLanguageNameA/W`, `VerQueryValueA/W`, `GetFileVersionInfoByHandle`).
-- The real DLL is loaded lazily, by full path, on the first forwarded call
-  (never from `DllMain`). A bare `"version.dll"` would resolve to the proxy
-  itself, which is already loaded.
-- **Entry-point hook (D, changed from draft 1):** `DllMain` only checks that the
-  process is `eu4.exe` and overwrites the first 14 bytes of the executable's
-  entry point with an absolute jump to Anvil. When the main thread reaches the
-  entry point, every DLL is initialized and the loader lock is released, but
-  the game's C runtime has not started. Anvil restores the 14 bytes first (so
-  plugins and `[[expect]]` checks see the unmodified image), loads `early`
-  plugins there and continues into the game. Plugins can therefore
-  load DLLs and start threads (forbidden in `DllMain`) and still run before
-  the game allocates its first heap block. Any other process, or any failure,
-  leaves the DLL a pure proxy. `ANVIL_ANY_EXE=1` allows other executable
-  names (lab/testing only).
-- `version.dll` was chosen over `winmm.dll` because its export surface is tiny
-  and stable.
+## 2. Injection: proxy `version.dll` (unchanged)
 
-Alternatives considered: adding an import to `eu4.exe` (modifies the game;
-overwritten by Steam), a launcher that injects into a suspended process
-(changes how the game is started through Steam/Paradox launcher), AppInit_DLLs
-(system-wide, disabled by Secure Boot).
+`eu4.exe` imports `VERSION.dll`, which is not in `KnownDLLs`. Anvil ships as `version.dll` next to `eu4.exe`:
+- it forwards the 17 exports to `%SystemRoot%\System32\version.dll`;
+- `DllMain` checks that the process is `eu4.exe` and overwrites the executable's entry point with a jump to Anvil;
+- at the entry point Anvil restores those bytes, runs the `early` phase and continues into the game.
 
-## 3. Folder layout (D)
+This is verified for direct starts and through the Paradox launcher (EU4 engine lab, `docs/anvil-real-folder.md`).
+
+## 3. Folder layout
 
 ```
 <EU4>/eu4.exe
-<EU4>/version.dll                 Anvil (proxy + loader)
+<EU4>/version.dll                      Anvil (proxy + core)
+<EU4>/AnvilManager.exe                 player tool, also the installer (§15)
 <EU4>/anvil/
-    anvil.toml                    loader settings (optional; defaults apply)
-    anvil.log                     this start; previous start → anvil.prev.log
-    plugins/<plugin-id>/
-        plugin.toml               manifest
-        <entry>.dll               plugin binary (+ any read-only files)
-    data/<plugin-id>/             writable per-plugin data (caches, learned lists, config)
-    trust.toml                    stage 3: approvals of Workshop plugin versions
+    anvil.toml                         enabled, disabled_plugins, profile, log_level, opt-ins (§13)
+    anvil.log, anvil.prev.log
+    trust.toml                         approvals of Workshop plugins (§14)
+    crashes/<time>.json|.txt           last 10 crash reports (§12)
+    plugins/<plugin-id>/               local plugins: trusted by placement
+        plugin.toml  symbols.toml  settings.toml  <entry>.dll  (+ read-only files)
+    data/<plugin-id>/                  writable per plugin; settings.toml holds the player's values
+    data/anvil/approved/<id>/<hash>/   the previously approved copy of a Workshop plugin
+<mod folder of an enabled mod>/anvil/<plugin-id>/   Workshop plugins (§14)
 ```
 
-Plugin folders are treated as read-only (a Workshop folder can be replaced by
-Steam at any time); everything a plugin writes goes to `data/<plugin-id>/`.
+## 4. Core and standard plugins
 
-## 4. Plugin manifest `plugin.toml` (D, fields may grow)
+Decided in [What belongs in the Anvil core and what in library plugins](https://github.com/happy-dwarf-team/anvil/issues/17).
+
+**Rule:** a feature belongs to the **core** only if it must work before any plugin loads or needs a view across all plugins at once.
+
+Core:
+- discovery, resolution and load order;
+- build identity (the core's only game knowledge);
+- symbol verification;
+- the registry of changes and the chains;
+- services and events;
+- the approval decision for Workshop plugins;
+- crash capture and attribution;
+- suspending gameplay plugins (§13);
+- plugin status (`anvil.status`) and the log.
+
+The core never shows a blocking dialog.
+
+**Standard plugins** are library plugins maintained by the project and released with Anvil. They load, fail and can be disabled or replaced like any other plugin; dependents of a missing one are skipped with the reason.
+- `anvil-game`: game readiness, a frame event, running work on the main thread, and a session event (ironman, multiplayer).
+- `anvil-overlay`: notifications, the panel and the settings UI (§15).
+
+Knowledge that only some plugins need (GUI tree, console, text) stays in those plugins and their services.
+
+## 5. A plugin package
+
+### 5.1 `plugin.toml` (manifest v2)
 
 ```toml
-id = "bellows"                    # [a-z0-9-]+, max 64, unique
-name = "Bellows"
-version = "0.1.0"                 # SemVer
-authors = ["Happy Dwarf Team"]
-description = "Faster game start-up."
-api = 1                           # Anvil plugin API major version
-anvil = ">=0.2.0"                 # optional: Anvil versions the plugin needs (SemVer range)
-entry = "bellows.dll"             # file name inside the plugin folder
-phase = "early"                   # "early" | "main"
-affects_gameplay = false          # true = may change simulation (multiplayer/ironman warning)
-load_after = []                   # ordering only, no dependency
-game_builds = ["eu4-1.37.5-steam-win64"]   # or ["*"] when no game addresses are used
+id = "hello"                        # [a-z0-9-]+, max 64, unique
+name = "Hello"
+version = "0.1.0"                   # SemVer
+authors = ["Your Name"]
+description = "..."
+api = 2
+anvil = ">=1.0.0"                   # optional SemVer range of Anvil
+entry = "hello.dll"
+phase = "main"                      # "early" | "main"
+symbols = "symbols.toml"            # optional; its `build` replaces game_builds
+settings = "settings.toml"          # optional
+affects_gameplay = false            # REQUIRED (§13)
+allow_ironman = false               # false | "opt-in"
+allow_multiplayer = false           # false | "opt-in"
+load_after = []
+issues = "https://github.com/you/hello/issues"   # optional; shown with crash reports
+repository = "https://github.com/you/hello"      # optional; shown when approving
 
-[[dependencies]]                  # zero or more
-id = "anvil-ui"
-version = ">=1.2.0, <2"           # SemVer range: comparators joined by ',', ^ ~ = > >= < <= *
-optional = false                  # optional: loaded first if present, never required
+[[dependencies]]
+id = "anvil-game"
+version = "^1"
+optional = false
 
-[[expect]]                        # zero or more: game bytes the plugin depends on
-build = "eu4-1.37.5-steam-win64"  # the build these RVAs belong to ("*" = same bytes in every build)
-rva = 0x210000                    # TOML integer; hex allowed
-bytes = "48 89 5C 24 08 ?? ?? 57" # hex pairs, whitespace ignored, "??" = any byte (e.g. relocated addresses)
-name = "CEU4App::ResetGame"       # optional, for the log
+[[conflicts]]                       # this plugin is skipped while a listed one is enabled
+id = "other-text-renderer"
+version = "<2"
 ```
 
-Parsing: toml++ v3.4.0 (header-only, MIT). Unknown keys are logged and ignored.
+Unknown keys are errors ([Offline anvil check CLI and plugin CI](https://github.com/happy-dwarf-team/anvil/issues/23)). `game_builds` and `[[expect]]` are gone: a plugin without `symbols` runs on every build; with `symbols` it runs only on that file's `build`.
 
-### Dependency bytes `[[expect]]` (D)
+### 5.2 `symbols.toml`
 
-Patch calls already verify the bytes they overwrite. A plugin usually also
-*relies* on game code it does not patch: functions it calls by RVA, vtables,
-globals, struct layouts read through them. `[[expect]]` declares those ranges.
+Decided in [One source of truth for game addresses](https://github.com/happy-dwarf-team/anvil/issues/18), extended by [Plugin authoring experience](https://github.com/happy-dwarf-team/anvil/issues/21) and [API 2 gaps from the paper port](https://github.com/happy-dwarf-team/anvil/issues/32).
 
-- Entries whose `build` is the running build (plus all `"*"` entries) are
-  compared during resolution, before any plugin DLL is loaded and before any
-  plugin has patched anything; with an unknown build only `"*"` entries apply.
-  A mismatch, or a range outside the image or not readable, skips the plugin
-  with the RVA and the first differing byte in the log, and skips everything
-  that depends on it.
-- `build` must be listed in `game_builds` (unless `game_builds` contains
-  `"*"`); `rva + size` must fit in 32 bits; one entry compares at most
-  `ANVIL_MAX_EXPECT_BYTES` (64 KiB) and must contain at least one non-wildcard
-  byte.
-- Dependencies only known at run time use the host call `expect_bytes` (§6)
-  with the same semantics and an arbitrary bit mask.
-- Rationale: the EU4 Menu Patch (YozoraTempest/EU4-Menu-Patch) refuses to
-  install unless every native function it calls still has its known bytes; a
-  file hash would reject harmless edits of unrelated code, and checking only
-  the patch sites would miss a changed callee.
+```toml
+build = "eu4-1.37.5-steam-win64"
 
-## 5. Game build identity (D)
+[symbol.speed_object]                         # a function
+rva = 0x8024D0
+bytes = "48 8B 81 18 04 00 00 C3"             # hex pairs, ?? = any byte
+memory = "code"                               # code | read | write
+signature = "void* (void* session)"           # typed symbol in C/C++/Rust
+note = "session vtable slot 0x100: returns the game-speed object"
 
-Plugins patch code at fixed addresses, so they are tied to exact builds.
+[symbol.person_name_block]                    # a block for replace_block (Unicode Patch's person_name_hook)
+rva = 0xA4B48C
+bytes = "48 8D 55 B8 48 83 7D D0 10 48 0F 43 55 B8 4C 8B 45 C8 48 8B CB E8 4A 7E 64 FF"
+memory = "code"
+# resume = "<symbol>"                         # optional; default: the end of the block (0xA4B4A6 here)
 
-- At start Anvil reads the PE header of the running image (TimeDateStamp,
-  SizeOfImage, CheckSum, entry point) and maps it to a build id from a table
-  compiled into Anvil (`eu4-1.37.5-steam-win64` → SHA-256 `9AD3EFE1…771A`).
-  The version resource of `eu4.exe` only says "1.0", so it is not used.
-- The decision is made from the header alone (no hashing on the critical
-  path). The full SHA-256 is checked afterwards on the main-phase thread and
-  cached in `anvil/data/anvil/build-cache.txt` (key: size + mtime). A mismatch
-  is logged; every patch is still verified against expected bytes, so a wrong
-  build fails safely.
-- Unknown build → plugins that list specific builds are skipped with a clear
-  log line ("game build unknown (EU4 updated?) not supported; plugin supports
-  …").
+[symbol.frontend_tick_slot]                   # a pointer slot
+rva = 0x1D5A8E8
+memory = "read"
+points_to = 0x10D2E80
 
-## 6. Plugin API (C ABI, header-only SDK) (D)
+[symbol.root_and_date]                        # values taken from verified bytes
+rva = 0x14321FC
+bytes = "48 8B 05 75 DC F0 00 8B 98 D0 1D 00 00"
+memory = "code"
+values.root        = { at = 3, rip_relative = 7, type = "Root" }   # -> sym::root, Data<Root> at 0x233FE78
+values.date_offset = { at = 9, size = 4 }                          # -> sym::root_and_date.date_offset = 0x1DD0
 
-The SDK is the single header `include/anvil/anvil_plugin.h` (API 1); plugin
-repositories vendor a copy. Compiler-independent C ABI. Summary:
+[symbol.physfs_get_write_dir]                 # by export name instead of RVA
+export = "PHYSFS_getWriteDir"
+signature = "const char* ()"
+```
 
-- `AnvilHost` (function table, `size` + `api_version` for compatibility):
-  `log`, `plugin_dir`, `data_dir`; patching — `patch_bytes`, `redirect_call`,
-  `hook_function`, `replace_import`, `alloc_near_image`; services —
-  `register_service`, `get_service`; events — `subscribe`, `publish`;
-  appended after API 1.0 — `expect_bytes` (check with `ANVIL_HOST_HAS`).
-  `game` points to `AnvilGameInfo` (build id or NULL, image base/size, PE
-  identity, `ready_signal_known`).
-- `expect_bytes(self, rva, expected, mask, size)` is a read-only dependency
-  check: `(actual & mask) == (expected & mask)`, mask NULL = every bit. Bytes
-  patched by other plugins are compared in their original form. Once the
-  calling plugin has patches of its own the call returns
-  `ANVIL_ERROR_WRONG_PHASE`: verify everything first, then patch, so that a
-  main-phase plugin never leaves the running game half-patched.
-- Plugins export `anvil_plugin_load(const AnvilHost*, AnvilPlugin*)`.
-- All patch addresses are RVAs inside `eu4.exe`. The host verifies expected
-  bytes / call target / import before writing, refuses overlaps with patches of
-  other plugins (registry; both ids are logged), records originals, and rolls
-  back all patches of a plugin whose load fails (error result or structured
-  exception, caught by an SEH guard). The DLL of a failed plugin stays mapped
-  (it may have started threads) but inactive.
-- Function hooks: SafetyHook v0.7.0 (BSL-1.0; fetches Zydis 4.1.0) inside
-  Anvil, hidden behind the C API so it can be replaced (D). Requires C++23 for
-  Anvil itself only. Call redirection and byte patches are Anvil's own code;
-  stubs come from an allocator of executable memory within ±2 GB of the image
-  (no reuse of `int3` padding inside `eu4.exe`).
-- Phases:
-  - `early`: called at the executable entry point on the main thread, outside
-    the loader lock, before the game's C runtime starts (see §2). DLL loading
-    and threads are allowed; no UI.
-  - `main`: called on an Anvil thread right after the early phase, concurrently
-    with the game start-up.
+- **Kinds:** a symbol is a function (`signature`), a pointer slot (`points_to`), data (`type`) or a site (anything else).
+- **Values:** they must lie on fixed bytes.
+- **Exports:** an `export` symbol is resolved through the export table; `bytes`, if given, check the prologue.
+- **Imports:** the format accepts symbols imported from a shared address library (**Q**: the library itself is fog, §21).
 
-### Services and events between plugins (D)
+### 5.3 `settings.toml`
 
-Following the patterns of mature plugin systems (Fabric's dependency
-metadata, SKSE's messaging, VS Code extension APIs):
+Decided in [Plugin configuration convention and the overlay settings panel](https://github.com/happy-dwarf-team/anvil/issues/35).
 
-1. **Dependencies** in the manifest (above) define availability and order:
-   topological sort per phase, ties by id; missing/mismatched required
-   dependency, dependency cycle, or an early plugin depending on a main-phase
-   plugin → the plugin is skipped with a reason, and everything depending on
-   it is skipped too.
-2. **Service registry**: `register_service(self, "<own-id>.<name>", major,
-   ptr)` / `get_service(self, name, major)`. A service is a C struct of
-   function pointers whose first field is `uint32_t size`; minor additions are
-   appended (check `size`), breaking changes get a new major (both majors may be
-   registered at the same time). The providing plugin publishes the struct in
-   its own header. Services live for the process lifetime; a plugin can only
-   register under its own id prefix.
-3. **Events**: `subscribe(self, event, callback, context)` / `publish(self,
-   event, payload)`, synchronous on the publishing thread, in subscription
-   order. Built-in: `anvil.plugins_loaded` (after the main phase) and
-   `anvil.game_ready` (known builds only; Anvil polls the game's
-   initialization marker). The `anvil.` prefix is reserved for the host.
+```toml
+[setting.ram_prefetch_budget_mb]
+type = "int"                  # bool | int | float | enum | string | key
+default = 1024
+min = 64
+max = 8192
+label = "RAM prefetch budget (MB)"
+description = "RAM for unpacked archive members the game has not taken yet."
+group = "RAM prefetch"
+restart = true                # true: applies at the next start
+```
 
-## 7. Load order and failure policy (D)
+## 6. Game build identity
 
-1. Proxy setup (always). Entry-point hook in `eu4.exe` only.
-2. At the entry point: if `anvil/` does not exist → nothing (no files written).
-   `ANVIL_DISABLE=1` or `enabled = false` in `anvil/anvil.toml` → log only.
-3. Identify the game build (header).
-4. Discover plugins: `anvil/plugins/*/plugin.toml` (stage 3: plus enabled
-   mods' `anvil/` folders); broken manifests and missing entry DLLs are skipped
-   with the error.
-5. Resolve (API version, `anvil` version range, build, duplicates — first
-   folder in name order wins, disabled ids, `[[expect]]` bytes, dependencies,
-   cycles) and order.
-6. Restore the entry point; load `early` plugins; start the main-phase thread
-   (main plugins → `anvil.plugins_loaded` → status summary → SHA-256 check) and
-   the ready watcher.
+Anvil reads the PE header of the running image (TimeDateStamp, SizeOfImage, CheckSum, entry point) and maps it to a build id from a compiled-in table. The full SHA-256 is checked off the critical path and cached. With an unknown build, plugins with `symbols` are skipped with "game build unknown (EU4 updated?)", and the overlay says so: it runs on every build. Other storefront builds are covered by [Other distributions of EU4 1.37.5](https://github.com/happy-dwarf-team/anvil/issues/36) (**Q**).
 
-Settings (`anvil.toml`): `enabled = true`, `disabled_plugins = []`,
-`log_level`. Environment variable `ANVIL_DISABLE=1` disables all plugins for a
-single start (diagnostics).
+## 7. Verification before loading
 
-## 8. Logging and status (D)
+For each plugin, before its DLL is loaded and before any plugin has changed anything, Anvil:
+1. parses `plugin.toml`, `symbols.toml` and `settings.toml`; an unknown key or a schema error skips the plugin;
+2. resolves `export` symbols;
+3. compares every symbol with the image: `(actual & mask) == (expected & mask)`, the memory kind against the section flags, and `points_to` against the stored pointer;
+4. computes `values`.
 
-- `anvil/anvil.log` (UTF-8), rotated to `anvil.prev.log`. Contents: Anvil
-  version, game build id (or "unknown" + header identity), per plugin
-  `loaded` / `skipped (reason)` / `failed (reason)`, patch list per plugin,
-  timings of discovery and loading.
-- Lines logged before the log file is opened (e.g. from `DllMain`) are kept
-  in memory and written when it opens at the entry point. Plugin messages are
-  tagged with the plugin id. `log_level` in `anvil.toml` filters.
-- Stage 4: in-game overlay with the same information.
+Bytes already changed by other plugins are compared in their original form, so two plugins can depend on the same function. A mismatch skips the plugin, logging the symbol, the RVA and the first differing byte. `anvil check` runs the same code offline (§16).
 
-## 9. Stage 3 — plugins from enabled mods / Steam Workshop (D, later)
+## 8. Changes
 
-- Source: mods enabled in the current playset (`dlc_load.json` in the EU4 user
-  folder → `.mod` descriptors → `path=`), each mod's `anvil/` subfolder with
-  the same layout as `anvil/plugins/<id>/`. Not merely subscribed items.
-- Trust: a Workshop plugin version runs only after approval, recorded in
-  `anvil/trust.toml` as (plugin id, mod id, SHA-256 of entry DLL and manifest).
-  A new version needs a new approval; until then the previously approved
-  version stays (copied to `data/anvil/approved/`) or nothing runs.
-- Early plugins load before the game window exists, and a modal question at
-  that moment would block the start: the first start records the plugin as
-  pending and asks once the game is running; it loads from the next start
-  (stage 3a). A separate "Anvil Manager"
-  for approving before launch is stage 4.
-- To verify before publishing: whether a mod containing only `anvil/` changes
-  the game checksum (ironman/achievements), and Workshop/Paradox rules for
-  DLLs in mods.
+Decided in [Hook API 2: hook kinds, chaining and conflict policy](https://github.com/happy-dwarf-team/anvil/issues/19) and [API 2 gaps from the paper port](https://github.com/happy-dwarf-team/anvil/issues/32). Facts: [SafetyHook research](https://github.com/happy-dwarf-team/anvil/issues/14).
 
-## 10. Security
+### 8.1 Seven kinds of change
 
-Plugins are native code with the game's permissions. Anvil never downloads
-anything. Local plugins are trusted by being placed in the folder; Workshop
-plugins need per-version approval. Releases are built by GitHub Actions with
-published SHA-256 hashes; code signing is planned (proxy DLLs are a pattern
-antivirus heuristics look at).
+| Kind | Call | Notes |
+| --- | --- | --- |
+| Function hook | `hook_function(sym, detour, &next)` | detour with its own `next` |
+| Mid hook | `mid_hook(sym, callback, user)` | callback gets `AnvilCpuContext`; the original code runs afterwards |
+| Block replacement | `replace_block(sym, callback, user)` | the declared block never runs; resume at `resume` or at the block's end |
+| Call redirect | `redirect_call(sym, target, &next)` | `call rel32` sites |
+| Byte patch | `patch_bytes(sym, bytes, size)` | expected bytes come from the declaration |
+| Pointer swap | `swap_pointer(sym, value, &previous)` | atomic; also in read-only memory |
+| Import replacement | `replace_import(module, function, replacement, &next)` | `eu4.exe` imports |
 
-## 11. Build, test, release
+In addition, `address_of(sym)` gives a verified address to call or read.
 
-- CMake + Ninja or Visual Studio generator, MSVC (Visual Studio 2022 Build
-  Tools, x64) as the reference toolchain; C++23 inside Anvil (SafetyHook), C
-  ABI at the boundary; static CRT so `version.dll` needs no redistributable.
-- Tests (`tests/test_main.cpp`): SemVer and ranges, manifest parsing and
-  errors, resolver (dependencies, optional, cycles, phases, builds, API,
-  duplicates, disabled, verification hook), patch registry (bytes, conflicts,
-  rollback, call redirection, SafetyHook hook, import replacement,
-  `expect_bytes` with masks, bounds, unreadable pages, other owners' patches
-  and the wrong-phase rule), `[[expect]]` patterns and per-build selection,
-  services/events, and the
-  built proxy forwarding all 17 exports. Game-level check (lab): vanilla copy,
-  proxy without `anvil/`, empty `plugins`, example plugin.
-- GitHub Actions on `windows-2022` for every pull request and push to `main`:
-  build, tests, package zip (`version.dll`, `anvil/` skeleton, README,
-  LICENSE, SHA256SUMS). Actions are pinned to commit SHAs (Dependabot).
-- Releases (D): Conventional Commits in squash-merged pull request titles;
-  release-please maintains a release pull request that bumps `version.txt`
-  (the single version source) and `CHANGELOG.md`; merging it tags `vX.Y.Z`,
-  after which the release workflow builds the tag, attaches the zip and
-  checksums with a build provenance attestation, and triggers the website.
-  Details in `CONTRIBUTING.md`.
-- Versioning: SemVer for Anvil; the plugin API has its own major version.
-  Within API 1, functions and fields are only appended (`ANVIL_HOST_HAS`) and
-  manifest keys only added; a plugin that needs something added later states
-  `anvil = ">=x.y.z"`, and an older Anvil skips it with the reason instead of
-  loading it without the feature (an unknown manifest key, such as
-  `[[expect]]` on an Anvil that predates it, would otherwise be ignored).
+Every call that touches `eu4.exe` takes a declared symbol, never a raw RVA. Raw pointers are accepted only **outside** the `eu4.exe` image (`hook_function_at` and friends, e.g. Direct3D 9 vtables). Those still go through the registry and chains, with an optional prologue check.
 
-## 12. Stages
+### 8.2 Chains
 
-1. Core: proxy, discovery of local plugins, manifest, build identity, log,
-   patch API with registry, services/events, sample plugin. **Done** (0.1.0).
-2. First real plugin: `bellows`, formerly `eu4-startup-boost` (separate repository).
-3. Plugins from enabled mods + per-version approval.
-4. In-game overlay, Anvil Manager, code signing.
+- Anvil owns one SafetyHook hook per address and chains the plugins itself.
+- Order follows the load order (dependencies, `load_after`): the earlier plugin is outermost. There are no priorities.
+- Every link has its own `next`. Redirects and pointer swaps chain with `next` being the previous target or value.
+- Links can be removed in any order. Executable memory (stubs, trampolines) is never freed.
+- At one address, mid hooks run first, then a block replacement or the function-hook chain or the redirected call.
+- A mid hook that changes `rip` ends the chain; the first occurrence per address and session is logged.
 
-## 13. Open questions (Q)
+### 8.3 Conflicts and unsafe sites
 
-- Decided: SafetyHook (§6); services, dependencies and events in API 1 (§6).
-- Whether `version.dll` alone is enough for all launch paths (Steam, Paradox
-  launcher, direct start) — direct start verified in the lab; Steam/launcher
-  to be tested with a real install.
-- Mid-function hooks (SafetyHook `MidHook`) in a later API minor: needs a
-  stable C layout for the register context.
+- A change whose bytes overlap another plugin's change at a different address is refused, and both owners are logged. A block replacement owns its whole block.
+- The one exception: identical byte patches share ownership.
+- A hook whose stolen bytes contain `JRCXZ` or `LOOP*` is refused, because SafetyHook mis-encodes them.
+
+### 8.4 Staging, handles, suspension
+
+- Changes requested during `anvil_plugin_load` are staged and enabled together after it returns `ANVIL_OK`; on failure none are enabled.
+- Later changes are atomic one by one or as an explicit group.
+- Every change returns a handle and can be removed. A failed load rolls back everything the plugin had.
+- The core can **suspend and resume all changes of a plugin**: it bypasses its links, reverts its patches and restores its pointers (§13).
+- All kinds are allowed in every phase; SafetyHook's page trapping covers threads.
+
+### 8.5 `AnvilCpuContext`
+
+- The layout is identical to SafetyHook's `Context64` (408 bytes): XMM0–15, RFLAGS, the GPRs, `rsp` (read-only), a reserved slot (`trampoline_rsp`) and `rip` (writable). It is pinned with `static_assert`s.
+- YMM upper halves, x87 and MXCSR are not saved.
+- If SafetyHook's layout ever changes, Anvil ships its own stub and keeps the ABI.
+- A lighter, volatile-only context is not offered in 1.0 (§17).
+
+## 9. Plugin API 2
+
+The C ABI is in `include/anvil/anvil_plugin.h`; the draft is [`docs/api2/anvil_plugin.h`](api2/anvil_plugin.h) until it replaces API 1. Plugins vendor it.
+- **Host table:** log, `plugin_dir`, `data_dir`, game info, the change calls of §8, `address_of`, services, events, and settings (§11).
+- **Versioning:** the `size` and `api_version` fields keep it extensible; within API 2 functions are only appended (`ANVIL_HOST_HAS`).
+- **Generated headers:** `anvil gen` produces `symbols.gen.h/.hpp` (symbol ids, typed function symbols, values) and `settings.gen.h/.hpp` (typed accessors).
+- **C++ wrapper** (`anvil.hpp`, header-only):
+  - `ANVIL_PLUGIN(Type)`; a failing call in `load()` throws, the macro turns it into a result, and Anvil rolls back;
+  - hook callbacks must not throw: the adapter catches, logs once and continues;
+  - `anvil::HookOf<sym::x>`; mid hooks and block replacements take any callable;
+  - a signature mismatch fails with a `static_assert` naming the symbol;
+  - `Host` is a stateless value (`anvil::Host{}` works anywhere);
+  - `Change` is a move-only handle.
+- **Rust** ([Rust SDK tier and timing](https://github.com/happy-dwarf-team/anvil/issues/22)): `anvil-sys` (committed bindgen bindings, checked against the header in CI, published to crates.io), `anvil gen --lang rust`, and a Rust hello in CI. The safe `anvil` crate comes later, with recorded principles: `#[anvil::plugin]` returning `Result`, `catch_unwind` adapters, typed symbols, `Drop` handles, a `#[repr(C)]` context.
+
+## 10. Load order and failure policy
+
+1. The proxy is set up (always); the entry-point hook is placed in `eu4.exe` only.
+2. At the entry point: no `anvil/` folder means nothing happens. `ANVIL_DISABLE=1` or `enabled = false` means the log only.
+3. **Safe mode:** two consecutive crashes before `game_ready` (§12) mean this start loads no plugins except the standard ones the overlay needs to explain it.
+4. The build is identified.
+5. Plugins are discovered: local `anvil/plugins/*`, and Workshop plugins in enabled mods (approved versions only, §14).
+6. Resolve and verify:
+   - API version and the `anvil` range;
+   - the build of `symbols`;
+   - duplicates (the local plugin wins over a Workshop one with the same id);
+   - disabled ids and `conflicts` (the declaring plugin is skipped);
+   - the symbols (§7);
+   - dependencies and cycles.
+7. `early` plugins are loaded at the entry point, then `main` plugins on an Anvil thread. Each plugin's staged changes are enabled when its load returns.
+8. `anvil.plugins_loaded` is published and the status is recorded.
+
+## 11. Settings
+
+- Defaults live in `settings.toml` in the plugin folder, read-only.
+- The player's values live in `anvil/data/<id>/settings.toml`, only the values that differ from the default; the file can be edited by hand.
+- An invalid value falls back to the default, with a warning in the log and the overlay.
+- `ANVIL_<ID>_<NAME>` environment variables override values for testing, and Anvil logs it.
+- Plugins read validated values through generated accessors. For `restart = false` settings they can subscribe to changes.
+- The overlay and the Manager edit the values. Settings are global per plugin; profiles are fog.
+
+## 12. Crash capture and attribution
+
+Decided in [Crash attribution to plugins](https://github.com/happy-dwarf-team/anvil/issues/24).
+
+- **Capture**
+  - The core registers a VEH at the entry point. It records fatal-looking exceptions in memory only: no IO, at most 8.
+  - An unhandled-exception filter chained ahead of EU4's writes the report, then hands over to EU4's own crash reporter.
+  - On stack overflow, a helper thread prepared at start-up writes the report and a small minidump.
+- **Report:** `anvil/crashes/<time>.json` and `.txt`, keeping the last 10. It contains:
+  - the code and the address as module + offset;
+  - for `eu4.exe` addresses, the nearest declared symbol and whether a plugin's change covers it;
+  - for stubs and trampolines, the change, plugin and symbol;
+  - the unwound stack with every frame attributed;
+  - the registers, the plugins with versions, the build, and the tail of the log.
+- **Levels:** "in plugin X's code", "in plugin X's change", "plugin X on the stack", or "no plugin involved". Never "X caused it".
+- **Next start:** a notice in the overlay with "disable X at the next start" (only on click), and safe mode after two crashes before `game_ready`. Nothing is uploaded; "copy report" plus the `issues` link.
+
+## 13. Gameplay-affecting plugins
+
+Decided in [Gameplay-affecting plugins in ironman, achievements and multiplayer](https://github.com/happy-dwarf-team/anvil/issues/29).
+
+- **`affects_gameplay`** is required: `true` if the plugin can change the simulation's state or results.
+- **Suspension:** `anvil-game` publishes a session event. In ironman or multiplayer the core suspends every change of gameplay plugins (§8.4), the plugin is told so it can stop its threads, and the changes come back after the session.
+- **Opt-in:** `allow_ironman` / `allow_multiplayer = "opt-in"` let the player allow a plugin in that mode; the choice is stored in `anvil.toml`.
+- **Achievements:** with an ironman opt-in active, the overlay shows a permanent notice that achievements stay enabled but may break Paradox's rules.
+- **Multiplayer:** the overlay shows a hash of the active gameplay plugin set for players to compare by hand.
+
+## 14. Workshop distribution and trust
+
+Decided in [Workshop distribution and trust model](https://github.com/happy-dwarf-team/anvil/issues/25). Facts: [Workshop research](https://github.com/happy-dwarf-team/anvil/issues/16).
+
+E1 showed that a mod with only `descriptor.mod` + `anvil/**` keeps the 1.37.5 checksum and allows ironman achievements. E2 (whether the uploader keeps `.dll` files) is still open (**Q**, [Run the Workshop experiments E1 and E2](https://github.com/happy-dwarf-team/anvil/issues/34)).
+
+- **Discovery:** only mods enabled in the current playset (`dlc_load.json` → `.mod` → `path`), in `anvil/<plugin-id>/` folders, several per mod. This also gates a plugin on its mod being enabled.
+- **Trust:**
+  - an approval covers a SHA-256 over the whole plugin folder;
+  - `trust.toml` records the id, version, Workshop id, hash and date;
+  - the Manager can revoke an approval.
+- **Updates:** a new hash is pending; the previously approved copy (`data/anvil/approved/`) keeps running until the new one is approved.
+- **First approval:**
+  - the overlay asks once the game runs, and the plugin loads from the next start;
+  - the Manager can approve before launch;
+  - the prompt shows the name, authors, version, mod, `affects_gameplay`, symbol count, hash, `repository` and a native-code warning.
+- **Anvil itself** cannot be installed by the Workshop (items never land next to `eu4.exe`); the Manager installs it (§15).
+
+## 15. Player UI
+
+Decided in [Player UI: in-game overlay and Anvil Manager](https://github.com/happy-dwarf-team/anvil/issues/26).
+
+- **`anvil-overlay`**
+  - Drawing: Dear ImGui on D3D9 (`EndScene`/`Reset` via `hook_function_at`, chained with other D3D9 hooks); input by subclassing the game window's WndProc. It turns itself off on the OpenGL backend (fog).
+  - Notifications: non-blocking, for skipped plugins, the previous crash, pending approvals/updates and safe mode.
+  - Panel on `Ctrl+Shift+F12`:
+    - status and reasons;
+    - approvals;
+    - "disable at the next start";
+    - the crash report;
+    - the log tail;
+    - the settings editor.
+  - It never pauses the game. Plugins get no ImGui context.
+- **`AnvilManager.exe`** (C++ and Dear ImGui, static):
+  - finds the game (Steam `libraryfolders.vdf`);
+  - installs, repairs and uninstalls Anvil from its own package;
+  - enables plugins, approves and revokes;
+  - shows what will load and why (`anvil check --game --format json`);
+  - shows crashes and logs, and launches through `steam://rungameid/236850`;
+  - has an opt-in GitHub release check that only shows a link. Nothing is downloaded.
+
+## 16. Tooling for authors
+
+- **`anvil.exe`** (in the SDK archive) is built from the core's own library:
+  - `anvil gen [--lang c|cpp|rust]`;
+  - `anvil check` with strict schemas, which also verifies, with `--exe`, the build, bytes, memory, pointers, exports, values and instruction boundaries; with `--game <folder>`, every installed plugin and the conflicts between them;
+  - `--format text|json|github`; exit codes 0 OK, 1 problems, 2 cannot check.
+- **`symbols.lock`:** `anvil check --exe` writes the `eu4.exe` SHA-256, a digest of `symbols.toml`, the tool version and the result. CI, which cannot have the game, fails when the lock is stale.
+- **SDK:**
+  - an archive on every release, consumed with `FetchContent`;
+  - `anvil_add_plugin(<target> SOURCES …)` runs `anvil gen`, builds with the static CRT and lays out `plugin/<id>/`;
+  - `<target>-check` (with `EU4_EXE`) and `<target>-deploy` (with `EU4_DIR`).
+- **Template:** `happy-dwarf-team/anvil-plugin-template`. Its CI runs `anvil check --format github` and the lock check; its release workflow zips the plugin folder, or a mod folder for the Workshop. The README covers a first plugin in 15 minutes.
+
+## 17. Performance budgets
+
+Decided in [Performance budgets and how the lab measures them](https://github.com/happy-dwarf-team/anvil/issues/20).
+
+| Quantity | Budget |
+| --- | --- |
+| Core start-up, no plugins (entry point → end of loading) | ≤ 20 ms; no difference in `Running application` detectable within the spread |
+| Same with `anvil-game` and `anvil-overlay` | ≤ 50 ms |
+| Function hook, call redirect: first / each further link | ≤ 2 ns / ≤ 2 ns |
+| Mid hook, block replacement: first / each further link | ≤ 25 ns / ≤ 20 ns |
+| Pointer swap, byte patch, import replacement | 0 |
+| All changes of the standard plugins in a SIMULATION year | ≤ 0.5% |
+| Memory: core / per change | ≤ 2 MB / ≤ 1 KB |
+
+**Method**
+- In-game impact is per-call cost × counted calls; the optional counters are enabled with `profile = true`.
+- Microbenchmarks run in CI as a ±20% regression check. Binding numbers come from the lab: i9-13900KF, CPU4, median of ≥ 30.
+- Start-up follows the lab procedure, with ≥ 5 runs per variant.
+- SIMULATION A/B through Tongs, with ≥ 5 valid trials, guards only against ≥ 2% regressions.
+
+Exceeding a budget blocks the release and any change to stubs, chains or core start-up.
+
+## 18. Logging and status
+
+`anvil/anvil.log` is UTF-8 and rotated. It records the Anvil version, the build, each plugin's status and reason, its changes, verification failures with the symbol and byte, timings and the call counters. The same status is published as the `anvil.status` service and event for the overlay and the Manager.
+
+## 19. Security
+
+Plugins are native code with the game's permissions:
+- local plugins are trusted by placement, and Workshop plugins need per-version approval;
+- Anvil and its standard plugins never download anything; the Manager's release check is opt-in and only links;
+- releases are built by GitHub Actions with SHA-256 sums and provenance attestation. Code signing is fog.
+
+## 20. Build, test, release
+
+- CMake, with MSVC (VS 2022) as the reference toolchain. C++23 inside Anvil, a C ABI at the boundary, and the static CRT.
+- **Tests:** unit tests for manifests, symbols, settings, the resolver, chains (orders, removal in any order, conflicts, staging, suspension) and the CLI, plus microbenchmarks and a Rust hello build.
+- **Lab checks:** the vanilla copy, the proxy without `anvil/`, each standard plugin, the budgets, and E1/E2 for the Workshop.
+- **Releases:** release-please and Conventional Commits, squash-merged PRs; the release workflow attaches the Anvil zip, the SDK archive, `anvil.exe`, the Manager and `anvil-sys`.
+
+## 21. Open questions and fog
+
+- **Q, needs [Rewrite or evolve, and the pull request sequence to Anvil 2](https://github.com/happy-dwarf-team/anvil/issues/28):**
+  - the version number of the first release with API 2 (Anvil 1.0.0?);
+  - the repository layout of the standard plugins and the Manager;
+  - the scope of the first release;
+  - the migration of Bellows and Tongs.
+- **Q:** E2 (Workshop keeps `.dll`?); other storefront builds ([#36](https://github.com/happy-dwarf-team/anvil/issues/36)).
+- **Fog** (from the map):
+  - hot reload;
+  - code signing;
+  - the ABI stability policy for API 2;
+  - localization of player messages;
+  - the shared address library;
+  - a vcpkg port;
+  - call counts of text hooks (lighter context);
+  - OpenGL in the overlay;
+  - setting profiles;
+  - automatic multiplayer plugin-set exchange;
+  - the safe Rust crate.
