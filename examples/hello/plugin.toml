@@ -3,16 +3,14 @@ name = "Hello Anvil"
 version = "0.1.0"
 authors = ["Happy Dwarf Team"]
 description = "Example plugin: logs, publishes a service and waits for the game to be ready."
-api = 1
+api = 2
 entry = "hello.dll"
 phase = "main"
+# Required: true if the plugin can change the simulation's state or results.
 affects_gameplay = false
-game_builds = ["*"]
+issues = "https://github.com/happy-dwarf-team/anvil/issues"
+repository = "https://github.com/happy-dwarf-team/anvil"
 
-# Game bytes this plugin relies on, checked before hello.dll is loaded. Real
-# plugins list the functions, vtables and globals they use, per build id.
-[[expect]]
-build = "*"                       # the PE signature is the same in every build
-rva = 0
-bytes = "4D 5A"                   # "MZ"
-name = "DOS header"
+# No `symbols`: hello uses no game addresses, so it runs on every game build.
+# A plugin that does declares them in symbols.toml, tied to one build:
+# symbols = "symbols.toml"

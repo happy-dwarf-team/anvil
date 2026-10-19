@@ -9,14 +9,6 @@
 namespace anvil {
 namespace {
 
-bool supports_build(const Manifest& m, const char* build) {
-    for (const auto& b : m.game_builds) {
-        if (b == "*") return true;
-        if (build != nullptr && b == build) return true;
-    }
-    return false;
-}
-
 std::string phase_name(Phase p) { return p == Phase::Early ? "early" : "main"; }
 
 // Removes plugins whose required dependencies are missing or mismatched, until stable.
@@ -117,14 +109,6 @@ ResolveResult resolve(const ResolveInput& input) {
         if (m.anvil && input.host_version && !m.anvil->matches(*input.host_version)) {
             result.skipped.push_back({m.id, "requires Anvil " + m.anvil->text() + ", this is Anvil " +
                                                 input.host_version->to_string()});
-            continue;
-        }
-        if (!supports_build(m, input.game_build)) {
-            std::string builds;
-            for (const auto& b : m.game_builds) builds += (builds.empty() ? "" : ", ") + b;
-            result.skipped.push_back({m.id, std::string("game build ") +
-                                                (input.game_build ? input.game_build : "unknown (EU4 updated?)") +
-                                                " not supported; plugin supports: " + builds});
             continue;
         }
         if (input.verify) {

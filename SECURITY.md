@@ -27,7 +27,7 @@ releases are not supported.
   unexpected location).
 - Plugin discovery and loading: `plugin.toml` parsing, paths outside the plugin
   folder, plugins loaded despite being disabled, skipped or failing their
-  `[[expect]]` checks.
+  symbol checks.
 - The patch registry: writes outside the game image, missed overlap or
   byte checks.
 - Release integrity: release assets that do not match `SHA256SUMS.txt` or

@@ -1,10 +1,10 @@
 // Unit tests for the Anvil core. Usage: anvil_tests <path-to-built-version.dll>
-#include "core/expectations.hpp"
 #include "core/manifest.hpp"
 #include "core/patching.hpp"
 #include "core/resolver.hpp"
 #include "core/semver.hpp"
 #include "core/services.hpp"
+#include "test_support.hpp"
 
 #include <windows.h>
 
@@ -16,43 +16,7 @@
 
 namespace {
 
-int g_failures = 0;
-int g_checks = 0;
-
-#define CHECK(cond)                                                                    \
-    do {                                                                               \
-        ++g_checks;                                                                    \
-        if (!(cond)) {                                                                 \
-            ++g_failures;                                                              \
-            std::printf("  FAILED %s:%d: %s\n", __FILE__, __LINE__, #cond);            \
-        }                                                                              \
-    } while (0)
-
-void run(const char* name, const std::function<void()>& body) {
-    const int before = g_failures;
-    body();
-    std::printf("%s %s\n", g_failures == before ? "ok  " : "FAIL", name);
-}
-
 using namespace anvil;
-
-Manifest manifest(const std::string& toml) {
-    auto r = parse_manifest_text(toml, L"C:\\plugins\\x");
-    if (!r.manifest) std::printf("  manifest error: %s\n", r.error.c_str());
-    return *r.manifest;
-}
-
-std::string plugin_toml(const std::string& id, const std::string& extra = "", const std::string& version = "1.0.0",
-                        const std::string& phase = "main") {
-    return "id = \"" + id + "\"\nname = \"" + id + "\"\nversion = \"" + version + "\"\napi = 1\nentry = \"" + id +
-           ".dll\"\nphase = \"" + phase + "\"\ngame_builds = [\"*\"]\n" + extra;
-}
-
-// Manifest pinned to one build, for [[expect]] tests.
-std::string pinned_toml(const std::string& extra) {
-    return "id = \"p\"\nname = \"p\"\nversion = \"1.0.0\"\napi = 1\nentry = \"p.dll\"\n"
-           "game_builds = [\"eu4-1.37.5-steam-win64\"]\n" + extra;
-}
 
 std::string skip_reason(const ResolveResult& r, const std::string& id) {
     for (const auto& s : r.skipped) {
@@ -113,25 +77,11 @@ int main(int argc, char** argv) {
         CHECK(!VersionRange::parse(">=x").has_value());
     });
 
-    run("manifest parsing", [] {
-        auto ok = parse_manifest_text(plugin_toml("demo", "custom = 1\n[[dependencies]]\nid = \"base\"\nversion = \"^1\"\n"),
-                                      L"C:\\p");
-        CHECK(ok.manifest.has_value());
-        CHECK(ok.manifest->dependencies.size() == 1 && ok.manifest->dependencies[0].id == "base");
-        CHECK(ok.manifest->notes.size() == 1);  // unknown key 'custom'
-        CHECK(!parse_manifest_text("id = \"Bad_Id\"\nname=\"x\"\nversion=\"1.0.0\"\napi=1\nentry=\"x.dll\"\ngame_builds=[\"*\"]",
-                                   L"C:\\p").manifest);
-        CHECK(!parse_manifest_text("id = \"a\"\nname=\"a\"\nversion=\"1.0\"\napi=1\nentry=\"a.dll\"\ngame_builds=[\"*\"]",
-                                   L"C:\\p").manifest);  // not SemVer
-        CHECK(!parse_manifest_text("id = \"a\"\nname=\"a\"\nversion=\"1.0.0\"\napi=1\nentry=\"..\\\\a.dll\"\ngame_builds=[\"*\"]",
-                                   L"C:\\p").manifest);  // path in entry
-        CHECK(!parse_manifest_text("id = \"a\"\nname=\"a\"\nversion=\"1.0.0\"\napi=1\nentry=\"a.dll\"", L"C:\\p").manifest);
-        CHECK(!parse_manifest_text("id = = broken", L"C:\\p").manifest);
-    });
+    manifest_tests();
 
     run("resolver: order, dependencies, builds", [] {
         ResolveInput in;
-        in.host_api = 1;
+        in.host_api = kManifestApi;
         in.game_build = "eu4-1.37.5-steam-win64";
         in.manifests = {
             manifest(plugin_toml("ui", "[[dependencies]]\nid = \"core\"\nversion = \">=1.0.0\"\n")),
@@ -146,13 +96,9 @@ int main(int argc, char** argv) {
 
     run("resolver: failures cascade", [] {
         ResolveInput in;
-        in.host_api = 1;
+        in.host_api = kManifestApi;
         in.game_build = nullptr;  // unknown build
-        auto pinned = manifest(plugin_toml("pinned"));
-        pinned.game_builds = {"eu4-1.37.5-steam-win64"};
         in.manifests = {
-            pinned,
-            manifest(plugin_toml("needs-pinned", "[[dependencies]]\nid = \"pinned\"\n")),
             manifest(plugin_toml("old-api")),
             manifest(plugin_toml("wants-v2", "[[dependencies]]\nid = \"lib\"\nversion = \">=2\"\n")),
             manifest(plugin_toml("lib", "", "1.5.0")),
@@ -163,11 +109,9 @@ int main(int argc, char** argv) {
             manifest(plugin_toml("cyc-b", "load_after = [\"cyc-a\"]\n")),
             manifest(plugin_toml("after-cycle", "[[dependencies]]\nid = \"cyc-a\"\n", "1.0.0", "main")),
         };
-        in.manifests[2].api = 2;
+        in.manifests[0].api = 1;
         in.disabled = {"off"};
         auto r = resolve(in);
-        CHECK(skipped(r, "pinned"));
-        CHECK(skipped(r, "needs-pinned"));
         CHECK(skipped(r, "old-api"));
         CHECK(skipped(r, "wants-v2"));
         CHECK(skipped(r, "off"));
@@ -274,36 +218,6 @@ int main(int argc, char** argv) {
         CHECK(!parse_byte_pattern(std::string(2 * ANVIL_MAX_EXPECT_BYTES + 2, '0'), bytes, mask, error));
     });
 
-    run("manifest: [[expect]]", [] {
-        auto ok = parse_manifest_text(pinned_toml("[[expect]]\nbuild = \"eu4-1.37.5-steam-win64\"\nrva = 0x210000\n"
-                                                  "bytes = \"48 89 5C 24 ??\"\nname = \"ResetGame\"\ncomment = 1\n"
-                                                  "[[expect]]\nbuild = \"*\"\nrva = 0\nbytes = '''\n4D 5A\n'''\n"),
-                                      L"C:\\p");
-        CHECK(ok.manifest.has_value());
-        if (ok.manifest) {
-            const auto& e = ok.manifest->expectations;
-            CHECK(e.size() == 2);
-            CHECK(e[0].rva == 0x210000 && e[0].name == "ResetGame" && e[0].bytes.size() == 5 && e[0].mask[4] == 0);
-            CHECK(e[1].build == "*" && e[1].rva == 0 && e[1].bytes == (std::vector<uint8_t>{0x4D, 0x5A}));
-            CHECK(ok.manifest->notes.size() == 1);  // unknown key 'comment' inside [[expect]]
-        }
-        // Any build id is accepted when the plugin itself supports "*".
-        CHECK(parse_manifest_text(plugin_toml("any", "[[expect]]\nbuild = \"eu4-1.38.0-steam-win64\"\nrva = 1\nbytes = \"90\"\n"),
-                                  L"C:\\p").manifest);
-        auto fails = [](const std::string& expect) {
-            return !parse_manifest_text(pinned_toml(expect), L"C:\\p").manifest.has_value();
-        };
-        CHECK(fails("[[expect]]\nbuild = \"eu4-1.38.0-steam-win64\"\nrva = 1\nbytes = \"90\"\n"));  // not in game_builds
-        CHECK(fails("[[expect]]\nrva = 1\nbytes = \"90\"\n"));                                       // no build
-        CHECK(fails("[[expect]]\nbuild = \"*\"\nrva = -1\nbytes = \"90\"\n"));
-        CHECK(fails("[[expect]]\nbuild = \"*\"\nrva = \"0x10\"\nbytes = \"90\"\n"));  // rva as string
-        CHECK(fails("[[expect]]\nbuild = \"*\"\nrva = 0x100000000\nbytes = \"90\"\n"));
-        CHECK(fails("[[expect]]\nbuild = \"*\"\nrva = 0xFFFFFFFF\nbytes = \"90 90\"\n"));  // past 4 GB
-        CHECK(fails("[[expect]]\nbuild = \"*\"\nrva = 1\n"));                              // no bytes
-        CHECK(fails("[[expect]]\nbuild = \"*\"\nrva = 1\nbytes = \"9\"\n"));
-        CHECK(fails("expect = 1\n"));
-    });
-
     run("patch registry: expect_bytes", [] {
         Scratch s(0x2000);
         const uintptr_t base = reinterpret_cast<uintptr_t>(s.base);
@@ -355,36 +269,9 @@ int main(int argc, char** argv) {
         CHECK(reg.rollback("other") == 2);
     });
 
-    run("expectations: per build", [] {
-        Scratch s(0x1000);
-        const uintptr_t base = reinterpret_cast<uintptr_t>(s.base);
-        PatchRegistry reg(base, 0x1000);
-        const uint8_t code[] = {0x48, 0x89, 0x5C, 0x24, 0x08};
-        std::memcpy(s.base + 0x100, code, sizeof(code));
-        auto parsed = parse_manifest_text(
-            plugin_toml("dep", "[[expect]]\nbuild = \"eu4-1.37.5-steam-win64\"\nrva = 0x100\nbytes = \"48 89 5C 24 ??\"\n"
-                               "[[expect]]\nbuild = \"eu4-1.38.0-steam-win64\"\nrva = 0x100\nbytes = \"E9\"\nname = \"Foo\"\n"
-                               "[[expect]]\nbuild = \"*\"\nrva = 0x200\nbytes = \"CC CC\"\n"),
-            L"C:\\p");
-        CHECK(parsed.manifest.has_value());
-        if (!parsed.manifest) return;
-        size_t checked = 0;
-        CHECK(check_expectations(*parsed.manifest, "eu4-1.37.5-steam-win64", reg, base, checked).empty());
-        CHECK(checked == 2);
-        const std::string reason = check_expectations(*parsed.manifest, "eu4-1.38.0-steam-win64", reg, base, checked);
-        CHECK(reason.find("Foo (rva 0x100, 1 B)") != std::string::npos);
-        CHECK(reason.find("expected 0xE9, found 0x48") != std::string::npos);
-        CHECK(check_expectations(*parsed.manifest, nullptr, reg, base, checked).empty() && checked == 1);
-        auto outside = parse_manifest_text(plugin_toml("far", "[[expect]]\nbuild = \"*\"\nrva = 0x5000\nbytes = \"CC\"\n"),
-                                           L"C:\\p");
-        CHECK(outside.manifest &&
-              check_expectations(*outside.manifest, nullptr, reg, base, checked).find("outside the game image") !=
-                  std::string::npos);
-    });
-
     run("resolver: verify skips plugins and dependents", [] {
         ResolveInput in;
-        in.host_api = 1;
+        in.host_api = kManifestApi;
         in.game_build = "eu4-1.37.5-steam-win64";
         in.manifests = {
             manifest(plugin_toml("bad")),
@@ -408,12 +295,11 @@ int main(int argc, char** argv) {
     run("manifest + resolver: minimum Anvil version", [] {
         auto ok = parse_manifest_text(plugin_toml("needs-new", "anvil = \">=0.2.0, <1\"\n"), L"C:\\p");
         CHECK(ok.manifest && ok.manifest->anvil && ok.manifest->anvil->text() == ">=0.2.0, <1");
-        CHECK(ok.manifest && ok.manifest->notes.empty());  // "anvil" is a known key
         CHECK(!parse_manifest_text(plugin_toml("bad", "anvil = \">=x\"\n"), L"C:\\p").manifest);
         CHECK(!parse_manifest_text(plugin_toml("bad", "anvil = 2\n"), L"C:\\p").manifest);
 
         ResolveInput in;
-        in.host_api = 1;
+        in.host_api = kManifestApi;
         in.game_build = "eu4-1.37.5-steam-win64";
         in.manifests = {*ok.manifest, manifest(plugin_toml("any")),
                         manifest(plugin_toml("needs-new-dep", "[[dependencies]]\nid = \"needs-new\"\n"))};

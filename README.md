@@ -6,7 +6,7 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
 > Status: stage 1 (core loader), early public releases — see
 > [Releases](https://github.com/happy-dwarf-team/anvil/releases) and
 > [CHANGELOG.md](CHANGELOG.md). Supported game build: EU4 1.37.5 (Steam,
-> Windows 64-bit); other builds start without plugins. Design:
+> Windows 64-bit); on other builds only plugins that use no game addresses load. Design:
 > [docs/design.md](docs/design.md). Plugin SDK:
 > [include/anvil/anvil_plugin.h](include/anvil/anvil_plugin.h); example:
 > [examples/hello](examples/hello).
@@ -19,9 +19,11 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
 - Plugins live in `anvil/plugins/<plugin-id>/` (manifest + DLL). Later, plugins
   can also come from EU4 mods enabled in the Paradox launcher (Steam Workshop),
   each version only after the player approves it.
-- Every plugin declares which EU4 builds it supports. Unsupported builds,
-  broken plugins or an empty `plugins` folder mean the game simply starts as
-  usual.
+- A plugin that uses game addresses declares them, for one EU4 build, in its
+  `symbols.toml`; on another build it is skipped. Broken plugins, plugins
+  written for an older plugin API or an empty `plugins` folder mean the game
+  simply starts as usual. The manifest format is described in
+  [docs/design.md](docs/design.md#51-plugintoml-manifest-v2).
 - Each start writes `anvil/anvil.log`: what was loaded, what was skipped and why.
 
 ## Install / uninstall

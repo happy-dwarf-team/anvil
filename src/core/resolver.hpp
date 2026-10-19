@@ -14,8 +14,8 @@ struct ResolveInput {
     std::optional<Version> host_version;  // Anvil version, checked against each plugin's "anvil" range
     const char* game_build = nullptr;  // nullptr = unknown build
     std::vector<std::string> disabled;  // ids disabled in anvil.toml
-    // Optional check after the API and build checks (e.g. [[expect]] bytes);
-    // returns why the plugin must be skipped, empty = keep it.
+    // Optional check after the API and Anvil version checks (the plugin's
+    // symbols, #40); returns why the plugin must be skipped, empty = keep it.
     std::function<std::string(const Manifest&)> verify;
 };
 
@@ -29,7 +29,7 @@ struct ResolveResult {
     std::vector<Skipped> skipped;
 };
 
-// Validates plugins against the host and the game build, resolves required and
+// Validates plugins against the host (and, through `verify`, the game), resolves required and
 // optional dependencies (SemVer ranges) and load_after, and orders them
 // topologically (ties broken by id). Plugins that cannot be loaded are listed
 // in `skipped` with a human-readable reason; anything depending on them is

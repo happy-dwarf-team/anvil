@@ -125,14 +125,14 @@ typedef struct AnvilHost {
      * Bytes already patched by other plugins are compared in their original
      * form. Verify every dependency before the first patch: once the plugin
      * has patches of its own, the call returns ANVIL_ERROR_WRONG_PHASE.
-     * Dependencies known in advance are better declared as [[expect]] in
-     * plugin.toml: Anvil checks those before the plugin DLL is loaded.
+     * Dependencies known in advance are better declared in symbols.toml:
+     * Anvil checks those before the plugin DLL is loaded.
      * size: 1 .. ANVIL_MAX_EXPECT_BYTES. */
     AnvilResult (*expect_bytes)(AnvilPlugin *self, uint32_t rva, const void *expected, const void *mask,
                                 size_t size);
 } AnvilHost;
 
-/* Largest range one expect_bytes call or one [[expect]] entry may compare. */
+/* Largest range one expect_bytes call may compare. */
 #define ANVIL_MAX_EXPECT_BYTES 65536
 
 /* Nonzero when the host provides `field` (appended after API 1.0). */

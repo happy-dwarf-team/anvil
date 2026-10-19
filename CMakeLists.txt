@@ -49,10 +49,9 @@ if(MSVC)
 endif()
 
 # anvil_loader: the parts that act on the running game (startup, the patch
-# registry, [[expect]] checks against live memory, services, SEH guards).
+# registry, services, SEH guards).
 # Linked into version.dll and the tests, never into anvil.exe.
 add_library(anvil_loader STATIC
-    src/core/expectations.cpp
     src/core/patching.cpp
     src/core/runtime.cpp
     src/core/seh_guard.cpp
@@ -79,8 +78,9 @@ endif()
 
 if(ANVIL_BUILD_TESTS)
     enable_testing()
-    add_executable(anvil_tests tests/test_main.cpp)
+    add_executable(anvil_tests tests/test_main.cpp tests/manifest_tests.cpp)
     target_link_libraries(anvil_tests PRIVATE anvil_loader)
+    target_compile_definitions(anvil_tests PRIVATE ANVIL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_dependencies(anvil_tests version_dll)
     add_test(NAME anvil_tests COMMAND anvil_tests $<TARGET_FILE:version_dll>)
 
