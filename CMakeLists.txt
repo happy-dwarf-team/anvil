@@ -32,14 +32,17 @@ FetchContent_Declare(safetyhook
 FetchContent_MakeAvailable(tomlplusplus safetyhook)
 
 # anvil_core: the rules shared by version.dll and anvil.exe (manifests, SemVer,
-# the resolver, the game build identity, the log). Nothing here may depend on
-# running inside the game process, so the CLI applies the same rules as the loader.
+# the resolver, the game build identity, symbols.toml and its verification
+# against a PE image, the log). Nothing here may depend on running inside the
+# game process, so the CLI applies the same rules as the loader.
 add_library(anvil_core STATIC
     src/core/game_build.cpp
     src/core/log.cpp
     src/core/manifest.cpp
+    src/core/pe_image.cpp
     src/core/resolver.cpp
-    src/core/semver.cpp)
+    src/core/semver.cpp
+    src/core/symbols.cpp)
 target_include_directories(anvil_core PUBLIC include src)
 target_link_libraries(anvil_core PUBLIC tomlplusplus::tomlplusplus bcrypt)
 target_compile_definitions(anvil_core PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE
@@ -49,13 +52,14 @@ if(MSVC)
 endif()
 
 # anvil_loader: the parts that act on the running game (startup, the patch
-# registry, services, SEH guards).
+# registry, symbols.toml checks against the running image, services, SEH guards).
 # Linked into version.dll and the tests, never into anvil.exe.
 add_library(anvil_loader STATIC
     src/core/patching.cpp
     src/core/runtime.cpp
     src/core/seh_guard.cpp
-    src/core/services.cpp)
+    src/core/services.cpp
+    src/core/symbol_check.cpp)
 target_link_libraries(anvil_loader PUBLIC anvil_core safetyhook::safetyhook)
 
 # version.dll = proxy + loader
@@ -83,6 +87,9 @@ if(ANVIL_BUILD_TESTS)
     target_compile_definitions(anvil_tests PRIVATE ANVIL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_dependencies(anvil_tests version_dll)
     add_test(NAME anvil_tests COMMAND anvil_tests $<TARGET_FILE:version_dll>)
+    add_executable(anvil_symbols_tests tests/test_symbols.cpp)
+    target_link_libraries(anvil_symbols_tests PRIVATE anvil_loader)
+    add_test(NAME anvil_symbols_tests COMMAND anvil_symbols_tests)
 
     add_test(NAME anvil_cli_version COMMAND anvil --version)
     set_tests_properties(anvil_cli_version PROPERTIES PASS_REGULAR_EXPRESSION "^anvil ${PROJECT_VERSION}[\r\n]*$")

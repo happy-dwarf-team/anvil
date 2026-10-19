@@ -148,6 +148,7 @@ signature = "const char* ()"
 - **Values:** they must lie on fixed bytes.
 - **Exports:** an `export` symbol is resolved through the export table; `bytes`, if given, check the prologue.
 - **Imports:** the format accepts symbols imported from a shared address library (the library itself is fog, §21).
+- **Schema:** unknown keys are errors. Names match `[a-z][a-z0-9_]*` (they become identifiers in generated headers), and a symbol's id is its position in the file. A symbol has exactly one of `rva` and `export`; one at an `rva` needs `memory` and `bytes` or `points_to` (a data symbol may have neither). `signature`, `points_to` and `type` exclude each other. A value has `at` and either `size` (1, 2, 4 or 8, little-endian) or `rip_relative`, the offset of the instruction's end, at least `at + 4`: it yields the RVA `rva + rip_relative + disp32`. `resume` names another symbol and needs `bytes`, the block it ends.
 
 ### 5.3 `settings.toml`
 

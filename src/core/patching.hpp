@@ -42,6 +42,10 @@ public:
     AnvilResult expect_bytes(const std::string& owner, uintptr_t address, const void* expected, const void* mask,
                              size_t size, std::string* mismatch = nullptr) const;
 
+    // Copies image bytes as the game shipped them: bytes changed by any owner
+    // read in their original form. False outside the image or for unreadable memory.
+    bool read_original(uintptr_t address, void* out, size_t size) const;
+
     // Undo every patch of `owner`, newest first. Returns the number undone.
     size_t rollback(const std::string& owner);
     std::vector<std::string> describe(const std::string& owner) const;
@@ -51,6 +55,7 @@ private:
     struct Entry;
     bool overlaps_other_owner(const std::string& owner, uintptr_t address, size_t size, std::string& other) const;
     bool in_image(uintptr_t address, size_t size) const;
+    bool read_original_locked(uintptr_t address, void* out, size_t size) const;
     void* alloc_near_locked(size_t size);
 
     uintptr_t image_base_;
