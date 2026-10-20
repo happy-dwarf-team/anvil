@@ -496,7 +496,6 @@ void ChangeRegistry::set_profile(bool on) {
 // Called by a code site's context stub on the game's thread, without the
 // registry's lock: it reads only the published list. dispatch_counted is the
 // stub's target instead when the site was created with profile = true.
-//
 void ChangeRegistry::dispatch(AnvilCpuContext* cpu) { run_callbacks<false>(cpu); }
 void ChangeRegistry::dispatch_counted(AnvilCpuContext* cpu) { run_callbacks<true>(cpu); }
 
