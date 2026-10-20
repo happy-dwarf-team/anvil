@@ -203,6 +203,23 @@ __declspec(noinline) void crash_here() { *g_null = 1; }
 // context stub.
 void crash_in_callback(AnvilCpuContext*, void*) { crash_here(); }
 
+// The size of a CONTEXT with every extended state the host enables: what
+// Windows puts on the crashed thread's stack before it calls any handler.
+DWORD exception_context_bytes() {
+    DWORD length = 0;
+    InitializeContext2(nullptr, CONTEXT_ALL | CONTEXT_XSTATE, nullptr, &length, GetEnabledXStateFeatures());
+    return length;
+}
+
+// After a stack overflow a thread with the default guarantee has about 12 KB
+// left. Windows needs the exception context and about 1 KB more to call the
+// vectored handler, and Anvil's handler and filter about 2 KB after that. The
+// context is 1.7 KB with AVX and 3.2 KB with AVX-512, but 11.5 KB where the
+// host enables AMX (its tile data alone is 8 KB; seen on some Xeon 8573C
+// runners): there Windows ends the process with 0xC0000005 before any
+// handler runs, Anvil's or another (#98).
+bool default_guarantee_fits() { return exception_context_bytes() <= 8 * 1024; }
+
 __declspec(noinline) int recurse(int depth) {
     volatile char pad[256];
     pad[0] = static_cast<char>(depth);
@@ -304,11 +321,18 @@ int child(const std::string& mode, const fs::path& dir) {
             return static_cast<DWORD>(call_scratch(reinterpret_cast<Fn>(p), 1));
         };
     } else if (mode == "overflow") {
-        body = [](LPVOID) -> DWORD { return static_cast<DWORD>(recurse(0)); };
+        body = [](LPVOID) -> DWORD {
+            // Room for the exception context where the default cannot hold
+            // it: the guarantee the game's main thread gets.
+            ULONG guarantee = 64 * 1024;
+            if (!default_guarantee_fits()) SetThreadStackGuarantee(&guarantee);
+            return static_cast<DWORD>(recurse(0));
+        };
     } else {
         return 12;
     }
-    // A thread of its own with the default stack guarantee, like the game's.
+    // A thread of its own with the default stack guarantee, like the game's
+    // (but see default_guarantee_fits).
     HANDLE thread = CreateThread(nullptr, 256 * 1024, body,
                                  reinterpret_cast<void*>(image.at(mode == "mid" ? 0x100 : 0x200)),
                                  STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
@@ -828,6 +852,10 @@ int main(int argc, char** argv) {
     });
 
     run("crash capture: a stack overflow writes the report and a minidump (child process)", [&] {
+        if (!default_guarantee_fits()) {
+            std::printf("  note: the exception context is %lu bytes here; the overflowing thread gets a 64 KB guarantee\n",
+                        exception_context_bytes());
+        }
         const ChildResult r = run_child("overflow", root / "overflow");
         CHECK(r.exit == 0xC0DE || r.exit == EXCEPTION_STACK_OVERFLOW);
         CHECK(Json::valid(r.json));

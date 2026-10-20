@@ -438,7 +438,9 @@ bool install(const Setup& setup, std::string& error) {
         ok = false;
     }
     // Room for the handlers when this thread (the game's main thread)
-    // overflows its stack; the game's other threads keep the default.
+    // overflows its stack; the game's other threads keep the default. It
+    // also holds the CPU state Windows saves with the exception, 11.5 KB
+    // with AMX, which the default leaves no room for.
     ULONG guarantee = 64 * 1024;
     SetThreadStackGuarantee(&guarantee);
 
