@@ -248,13 +248,20 @@ size_t walk_stack(const CONTEXT& start, uintptr_t stack_low, uintptr_t stack_hig
         const uintptr_t rsp = ctx.Rsp;
         if (!on_stack(rsp)) return n;  // a broken rsp: nothing to unwind or scan
         if (at.change.context_return) {
-            // Returned to a context stub: rbx is its saved context, and the
-            // game was at the site's address with those registers.
+            // Returned to the shared context stub: its spare slot names the
+            // site, rbx is its saved context, and the game was at the site's
+            // address with those registers.
+            uintptr_t state = 0;
+            AddressAttribution site;
             AnvilCpuContext cpu{};
-            if (!read_memory(ctx.Rbx, &cpu, sizeof(cpu)) || !on_stack(cpu.rsp)) {
+            if (s.changes == nullptr ||
+                !read_memory(rsp + ChangeRegistry::context_stub_site_slot(), &state, sizeof(state)) ||
+                !s.changes->attribute_context(state, site) || !read_memory(ctx.Rbx, &cpu, sizeof(cpu)) ||
+                !on_stack(cpu.rsp)) {
                 scan_from = rsp;
                 break;
             }
+            frame->where.change = site;
             load_context(ctx, cpu);
             ctx.Rip = at.change.site;
             source = FrameSource::ContextStub;

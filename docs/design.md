@@ -260,7 +260,7 @@ Every call that touches `eu4.exe` takes a declared symbol, never a raw RVA. Raw 
 
 - The layout is identical to SafetyHook's `Context64` (408 bytes): XMM0–15, RFLAGS, the GPRs, `rsp` (read-only), a reserved slot (`trampoline_rsp`) and `rip` (writable). It is pinned with `static_assert`s.
 - YMM upper halves, x87 and MXCSR are not saved.
-- Anvil runs a copy of SafetyHook 0.7's stub, one per address: one context save for all mid hooks there and the block replacement, so a later SafetyHook cannot change the ABI.
+- Anvil runs a copy of SafetyHook 0.7's stub, so a later SafetyHook cannot change the ABI: one context save for all mid hooks at an address and the block replacement. One copy serves every address; each address enters it through its own 24-byte thunk that pushes the address's state as `rip`, which the dispatch loop replaces with the resume address before any callback runs.
 - A lighter, volatile-only context is not offered in 1.0 (§17).
 
 ## 9. Plugin API 2
@@ -358,7 +358,7 @@ Decided in [Crash attribution to plugins](https://github.com/happy-dwarf-team/an
   - for `eu4.exe` addresses, the nearest declared symbol and whether a plugin's change covers it;
   - for stubs and trampolines, the change, plugin and symbol;
   - the unwound stack with every frame attributed;
-    - frames come from unwind data (`RtlVirtualUnwind`). Anvil's stubs have none: a return address in a context stub continues from its saved `AnvilCpuContext` at the site, and a trampoline is unwound as the game instructions it copies. Anything else without unwind data (other stubs, code of no module) switches to a scan of the stack for return addresses, marked "scan" (they may be stale);
+    - frames come from unwind data (`RtlVirtualUnwind`). Anvil's stubs have none: a return address in the context stub continues from its saved `AnvilCpuContext` at the site (the stub is shared, so the dispatch loop leaves the site's state in a spare slot of the stub's frame for the walk), and a trampoline is unwound as the game instructions it copies. Anything else without unwind data (other stubs, code of no module) switches to a scan of the stack for return addresses, marked "scan" (they may be stale);
     - repeated frames (a recursion) are counted, not listed;
   - the registers, the plugins with versions and `issues` links, the build, the earlier fatal-looking exceptions of the VEH, and the tail of the log.
 - **Levels:** "in plugin X's code", "in plugin X's change", "plugin X on the stack", or "no plugin involved". Never "X caused it".
@@ -554,7 +554,7 @@ Decided in [Performance budgets and how the lab measures them](https://github.co
 | Mid hook, block replacement: first / each further link | ≤ 25 ns / ≤ 20 ns |
 | Pointer swap, byte patch, import replacement | 0 |
 | All changes of the standard plugins in a SIMULATION year | ≤ 0.5% |
-| Memory: core / per change (mid hook, block replacement) | ≤ 2 MB / ≤ 1 KB (≤ 2 KB) |
+| Memory: core / per change | ≤ 2 MB / ≤ 1 KB |
 
 **Method**
 - In-game impact is per-call cost × counted calls; the optional counters are enabled with `profile = true`.
@@ -576,7 +576,7 @@ Decided in [Performance budgets and how the lab measures them](https://github.co
   - `version.dll`'s image is not private memory. Its writable sections (from its headers; mostly the crash writer's static buffers) are added to the core; its code and read-only data are file-backed and shared, so `SizeOfImage` is reported but not budgeted. This is the method of record for the core budget: start-up private bytes plus `version.dll`'s writable sections, without its image.
   - Not in the core number: what the static CRT of `version.dll` allocates before `AnvilEntry`, the transient buffers of the `eu4.exe` SHA-256 check after loading, and a thread-pool worker that loading `dbghelp.dll` sometimes starts (about 40 KB, named in `other_threads_added` when it is in the measurement).
   - **Per change:** for each kind, 1000 changes of one owner at 1000 distinct sites of a synthetic image (functions in executable scratch memory, a PE header with 1000 imports for import replacements), with a snapshot every 100 changes. Bytes per change are the slope of a least-squares line, so a stub arena or a vector's growth counts by its share. The plugin's own memory (its `next` pointers) exists before the first snapshot. Each kind reports the executable bytes per change apart; the budget is the total. Each kind runs in its own child process: in one process, heap commit one kind left behind or a commit step it ended on landed on the next kind's slope (a block replacement read about 1645 B right after the mid hooks, about 1450 B alone).
-  - A mid hook and a block replacement get ≤ 2 KB instead of 1 KB: each code site with them has its own executable context stub (391 B, about 416 B with its entry stub) and its own chain state on the heap. 1.0 used about 1425 B and 1450 B (heap about 774 B and 791 B in 12 blocks). 1.1 trims the heap to about 638 B and 653 B in 9 blocks (#90): a change keeps its label and symbol in one block, a dispatch list is one block, and a site keeps its few original bytes in place. About 270 B of a code site's heap is SafetyHook's own: the `InlineHook` object (168 B), its copy of the stolen bytes, and a node of its thread-trap map (96 B) that it keeps for every hooked address.
+  - Mid hooks and block replacements fit the same 1 KB since 1.1 (#90). 1.0 used about 1520 B and 1540 B: each code site with them had its own executable context stub (391 B) and about 774 B and 791 B of heap in 12 blocks. Now the context stub is shared (each address adds a 24-byte thunk), a change keeps its label and symbol in one block, a dispatch list is one block, and a site keeps its few original bytes in place (heap about 638 B and 653 B in 9 blocks). About 270 B of a code site's heap is SafetyHook's own: the `InlineHook` object (168 B), its copy of the stolen bytes, and a node of its thread-trap map (96 B) that it keeps for every hooked address.
 - Start-up: `anvil.log` times everything from `AnvilEntry`: `resolved … at`, `early phase done at`, and `plugins loaded at`, which is the end of the core start-up; `game ready at` follows `anvil-game.ready`.
 - Start-up follows the lab procedure, with ≥ 5 runs per variant.
 - SIMULATION A/B through Tongs, with ≥ 5 valid trials, guards only against ≥ 2% regressions.
@@ -589,8 +589,8 @@ Exceeding a budget blocks the release and any change to stubs, chains or core st
   - The chain enters the link through a 32-byte counting stub: `push rax; mov rax, counter; lock inc qword [rax]; pop rax; jmp detour`.
   - Flags are dead at a function entry and at a call, so the stub only saves `rax`.
   - The link's own `next` is unchanged.
-- Mid hooks and block replacements: the site's context stub calls a counting copy of the dispatch loop, which counts each callback it calls. A callback skipped because an earlier mid hook changed `rip` is not counted.
-- Off, none of this exists: chains enter detours directly and the context stubs call the plain dispatch loop. The setting is read at start-up.
+- Mid hooks and block replacements: the shared context stub calls a counting copy of the dispatch loop, which counts each callback it calls. A callback skipped because an earlier mid hook changed `rip` is not counted.
+- Off, none of this exists: chains enter detours directly and the context stub calls the plain dispatch loop. The setting is read at start-up.
 - Pointer swaps, byte patches and import replacements are not counted: their cost is 0 (see the table above).
 - **Report:** when the process exits, `anvil.log` gets one line per counted change under its plugin's id (at info level), e.g. `calls: function hook rva 0x8024D0 [speed_object]: 1234 calls`.
   - Removed changes that saw calls are included.

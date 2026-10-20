@@ -243,8 +243,14 @@ public:
     // when the registry is busy (a crashed thread may hold its lock).
     bool attribute(uintptr_t address, AddressAttribution& out) const;
     // The return address inside a context stub, after its call to the
-    // callbacks; rbx then holds the saved AnvilCpuContext.
+    // callbacks; rbx then holds the saved AnvilCpuContext. All code sites
+    // share the context stub, so attribute() names no site there: the qword
+    // at that frame's rsp + context_stub_site_slot() does, and
+    // attribute_context() turns it into the site and its changes (false for
+    // no known site, or when the registry is busy; it never reads `state`).
     static size_t context_stub_return();
+    static size_t context_stub_site_slot();
+    bool attribute_context(uintptr_t state, AddressAttribution& out) const;
 
 private:
     struct Site;
@@ -282,6 +288,7 @@ private:
     size_t extent(const Site& site) const;
     std::string site_name(const Site& site) const;
     uint8_t* new_stub(uintptr_t target);
+    uint8_t* context_stub(const uint8_t* from);
     bool in_image(uintptr_t address, size_t size) const;
     bool read_original_locked(uintptr_t address, void* out, size_t size) const;
     void* alloc_near_locked(size_t size);
@@ -303,6 +310,7 @@ private:
         size_t size;
     };
     std::vector<Arena> arenas_;
+    std::vector<uint8_t*> context_stubs_;  // shared copies of the context stub, never freed
 };
 
 // Writes to code/data pages with a temporary protection change and flushes the

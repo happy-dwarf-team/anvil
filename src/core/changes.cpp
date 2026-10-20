@@ -4,6 +4,8 @@
 #include <safetyhook.hpp>
 #include <safetyhook/os.hpp>
 
+#include <intrin.h>
+
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
@@ -116,9 +118,12 @@ void set_stub(uint8_t* stub, uintptr_t target) {
 // Windows mid-hook stub (src/mid_hook.cpp, MIT), byte for byte, so the saved
 // context is its Context64. It pushes the qword at +383 as `rip`, saves
 // RFLAGS, the GPRs and XMM0-15, calls the function at +375 with rcx = the
-// context, restores everything and returns to the context's `rip`. Anvil
-// stores the site's CpuStub at +383; dispatch() replaces it with the real
-// resume address before any plugin sees the context.
+// context, restores everything and returns to the context's `rip`.
+//
+// Anvil shares one copy between all code sites (per dispatch function) and
+// enters it past that first push: each site's thunk pushes its own CpuStub as
+// `rip` instead. dispatch() replaces it with the real resume address before
+// any plugin sees the context.
 constexpr uint8_t kCpuStub[391] = {
     0xFF, 0x35, 0x79, 0x01, 0x00, 0x00, 0x54, 0x54, 0x55, 0x50, 0x53, 0x51, 0x52, 0x56, 0x57, 0x41, 0x50, 0x41, 0x51,
     0x41, 0x52, 0x41, 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0x9C, 0x48, 0x81, 0xEC, 0x00, 0x01, 0x00,
@@ -150,6 +155,24 @@ static_assert(kCpuStub[kCpuStubReturn - 6] == 0xFF && kCpuStub[kCpuStubReturn - 
               kCpuStubReturn + 0xA8 == kCpuStubDestination);
 static_assert(kCpuStub[kCpuStubReturn - 17] == 0x48 && kCpuStub[kCpuStubReturn - 16] == 0x89 &&
               kCpuStub[kCpuStubReturn - 15] == 0xE3);  // mov rbx, rsp (rsp = the context), then the alignment
+// Where a site's thunk enters: past the stub's push qword [rip+0x179].
+constexpr size_t kCpuStubBody = 6;
+static_assert(kCpuStub[0] == 0xFF && kCpuStub[1] == 0x35 && kCpuStubBody + 0x179 == kCpuStubState);
+// The stub reserves 0x30 bytes below the context before its call (sub rsp,
+// 0x30; and rsp, -16): the callee's 0x20 bytes of home space, then a spare
+// qword at [rsp+0x20], below the context. dispatch() leaves the site's CpuStub
+// there, so a stack walk that returns into the shared stub finds the site.
+constexpr size_t kCpuStubSiteSlot = 0x20;
+static_assert(kCpuStub[kCpuStubReturn - 14] == 0x48 && kCpuStub[kCpuStubReturn - 13] == 0x83 &&
+              kCpuStub[kCpuStubReturn - 12] == 0xEC && kCpuStub[kCpuStubReturn - 11] == 0x30 &&
+              kCpuStubSiteSlot + 8 <= 0x30);
+
+// A code site's way into the shared context stub: push qword [rip+10] (the
+// site's CpuStub, at +16, which the stub saves as `rip`); jmp rel32 to the
+// stub's body; int3 x5; dq CpuStub.
+constexpr size_t kThunkSize = 24;
+constexpr size_t kThunkState = 16;
+constexpr size_t kThunkJumpEnd = 11;  // the jmp's rel32 counts from here
 
 // Call stub: the original `call rel32` of a code site, so mid hooks at a call
 // pass on to the callee or to the redirect chain with the game's own return
@@ -389,9 +412,9 @@ struct ChangeRegistry::Dispatch {
     Item* items() { return reinterpret_cast<Item*>(this + 1); }
 };
 
-// A code site's context stub (kCpuStub) and what dispatch() needs.
+// A code site's thunk into the shared context stub and what dispatch() needs.
 struct ChangeRegistry::CpuStub {
-    uint8_t* code = nullptr;
+    uint8_t* code = nullptr;  // the thunk
     ChangeRegistry* registry = nullptr;
     uintptr_t address = 0;
     std::atomic<const Dispatch*> current{nullptr};  // with every older list behind it
@@ -493,11 +516,21 @@ void ChangeRegistry::set_profile(bool on) {
     profile_ = on;
 }
 
-// Called by a code site's context stub on the game's thread, without the
-// registry's lock: it reads only the published list. dispatch_counted is the
-// stub's target instead when the site was created with profile = true.
-void ChangeRegistry::dispatch(AnvilCpuContext* cpu) { run_callbacks<false>(cpu); }
-void ChangeRegistry::dispatch_counted(AnvilCpuContext* cpu) { run_callbacks<true>(cpu); }
+// Called by a context stub on the game's thread, without the registry's lock:
+// it reads only the published list. dispatch_counted is the stub's target
+// instead when the site was created with profile = true. Each first leaves
+// the site's CpuStub (still in `rip`) in the stub's spare slot for a stack walk.
+namespace {
+constexpr size_t kSiteSlotIndex = 1 + kCpuStubSiteSlot / sizeof(uintptr_t);  // past the return address
+}
+void ChangeRegistry::dispatch(AnvilCpuContext* cpu) {
+    static_cast<volatile uintptr_t*>(_AddressOfReturnAddress())[kSiteSlotIndex] = cpu->rip;
+    run_callbacks<false>(cpu);
+}
+void ChangeRegistry::dispatch_counted(AnvilCpuContext* cpu) {
+    static_cast<volatile uintptr_t*>(_AddressOfReturnAddress())[kSiteSlotIndex] = cpu->rip;
+    run_callbacks<true>(cpu);
+}
 
 namespace {
 LONG unhandled(EXCEPTION_POINTERS* info) { return UnhandledExceptionFilter(info); }
@@ -511,7 +544,7 @@ LONG unhandled(EXCEPTION_POINTERS* info) { return UnhandledExceptionFilter(info)
 // costs nothing until an exception is raised.
 template <bool Count> void ChangeRegistry::run_callbacks(AnvilCpuContext* cpu) {
     __try {
-        auto* stub = reinterpret_cast<CpuStub*>(cpu->rip);  // kCpuStubState, pushed as rip
+        auto* stub = reinterpret_cast<CpuStub*>(cpu->rip);  // pushed as rip by the site's thunk
         const Dispatch* list = stub->current.load(std::memory_order_acquire);
         cpu->rip = list->resume;
         const Dispatch::Item* const end = list->items() + list->count;
@@ -999,16 +1032,21 @@ ChangeStatus ChangeRegistry::code_site(OwnerId owner, const ChangeTarget& target
         set_stub(entry, site->terminal);
     }
     if (kind != ChangeKind::FunctionHook && !site->cpu) {
-        auto* code = static_cast<uint8_t*>(alloc_near_locked(sizeof(kCpuStub)));
-        if (code == nullptr) return refuse(owner, ChangeStatus::OutOfMemory, label + ": no stub memory");
+        auto* code = static_cast<uint8_t*>(alloc_near_locked(kThunkSize));
+        const uint8_t* context = code != nullptr ? context_stub(code + kThunkJumpEnd) : nullptr;
+        if (context == nullptr) return refuse(owner, ChangeStatus::OutOfMemory, label + ": no stub memory");
         auto cpu = std::make_unique<CpuStub>();
-        std::memcpy(code, kCpuStub, sizeof(kCpuStub));
-        const uintptr_t destination = reinterpret_cast<uintptr_t>(profile_ ? &ChangeRegistry::dispatch_counted
-                                                                           : &ChangeRegistry::dispatch);
+        const auto rel = static_cast<int32_t>(reinterpret_cast<intptr_t>(context + kCpuStubBody) -
+                                              reinterpret_cast<intptr_t>(code + kThunkJumpEnd));
         const uintptr_t state = reinterpret_cast<uintptr_t>(cpu.get());
-        std::memcpy(code + kCpuStubDestination, &destination, sizeof(destination));
-        std::memcpy(code + kCpuStubState, &state, sizeof(state));
-        FlushInstructionCache(GetCurrentProcess(), code, sizeof(kCpuStub));
+        const uint8_t thunk[kThunkState] = {0xFF, 0x35, 0x0A, 0x00, 0x00, 0x00,  // push qword [rip+10]
+                                            0xE9, 0,    0,    0,    0,           // jmp rel32
+                                            0xCC, 0xCC, 0xCC, 0xCC, 0xCC};
+        static_assert(6 + 0x0A == kThunkState && 6 + 5 == kThunkJumpEnd);
+        std::memcpy(code, thunk, sizeof(thunk));
+        std::memcpy(code + 7, &rel, sizeof(rel));
+        std::memcpy(code + kThunkState, &state, sizeof(state));
+        FlushInstructionCache(GetCurrentProcess(), code, kThunkSize);
         cpu->code = code;
         cpu->registry = this;
         cpu->address = site->address;
@@ -1042,6 +1080,29 @@ bool ChangeRegistry::add_call_stub(Site& code, const Site* call) {
     code.call_stub = stub;
     code.terminal = reinterpret_cast<uintptr_t>(stub);
     return true;
+}
+
+// The shared context stub for the current dispatch function (profile or not)
+// within rel32 reach of `from`, created on first use.
+uint8_t* ChangeRegistry::context_stub(const uint8_t* from) {
+    const uintptr_t destination =
+        reinterpret_cast<uintptr_t>(profile_ ? &ChangeRegistry::dispatch_counted : &ChangeRegistry::dispatch);
+    const auto reaches = [from](const uint8_t* stub) {
+        const intptr_t delta = reinterpret_cast<intptr_t>(stub + kCpuStubBody) - reinterpret_cast<intptr_t>(from);
+        return delta >= INT32_MIN && delta <= INT32_MAX;
+    };
+    for (uint8_t* stub : context_stubs_) {
+        uintptr_t target = 0;
+        std::memcpy(&target, stub + kCpuStubDestination, sizeof(target));
+        if (target == destination && reaches(stub)) return stub;
+    }
+    auto* stub = static_cast<uint8_t*>(alloc_near_locked(sizeof(kCpuStub)));
+    if (stub == nullptr || !reaches(stub)) return nullptr;
+    std::memcpy(stub, kCpuStub, sizeof(kCpuStub));
+    std::memcpy(stub + kCpuStubDestination, &destination, sizeof(destination));
+    FlushInstructionCache(GetCurrentProcess(), stub, sizeof(kCpuStub));
+    context_stubs_.push_back(stub);
+    return stub;
 }
 
 ChangeStatus ChangeRegistry::hook_function(OwnerId owner, const ChangeTarget& target, void* detour, void** next,
@@ -1547,7 +1608,32 @@ std::vector<OwnerId> ChangeRegistry::chain_at(uintptr_t address) const {
     return out;
 }
 
+bool ChangeRegistry::attribute_context(uintptr_t state, AddressAttribution& out) const {
+    out = AddressAttribution{};
+    std::unique_lock lock(mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) return false;
+    for (const auto& site : sites_) {
+        const Site& s = *site;
+        if (!s.cpu || reinterpret_cast<uintptr_t>(s.cpu.get()) != state) continue;
+        out.role = AddressRole::Stub;
+        out.context_return = true;
+        out.site = s.address;
+        const bool any_active =
+            std::any_of(s.links.begin(), s.links.end(), [](const Change* c) { return c->state == LinkState::Active; });
+        for (const Change* c : s.links) {
+            if (any_active && c->state != LinkState::Active) continue;
+            if (out.count < AddressAttribution::kMaxChanges) {
+                out.changes[out.count++] = {c->id, c->owner, c->kind, c->label(), c->symbol()};
+            }
+            ++out.total;
+        }
+        return true;
+    }
+    return false;
+}
+
 size_t ChangeRegistry::context_stub_return() { return kCpuStubReturn; }
+size_t ChangeRegistry::context_stub_site_slot() { return kCpuStubSiteSlot; }
 
 bool ChangeRegistry::attribute(uintptr_t address, AddressAttribution& out) const {
     out = AddressAttribution{};
@@ -1585,9 +1671,8 @@ bool ChangeRegistry::attribute(uintptr_t address, AddressAttribution& out) const
     for (const auto& site : sites_) {
         const Site& s = *site;
         if (inside(s.entry, kStubSize) || inside(s.call_stub, kCallStubSize) ||
-            (s.cpu && inside(s.cpu->code, sizeof(kCpuStub)))) {
+            (s.cpu && inside(s.cpu->code, kThunkSize))) {
             out.role = AddressRole::Stub;
-            out.context_return = s.cpu && address == reinterpret_cast<uintptr_t>(s.cpu->code) + kCpuStubReturn;
             add_site(s);
             return true;
         }
@@ -1613,6 +1698,15 @@ bool ChangeRegistry::attribute(uintptr_t address, AddressAttribution& out) const
         // only to count the other owners, the role stays.
     }
     if (out.role != AddressRole::None) return true;
+    // A shared context stub belongs to no site: attribute_context() finds
+    // the site of a return into it.
+    for (const uint8_t* stub : context_stubs_) {
+        if (inside(stub, sizeof(kCpuStub))) {
+            out.role = AddressRole::Stub;
+            out.context_return = address == reinterpret_cast<uintptr_t>(stub) + kCpuStubReturn;
+            return true;
+        }
+    }
     for (const Arena& a : arenas_) {
         if (inside(a.base, a.size)) {
             out.role = AddressRole::StubMemory;

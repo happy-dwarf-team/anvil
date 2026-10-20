@@ -1,5 +1,5 @@
 // anvil_bench --memory: the memory budgets of design §17 (core <= 2 MB,
-// <= 1 KB per change, <= 2 KB per mid hook or block replacement).
+// <= 1 KB per change).
 //
 // Core: a child process (anvil_bench --memory-core DIR) runs the real
 // anvil::startup() on DIR, a game folder with anvil/anvil.toml and an empty
@@ -54,13 +54,6 @@ using namespace anvil;
 
 constexpr uint64_t kCoreBudget = 2 * 1024 * 1024;
 constexpr double kChangeBudget = 1024;
-// A mid hook or a block replacement has its own stub with a saved context and
-// a callback list, so its budget is larger.
-constexpr double kStubChangeBudget = 2048;
-
-double change_budget(const std::string& kind) {
-    return kind == "mid_hook" || kind == "block_replacement" ? kStubChangeBudget : kChangeBudget;
-}
 constexpr int kCheckpoints = 10;
 
 struct Snapshot {
@@ -742,8 +735,8 @@ int memory_main(size_t n, const char* out_path) {
     for (size_t i = 0; i < kinds.size(); ++i) {
         const Kind& k = kinds[i];
         json += "    \"" + k.name + "\": {\"bytes\": " + json_number(k.slope.private_bytes) + ", \"budget_bytes\": " +
-                json_number(change_budget(k.name)) + ", \"within\": " +
-                (k.slope.private_bytes <= change_budget(k.name) ? "true" : "false") +
+                json_number(kChangeBudget) + ", \"within\": " +
+                (k.slope.private_bytes <= kChangeBudget ? "true" : "false") +
                 ", \"what\": \"private bytes per change (stubs included)\"}" + (i + 1 < kinds.size() ? ",\n" : "\n");
     }
     json += "  }\n}\n";
@@ -776,8 +769,8 @@ int memory_main(size_t n, const char* out_path) {
     std::fprintf(stderr, "%-24s %12s %12s %12s %10s\n", "per change (bytes)", "private", "heap", "executable", "budget");
     for (const auto& k : kinds) {
         std::fprintf(stderr, "%-24s %12.1f %12.1f %12.1f %10.0f%s\n", k.name.c_str(), k.slope.private_bytes,
-                     k.slope.heap_bytes, k.slope.executable_bytes, change_budget(k.name),
-                     k.slope.private_bytes <= change_budget(k.name) ? "" : "  OVER");
+                     k.slope.heap_bytes, k.slope.executable_bytes, kChangeBudget,
+                     k.slope.private_bytes <= kChangeBudget ? "" : "  OVER");
     }
     return 0;
 }
