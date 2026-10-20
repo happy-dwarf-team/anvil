@@ -46,6 +46,7 @@ struct Installation {
     std::string dll_version;      // Anvil's version.dll: its ProductVersion
     bool anvil_folder = false;    // <EU4>/anvil exists
     bool manager_copy = false;    // <EU4>/AnvilManager.exe exists
+    bool manager_current = false;  // ... and has the bytes of the running Manager
     std::vector<std::string> missing;    // package files that are not there (anvil.toml included)
     std::vector<std::string> differing;  // package files with other bytes (not anvil.toml)
     std::vector<std::string> extra;      // files in a standard plugin's folder the package does not have
@@ -55,7 +56,9 @@ struct Installation {
     bool intact() const;
 };
 
-Installation inspect_installation(const Package& package, const std::filesystem::path& game_dir);
+// `manager_exe` is the running AnvilManager.exe (empty: not compared).
+Installation inspect_installation(const Package& package, const std::filesystem::path& game_dir,
+                                  const std::filesystem::path& manager_exe = {});
 
 struct Step {
     enum class Kind {
@@ -80,7 +83,7 @@ struct Plan {
 // missing or differs is written (anvil.toml only when missing: the player's
 // settings stay), files in a standard plugin's folder that the package does
 // not have are removed, and the Manager copies itself into the folder when
-// `manager_exe` is given and not already that file. version.dll comes last,
+// `manager_exe` is given, is not that file and the copy there differs. version.dll comes last,
 // so the game stays vanilla until Anvil is complete. A version.dll that is
 // not Anvil's (another mod's proxy) is refused unless `replace_foreign_dll`.
 Plan plan_install(const Package& package, const Installation& installation, const std::filesystem::path& game_dir,

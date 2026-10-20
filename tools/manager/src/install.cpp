@@ -152,7 +152,7 @@ bool Installation::intact() const {
            std::all_of(missing.begin(), missing.end(), [](const std::string& path) { return path == kPlayerToml; });
 }
 
-Installation inspect_installation(const Package& package, const fs::path& game_dir) {
+Installation inspect_installation(const Package& package, const fs::path& game_dir, const fs::path& manager_exe) {
     Installation out;
     const fs::path dll = game_dir / "version.dll";
     if (is_file(dll)) {
@@ -166,6 +166,9 @@ Installation inspect_installation(const Package& package, const fs::path& game_d
     }
     out.anvil_folder = is_dir(game_dir / "anvil");
     out.manager_copy = is_file(game_dir / kManagerExe);
+    out.manager_current = out.manager_copy && !manager_exe.empty() &&
+                          (same_file(manager_exe, game_dir / kManagerExe) ||
+                           sha256_file(manager_exe) == sha256_file(game_dir / kManagerExe));
     std::set<std::string> known;
     for (const Package::File& file : package.files) {
         known.insert(file.path);
@@ -221,7 +224,7 @@ Plan plan_install(const Package& package, const Installation& installation, cons
         }
     }
     if (installation.dll == Installation::Dll::Foreign) dll = true;
-    if (!manager_exe.empty() && !same_file(manager_exe, game_dir / kManagerExe)) {
+    if (!manager_exe.empty() && !installation.manager_current && !same_file(manager_exe, game_dir / kManagerExe)) {
         plan.steps.push_back({Step::Kind::CopyManager, kManagerExe});
     }
     if (dll) plan.steps.push_back({Step::Kind::Write, "version.dll"});

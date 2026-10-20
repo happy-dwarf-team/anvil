@@ -283,10 +283,20 @@ int main(int argc, char** argv) {
         CHECK(read(game / "AnvilManager.exe") == "manager" && read(game / "version.dll") == version_dll);
         CHECK(read(game / "anvil" / "plugins" / "anvil-game" / "anvil-game.dll") == "MZ game");
 
-        const Installation after = inspect_installation(*package, game);
-        CHECK(after.intact() && after.installed() && after.dll_version == ANVIL_VERSION && after.manager_copy);
-        // Nothing to do: the Manager running from the folder is not copied onto itself.
-        CHECK(plan_install(*package, after, game, game / "AnvilManager.exe", false).steps.empty());
+        const Installation after = inspect_installation(*package, game, manager);
+        CHECK(after.intact() && after.installed() && after.dll_version == ANVIL_VERSION && after.manager_copy &&
+              after.manager_current);
+        // Nothing to do: the same Manager again, or the Manager running from the folder.
+        CHECK(plan_install(*package, after, game, manager, false).steps.empty());
+        CHECK(plan_install(*package, inspect_installation(*package, game, game / "AnvilManager.exe"), game,
+                           game / "AnvilManager.exe", false).steps.empty());
+        // A newer Manager replaces the copy in the folder.
+        write(manager, "newer manager");
+        const Installation older_copy = inspect_installation(*package, game, manager);
+        CHECK(!older_copy.manager_current);
+        const Plan copy = plan_install(*package, older_copy, game, manager, false);
+        CHECK(copy.steps.size() == 1 && copy.steps[0].kind == Step::Kind::CopyManager);
+        CHECK(apply_plan(*package, copy, game, manager).ok && read(game / "AnvilManager.exe") == "newer manager");
         CHECK(!fs::exists(game / "anvil" / "anvil.toml.anvil-new"));
     });
 
@@ -461,7 +471,12 @@ int main(int argc, char** argv) {
         };
         CHECK(contains(refusal({{"readme.txt", "x"}}), "no plugin.toml"));
         CHECK(contains(refusal({{"a/plugin.toml", plugin_toml("a")}, {"b/plugin.toml", plugin_toml("b")}}), "more than one plugin"));
-        CHECK(contains(refusal({{"a/plugin.toml", plugin_toml("a")}, {"a/a.dll", "MZ"}, {"other.txt", "x"}}), "outside the plugin's folder"));
+        {
+            // Files next to the plugin's folder (a release's SHA256SUMS.txt) are left out.
+            const auto zip = zip_of({{"a/plugin.toml", plugin_toml("a")}, {"a/a.dll", "MZ"}, {"SHA256SUMS.txt", "x"}});
+            const PluginZipCheck check = check_plugin_zip(*zip, game, temp.dir / "tmp", standard);
+            CHECK(check.error.empty() && check.files.size() == 2 && check.ignored == std::vector<std::string>({"SHA256SUMS.txt"}));
+        }
         CHECK(refusal({{"a/plugin.toml", plugin_toml("a")}, {"a/a.dll", "MZ"}, {"__MACOSX/a/._a.dll", "x"}}).empty());
         CHECK(contains(refusal({{"plugin.toml", plugin_toml("anvil-game")}, {"anvil-game.dll", "MZ"}}), "comes with Anvil"));
         CHECK(contains(refusal({{"plugin.toml", plugin_toml("a")}}), "a.dll"));  // no entry DLL

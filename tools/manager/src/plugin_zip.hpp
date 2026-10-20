@@ -12,11 +12,14 @@ namespace anvil::manager {
 // A plugin zip the player picked (issue #59): `<id>-<version>.zip` as the
 // template releases it, the contents of anvil/plugins/<id>/ in one folder.
 // The plugin's folder in the zip is the one with the shallowest plugin.toml:
-// the root, `<folder>/` or `anvil/plugins/<folder>/`. Nothing is downloaded.
+// the root, `<folder>/` or `anvil/plugins/<folder>/`; files outside it are
+// not installed. Nothing is downloaded.
 struct PluginZipCheck {
     std::string error;  // the zip cannot be installed at all; the rest may be empty
     std::string root;   // the plugin's folder in the zip, "" or ending in '/'
     std::vector<const ZipEntry*> files;  // below root
+    // Files outside the plugin's folder (a release's SHA256SUMS.txt): not installed.
+    std::vector<std::string> ignored;
     // The plugin as `anvil check <folder> --exe <EU4>/eu4.exe` sees it,
     // unpacked to a temporary folder (no symbols.lock is written).
     cli::CheckReport report;

@@ -74,9 +74,7 @@ PluginZipCheck check_plugin_zip(const ZipArchive& zip, const fs::path& game_dir,
         if (entry.path.starts_with(out.root)) {
             out.files.push_back(&entry);
         } else if (!entry.path.starts_with("__MACOSX/")) {
-            out.error = "'" + entry.path + "' lies outside the plugin's folder (" +
-                        (out.root.empty() ? std::string("the zip's root") : out.root) + ") in the zip";
-            return out;
+            out.ignored.push_back(entry.path);  // e.g. the release's SHA256SUMS.txt
         }
     }
 
