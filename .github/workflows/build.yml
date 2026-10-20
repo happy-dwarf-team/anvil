@@ -89,6 +89,14 @@ jobs:
           }
           bench/check-regression.ps1 -Result bench-1.json, bench-2.json, bench-3.json
 
+      # Memory budgets (design §17): run so the tool keeps working, not gated;
+      # the bytes depend on the Windows build, and the lab checks the budgets.
+      - name: Memory
+        shell: pwsh
+        run: |
+          build/Release/anvil_bench.exe --memory --out bench-memory.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:

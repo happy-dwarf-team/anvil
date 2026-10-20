@@ -3,16 +3,22 @@
 # with at least 30 repetitions (median reported), and EU4 closed.
 #
 #   pwsh bench/run-lab.ps1 [-Bench build/Release/anvil_bench.exe] [-Repetitions 31] [-Out bench-lab.json]
+#   pwsh bench/run-lab.ps1 -Memory [-Changes 1000] [-Out bench-lab-memory.json]
 #
 # Writes the anvil_bench JSON with a "lab" section (commit, SHA-256 of the
 # benchmark, start time, Windows build) and prints the per-link costs against
-# the budgets. Exit 1 when a budget is exceeded, 2 when the conditions are not met.
+# the budgets. -Memory measures the memory budgets instead (anvil_bench
+# --memory: the core start-up and N changes of each kind; not pinned, as the
+# bytes do not depend on the CPU). Exit 1 when a budget is exceeded, 2 when
+# the conditions are not met.
 param(
     [string]$Bench = (Join-Path $PSScriptRoot '..\build\Release\anvil_bench.exe'),
     [int]$Repetitions = 31,
     [int]$Cpu = 4,
     [double]$SampleMs = 2,
-    [string]$Out = ("bench-lab-{0}.json" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    [switch]$Memory,
+    [int]$Changes = 1000,
+    [string]$Out = ("bench-lab-{0}{1}.json" -f $(if ($Memory) { 'memory-' } else { '' }), (Get-Date -Format 'yyyyMMdd-HHmmss'))
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,7 +42,11 @@ if ($Cpu -ge [Environment]::ProcessorCount) {
 }
 
 $started = Get-Date
-& $Bench --repetitions $Repetitions --cpu $Cpu --sample-ms $SampleMs --out $Out
+if ($Memory) {
+    & $Bench --memory --changes $Changes --out $Out
+} else {
+    & $Bench --repetitions $Repetitions --cpu $Cpu --sample-ms $SampleMs --out $Out
+}
 if ($LASTEXITCODE -ne 0) {
     Write-Error "anvil_bench failed with exit code $LASTEXITCODE"
     exit 2
@@ -54,13 +64,24 @@ $result | Add-Member -NotePropertyName lab -NotePropertyValue ([ordered]@{
 })
 $result | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $Out -Encoding utf8
 
-if ($result.cpu -notmatch 'i9-13900KF') {
-    Write-Warning "not the lab CPU ($($result.cpu)): the numbers are not binding"
-}
 $over = @($result.budgets.PSObject.Properties | Where-Object { -not $_.Value.within })
 Write-Host ''
-Write-Host "Result: $Out ($($result.repetitions) repetitions, CPU $Cpu, $($result.cpu))"
-foreach ($b in $over) {
-    Write-Host ("over budget: {0} {1:N2} ns > {2} ns" -f $b.Name, [double]$b.Value.ns, $b.Value.budget_ns)
+if ($Memory) {
+    Write-Host "Result: $Out ($($result.changes) changes per kind)"
+    if ($null -eq $result.image) {
+        Write-Error 'version.dll was not found next to anvil_bench; the core budget was not checked'
+        exit 2
+    }
+    foreach ($b in $over) {
+        Write-Host ("over budget: {0} {1:N0} bytes > {2} bytes" -f $b.Name, [double]$b.Value.bytes, $b.Value.budget_bytes)
+    }
+} else {
+    if ($result.cpu -notmatch 'i9-13900KF') {
+        Write-Warning "not the lab CPU ($($result.cpu)): the numbers are not binding"
+    }
+    Write-Host "Result: $Out ($($result.repetitions) repetitions, CPU $Cpu, $($result.cpu))"
+    foreach ($b in $over) {
+        Write-Host ("over budget: {0} {1:N2} ns > {2} ns" -f $b.Name, [double]$b.Value.ns, $b.Value.budget_ns)
+    }
 }
 if ($over.Count -gt 0) { exit 1 }

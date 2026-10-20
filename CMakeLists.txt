@@ -158,9 +158,13 @@ unset(CMAKE_COMPILE_WARNING_AS_ERROR)
 # anvil_bench: microbenchmarks per kind of change and of the start-up parsers
 # (design §17). CI runs it as its own step against bench/baseline-ci.json; the
 # lab runs it pinned through bench/run-lab.ps1. Not part of ctest.
+# anvil_bench --memory measures the memory budgets; it reads version.dll's
+# headers next to it and copies dist/anvil.toml for the core start-up.
 if(ANVIL_BUILD_BENCH)
-    add_executable(anvil_bench bench/anvil_bench.cpp)
+    add_executable(anvil_bench bench/anvil_bench.cpp bench/memory.cpp)
     target_link_libraries(anvil_bench PRIVATE anvil_loader)
+    target_compile_definitions(anvil_bench PRIVATE ANVIL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_dependencies(anvil_bench version_dll)
 endif()
 
 if(ANVIL_BUILD_TESTS)

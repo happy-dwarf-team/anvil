@@ -101,3 +101,11 @@ bench/check-regression.ps1 -Result bench-1.json
 ```
 
 Binding numbers come from the lab machine: `bench/run-lab.ps1`.
+
+A change that adds memory per change or to the core start-up also measures the
+memory budgets (design §17). CI only runs this; it does not gate on the bytes:
+
+```powershell
+build/Release/anvil_bench.exe --memory --out bench-memory.json
+bench/run-lab.ps1 -Memory   # exit 1 over a budget
+```
