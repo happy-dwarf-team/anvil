@@ -1,0 +1,233 @@
+// anvil-overlay end to end on a real Direct3D 9 device: the plugin loads
+// through the host table with this executable as the "game" image (it imports
+// Direct3DCreate9(Ex), GetAsyncKeyState and GetKeyState like eu4.exe), the
+// core's anvil.control reports a skipped plugin, and the test renders frames
+// on a window of its own. It checks the hooks, that a notice and the panel are
+// drawn on the back buffer, the panel key through the window procedure, a
+// settings change and a device reset. Without a Direct3D 9 device (some CI
+// machines) it reports that and passes.
+// Usage: anvil_overlay_d3d_tests <folder with one folder per plugin>
+#include "core/changes.hpp"
+#include "core/control.hpp"
+#include "core/host.hpp"
+#include "core/manifest.hpp"
+#include "core/services.hpp"
+#include "core/settings.hpp"
+#include "test_support.hpp"
+
+#include <anvil/anvil_plugin.h>
+#include <windows.h>
+#include <d3d9.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace {
+
+using namespace anvil;
+namespace fs = std::filesystem;
+
+constexpr D3DCOLOR kClear = D3DCOLOR_XRGB(0, 0, 0);
+constexpr UINT kWidth = 1280, kHeight = 720;
+
+bool contains(const std::vector<std::string>& log, const std::string& part) {
+    return std::any_of(log.begin(), log.end(), [&](const std::string& l) { return l.find(part) != std::string::npos; });
+}
+
+// Pixels of the back buffer that are not the clear colour, inside a rectangle.
+size_t drawn_pixels(IDirect3DDevice9* device, RECT area) {
+    IDirect3DSurface9* back = nullptr;
+    IDirect3DSurface9* copy = nullptr;
+    size_t count = 0;
+    if (SUCCEEDED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &back)) &&
+        SUCCEEDED(device->CreateOffscreenPlainSurface(kWidth, kHeight, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &copy, nullptr)) &&
+        SUCCEEDED(device->GetRenderTargetData(back, copy))) {
+        D3DLOCKED_RECT locked{};
+        if (SUCCEEDED(copy->LockRect(&locked, &area, D3DLOCK_READONLY))) {
+            for (LONG y = 0; y < area.bottom - area.top; ++y) {
+                const auto* row = reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(locked.pBits) + y * locked.Pitch);
+                for (LONG x = 0; x < area.right - area.left; ++x) count += (row[x] & 0xFFFFFF) != (kClear & 0xFFFFFF) ? 1 : 0;
+            }
+            copy->UnlockRect();
+        }
+    }
+    if (copy) copy->Release();
+    if (back) back->Release();
+    return count;
+}
+
+// One frame, then what it drew in `area` (read before Present).
+size_t frame(IDirect3DDevice9* device, RECT area) {
+    device->Clear(0, nullptr, D3DCLEAR_TARGET, kClear, 1.0f, 0);
+    device->BeginScene();
+    device->EndScene();
+    const size_t drawn = drawn_pixels(device, area);
+    device->Present(nullptr, nullptr, nullptr, nullptr);
+    MSG msg;
+    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&msg);
+    return drawn;
+}
+
+D3DPRESENT_PARAMETERS parameters(HWND window) {
+    D3DPRESENT_PARAMETERS p{};
+    p.Windowed = TRUE;
+    p.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    p.BackBufferFormat = D3DFMT_X8R8G8B8;
+    p.BackBufferWidth = kWidth;
+    p.BackBufferHeight = kHeight;
+    p.hDeviceWindow = window;
+    p.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+    return p;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        std::printf("usage: anvil_overlay_d3d_tests <plugin folder>\n");
+        return 2;
+    }
+    const fs::path dir = fs::absolute(argv[1]) / "anvil-overlay";
+    const fs::path root = fs::temp_directory_path() / "anvil-overlay-d3d";
+    std::error_code ignored;
+    fs::remove_all(root, ignored);
+    fs::create_directories(root / "anvil");
+    // The polling imports the overlay replaces, so this image has them.
+    std::printf("keys %d %d\n", GetAsyncKeyState(VK_F24), GetKeyState(VK_F24));
+
+    // As in the game, everything outlives the plugin.
+    HMODULE self = GetModuleHandleW(nullptr);
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
+        reinterpret_cast<const uint8_t*>(self) + reinterpret_cast<const IMAGE_DOS_HEADER*>(self)->e_lfanew);
+    ChangeRegistry& changes = *new ChangeRegistry(reinterpret_cast<uintptr_t>(self), nt->OptionalHeader.SizeOfImage);
+    ServiceBus& bus = *new ServiceBus;
+    std::vector<std::string>& log = *new std::vector<std::string>;
+    HostContext& context = *new HostContext;
+    context.changes = &changes;
+    context.bus = &bus;
+    context.image = self;
+    context.log = [&log](const AnvilPlugin& p, AnvilLogLevel, std::string_view message) {
+        log.push_back(p.manifest.id + ": " + std::string(message));
+        std::printf("    %s: %.*s\n", p.manifest.id.c_str(), static_cast<int>(message.size()), message.data());
+    };
+    AnvilGameInfo& info = *new AnvilGameInfo{};
+    info.size = sizeof(info);
+    const AnvilHost& host = *new AnvilHost(make_host(&info));
+
+    auto& plugins = *new std::vector<std::unique_ptr<AnvilPlugin>>;
+    auto& skipped = *new std::vector<Skipped>{{"tongs", "requires plugin 'anvil-game', which is not loaded", root, false}};
+    {
+        const auto parsed = load_manifest(dir);
+        CHECK(parsed.manifest.has_value());
+        if (!parsed.manifest) return 1;
+        auto p = std::make_unique<AnvilPlugin>();
+        p->context = &context;
+        p->manifest = *parsed.manifest;
+        p->owner = changes.add_owner(p->manifest.id);
+        p->plugin_dir = dir.wstring();
+        p->data_dir = (root / "anvil" / "data" / "anvil-overlay").wstring();
+        auto schema = load_settings(dir / p->manifest.settings);
+        CHECK(schema.file.has_value());
+        if (!schema.file) return 1;
+        p->settings.init(std::move(*schema.file), fs::path(p->data_dir) / "settings.toml", p->manifest.id,
+                         [](const std::string&) { return std::optional<std::string>(); });
+        plugins.push_back(std::move(p));
+    }
+    ControlSources sources;
+    sources.anvil_dir = root / "anvil";
+    sources.anvil_version = "test";
+    sources.plugins = &plugins;
+    sources.skipped = &skipped;
+    Control& control = *new Control(sources);
+    bus.register_service("anvil", ANVIL_CONTROL_SERVICE, ANVIL_CONTROL_VERSION, control.service());
+
+    AnvilPlugin& overlay = *plugins.front();
+    run("overlay: loads early and replaces the imports", [&] {
+        overlay.module = LoadLibraryExW((dir / overlay.manifest.entry).c_str(), nullptr,
+                                        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+        CHECK(overlay.module != nullptr);
+        if (overlay.module == nullptr) return;
+        const auto fn = reinterpret_cast<PluginLoadFn>(GetProcAddress(overlay.module, "anvil_plugin_load"));
+        const LoadOutcome outcome = run_plugin_load(overlay, host, fn);
+        CHECK(outcome.result == ANVIL_OK && outcome.staged == 4 && changes.count(overlay.owner) == 4);
+        overlay.state = outcome.result == ANVIL_OK ? "loaded" : "failed";
+        CHECK(contains(log, "Direct3DCreate9(Ex) replaced; panel key Ctrl+Shift+F12"));
+        control.loading_done();
+    });
+    if (overlay.state != "loaded") {
+        std::printf("%d checks, %d failed\n", g_checks, g_failures);
+        return 1;
+    }
+
+    WNDCLASSEXW wc{sizeof(wc)};
+    wc.lpfnWndProc = DefWindowProcW;
+    wc.hInstance = self;
+    wc.lpszClassName = L"anvil-overlay-test";
+    RegisterClassExW(&wc);
+    HWND window = CreateWindowExW(0, wc.lpszClassName, L"anvil-overlay test", WS_OVERLAPPEDWINDOW, 0, 0, kWidth, kHeight,
+                                  nullptr, nullptr, self, nullptr);
+    IDirect3D9Ex* d3d_ex = nullptr;
+    if (SUCCEEDED(Direct3DCreate9Ex(D3D_SDK_VERSION, &d3d_ex)) && d3d_ex != nullptr) d3d_ex->Release();
+    IDirect3D9* d3d = Direct3DCreate9(D3D_SDK_VERSION);
+    IDirect3DDevice9* device = nullptr;
+    D3DPRESENT_PARAMETERS pp = parameters(window);
+    if (d3d == nullptr || FAILED(d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window,
+                                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE, &pp,
+                                                   &device))) {
+        std::printf("skipped: no Direct3D 9 device on this machine\n%d checks, %d failed\n", g_checks, g_failures);
+        return g_failures == 0 ? 0 : 1;
+    }
+    const RECT top_right{static_cast<LONG>(kWidth) - 480, 0, static_cast<LONG>(kWidth), 200};
+    const RECT middle{static_cast<LONG>(kWidth) / 2 - 100, static_cast<LONG>(kHeight) / 2 - 50,
+                      static_cast<LONG>(kWidth) / 2 + 100, static_cast<LONG>(kHeight) / 2 + 50};
+
+    run("overlay: the device is hooked and a notice is drawn", [&] {
+        CHECK(contains(log, "Direct3D 9 device found"));
+        // + CreateDevice and CreateDeviceEx (Direct3DCreate9Ex came first), EndScene, Reset.
+        CHECK(changes.count(overlay.owner) == 8);
+        size_t drawn = 0;
+        for (int i = 0; i < 3; ++i) drawn = frame(device, top_right);
+        CHECK(contains(log, "ImGui 1.91.8 started") && contains(log, "1 notice(s) at the start"));
+        CHECK(drawn > 1000);
+        CHECK(frame(device, middle) == 0);  // no panel yet
+    });
+
+    run("overlay: the panel key opens the panel; a setting changes it", [&] {
+        // F11 alone, so the test needs no modifier keys held.
+        AnvilControlResult result{};
+        CHECK(control.service()->setting_set_text("anvil-overlay", 0, "F11", &result) == ANVIL_OK && result.applied == 1);
+        SendMessageW(window, WM_KEYDOWN, VK_F11, 1);
+        size_t drawn = 0;
+        for (int i = 0; i < 3; ++i) drawn = frame(device, middle);
+        CHECK(drawn > 1000);
+        SendMessageW(window, WM_KEYDOWN, VK_F11, 1);
+        frame(device, middle);
+        CHECK(frame(device, middle) == 0);
+        CHECK(control.service()->setting_reset("anvil-overlay", 0, &result) == ANVIL_OK);
+    });
+
+    run("overlay: a device reset keeps drawing", [&] {
+        D3DPRESENT_PARAMETERS again = parameters(window);
+        CHECK(SUCCEEDED(device->Reset(&again)));
+        size_t drawn = 0;
+        for (int i = 0; i < 2; ++i) drawn = frame(device, top_right);
+        CHECK(drawn > 1000);
+    });
+
+    run("overlay: notices close after their time; then no ImGui frame", [&] {
+        AnvilControlResult result{};
+        CHECK(control.service()->setting_set_text("anvil-overlay", 1, "false", &result) == ANVIL_OK);  // notifications off
+        frame(device, top_right);
+        CHECK(frame(device, top_right) == 0);
+    });
+
+    device->Release();
+    d3d->Release();
+    DestroyWindow(window);
+    std::printf("%d checks, %d failed\n", g_checks, g_failures);
+    return g_failures == 0 ? 0 : 1;
+}

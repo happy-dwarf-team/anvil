@@ -1,0 +1,21 @@
+id = "anvil-overlay"
+name = "Anvil overlay"
+version = "1.0.0"
+authors = ["Happy Dwarf Team"]
+description = "Standard plugin: in-game notifications about skipped plugins, the previous crash, safe mode, ironman and multiplayer, and a panel (Ctrl+Shift+F12) with the status, the crash report, the log and every plugin's settings."
+api = 2
+entry = "anvil_overlay.dll"
+# Early: it replaces eu4.exe's imports of Direct3DCreate9(Ex) before the game
+# creates its renderer.
+phase = "early"
+settings = "settings.toml"
+affects_gameplay = false
+issues = "https://github.com/happy-dwarf-team/anvil/issues"
+repository = "https://github.com/happy-dwarf-team/anvil"
+
+# The game's readiness and sessions; without it the overlay starts its
+# notifications at the first frame and shows no session notices.
+[[dependencies]]
+id = "anvil-game"
+version = "^1"
+optional = true

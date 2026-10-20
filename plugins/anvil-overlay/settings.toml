@@ -1,0 +1,36 @@
+# anvil-overlay's settings. The player's values live in
+# anvil/data/anvil-overlay/settings.toml; the panel edits them.
+
+[setting.panel_key]
+type = "key"
+default = "Ctrl+Shift+F12"
+label = "Panel key"
+description = "Opens and closes the Anvil panel."
+restart = false
+
+[setting.notifications]
+type = "bool"
+default = true
+label = "Show notifications"
+description = "Notices about skipped plugins, the previous crash and safe mode when the game is ready. The ironman and multiplayer notices are always shown."
+restart = false
+
+[setting.notification_seconds]
+type = "int"
+default = 30
+min = 0
+max = 600
+step = 5
+label = "Notification time (s)"
+description = "How long a notification stays; 0 keeps it until it is closed."
+restart = false
+
+[setting.scale]
+type = "float"
+default = 1.0
+min = 0.75
+max = 2.5
+step = 0.25
+label = "Scale"
+description = "The size of the panel and the notifications."
+restart = false
