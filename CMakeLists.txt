@@ -200,9 +200,11 @@ if(ANVIL_BUILD_TESTS)
     add_dependencies(anvil_tests version_dll)
     add_test(NAME anvil_tests COMMAND anvil_tests $<TARGET_FILE:version_dll>)
     # Crash capture and safe mode; crashes for real in child processes of itself.
+    # version.dll: the stack guarantee its DllMain gives new threads.
     add_executable(anvil_crash_tests tests/crash_tests.cpp)
     target_link_libraries(anvil_crash_tests PRIVATE anvil_loader)
-    add_test(NAME anvil_crash_tests COMMAND anvil_crash_tests)
+    add_dependencies(anvil_crash_tests version_dll)
+    add_test(NAME anvil_crash_tests COMMAND anvil_crash_tests $<TARGET_FILE:version_dll>)
     add_executable(anvil_symbols_tests tests/test_symbols.cpp)
     target_link_libraries(anvil_symbols_tests PRIVATE anvil_loader)
     add_test(NAME anvil_symbols_tests COMMAND anvil_symbols_tests)

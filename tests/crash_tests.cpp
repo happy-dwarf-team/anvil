@@ -211,14 +211,23 @@ DWORD exception_context_bytes() {
     return length;
 }
 
-// After a stack overflow a thread with the default guarantee has about 12 KB
-// left. Windows needs the exception context and about 1 KB more to call the
-// vectored handler, and Anvil's handler and filter about 2 KB after that. The
-// context is 1.7 KB with AVX and 3.2 KB with AVX-512, but 11.5 KB where the
-// host enables AMX (its tile data alone is 8 KB; seen on some Xeon 8573C
-// runners): there Windows ends the process with 0xC0000005 before any
-// handler runs, Anvil's or another (#98).
-bool default_guarantee_fits() { return exception_context_bytes() <= 8 * 1024; }
+// The stack guarantee a thread has: SetThreadStackGuarantee with 0 reads it.
+ULONG current_guarantee() {
+    ULONG size = 0;
+    SetThreadStackGuarantee(&size);
+    return size;
+}
+
+// Runs `body` on a thread with a stack reservation of `reserve` bytes.
+DWORD on_thread(SIZE_T reserve, DWORD(WINAPI* body)(LPVOID)) {
+    HANDLE thread = CreateThread(nullptr, reserve, body, nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+    if (thread == nullptr) return 0;
+    WaitForSingleObject(thread, 60000);
+    DWORD result = 0;
+    GetExitCodeThread(thread, &result);
+    CloseHandle(thread);
+    return result;
+}
 
 __declspec(noinline) int recurse(int depth) {
     volatile char pad[256];
@@ -260,6 +269,23 @@ size_t kept_dumps(const fs::path& crashes) {
 
 int child(const std::string& mode, const fs::path& dir) {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+    if (mode == "dllmain") {
+        // version.dll in a game process: from then on, new threads get the
+        // guarantee this host needs (none without AMX), unless their stack is
+        // under 256 KB.
+        wchar_t dll[MAX_PATH * 2] = {};
+        GetEnvironmentVariableW(L"ANVIL_TEST_VERSION_DLL", dll, static_cast<DWORD>(std::size(dll)));
+        const auto guarantee = [](LPVOID) -> DWORD { return current_guarantee(); };
+        const DWORD before = on_thread(256 * 1024, guarantee);
+        SetEnvironmentVariableW(L"ANVIL_ANY_EXE", L"1");
+        if (LoadLibraryExW(dll, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH) == nullptr) return 15;
+        const ULONG expected = crash::thread_guarantee();
+        const DWORD large = on_thread(256 * 1024, guarantee);
+        const DWORD small = on_thread(128 * 1024, guarantee);
+        std::printf("expected %lu; default %lu, 256 KB thread %lu, 128 KB thread %lu\n", expected, before, large, small);
+        const bool ok = (expected == 0 ? large == before : large >= expected) && small == before;
+        return ok ? 0 : 16;
+    }
     g_child_dir = dir;
     static Scratch image(0x10000);
     image.put(0x100, kAddOne);
@@ -322,17 +348,17 @@ int child(const std::string& mode, const fs::path& dir) {
         };
     } else if (mode == "overflow") {
         body = [](LPVOID) -> DWORD {
-            // Room for the exception context where the default cannot hold
-            // it: the guarantee the game's main thread gets.
-            ULONG guarantee = 64 * 1024;
-            if (!default_guarantee_fits()) SetThreadStackGuarantee(&guarantee);
+            // What version.dll's DllMain does as one of the game's threads
+            // starts: a guarantee only where the host's exception context
+            // does not fit in the default (AMX).
+            crash::guard_thread(crash::thread_guarantee());
             return static_cast<DWORD>(recurse(0));
         };
     } else {
         return 12;
     }
     // A thread of its own with the default stack guarantee, like the game's
-    // (but see default_guarantee_fits).
+    // (but see crash::thread_guarantee).
     HANDLE thread = CreateThread(nullptr, 256 * 1024, body,
                                  reinterpret_cast<void*>(image.at(mode == "mid" ? 0x100 : 0x200)),
                                  STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
@@ -851,10 +877,41 @@ int main(int argc, char** argv) {
         explain(r);
     });
 
+    run("crash: threads get a stack guarantee only where the exception context does not fit (AMX)", [] {
+        CHECK(crash::thread_guarantee_for(1663) == 0);  // AVX
+        CHECK(crash::thread_guarantee_for(3263) == 0);  // AVX-512
+        CHECK(crash::thread_guarantee_for(8 * 1024) == 0);
+        CHECK(crash::thread_guarantee_for(11567) == 20 * 1024);  // AMX (Xeon 8573C, 6973P-C)
+        CHECK(crash::thread_guarantee_for(8 * 1024 + 1) == 20 * 1024);
+        CHECK(crash::thread_guarantee_for(13 * 1024) == 24 * 1024);
+        CHECK(crash::thread_guarantee() == crash::thread_guarantee_for(exception_context_bytes()));
+        // A thread of 256 KB or more gets it; a smaller one keeps the default.
+        CHECK(on_thread(256 * 1024, [](LPVOID) -> DWORD {
+                  return crash::guard_thread(20 * 1024) ? current_guarantee() : 0;
+              }) >= 20 * 1024);
+        CHECK(on_thread(128 * 1024, [](LPVOID) -> DWORD {
+                  return crash::guard_thread(20 * 1024) ? 1 : current_guarantee() < 20 * 1024 ? 2 : 3;
+              }) == 2);
+        CHECK(on_thread(1024 * 1024, [](LPVOID) -> DWORD {
+                  return crash::guard_thread(0) ? 1 : current_guarantee() < 20 * 1024 ? 2 : 3;
+              }) == 2);
+    });
+
+    run("crash: version.dll in the game gives new threads the guarantee where the host needs it (child process)", [&] {
+        if (argc < 2) {
+            std::printf("  (skipped: pass the built version.dll path)\n");
+            return;
+        }
+        SetEnvironmentVariableW(L"ANVIL_TEST_VERSION_DLL", widen(argv[1]).c_str());
+        const ChildResult r = run_child("dllmain", root / "dllmain");
+        CHECK(r.exit == 0);
+        explain(r);
+    });
+
     run("crash capture: a stack overflow writes the report and a minidump (child process)", [&] {
-        if (!default_guarantee_fits()) {
-            std::printf("  note: the exception context is %lu bytes here; the overflowing thread gets a 64 KB guarantee\n",
-                        exception_context_bytes());
+        if (const ULONG guarantee = crash::thread_guarantee(); guarantee != 0) {
+            std::printf("  note: the exception context is %lu bytes here; the overflowing thread gets a %lu KB guarantee\n",
+                        exception_context_bytes(), guarantee / 1024);
         }
         const ChildResult r = run_child("overflow", root / "overflow");
         CHECK(r.exit == 0xC0DE || r.exit == EXCEPTION_STACK_OVERFLOW);

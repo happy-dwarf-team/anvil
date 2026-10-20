@@ -49,6 +49,29 @@ struct Setup {
 // A second call does nothing.
 bool install(const Setup& setup, std::string& error);
 
+// A stack overflow on a thread reaches the handlers only when the CPU state
+// Windows saves with the exception fits in the stack left after the overflow:
+// about 12 KB with the default guarantee. That holds the 1.7 KB of AVX and
+// the 3.2 KB of AVX-512, but not the 11.5 KB where the host enables AMX: there
+// Windows ends the process before any handler runs. The game's main thread
+// gets 64 KB at install; its other threads get thread_guarantee() from
+// version.dll's DllMain when they start (guard_thread).
+//
+// The guarantee a thread needs for an exception context of `context_bytes`
+// (with every extended state): 0 where the default holds it (8 KB or less),
+// otherwise the context and 8 KB for the dispatch and Anvil's handlers,
+// rounded up to whole pages (20 KB for AMX's 11.5 KB).
+ULONG thread_guarantee_for(DWORD context_bytes);
+
+// thread_guarantee_for this host's exception context. 0 where Windows has no
+// InitializeContext2 (before build 20348, which has no AMX either).
+ULONG thread_guarantee();
+
+// Gives the calling thread `guarantee` (when not 0) if its stack reservation
+// is at least 256 KB; a smaller stack would lose too much of its room.
+// Whether it did.
+bool guard_thread(ULONG guarantee);
+
 // The game is ready: later reports say "after game_ready".
 void set_game_ready();
 

@@ -438,9 +438,9 @@ bool install(const Setup& setup, std::string& error) {
         ok = false;
     }
     // Room for the handlers when this thread (the game's main thread)
-    // overflows its stack; the game's other threads keep the default. It
-    // also holds the CPU state Windows saves with the exception, 11.5 KB
-    // with AMX, which the default leaves no room for.
+    // overflows its stack. It also holds the CPU state Windows saves with the
+    // exception, 11.5 KB with AMX, which the default leaves no room for; the
+    // game's other threads get thread_guarantee() as they start.
     ULONG guarantee = 64 * 1024;
     SetThreadStackGuarantee(&guarantee);
 
@@ -458,6 +458,35 @@ bool install(const Setup& setup, std::string& error) {
         ok = false;
     }
     return ok;
+}
+
+ULONG thread_guarantee_for(DWORD context_bytes) {
+    constexpr DWORD kDefaultHolds = 8 * 1024;  // the default leaves about 12 KB
+    constexpr DWORD kHandlers = 8 * 1024;      // dispatch ~1 KB, Anvil's handlers ~2 KB, the rest margin
+    constexpr DWORD kPage = 4096;
+    if (context_bytes <= kDefaultHolds) return 0;
+    return (context_bytes + kHandlers + kPage - 1) / kPage * kPage;
+}
+
+ULONG thread_guarantee() {
+    // Looked up: Windows 10 before build 20348 has no InitializeContext2, and
+    // an import of it would keep version.dll (and the game) from loading.
+    using InitializeContext2Fn = BOOL(WINAPI*)(PVOID, DWORD, PCONTEXT*, PDWORD, ULONG64);
+    const auto initialize = reinterpret_cast<InitializeContext2Fn>(
+        GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "InitializeContext2"));
+    if (initialize == nullptr) return 0;
+    DWORD length = 0;
+    initialize(nullptr, CONTEXT_ALL | CONTEXT_XSTATE, nullptr, &length, GetEnabledXStateFeatures());
+    return thread_guarantee_for(length);
+}
+
+bool guard_thread(ULONG guarantee) {
+    constexpr ULONG_PTR kSmallestGuarded = 256 * 1024;
+    if (guarantee == 0) return false;
+    ULONG_PTR low = 0, high = 0;
+    GetCurrentThreadStackLimits(&low, &high);
+    if (high - low < kSmallestGuarded) return false;
+    return SetThreadStackGuarantee(&guarantee) != FALSE;
 }
 
 void set_game_ready() { g_game_ready.store(true); }

@@ -9,6 +9,7 @@
 // In any other process (or if anything fails) the DLL is a pure proxy.
 #include "core/log.hpp"
 #include "core/changes.hpp"
+#include "core/crash.hpp"
 #include "core/runtime.hpp"
 
 #include <windows.h>
@@ -22,6 +23,7 @@ using EntryFn = int(__stdcall*)(void*);
 
 uint8_t g_savedEntry[14] = {};
 uint8_t* g_entry = nullptr;
+ULONG g_thread_guarantee = 0;  // crash::thread_guarantee() in the game; 0: threads keep the default
 
 bool is_game_process(const std::filesystem::path& exe) {
     std::wstring name = exe.filename().wstring();
@@ -70,11 +72,23 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
         anvil::shutdown();  // the call counters, if profile = true
         return TRUE;
     }
+    if (reason == DLL_THREAD_ATTACH) {
+        anvil::crash::guard_thread(g_thread_guarantee);
+        return TRUE;
+    }
     if (reason != DLL_PROCESS_ATTACH) return TRUE;
-    DisableThreadLibraryCalls(instance);
     wchar_t path[MAX_PATH * 2] = {};
     const DWORD length = GetModuleFileNameW(nullptr, path, static_cast<DWORD>(std::size(path)));
-    if (length == 0 || length >= std::size(path) || !is_game_process(path)) return TRUE;
+    if (length == 0 || length >= std::size(path) || !is_game_process(path)) {
+        DisableThreadLibraryCalls(instance);
+        return TRUE;
+    }
+    // Where the host's exception context does not fit in a default thread's
+    // room after a stack overflow (AMX), the game's threads get a guarantee
+    // as they start, so their overflow is reported too (design §12).
+    // Elsewhere thread starts and exits do not call in.
+    g_thread_guarantee = anvil::crash::thread_guarantee();
+    if (g_thread_guarantee == 0) DisableThreadLibraryCalls(instance);
     if (!install_entry_hook()) {
         anvil::log_error("could not hook the game entry point; plugins disabled for this start");
     }
