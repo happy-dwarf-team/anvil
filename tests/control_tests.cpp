@@ -182,6 +182,44 @@ void control_tests() {
               "enabled = true\ndisabled_plugins = [\"x\"]\n\n[[list]]\nk = 1\n");
     });
 
+    run("anvil.toml edit: removing an id and the other lists", [] {
+        const auto unlisted = [](std::string_view text, std::string_view id, std::string_view key = "disabled_plugins") {
+            std::string error;
+            const auto out = with_plugin_listed(text, key, id, false, error);
+            if (!out) std::printf("  edit error: %s\n", error.c_str());
+            return out.value_or("<error>");
+        };
+        CHECK(unlisted("disabled_plugins = [\"x\"]\n", "x") == "disabled_plugins = []\n");
+        CHECK(unlisted("disabled_plugins = [\"a\", \"x\"] # keep\n", "x") == "disabled_plugins = [\"a\"] # keep\n");
+        CHECK(unlisted("disabled_plugins = [\"x\", \"a\"]\n", "x") == "disabled_plugins = [\"a\"]\n");
+        CHECK(unlisted("disabled_plugins = [\"a\", 'x' , \"b\"]\n", "x") == "disabled_plugins = [\"a\", \"b\"]\n");
+        CHECK(unlisted("disabled_plugins = [\n  \"a\", # first\n  \"x\",\n]\n", "x") ==
+              "disabled_plugins = [\n  \"a\", # first\n]\n");
+        CHECK(unlisted("disabled_plugins = [\n  \"a\",\n  \"x\" # gone\n]\n", "x") ==
+              "disabled_plugins = [\n  \"a\" # gone\n]\n");
+        CHECK(unlisted("disabled_plugins = [\"x\", \"a\", \"x\"]\r\n", "x") == "disabled_plugins = [\"a\"]\r\n");
+        CHECK(unlisted("\xEF\xBB\xBF" "disabled_plugins = [\"x\"]\n", "x") == "\xEF\xBB\xBF" "disabled_plugins = []\n");
+        // Nothing to remove: the text is unchanged, a missing key included.
+        CHECK(unlisted("disabled_plugins = [\"a\"]\n", "x") == "disabled_plugins = [\"a\"]\n");
+        CHECK(unlisted("enabled = true\n", "x") == "enabled = true\n");
+        // allow_ironman and allow_multiplayer work the same way.
+        std::string error;
+        CHECK(with_plugin_listed("allow_ironman = []\n", "allow_ironman", "x", true, error) ==
+              std::optional<std::string>("allow_ironman = [\"x\"]\n"));
+        CHECK(unlisted("allow_multiplayer = [\"x\"]\n", "x", "allow_multiplayer") == "allow_multiplayer = []\n");
+        CHECK(!with_plugin_listed("", "log_level", "x", true, error) && error.find("not a list of plugin ids") != std::string::npos);
+        // An id written with escapes is not found textually: refused, not mangled.
+        CHECK(!with_plugin_listed("disabled_plugins = [\"\\u0078\"]\n", "disabled_plugins", "x", false, error));
+
+        const fs::path dir = fresh_dir("anvil-control-toml-remove");
+        const fs::path file = dir / "anvil.toml";
+        CHECK(set_plugin_listed(file, "disabled_plugins", "x", false, error) && !fs::exists(file));
+        write_file(file, "# mine\ndisabled_plugins = [\"bellows\", \"tongs\"]\n");
+        CHECK(set_plugin_listed(file, "disabled_plugins", "bellows", false, error));
+        CHECK(read_file(file) == "# mine\ndisabled_plugins = [\"tongs\"]\n");
+        fs::remove_all(dir);
+    });
+
     run("anvil.toml edit: refusals", [] {
         std::string error;
         CHECK(edit_fails("", "Bad Id", error) && error.find("not a plugin id") != std::string::npos);
