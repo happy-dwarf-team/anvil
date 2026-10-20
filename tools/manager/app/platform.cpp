@@ -192,7 +192,10 @@ bool launch_game() {
 
 bool restart_elevated(const fs::path& game_dir) {
     const fs::path exe = own_exe_path();
-    const std::wstring parameters = L"--game \"" + game_dir.wstring() + L"\"";
+    // A folder ending in a backslash ("D:\") would escape the closing quote.
+    std::wstring folder = game_dir.wstring();
+    if (!folder.empty() && folder.back() == L'\\') folder += L'\\';
+    const std::wstring parameters = L"--game \"" + folder + L"\"";
     SHELLEXECUTEINFOW info{sizeof(info)};
     info.fMask = SEE_MASK_NOASYNC;
     info.lpVerb = L"runas";
