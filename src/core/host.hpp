@@ -28,6 +28,9 @@ struct AnvilPlugin {
     anvil::PluginSymbols symbols;  // verified symbols.toml, by AnvilSymbol
     anvil::PluginSettings settings;  // settings.toml and the player's values, by AnvilSetting
     std::wstring plugin_dir;
+    // A plugin from a mod: the hash its approved copy (plugin_dir) must have
+    // right before LoadLibrary (design §14); "" for a local plugin.
+    std::string approved_hash;
     std::wstring data_dir;
     HMODULE module = nullptr;
     std::string state = "pending";  // pending | loaded | failed

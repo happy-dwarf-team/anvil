@@ -43,11 +43,14 @@ void print_usage(std::FILE* out) {
                "      --exe, also the game build, every symbol (bytes, memory, pointers, exports, values) and\n"
                "      instruction boundaries, and write symbols.lock; without it, check that\n"
                "      symbols.lock matches symbols.toml.\n"
-               "  check --game <EU4 folder> [--format text|json|github]\n"
+               "  check --game <EU4 folder> [--format text|json|github] [--user-dir <folder>]\n"
                "      check every plugin in <folder>/anvil/plugins against <folder>/eu4.exe (nothing is\n"
                "      written), then resolve them as the game does at start-up: the load order, what is\n"
                "      skipped and why (anvil.toml, API, build, conflicts, dependencies), and warnings\n"
-               "      for plugins whose code ranges overlap.\n"
+               "      for plugins whose code ranges overlap. Plugins in the mods that dlc_load.json in\n"
+               "      EU4's user folder enables (--user-dir, or the folder the game uses) are listed as\n"
+               "      approved, update pending, pending, in conflict, shadowed or invalid; the approved\n"
+               "      ones take part in the resolution.\n"
                "\n"
                "Options:\n"
                "  -h, --help    show this help\n"
@@ -220,11 +223,15 @@ int run_check(const std::vector<std::wstring>& args) {
     CheckOptions options;
     Format format = Format::Text;
     std::optional<std::wstring> game;
+    std::optional<std::wstring> user_dir;
     std::vector<std::wstring> positional;
     for (size_t i = 2; i < args.size(); ++i) {
         if (is_option(args[i], L"--game")) {
             game = option_value(args, i, L"--game");
             if (!game || game->empty()) return usage_error("check: --game needs the EU4 folder");
+        } else if (is_option(args[i], L"--user-dir")) {
+            user_dir = option_value(args, i, L"--user-dir");
+            if (!user_dir || user_dir->empty()) return usage_error("check: --user-dir needs EU4's user folder");
         } else if (is_option(args[i], L"--exe")) {
             const auto exe = option_value(args, i, L"--exe");
             if (!exe || exe->empty()) return usage_error("check: --exe needs the path of eu4.exe");
@@ -240,12 +247,14 @@ int run_check(const std::vector<std::wstring>& args) {
             positional.push_back(args[i]);
         }
     }
+    if (user_dir && !game) return usage_error("check: --user-dir goes with --game");
     if (game) {
         if (!positional.empty() || !options.exe.empty()) {
             return usage_error("check: --game takes the EU4 folder only (not a <plugin-dir> or --exe)");
         }
         GameOptions game_options;
         game_options.game_dir = *game;
+        if (user_dir) game_options.user_dir = *user_dir;
         const GameReport report = check_game(game_options);
         const std::string text = format_game_report(report, format);
         std::fputs(text.c_str(), format == Format::Text && report.exit_code == kExitCannotCheck && report.plugins.empty()
