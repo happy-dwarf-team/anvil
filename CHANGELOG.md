@@ -1,5 +1,52 @@
 # Changelog
 
+## [1.0.0](https://github.com/happy-dwarf-team/anvil/compare/v0.2.0...v1.0.0) (2026-10-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **api:** plugin API 1 is removed. Plugins include the new anvil_plugin.h (or anvil.hpp), declare every eu4.exe address in symbols.toml and pass symbol ids (SYM_* / sym::*) instead of RVAs with expected bytes; hook_function, redirect_call and replace_import return their own `next`; expect_bytes, alloc_near_image, ANVIL_EVENT_GAME_READY and the PE fields of AnvilGameInfo are gone; result codes are renumbered.
+* **core:** changes an API 1 plugin requests in anvil_plugin_load are enabled only after it returns ANVIL_OK. A second hook, redirect or import replacement at the same address joins a chain instead of failing with ANVIL_ERROR_CONFLICT, expected bytes are compared with the original bytes, and an overlap with the plugin's own change at another address is refused.
+* **manifest:** plugin.toml must declare api = 2 and affects_gameplay, and must not use game_builds, [[expect]] or any other unknown key. Plugins with api = 1 are skipped.
+
+### Features
+
+* **anvil-game:** readiness, frame, main-thread work and the gameplay policy ([#77](https://github.com/happy-dwarf-team/anvil/issues/77)) ([376bc82](https://github.com/happy-dwarf-team/anvil/commit/376bc82a70f6c3e64117bd2f2151b5145a9bc7c0)), closes [#54](https://github.com/happy-dwarf-team/anvil/issues/54)
+* **api:** plugin API 2 header, C++ wrapper and hello examples ([#74](https://github.com/happy-dwarf-team/anvil/issues/74)) ([5ba11a1](https://github.com/happy-dwarf-team/anvil/commit/5ba11a193802f973effd7100b6ed24b49971abeb)), closes [#46](https://github.com/happy-dwarf-team/anvil/issues/46)
+* **cli:** anvil check --game ([#68](https://github.com/happy-dwarf-team/anvil/issues/68)) ([ab63642](https://github.com/happy-dwarf-team/anvil/commit/ab6364209627634d6b5669d6edb5946395db83fa))
+* **cli:** anvil gen and anvil check ([#67](https://github.com/happy-dwarf-team/anvil/issues/67)) ([63da5a4](https://github.com/happy-dwarf-team/anvil/commit/63da5a4c18c8bb364c184abae15fe5e2535cdc9e)), closes [#41](https://github.com/happy-dwarf-team/anvil/issues/41)
+* **core:** change registry with Anvil-owned chains, staging and handles ([#66](https://github.com/happy-dwarf-team/anvil/issues/66)) ([245591c](https://github.com/happy-dwarf-team/anvil/commit/245591c8539c0741ea3c601a5384fbad182d1c09))
+* **core:** crash capture and attribution with safe mode ([#79](https://github.com/happy-dwarf-team/anvil/issues/79)) ([7fae2b5](https://github.com/happy-dwarf-team/anvil/commit/7fae2b57a7b092b6106f55d88437eadcb8e91a49))
+* **core:** mid hooks with AnvilCpuContext and block replacement ([#69](https://github.com/happy-dwarf-team/anvil/issues/69)) ([6988aef](https://github.com/happy-dwarf-team/anvil/commit/6988aef9eaef1594517a16d1f4893443b5b1e04b)), closes [#43](https://github.com/happy-dwarf-team/anvil/issues/43)
+* **core:** optional per-change call counters ([#73](https://github.com/happy-dwarf-team/anvil/issues/73)) ([1440cd5](https://github.com/happy-dwarf-team/anvil/commit/1440cd57d4ae664fc8ca25f4052d450fed3964ac))
+* **core:** plugin settings ([#78](https://github.com/happy-dwarf-team/anvil/issues/78)) ([893b3ce](https://github.com/happy-dwarf-team/anvil/commit/893b3ce258e270d6eb5760c1a2e7138f5cdba8cb)), closes [#48](https://github.com/happy-dwarf-team/anvil/issues/48)
+* **core:** pointer swap ([#71](https://github.com/happy-dwarf-team/anvil/issues/71)) ([c3d7c0f](https://github.com/happy-dwarf-team/anvil/commit/c3d7c0febe229873a75b2791555a2b30130e942d))
+* **core:** skip plugins that declare a conflict with an enabled plugin ([#65](https://github.com/happy-dwarf-team/anvil/issues/65)) ([f657df5](https://github.com/happy-dwarf-team/anvil/commit/f657df5175c823c92a7423656c35264129989f66))
+* **core:** suspend and resume all changes of a plugin ([#72](https://github.com/happy-dwarf-team/anvil/issues/72)) ([9dc06ce](https://github.com/happy-dwarf-team/anvil/commit/9dc06ce117391054fc099220d652300ea7c7eeb2))
+* **manifest:** manifest v2 ([#62](https://github.com/happy-dwarf-team/anvil/issues/62)) ([800232b](https://github.com/happy-dwarf-team/anvil/commit/800232bbc4a45f6a42f25ef565c6538b54a5df97))
+* **rust:** anvil-sys, anvil gen --lang rust and a Rust hello ([#76](https://github.com/happy-dwarf-team/anvil/issues/76)) ([ab8f7e6](https://github.com/happy-dwarf-team/anvil/commit/ab8f7e699b408e94f117f2b8d5f89e19773d0114))
+* **symbols:** parse and verify symbols.toml ([#64](https://github.com/happy-dwarf-team/anvil/issues/64)) ([8b8b50f](https://github.com/happy-dwarf-team/anvil/commit/8b8b50fce06f6abce5fae940d331b487f583368e))
+
+
+### Bug Fixes
+
+* **build:** let the SDK from source work without the C language ([#85](https://github.com/happy-dwarf-team/anvil/issues/85)) ([51c8ac4](https://github.com/happy-dwarf-team/anvil/commit/51c8ac46350f2598c800c7f52bf85d21ec163b39))
+* **build:** SDK from source works without the C language ([51c8ac4](https://github.com/happy-dwarf-team/anvil/commit/51c8ac46350f2598c800c7f52bf85d21ec163b39)), closes [#81](https://github.com/happy-dwarf-team/anvil/issues/81)
+* **cli:** check value names the generators reject ([#84](https://github.com/happy-dwarf-team/anvil/issues/84)) ([f56b442](https://github.com/happy-dwarf-team/anvil/commit/f56b442287c6901b493ad3bb7975ac40e9bbd397)), closes [#80](https://github.com/happy-dwarf-team/anvil/issues/80)
+* **core:** keep the safe-mode count and finish the minidump after a crash ([#83](https://github.com/happy-dwarf-team/anvil/issues/83)) ([13db38d](https://github.com/happy-dwarf-team/anvil/commit/13db38d7aeefd731c6b468844a16f30b67b1de61)), closes [#82](https://github.com/happy-dwarf-team/anvil/issues/82)
+* **examples:** add the symbols.lock of hello-rust ([#88](https://github.com/happy-dwarf-team/anvil/issues/88)) ([e38435e](https://github.com/happy-dwarf-team/anvil/commit/e38435eee4d4aae795c91ff8c4c951a0f96394d6)), closes [#86](https://github.com/happy-dwarf-team/anvil/issues/86)
+
+
+### Build
+
+* add the SDK archive and CMake package ([#75](https://github.com/happy-dwarf-team/anvil/issues/75)) ([cc84234](https://github.com/happy-dwarf-team/anvil/commit/cc84234980b6e02649b2a68c7befffb6de793063))
+* SDK archive and CMake package ([cc84234](https://github.com/happy-dwarf-team/anvil/commit/cc84234980b6e02649b2a68c7befffb6de793063)), closes [#53](https://github.com/happy-dwarf-team/anvil/issues/53)
+
+
+### Documentation
+
+* give mid hooks and block replacements a 2 KB memory budget ([#89](https://github.com/happy-dwarf-team/anvil/issues/89)) ([f25b1d7](https://github.com/happy-dwarf-team/anvil/commit/f25b1d703262668beb76bfd4a1b3407ef7dd7f08)), closes [#57](https://github.com/happy-dwarf-team/anvil/issues/57)
+
 ## [0.2.0](https://github.com/happy-dwarf-team/anvil/compare/v0.1.0...v0.2.0) (2026-10-15)
 
 
