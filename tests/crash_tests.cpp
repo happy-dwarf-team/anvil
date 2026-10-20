@@ -259,7 +259,7 @@ int child(const std::string& mode, const fs::path& dir) {
     const uint8_t ud2[] = {0x0F, 0x0B};
     if (registry.patch_bytes(patcher, in_image(image.at(0x200)), ud2, sizeof(ud2)) != ChangeStatus::Ok) return 10;
     if (mode == "mid") {
-        // Mid hooks at two sites; the crash is under the second.
+        // Mid hooks at two sites share the context stub; the crash is under the second.
         if (registry.mid_hook(patcher, in_image(image.at(0x300)), quiet, nullptr) != ChangeStatus::Ok) return 15;
         if (registry.mid_hook(crasher, in_image(image.at(0x100)), crash_in_callback, nullptr) != ChangeStatus::Ok) {
             return 16;
@@ -448,6 +448,7 @@ int main(int argc, char** argv) {
     run("crash: the stack walk passes a mid hook's context stub to the hooked site and its caller", [] {
         Scratch image(0x10000);
         image.put(0x100, kAddOne);
+        image.put(0x200, kAddOne);
         ChangeRegistry r(image.at(0), 0x10000);
         const OwnerId m = r.add_owner("m");
         std::vector<std::unique_ptr<AnvilPlugin>> plugins;
@@ -459,7 +460,11 @@ int main(int argc, char** argv) {
         sources.image_base = image.at(0);
         sources.image_size = 0x10000;
         g_walk_sources = &sources;
+        // Another site first: both enter one shared context stub, and the
+        // walk must still find the site it came from.
+        CHECK(r.mid_hook(m, in_image(image.at(0x200)), quiet, nullptr) == ChangeStatus::Ok);
         CHECK(r.mid_hook(m, in_image(image.at(0x100)), walk_here, nullptr) == ChangeStatus::Ok);
+        CHECK(reinterpret_cast<Fn>(image.at(0x200))(1) == 2);
         g_walked_count = 0;
         CHECK(call_scratch(reinterpret_cast<Fn>(image.at(0x100)), 1) == 3);
         size_t stub = g_walked_count;
@@ -473,7 +478,16 @@ int main(int argc, char** argv) {
         if (stub + 2 < g_walked_count) {
             const Frame& stub_frame = g_walked[stub];
             CHECK(stub_frame.where.change.role == AddressRole::Stub);
+            CHECK(stub_frame.where.change.site == image.at(0x100));
             CHECK(stub_frame.where.change.count == 1 && stub_frame.where.change.changes[0].owner == m);
+            CHECK(contains(stub_frame.where.change.changes[0].label, "mid hook"));
+            // The shared stub alone names no site; an unknown state is none.
+            AddressAttribution shared;
+            CHECK(r.attribute(stub_frame.where.address, shared));
+            CHECK(shared.role == AddressRole::Stub && shared.context_return && shared.count == 0);
+            CHECK(r.attribute(stub_frame.where.address - 1, shared));
+            CHECK(shared.role == AddressRole::Stub && !shared.context_return);
+            CHECK(!r.attribute_context(image.at(0x100), shared));
             const Frame& site = g_walked[stub + 1];
             CHECK(site.source == FrameSource::ContextStub);
             CHECK(site.where.address == image.at(0x100));
@@ -768,8 +782,8 @@ int main(int argc, char** argv) {
         CHECK(Json::valid(r.json));
         CHECK(contains(r.json, "\"code\": \"0xC0000005\""));
         CHECK(contains(r.json, "\"level\": \"in_plugin_code\""));
-        // The return into the context stub names its site and change:
-        // the mid hook at 0x100, not the one at 0x300.
+        // The context stub is shared: its spare slot names the site and change
+        // of the return into it, the mid hook at 0x100, not the one at 0x300.
         CHECK(contains(r.json, "\"source\": \"context stub\""));
         CHECK(contains(r.json, "\"kind\": \"mid hook\", \"label\": \"mid hook rva 0x100\""));
         CHECK(!contains(r.json, "mid hook rva 0x300"));
