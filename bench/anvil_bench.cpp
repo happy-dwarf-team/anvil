@@ -11,7 +11,7 @@
 // ratio to the plain call of the same run, which is what the CI gate compares
 // (bench/check-regression.ps1), plus the per-link costs against the budgets.
 // Not a ctest: CI builds and runs it as its own step; the lab runs it pinned
-// (bench/run-lab.ps1).
+// (bench/run-lab.ps1). --memory measures the memory budgets instead (memory.cpp).
 #include "core/changes.hpp"
 #include "core/manifest.hpp"
 #include "core/resolver.hpp"
@@ -211,7 +211,13 @@ void usage() {
 
 }  // namespace
 
+int memory_main(size_t changes, const char* out_path);  // memory.cpp
+int memory_core_main(int argc, char** argv);
+
 int main(int argc, char** argv) {
+    if (argc > 1 && std::strcmp(argv[1], "--memory-core") == 0) return memory_core_main(argc, argv);
+    bool memory = false;
+    int changes = 1000;
     int repetitions = 31;
     double sample_ms = 2.0;
     int cpu = -1;
@@ -223,15 +229,18 @@ int main(int argc, char** argv) {
         else if (arg == "--sample-ms" && has_value) sample_ms = std::atof(argv[++i]);
         else if (arg == "--cpu" && has_value) cpu = std::atoi(argv[++i]);
         else if (arg == "--out" && has_value) out_path = argv[++i];
+        else if (arg == "--memory") memory = true;
+        else if (arg == "--changes" && has_value) changes = std::atoi(argv[++i]);
         else {
             usage();
             return 2;
         }
     }
-    if (repetitions < 1 || sample_ms <= 0 || cpu < -1 || cpu > 63) {
+    if (repetitions < 1 || sample_ms <= 0 || cpu < -1 || cpu > 63 || changes < 10) {
         usage();
         return 2;
     }
+    if (memory) return memory_main(static_cast<size_t>(changes), out_path);
     if (cpu >= 0 && SetThreadAffinityMask(GetCurrentThread(), DWORD_PTR{1} << cpu) == 0) {
         std::fprintf(stderr, "anvil_bench: cannot pin to CPU %d\n", cpu);
         return 1;
