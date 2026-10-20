@@ -17,7 +17,11 @@
 // synthetic image (executable scratch memory, a PE header with N imports for
 // import replacements), measured every N/10 changes; the result is the slope
 // of a least-squares line, so the first allocations (an arena, a vector's
-// capacity) count as their share of N rather than as a fixed cost.
+// capacity) count as their share of N rather than as a fixed cost. Each kind
+// runs in its own child process (anvil_bench --memory-kind NAME N RESULT):
+// in one process, the heap commit one kind left behind or the commit step it
+// ended on fell on the next kind (a block replacement read 1644 B in 1.0
+// right after the mid hooks, and some 1450 B alone).
 //
 // Every snapshot reads:
 //   - private: PROCESS_MEMORY_COUNTERS_EX.PrivateUsage, the commit charge
@@ -263,6 +267,31 @@ int core_child(const std::filesystem::path& game_dir, const std::filesystem::pat
     return 0;
 }
 
+// Runs this executable with `arguments` and waits up to timeout_ms; false
+// with `error` when it cannot start, takes longer or exits with an error.
+bool run_child(const std::wstring& arguments, DWORD timeout_ms, const std::string& what, std::string& error) {
+    std::wstring command = L"\"" + self_path() + L"\" " + arguments;
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+        error = "cannot start the " + what + " child process (error " + std::to_string(GetLastError()) + ")";
+        return false;
+    }
+    DWORD code = 1;
+    if (WaitForSingleObject(pi.hProcess, timeout_ms) != WAIT_OBJECT_0) {
+        TerminateProcess(pi.hProcess, 1);
+        error = "the " + what + " child process did not finish within " + std::to_string(timeout_ms / 1000) + " s";
+    }
+    GetExitCodeProcess(pi.hProcess, &code);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    if (error.empty() && code != 0) {
+        error = "the " + what + " child process failed (exit code " + std::to_string(code) + ")";
+    }
+    return error.empty();
+}
+
 bool run_core(Core& core, std::string& error) {
     std::error_code ec;
     const auto dir =
@@ -276,27 +305,12 @@ bool run_core(Core& core, std::string& error) {
     // The anvil.toml Anvil ships (its values are the defaults).
     std::filesystem::copy_file(ANVIL_SOURCE_DIR "/dist/anvil.toml", dir / "anvil" / "anvil.toml", ec);
     const auto result_file = dir / "core-result.txt";
-    std::wstring command = L"\"" + self_path() + L"\" --memory-core \"" + dir.wstring() + L"\" \"" +
-                           result_file.wstring() + L"\"";
     SetEnvironmentVariableW(L"ANVIL_DISABLE", nullptr);  // the child inherits it; its start-up must load
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    PROCESS_INFORMATION pi{};
-    if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
-        error = "cannot start the core child process (error " + std::to_string(GetLastError()) + ")";
-        return false;
-    }
-    DWORD code = 1;
-    if (WaitForSingleObject(pi.hProcess, 60000) != WAIT_OBJECT_0) {
-        TerminateProcess(pi.hProcess, 1);
-        error = "the core child process did not finish within 60 s";
-    }
-    GetExitCodeProcess(pi.hProcess, &code);
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
     FILE* f = nullptr;
-    if (error.empty() && (code != 0 || _wfopen_s(&f, result_file.c_str(), L"rb") != 0 || f == nullptr)) {
-        error = "the core child process failed (exit code " + std::to_string(code) + ")";
+    if (run_child(L"--memory-core \"" + dir.wstring() + L"\" \"" + result_file.wstring() + L"\"", 60000, "core",
+                  error) &&
+        (_wfopen_s(&f, result_file.c_str(), L"rb") != 0 || f == nullptr)) {
+        error = "the core child process wrote no result";
     }
     if (f != nullptr) {
         char line[512];
@@ -395,9 +409,10 @@ struct Kind {
     std::string what;
     std::vector<double> counts;
     std::vector<Snapshot> points;  // relative to the first
-    // Slopes (bytes per change) and the private intercept.
+    // Slopes (bytes per change), the private intercept and the last point.
     Snapshot slope;
     double fixed_private = 0;
+    Snapshot total;
 };
 
 void fit(Kind& k) {
@@ -417,6 +432,7 @@ void fit(Kind& k) {
     k.slope.heap_bytes = slope(&Snapshot::heap_bytes).first;
     k.slope.heap_blocks = slope(&Snapshot::heap_blocks).first;
     k.slope.executable_bytes = slope(&Snapshot::executable_bytes).first;
+    k.total = k.points.back();
 }
 
 // Adds n changes through add(i), with a snapshot before the first and every n/10.
@@ -500,23 +516,20 @@ int memory_core_main(int argc, char** argv) {
     return core_child(std::filesystem::path(argv[2]), std::filesystem::path(argv[3]));
 }
 
-int memory_main(size_t n, const char* out_path) {
-    // Core, in a child process.
-    Core core;
-    if (std::string error; !run_core(core, error)) {
-        std::fprintf(stderr, "anvil_bench: core: %s\n", error.c_str());
-        return 1;
-    }
-    const Image image = read_image(std::filesystem::path(self_path()).parent_path() / "version.dll");
+namespace {
 
-    // Per change. Everything a plugin would own (its next pointers, names)
-    // and every image exist before the first snapshot; registries stay alive.
+constexpr const char* kKindNames[] = {"function_hook", "call_redirect",  "byte_patch",        "mid_hook",
+                                      "block_replacement", "pointer_swap", "import_replacement"};
+
+// Measures the kind named `only` in this process. Everything a plugin would
+// own (its next pointers, names) and every image exist before the first
+// snapshot; registries stay alive.
+bool measure_kind(size_t n, const std::string& only, Kind& out) {
     std::vector<void*> nexts(n);
     std::vector<std::string> import_names;
     import_names.reserve(n);
     std::vector<std::unique_ptr<Scratch>> images;
     std::vector<std::unique_ptr<ChangeRegistry>> registries;
-    std::vector<Kind> kinds;
     auto image_for = [&](size_t bytes) -> Scratch& {
         images.push_back(std::make_unique<Scratch>((bytes + 0xFFFF) & ~size_t{0xFFFF}));
         return *images.back();
@@ -583,11 +596,99 @@ int memory_main(size_t n, const char* out_path) {
                                                   import_names[i].c_str(), fn, &nexts[i]);
          }},
     };
-    kinds.reserve(specs.size());
+    static_assert(std::size(kKindNames) == 7);
     for (const auto& spec : specs) {
-        kinds.push_back({spec.name, spec.what, {}, {}, {}, 0});
-        if (!measure(kinds.back(), n, spec.add)) return 1;
+        if (spec.name != only) continue;
+        out = {spec.name, spec.what, {}, {}, {}, 0, {}};
+        return measure(out, n, spec.add);
     }
+    std::fprintf(stderr, "anvil_bench: no kind of change named %s\n", only.c_str());
+    return false;
+}
+
+// Each kind in a child process: the result file holds "name value" lines.
+bool run_kind(const char* name, size_t n, const std::filesystem::path& dir, Kind& k, std::string& error) {
+    const auto result_file = dir / (std::string(name) + ".txt");
+    const std::wstring wide_name(name, name + std::strlen(name));
+    FILE* f = nullptr;
+    if (!run_child(L"--memory-kind " + wide_name + L" " + std::to_wstring(n) + L" \"" + result_file.wstring() + L"\"",
+                   600000, name, error)) {
+        return false;
+    }
+    if (_wfopen_s(&f, result_file.c_str(), L"rb") != 0 || f == nullptr) {
+        error = std::string("the ") + name + " child process wrote no result";
+        return false;
+    }
+    k = {name, "", {}, {}, {}, 0, {}};
+    char line[512];
+    while (std::fgets(line, sizeof(line), f) != nullptr) {
+        if (std::strncmp(line, "what ", 5) == 0) {
+            k.what.assign(line + 5, std::strcspn(line + 5, "\r\n"));
+            continue;
+        }
+        char key[64] = {};
+        double value = 0;
+        if (sscanf_s(line, "%63s %lf", key, static_cast<unsigned>(sizeof(key)), &value) != 2) continue;
+        const std::string field = key;
+        if (field == "private") k.slope.private_bytes = value;
+        else if (field == "heap") k.slope.heap_bytes = value;
+        else if (field == "heap_blocks") k.slope.heap_blocks = value;
+        else if (field == "executable") k.slope.executable_bytes = value;
+        else if (field == "fixed_private") k.fixed_private = value;
+        else if (field == "total_private") k.total.private_bytes = value;
+        else if (field == "total_heap") k.total.heap_bytes = value;
+        else if (field == "total_executable") k.total.executable_bytes = value;
+    }
+    std::fclose(f);
+    return true;
+}
+
+}  // namespace
+
+int memory_kind_main(int argc, char** argv) {
+    if (argc != 5) return 2;
+    const size_t n = std::strtoull(argv[3], nullptr, 10);
+    Kind k;
+    if (n < 10 || !measure_kind(n, argv[2], k)) return 1;
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, std::filesystem::path(argv[4]).c_str(), L"wb") != 0 || f == nullptr) return 1;
+    std::fprintf(f, "private %.3f\nheap %.3f\nheap_blocks %.3f\nexecutable %.3f\nfixed_private %.3f\n",
+                 k.slope.private_bytes, k.slope.heap_bytes, k.slope.heap_blocks, k.slope.executable_bytes,
+                 k.fixed_private);
+    std::fprintf(f, "total_private %.0f\ntotal_heap %.0f\ntotal_executable %.0f\nwhat %s\n", k.total.private_bytes,
+                 k.total.heap_bytes, k.total.executable_bytes, k.what.c_str());
+    std::fclose(f);
+    return 0;
+}
+
+int memory_main(size_t n, const char* out_path) {
+    // Core, in a child process.
+    Core core;
+    if (std::string error; !run_core(core, error)) {
+        std::fprintf(stderr, "anvil_bench: core: %s\n", error.c_str());
+        return 1;
+    }
+    const Image image = read_image(std::filesystem::path(self_path()).parent_path() / "version.dll");
+
+    // Per change, each kind in its own child process.
+    std::error_code ec;
+    const auto dir = std::filesystem::temp_directory_path(ec) /
+                     ("anvil-bench-memory-kinds-" + std::to_string(GetCurrentProcessId()));
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    if (ec) {
+        std::fprintf(stderr, "anvil_bench: cannot create %s\n", dir.string().c_str());
+        return 1;
+    }
+    std::vector<Kind> kinds(std::size(kKindNames));
+    for (size_t i = 0; i < kinds.size(); ++i) {
+        if (std::string error; !run_kind(kKindNames[i], n, dir, kinds[i], error)) {
+            std::fprintf(stderr, "anvil_bench: %s\n", error.c_str());
+            std::filesystem::remove_all(dir, ec);
+            return 1;
+        }
+    }
+    std::filesystem::remove_all(dir, ec);
 
     // --- JSON
     // The core budget counts commit: the start-up's private bytes (which
@@ -629,9 +730,9 @@ int memory_main(size_t n, const char* out_path) {
                 ", \"heap_bytes\": " + json_number(k.slope.heap_bytes) +
                 ", \"heap_blocks\": " + json_number(k.slope.heap_blocks) +
                 "}, \"fixed_private_bytes\": " + json_number(k.fixed_private) + ", \"total\": {\"private_bytes\": " +
-                json_number(k.points.back().private_bytes) +
-                ", \"executable_bytes\": " + json_number(k.points.back().executable_bytes) +
-                ", \"heap_bytes\": " + json_number(k.points.back().heap_bytes) + "}, \"what\": \"" + k.what + "\"}" +
+                json_number(k.total.private_bytes) +
+                ", \"executable_bytes\": " + json_number(k.total.executable_bytes) +
+                ", \"heap_bytes\": " + json_number(k.total.heap_bytes) + "}, \"what\": \"" + k.what + "\"}" +
                 (i + 1 < kinds.size() ? ",\n" : "\n");
     }
     json += "  },\n  \"budgets\": {\n";

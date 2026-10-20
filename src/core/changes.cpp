@@ -9,7 +9,9 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <new>
 #include <sstream>
+#include <type_traits>
 
 // AnvilCpuContext is SafetyHook's Context64, field for field (design §8.5).
 static_assert(sizeof(AnvilCpuContext) == 408 && sizeof(AnvilCpuContext) == sizeof(safetyhook::Context64));
@@ -93,7 +95,7 @@ namespace {
 // A link's life. Only Active links are part of a chain or keep a byte patch
 // written. Staged and Suspended links are skipped, but they keep their place in
 // the chain and their bytes reserved; Removed ones have left the site.
-enum class LinkState { Staged, Active, Suspended, Removed };
+enum class LinkState : uint8_t { Staged, Active, Suspended, Removed };
 
 // Kinds whose links pass on to the next one: through a `next` stub, or (a
 // pointer swap) through the plugin's `previous` cell.
@@ -310,13 +312,48 @@ ChangeStatus from_safetyhook(const safetyhook::InlineHook::Error& error, std::st
     }
 }
 
+// A site's original bytes: up to 16 in place (stolen bytes, a call, a slot,
+// a short patch), a longer byte patch on the heap. The part of std::vector a
+// site uses, without a heap block for the usual few bytes.
+class OriginalBytes {
+public:
+    OriginalBytes() = default;
+    OriginalBytes(const OriginalBytes&) = delete;
+    OriginalBytes& operator=(const OriginalBytes&) = delete;
+    ~OriginalBytes() { resize(0); }
+
+    void resize(size_t size) {
+        if (size_ > sizeof(local_)) delete[] heap_;
+        size_ = size;
+        if (size_ > sizeof(local_)) heap_ = new uint8_t[size_]();
+        else std::memset(local_, 0, sizeof(local_));
+    }
+    void assign(const uint8_t* first, const uint8_t* last) {
+        resize(static_cast<size_t>(last - first));
+        std::memcpy(data(), first, size_);
+    }
+    uint8_t* data() { return size_ > sizeof(local_) ? heap_ : local_; }
+    const uint8_t* data() const { return size_ > sizeof(local_) ? heap_ : local_; }
+    size_t size() const { return size_; }
+    uint8_t operator[](size_t i) const { return data()[i]; }
+
+private:
+    union {
+        uint8_t local_[16] = {};
+        uint8_t* heap_;
+    };
+    size_t size_ = 0;
+};
+
 }  // namespace
 
-// One change: a link of a chain, or one owner of a (shared) byte patch.
+// One change: a link of a chain, or one owner of a (shared) byte patch. Kept
+// small: there is one per change and the budget is per change (design §17).
 struct ChangeRegistry::Change {
     ChangeId id = 0;
-    OwnerId owner = 0;
     Site* site = nullptr;
+    OwnerId owner = 0;
+    uint32_t span = 0;           // block: its size, owned from the site's address
     ChangeKind kind = ChangeKind::BytePatch;
     LinkState state = LinkState::Staged;
     uintptr_t detour = 0;        // chain kinds: where this link goes; mid hook, block: the callback
@@ -324,17 +361,19 @@ struct ChangeRegistry::Change {
     void** previous = nullptr;   // pointer swap: the plugin's cell for the next value, or none
     void* user = nullptr;        // mid hook, block: the callback's argument
     uintptr_t resume = 0;        // block: where the game goes on
-    size_t span = 0;             // block: its size, owned from the site's address
-    std::vector<uint8_t> bytes;  // byte patch
-    std::string label;
-    std::string symbol;                     // the declared symbol, for the report
-    std::unique_ptr<CallCounter> counter;   // profile = true: function hook, redirect, mid hook, block
-    uint8_t* counting = nullptr;            // profile = true, chain kinds in code: the counting stub
+    std::unique_ptr<uint8_t[]> bytes;      // byte patch: the site's footprint
+    std::unique_ptr<char[]> names;         // the label, then the declared symbol ("" for none)
+    std::unique_ptr<CallCounter> counter;  // profile = true: function hook, redirect, mid hook, block
+    uint8_t* counting = nullptr;           // profile = true, chain kinds in code: the counting stub
+
+    const char* label() const { return names.get(); }
+    const char* symbol() const { return names.get() + std::strlen(names.get()) + 1; }
 };
 
 // The callbacks behind a code site's context stub, published as a whole so a
-// thread in the stub reads one consistent list. Never freed while the
-// registry lives: a thread may still read an older one.
+// thread in the stub reads one consistent list. One heap block: the header,
+// then `count` items. Never freed while the registry lives: a thread may still
+// read an older one, so each list keeps the one it replaced.
 struct ChangeRegistry::Dispatch {
     struct Item {
         AnvilCpuCallback callback;
@@ -343,8 +382,11 @@ struct ChangeRegistry::Dispatch {
         bool mid;  // a mid hook (a rip change ends the chain); else the block replacement
         std::atomic<uint64_t>* counter;  // profile = true
     };
-    uintptr_t resume = 0;     // where the game goes on unless a callback writes rip
-    std::vector<Item> items;  // the mid hooks in chain order, then the block replacement
+    const Dispatch* older = nullptr;
+    uintptr_t resume = 0;  // where the game goes on unless a callback writes rip
+    size_t count = 0;      // the mid hooks in chain order, then the block replacement
+    const Item* items() const { return reinterpret_cast<const Item*>(this + 1); }
+    Item* items() { return reinterpret_cast<Item*>(this + 1); }
 };
 
 // A code site's context stub (kCpuStub) and what dispatch() needs.
@@ -352,9 +394,19 @@ struct ChangeRegistry::CpuStub {
     uint8_t* code = nullptr;
     ChangeRegistry* registry = nullptr;
     uintptr_t address = 0;
-    std::atomic<const Dispatch*> current{nullptr};
-    std::vector<std::unique_ptr<Dispatch>> published;
-    std::atomic<bool> rip_noticed{false};  // the first rip change here is reported, once
+    std::atomic<const Dispatch*> current{nullptr};  // with every older list behind it
+    std::atomic<bool> rip_noticed{false};           // the first rip change here is reported, once
+
+    CpuStub() = default;
+    CpuStub(const CpuStub&) = delete;
+    CpuStub& operator=(const CpuStub&) = delete;
+    ~CpuStub() {
+        for (const Dispatch* list = current.load(); list != nullptr;) {
+            const Dispatch* older = list->older;
+            ::operator delete(const_cast<Dispatch*>(list));
+            list = older;
+        }
+    }
 };
 
 // Everything at one address of one kind. The game is changed only while a site
@@ -365,7 +417,7 @@ struct ChangeRegistry::Site {
     ChangeKind kind = ChangeKind::BytePatch;
     uintptr_t address = 0;
     size_t footprint = 0;           // bytes this site owns: stolen bytes, call, slot, patch
-    std::vector<uint8_t> original;  // those bytes as the game shipped them
+    OriginalBytes original;         // those bytes as the game shipped them
     uintptr_t terminal = 0;         // where the innermost next leads: trampoline (or call stub), callee, pointer
     uint8_t* entry = nullptr;       // code site, redirect: the stub the game jumps to first
     std::unique_ptr<safetyhook::InlineHook> hook;  // code site
@@ -451,7 +503,9 @@ template <bool Count> void ChangeRegistry::run_callbacks(AnvilCpuContext* cpu) {
     auto* stub = reinterpret_cast<CpuStub*>(cpu->rip);  // kCpuStubState, pushed as rip
     const Dispatch* list = stub->current.load(std::memory_order_acquire);
     cpu->rip = list->resume;
-    for (const Dispatch::Item& item : list->items) {
+    const Dispatch::Item* const end = list->items() + list->count;
+    for (const Dispatch::Item* at = list->items(); at != end; ++at) {
+        const Dispatch::Item& item = *at;
         if constexpr (Count) {
             if (item.counter != nullptr) item.counter->fetch_add(1, std::memory_order_relaxed);
         }
@@ -526,7 +580,7 @@ bool ChangeRegistry::live(const Site& site) const { return !site.links.empty(); 
 // The bytes a live site owns: a block replacement owns its whole block.
 size_t ChangeRegistry::extent(const Site& site) const {
     size_t size = site.footprint;
-    for (const Change* c : site.links) size = std::max(size, c->span);
+    for (const Change* c : site.links) size = std::max<size_t>(size, c->span);
     return size;
 }
 
@@ -625,9 +679,9 @@ void ChangeRegistry::publish(Site& site, uintptr_t resume, const std::vector<Cha
     CpuStub& cpu = *site.cpu;
     const Dispatch* now = cpu.current.load(std::memory_order_relaxed);
     const auto same = [&] {
-        if (now == nullptr || now->resume != resume || now->items.size() != callbacks.size()) return false;
+        if (now == nullptr || now->resume != resume || now->count != callbacks.size()) return false;
         for (size_t i = 0; i < callbacks.size(); ++i) {
-            const Dispatch::Item& item = now->items[i];
+            const Dispatch::Item& item = now->items()[i];
             const std::atomic<uint64_t>* counter = callbacks[i]->counter ? &callbacks[i]->counter->calls : nullptr;
             if (item.callback != reinterpret_cast<AnvilCpuCallback>(callbacks[i]->detour) ||
                 item.user != callbacks[i]->user || item.owner != callbacks[i]->owner || item.counter != counter) {
@@ -637,14 +691,19 @@ void ChangeRegistry::publish(Site& site, uintptr_t resume, const std::vector<Cha
         return true;
     };
     if (same()) return;
-    auto list = std::make_unique<Dispatch>();
+    static_assert(sizeof(Dispatch) % alignof(Dispatch::Item) == 0 && std::is_trivially_destructible_v<Dispatch> &&
+                  std::is_trivially_destructible_v<Dispatch::Item>);
+    auto* list = new (::operator new(sizeof(Dispatch) + callbacks.size() * sizeof(Dispatch::Item))) Dispatch;
+    list->older = now;
     list->resume = resume;
-    for (const Change* c : callbacks) {
-        list->items.push_back({reinterpret_cast<AnvilCpuCallback>(c->detour), c->user, c->owner,
-                               c->kind == ChangeKind::MidHook, c->counter ? &c->counter->calls : nullptr});
+    list->count = callbacks.size();
+    for (size_t i = 0; i < callbacks.size(); ++i) {
+        const Change* c = callbacks[i];
+        new (list->items() + i) Dispatch::Item{reinterpret_cast<AnvilCpuCallback>(c->detour), c->user, c->owner,
+                                               c->kind == ChangeKind::MidHook,
+                                               c->counter ? &c->counter->calls : nullptr};
     }
-    cpu.current.store(list.get(), std::memory_order_release);
-    cpu.published.push_back(std::move(list));
+    cpu.current.store(list, std::memory_order_release);
 }
 
 // Points every link and the site's entry at the Active links, innermost first,
@@ -730,8 +789,8 @@ bool ChangeRegistry::relink(Site& site) {
     }
     case ChangeKind::BytePatch:
         if (want != site.installed) {
-            const auto& bytes = want ? active.front()->bytes : site.original;
-            if (!write_code_or_data(site.address, bytes.data(), bytes.size())) return false;
+            const uint8_t* bytes = want ? active.front()->bytes.get() : site.original.data();
+            if (!write_code_or_data(site.address, bytes, site.footprint)) return false;
         }
         break;
     }
@@ -740,8 +799,8 @@ bool ChangeRegistry::relink(Site& site) {
 }
 
 ChangeStatus ChangeRegistry::add_link(OwnerId owner, Site& site, ChangeKind kind, uintptr_t detour,
-                                      std::vector<uint8_t> bytes, std::string label, void** next, ChangeId* out,
-                                      void* user, uintptr_t resume, size_t span, const char* symbol) {
+                                      std::unique_ptr<uint8_t[]> bytes, const std::string& label, void** next,
+                                      ChangeId* out, void* user, uintptr_t resume, size_t span, const char* symbol) {
     auto change = std::make_unique<Change>();
     change->id = changes_.size() + 1;
     change->owner = owner;
@@ -750,17 +809,20 @@ ChangeStatus ChangeRegistry::add_link(OwnerId owner, Site& site, ChangeKind kind
     change->detour = detour;
     change->user = user;
     change->resume = resume;
-    change->span = span;
+    change->span = static_cast<uint32_t>(span);
     change->bytes = std::move(bytes);
-    change->label = std::move(label);
-    if (symbol != nullptr) change->symbol = symbol;
+    // One block for both strings: the label, a NUL, the symbol, a NUL.
+    const size_t symbol_size = symbol != nullptr ? std::strlen(symbol) : 0;
+    change->names = std::make_unique<char[]>(label.size() + symbol_size + 2);  // zeroed
+    std::memcpy(change->names.get(), label.data(), label.size());
+    if (symbol_size != 0) std::memcpy(change->names.get() + label.size() + 1, symbol, symbol_size);
     if (profile_ && (kind == ChangeKind::FunctionHook || kind == ChangeKind::CallRedirect ||
                      kind == ChangeKind::MidHook || kind == ChangeKind::BlockReplacement)) {
         change->counter = std::make_unique<CallCounter>();
         if (kind == ChangeKind::FunctionHook || kind == ChangeKind::CallRedirect) {
             change->counting = static_cast<uint8_t*>(alloc_near_locked(kCountingStubSize));
             if (change->counting == nullptr) {
-                return refuse(owner, ChangeStatus::OutOfMemory, change->label + ": no stub memory");
+                return refuse(owner, ChangeStatus::OutOfMemory, label + ": no stub memory");
             }
             const uintptr_t counter = reinterpret_cast<uintptr_t>(&change->counter->calls);
             const uint8_t code[24] = {0x50,                                      // push rax
@@ -779,7 +841,7 @@ ChangeStatus ChangeRegistry::add_link(OwnerId owner, Site& site, ChangeKind kind
         change->previous = next;  // a value has no stub: the plugin's cell is re-pointed
     } else if (chains(kind)) {
         change->next = new_stub(site.terminal);
-        if (change->next == nullptr) return refuse(owner, ChangeStatus::OutOfMemory, change->label + ": no stub memory");
+        if (change->next == nullptr) return refuse(owner, ChangeStatus::OutOfMemory, label + ": no stub memory");
     }
     Change* link = change.get();
     const auto position = std::find_if(site.links.begin(), site.links.end(), [&](const Change* c) {
@@ -1096,12 +1158,11 @@ ChangeStatus ChangeRegistry::patch_bytes(OwnerId owner, const ChangeTarget& targ
     const std::string label = "byte patch " + where(target.address) + " (" + std::to_string(size) + " B)";
     if (const ChangeStatus s = check_target(owner, target, size, "byte patch"); s != ChangeStatus::Ok) return s;
     const auto* data = static_cast<const uint8_t*>(bytes);
-    std::vector<uint8_t> patch(data, data + size);
     // Identical byte patches share ownership (§8.3).
     Site* site = nullptr;
     for (const auto& s : sites_) {
         if (s->kind != ChangeKind::BytePatch || s->address != target.address || s->footprint != size) continue;
-        if (live(*s) && s->links.front()->bytes != patch) continue;  // reported by check_overlap below
+        if (live(*s) && std::memcmp(s->links.front()->bytes.get(), data, size) != 0) continue;  // reported below
         if (site == nullptr || live(*s)) site = s.get();
     }
     if (site == nullptr || !live(*site)) {
@@ -1115,6 +1176,8 @@ ChangeStatus ChangeRegistry::patch_bytes(OwnerId owner, const ChangeTarget& targ
         site->original.resize(size);
         std::memcpy(site->original.data(), reinterpret_cast<const void*>(target.address), size);
     }
+    auto patch = std::make_unique_for_overwrite<uint8_t[]>(size);
+    std::memcpy(patch.get(), data, size);
     return add_link(owner, *site, ChangeKind::BytePatch, 0, std::move(patch), label, nullptr, out);
 }
 
@@ -1213,7 +1276,7 @@ ChangeStatus ChangeRegistry::remove(OwnerId owner, ChangeId id) {
     if (c.state == LinkState::Staged) std::erase(owners_[owner].staged, id);
     c.state = LinkState::Removed;
     std::erase(c.site->links, &c);
-    if (!relink(*c.site)) return refuse(owner, ChangeStatus::Internal, c.label + ": cannot restore the game's memory");
+    if (!relink(*c.site)) return refuse(owner, ChangeStatus::Internal, std::string(c.label()) + ": cannot restore the game's memory");
     return ChangeStatus::Ok;
 }
 
@@ -1399,7 +1462,7 @@ std::vector<std::string> ChangeRegistry::describe(OwnerId owner) const {
     std::lock_guard lock(mutex_);
     std::vector<std::string> out;
     for (const auto& c : changes_) {
-        if (c->owner == owner && c->state == LinkState::Active) out.push_back(c->label);
+        if (c->owner == owner && c->state == LinkState::Active) out.push_back(c->label());
     }
     return out;
 }
@@ -1435,7 +1498,7 @@ bool ChangeRegistry::call_counts(std::vector<CallCount>& out, bool wait) const {
         if (!c->counter) continue;
         const uint64_t calls = c->counter->calls.load(std::memory_order_relaxed);
         if (c->state == LinkState::Removed && calls == 0) continue;
-        out.push_back({c->owner, c->kind, c->label, c->symbol, calls});
+        out.push_back({c->owner, c->kind, c->label(), c->symbol(), calls});
     }
     return true;
 }
@@ -1479,7 +1542,7 @@ bool ChangeRegistry::attribute(uintptr_t address, AddressAttribution& out) const
     };
     const auto add = [&out](const Change& c) {
         if (out.count < AddressAttribution::kMaxChanges) {
-            out.changes[out.count++] = {c.id, c.owner, c.kind, c.label.c_str(), c.symbol.c_str()};
+            out.changes[out.count++] = {c.id, c.owner, c.kind, c.label(), c.symbol()};
         }
         ++out.total;
     };
