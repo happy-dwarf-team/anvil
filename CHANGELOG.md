@@ -30,8 +30,7 @@
 
 ### Bug Fixes
 
-* **build:** let the SDK from source work without the C language ([#85](https://github.com/happy-dwarf-team/anvil/issues/85)) ([51c8ac4](https://github.com/happy-dwarf-team/anvil/commit/51c8ac46350f2598c800c7f52bf85d21ec163b39))
-* **build:** SDK from source works without the C language ([51c8ac4](https://github.com/happy-dwarf-team/anvil/commit/51c8ac46350f2598c800c7f52bf85d21ec163b39)), closes [#81](https://github.com/happy-dwarf-team/anvil/issues/81)
+* **build:** let the SDK from source work without the C language ([#85](https://github.com/happy-dwarf-team/anvil/issues/85)) ([51c8ac4](https://github.com/happy-dwarf-team/anvil/commit/51c8ac46350f2598c800c7f52bf85d21ec163b39)), closes [#81](https://github.com/happy-dwarf-team/anvil/issues/81)
 * **cli:** check value names the generators reject ([#84](https://github.com/happy-dwarf-team/anvil/issues/84)) ([f56b442](https://github.com/happy-dwarf-team/anvil/commit/f56b442287c6901b493ad3bb7975ac40e9bbd397)), closes [#80](https://github.com/happy-dwarf-team/anvil/issues/80)
 * **core:** keep the safe-mode count and finish the minidump after a crash ([#83](https://github.com/happy-dwarf-team/anvil/issues/83)) ([13db38d](https://github.com/happy-dwarf-team/anvil/commit/13db38d7aeefd731c6b468844a16f30b67b1de61)), closes [#82](https://github.com/happy-dwarf-team/anvil/issues/82)
 * **examples:** add the symbols.lock of hello-rust ([#88](https://github.com/happy-dwarf-team/anvil/issues/88)) ([e38435e](https://github.com/happy-dwarf-team/anvil/commit/e38435eee4d4aae795c91ff8c4c951a0f96394d6)), closes [#86](https://github.com/happy-dwarf-team/anvil/issues/86)
@@ -39,8 +38,7 @@
 
 ### Build
 
-* add the SDK archive and CMake package ([#75](https://github.com/happy-dwarf-team/anvil/issues/75)) ([cc84234](https://github.com/happy-dwarf-team/anvil/commit/cc84234980b6e02649b2a68c7befffb6de793063))
-* SDK archive and CMake package ([cc84234](https://github.com/happy-dwarf-team/anvil/commit/cc84234980b6e02649b2a68c7befffb6de793063)), closes [#53](https://github.com/happy-dwarf-team/anvil/issues/53)
+* add the SDK archive and CMake package ([#75](https://github.com/happy-dwarf-team/anvil/issues/75)) ([cc84234](https://github.com/happy-dwarf-team/anvil/commit/cc84234980b6e02649b2a68c7befffb6de793063)), closes [#53](https://github.com/happy-dwarf-team/anvil/issues/53)
 
 
 ### Documentation
