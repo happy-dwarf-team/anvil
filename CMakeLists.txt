@@ -203,6 +203,9 @@ if(ANVIL_BUILD_TESTS)
     add_dependencies(anvil_manager_tests version_dll)
     add_test(NAME anvil_manager_tests COMMAND anvil_manager_tests $<TARGET_FILE:version_dll>)
 
+    # AnvilManager.exe carries the package of this build and reads it back.
+    add_test(NAME anvil_manager_check_package COMMAND anvil_manager --check-package)
+
     add_executable(anvil_cli_tests tests/test_cli.cpp)
     target_link_libraries(anvil_cli_tests PRIVATE anvil_tool)
     add_dependencies(anvil_cli_tests anvil)
@@ -333,6 +336,8 @@ install(FILES ${safetyhook_SOURCE_DIR}/LICENSE DESTINATION anvil/docs/third-part
 install(FILES ${zydis_SOURCE_DIR}/LICENSE DESTINATION anvil/docs/third-party RENAME zydis-LICENSE.txt COMPONENT anvil)
 install(FILES ${zydis_SOURCE_DIR}/dependencies/zycore/LICENSE DESTINATION anvil/docs/third-party RENAME zycore-LICENSE.txt COMPONENT anvil)
 install(FILES ${ANVIL_OVERLAY_IMGUI_LICENSE} DESTINATION anvil/docs/third-party RENAME imgui-LICENSE.txt COMPONENT anvil)
+# miniz is compiled into AnvilManager.exe, which ships next to version.dll.
+install(FILES ${ANVIL_MINIZ_LICENSE} DESTINATION anvil/docs/third-party RENAME miniz-LICENSE.txt COMPONENT anvil)
 
 # SDK archive (cmake --install ... --component sdk): what plugin authors fetch
 # (design §16). FetchContent_MakeAvailable runs the CMakeLists.txt at its root;
