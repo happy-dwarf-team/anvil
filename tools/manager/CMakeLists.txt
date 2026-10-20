@@ -37,3 +37,57 @@ target_link_libraries(anvil_manager_core PUBLIC anvil_tool PRIVATE anvil_miniz a
 if(MSVC)
     target_compile_options(anvil_manager_core PRIVATE /W4 /WX)
 endif()
+
+# The package AnvilManager.exe carries: `cmake --install --component anvil` of
+# this build into a staging folder, zipped, linked in as resource ANVIL_PACKAGE.
+# The Manager therefore always installs the Anvil of its own version.
+set(ANVIL_MANAGER_STAGE ${CMAKE_CURRENT_BINARY_DIR}/package)
+set(ANVIL_MANAGER_PACKAGE ${CMAKE_CURRENT_BINARY_DIR}/anvil-package.zip)
+add_custom_command(
+    OUTPUT ${ANVIL_MANAGER_PACKAGE}
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${ANVIL_MANAGER_STAGE}
+    COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --config $<CONFIG> --component anvil
+        --prefix ${ANVIL_MANAGER_STAGE}
+    COMMAND ${CMAKE_COMMAND} -E chdir ${ANVIL_MANAGER_STAGE}
+        ${CMAKE_COMMAND} -E tar cf ${ANVIL_MANAGER_PACKAGE} --format=zip -- version.dll anvil
+    DEPENDS version_dll anvil_game anvil_overlay ${PROJECT_SOURCE_DIR}/dist/anvil.toml
+        ${PROJECT_SOURCE_DIR}/dist/plugins-README.txt ${PROJECT_SOURCE_DIR}/LICENSE ${PROJECT_SOURCE_DIR}/README.md
+    COMMENT "Anvil package for AnvilManager.exe"
+    VERBATIM)
+add_custom_target(anvil_manager_package DEPENDS ${ANVIL_MANAGER_PACKAGE})
+
+# Dear ImGui (the tag anvil-overlay pins) with the Win32 and Direct3D 11
+# backends, for the Manager's window.
+FetchContent_GetProperties(imgui)
+if(NOT imgui_SOURCE_DIR)
+    message(FATAL_ERROR "Dear ImGui sources not found (fetched by plugins/anvil-overlay)")
+endif()
+add_library(anvil_manager_imgui STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_dx11.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp)
+target_include_directories(anvil_manager_imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+target_compile_definitions(anvil_manager_imgui PUBLIC IMGUI_DISABLE_OBSOLETE_FUNCTIONS IMGUI_IMPL_WIN32_DISABLE_GAMEPAD)
+set_target_properties(anvil_manager_imgui PROPERTIES COMPILE_WARNING_AS_ERROR OFF)
+
+configure_file(app/manager.rc.in ${CMAKE_CURRENT_BINARY_DIR}/manager.rc @ONLY)
+set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/manager.rc PROPERTIES OBJECT_DEPENDS ${ANVIL_MANAGER_PACKAGE})
+add_executable(anvil_manager WIN32
+    app/main.cpp
+    app/manager_app.cpp
+    app/platform.cpp
+    app/AnvilManager.manifest
+    ${CMAKE_CURRENT_BINARY_DIR}/manager.rc)
+add_dependencies(anvil_manager anvil_manager_package)
+target_link_libraries(anvil_manager PRIVATE anvil_manager_core anvil_manager_imgui d3d11 dxgi winhttp shell32 ole32)
+set_target_properties(anvil_manager PROPERTIES OUTPUT_NAME AnvilManager)
+if(MSVC)
+    target_compile_options(anvil_manager PRIVATE /W4 /WX)
+    # The manifest in app/ says asInvoker; static imports come from System32
+    # only, so the Manager never loads the game folder's version.dll.
+    target_link_options(anvil_manager PRIVATE /MANIFESTUAC:NO /DEPENDENTLOADFLAG:0x800)
+endif()

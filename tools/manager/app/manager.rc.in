@@ -1,0 +1,35 @@
+// Resources of AnvilManager.exe; configured by CMake from version.txt.
+#include <winver.h>
+
+// The Anvil package of this version (tools/manager/CMakeLists.txt).
+ANVIL_PACKAGE RCDATA "@ANVIL_MANAGER_PACKAGE@"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "Happy Dwarf Team"
+            VALUE "FileDescription", "Anvil Manager: installs Anvil and manages its plugins for Europa Universalis IV"
+            VALUE "FileVersion", "@PROJECT_VERSION@"
+            VALUE "InternalName", "AnvilManager"
+            VALUE "LegalCopyright", "Copyright (c) 2026 Happy Dwarf Team. MIT License."
+            VALUE "OriginalFilename", "AnvilManager.exe"
+            VALUE "ProductName", "Anvil Manager"
+            VALUE "ProductVersion", "@PROJECT_VERSION@"
+            VALUE "Comments", "Unofficial community project, not affiliated with Paradox Interactive. https://github.com/happy-dwarf-team/anvil"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

@@ -1,0 +1,128 @@
+#pragma once
+
+#include "cli/game.hpp"
+#include "core/discovery.hpp"
+#include "core/settings.hpp"
+#include "game.hpp"
+#include "install.hpp"
+#include "platform.hpp"
+#include "plugin_zip.hpp"
+
+#include <windows.h>
+
+#include <chrono>
+#include <filesystem>
+#include <future>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace anvil::manager {
+
+// The Manager's window contents (design §15, issue #59): one ImGui frame per
+// draw(). Everything that reads the game folder at length (hashes, anvil
+// check --game) runs on a worker thread; while that folder's eu4.exe runs,
+// nothing that changes the folder is offered.
+class ManagerApp {
+public:
+    ManagerApp(HWND window, std::optional<Package> package, std::string package_error, std::filesystem::path game);
+
+    void draw();
+    // A file dropped on the window: a plugin zip.
+    void dropped(const std::filesystem::path& file);
+    bool should_close() const { return close_; }
+
+private:
+    // What the worker reads from the game folder.
+    struct Snapshot {
+        GameFolder folder;
+        std::optional<Installation> installation;
+        std::optional<cli::GameReport> report;  // when the anvil folder exists
+        AnvilSettings anvil_toml;
+        std::vector<std::string> crashes;
+    };
+    struct PendingPlan {
+        bool uninstall = false;
+        Plan plan;
+    };
+    struct SettingsEditor {
+        std::string plugin;  // id
+        std::filesystem::path player_file;
+        SettingsFile schema;
+        std::vector<SettingValue> values;
+        std::vector<std::string> texts;  // string and key settings, as edited
+        std::vector<std::string> warnings;
+        std::string error;
+        bool dirty = false;
+    };
+
+    void choose_game(const std::filesystem::path& dir);
+    void refresh();
+    void poll();
+    bool read_only() const;
+
+    void draw_game_bar();
+    void draw_anvil_tab();
+    void draw_plugins_tab();
+    void draw_settings_tab();
+    void draw_crashes_tab();
+    void draw_log_tab();
+    void draw_about_tab();
+    void draw_first_run();
+    void draw_modals();
+    void draw_plan_modal();
+    void draw_zip_modal();
+
+    void start_plan(bool uninstall);
+    void run_plan();
+    void open_zip(const std::filesystem::path& file);
+    void install_zip();
+    void edit_list(const std::string& key, const std::string& id, bool listed);
+    void open_settings(const cli::GamePlugin& plugin);
+    void save_settings();
+    void show_message(std::string title, std::string text);
+    void failed(const std::string& what, const std::string& error, bool access_denied);
+
+    HWND window_;
+    std::optional<Package> package_;
+    std::string package_error_;
+    std::filesystem::path exe_;
+    ManagerSettings settings_;
+    std::vector<std::filesystem::path> steam_games_;
+
+    std::filesystem::path game_;
+    std::optional<Snapshot> snapshot_;
+    std::future<Snapshot> pending_;
+    bool running_ = false;
+    std::chrono::steady_clock::time_point running_checked_{};
+
+    std::optional<PendingPlan> plan_;
+    bool replace_foreign_dll_ = false;
+    bool remove_everything_ = false;
+
+    std::optional<ZipArchive> zip_;
+    std::string zip_name_;
+    std::optional<PluginZipCheck> zip_check_;
+    bool zip_anyway_ = false;
+
+    std::optional<SettingsEditor> editor_;
+    std::string crash_selected_;
+    std::string crash_text_;
+    std::string log_text_;
+
+    std::future<ReleaseCheck> release_pending_;
+    std::optional<ReleaseCheck> release_;
+
+    std::string message_title_;
+    std::string message_text_;
+    bool offer_elevation_ = false;
+    bool open_message_ = false;
+    bool open_plan_ = false;
+    bool open_zip_ = false;
+    bool close_after_message_ = false;
+    bool show_settings_tab_ = false;
+    bool log_previous_ = false;
+    bool close_ = false;
+};
+
+}  // namespace anvil::manager
