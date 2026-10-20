@@ -339,6 +339,11 @@ install(FILES ${ANVIL_OVERLAY_IMGUI_LICENSE} DESTINATION anvil/docs/third-party 
 # miniz is compiled into AnvilManager.exe, which ships next to version.dll.
 install(FILES ${ANVIL_MINIZ_LICENSE} DESTINATION anvil/docs/third-party RENAME miniz-LICENSE.txt COMPONENT anvil)
 
+# AnvilManager.exe (cmake --install ... --component manager): next to eu4.exe in
+# the release zip, and a release asset of its own. Not in component anvil: the
+# Manager carries that package (tools/manager).
+install(TARGETS anvil_manager RUNTIME DESTINATION . COMPONENT manager)
+
 # SDK archive (cmake --install ... --component sdk): what plugin authors fetch
 # (design §16). FetchContent_MakeAvailable runs the CMakeLists.txt at its root;
 # find_package(AnvilPlugin) reads cmake/. The version file lets

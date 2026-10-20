@@ -108,6 +108,9 @@ jobs:
         shell: pwsh
         run: |
           cmake --install build --config Release --component anvil --prefix dist/anvil-package
+          # AnvilManager.exe next to version.dll (design §3); it is also an asset of its own.
+          cmake --install build --config Release --component manager --prefix dist/anvil-package
+          cmake --install build --config Release --component manager --prefix dist/anvil-manager
           # The hello examples, laid out as plugin folders (not installed: docs only).
           New-Item -ItemType Directory -Force dist/anvil-package/anvil/docs/examples | Out-Null
           foreach ($example in 'hello-c', 'hello-cpp', 'hello-rust') {
@@ -125,6 +128,19 @@ jobs:
         with:
           name: anvil-${{ github.sha }}
           path: dist/anvil-${{ github.sha }}.zip
+
+      # AnvilManager.exe on its own: the player's download (design §15). It carries
+      # the package above (--check-package reads it back; ctest ran it too).
+      - name: Check the Manager
+        shell: pwsh
+        run: |
+          $manager = Start-Process dist/anvil-manager/AnvilManager.exe -ArgumentList '--check-package' -Wait -PassThru
+          if ($manager.ExitCode -ne 0) { throw "AnvilManager.exe --check-package failed ($($manager.ExitCode))" }
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: anvil-manager-${{ github.sha }}
+          path: dist/anvil-manager/AnvilManager.exe
 
       # SDK archive for plugin authors (design §16): headers, anvil.exe and the
       # AnvilPlugin CMake package. Built from the same build as the package above.
