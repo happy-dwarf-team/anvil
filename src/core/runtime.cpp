@@ -1,6 +1,8 @@
 #include "runtime.hpp"
 
 #include "discovery.hpp"
+#include "mod_plugins.hpp"
+#include "plugin_hash.hpp"
 #include "game_build.hpp"
 #include "gameplay_policy.hpp"
 #include "host.hpp"
@@ -25,6 +27,7 @@
 #include <algorithm>
 #include <atomic>
 #include <map>
+#include <set>
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -52,6 +55,7 @@ struct Runtime {
     std::vector<std::unique_ptr<AnvilPlugin>> plugins;  // resolved, in load order
     std::vector<Skipped> skipped;
     StartMarker start_marker;  // safe mode: starts that ended before game_ready
+    ModDiscovery mods;  // plugins in the playset's mods (design §14)
     std::unique_ptr<Control> control;  // anvil.control, the overlay's view of the core (design §15)
     LARGE_INTEGER start{};
     LARGE_INTEGER frequency{};
@@ -117,8 +121,24 @@ void load_plugin(AnvilPlugin& plugin) {
         log_error(label + ": not loaded; " + reason);
         return;
     }
+    // A plugin from a mod: its approved copy must still have the approved
+    // hash. Its files stay open without write or delete sharing until the
+    // DLL is mapped, so nothing can change between the check and the load.
+    FileLocks locks;
+    if (!plugin.approved_hash.empty()) {
+        const FolderHash now = hash_plugin_folder(plugin.plugin_dir, &locks);
+        if (now.sha256 != plugin.approved_hash) {
+            plugin.reason = "its approved copy changed (" + (now.error.empty() ? "hash " + short_hash(now.sha256) : now.error) +
+                            ", approved " + short_hash(plugin.approved_hash) + "); approve it again";
+            plugin.state = "failed";
+            g_runtime->policy->forget(plugin.owner);
+            log_error(label + ": not loaded; " + plugin.reason);
+            return;
+        }
+    }
     plugin.module = LoadLibraryExW(dll.c_str(), nullptr,
                                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    locks.release();
     if (plugin.module == nullptr) {
         const DWORD error = GetLastError();
         plugin.reason = "cannot load " + plugin.manifest.entry + " (error " + std::to_string(error) + ")";
@@ -356,8 +376,12 @@ void startup_impl(const std::filesystem::path& game_dir) {
     };
     const auto plugins_dir = g_runtime->anvil_dir / "plugins";
     const std::vector<std::filesystem::path> folders = plugin_folders(plugins_dir);
+    // A local plugin wins over a plugin with its id in any mod (design §14),
+    // also when it is disabled or broken (then by its folder's name).
+    std::set<std::string> local_ids;
     for (const auto& folder : folders) {
         const auto parsed = load_manifest(folder);
+        local_ids.insert(parsed.manifest ? parsed.manifest->id : narrow(folder.filename().wstring()));
         if (!parsed.manifest) {
             g_runtime->skipped.push_back({narrow(folder.filename().wstring()), parsed.error, folder});
             continue;
@@ -379,6 +403,66 @@ void startup_impl(const std::filesystem::path& game_dir) {
         input.manifests.push_back(*parsed.manifest);
     }
     log_info("discovered " + std::to_string(folders.size()) + " plugin folder(s) in " + narrow(plugins_dir.wstring()));
+
+    // Plugins in the mods of the playset (design §14): only approved ones
+    // load, always from their approved copy, whose hash is checked again
+    // right before LoadLibrary (load_plugin).
+    std::map<std::wstring, std::string> approved_hashes;  // by the copy's folder
+    {
+        const std::filesystem::path user_dir = eu4_user_dir(game_dir);
+        g_runtime->mods = discover_mod_plugins(g_runtime->anvil_dir, user_dir, local_ids);
+        ModDiscovery& mods = g_runtime->mods;
+        for (const auto& w : mods.warnings) log_warning(w);
+        prune_approved_copies(g_runtime->anvil_dir, mods.trust);
+        std::map<std::string, std::vector<std::string>> shadowed;  // id -> the mods' names
+        for (ModPlugin& p : mods.plugins) {
+            const std::string label = p.id + " from mod '" + p.mod.name + "' (" +
+                                      (p.mod.workshop_id.empty() ? std::string("local mod") : "Workshop " + p.mod.workshop_id) + ")";
+            const auto skip = [&](const std::string& reason) {
+                g_runtime->skipped.push_back({p.id, label.substr(p.id.size() + 1) + ": " + reason, p.folder});
+            };
+            if (p.state == ModPluginState::Shadowed) {
+                shadowed[p.id].push_back(p.mod.name);
+                continue;
+            }
+            if (!p.loads()) {
+                skip(p.reason);
+                continue;
+            }
+            if (record.safe_mode) {
+                skip("safe mode");
+                continue;
+            }
+            if (p.copy_missing) {
+                if (std::string error; !make_approved_copy(g_runtime->anvil_dir, p, error)) {
+                    skip("cannot make its approved copy: " + error);
+                    continue;
+                }
+                log_info(label + ": made the approved copy");
+            }
+            log_info(label + ": " + p.reason + "; loads from " + narrow(p.load_folder.wstring()));
+            const auto parsed = load_manifest(p.load_folder);
+            if (!parsed.manifest) {
+                skip("its approved copy: " + parsed.error);
+                continue;
+            }
+            if (std::string reason = missing_entry_reason(*parsed.manifest); !reason.empty()) {
+                skip("its approved copy: " + reason);
+                continue;
+            }
+            approved_hashes[p.load_folder.wstring()] = p.approval->hash;
+            input.manifests.push_back(*parsed.manifest);
+        }
+        for (const auto& [id, names] : shadowed) {
+            std::string list;
+            for (const auto& n : names) list += (list.empty() ? "'" : ", '") + n + "'";
+            log_info(id + ": the local plugin in anvil/plugins wins over the same id in mod(s) " + list);
+        }
+        if (!mods.plugins.empty() || !mods.playset.mods.empty()) {
+            log_info("found " + std::to_string(mods.plugins.size()) + " plugin(s) in " +
+                     std::to_string(mods.playset.mods.size()) + " enabled mod(s) at " + fmt_ms(elapsed_ms()));
+        }
+    }
     ResolveResult resolved = resolve(input);
     g_runtime->skipped.insert(g_runtime->skipped.end(), resolved.skipped.begin(), resolved.skipped.end());
     for (const auto& s : g_runtime->skipped) log_warning(s.id + ": skipped — " + s.reason);
@@ -394,6 +478,9 @@ void startup_impl(const std::filesystem::path& game_dir) {
             plugin->symbols = std::move(it->second);
         }
         plugin->plugin_dir = m.folder.wstring();
+        if (const auto it = approved_hashes.find(m.folder.wstring()); it != approved_hashes.end()) {
+            plugin->approved_hash = it->second;
+        }
         plugin->data_dir = (g_runtime->anvil_dir / "data" / m.id).wstring();
         // The player's values and the ANVIL_<ID>_<NAME> overrides, before any plugin loads.
         if (const auto it = declared_settings.find(m.folder.wstring()); it != declared_settings.end()) {

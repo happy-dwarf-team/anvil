@@ -1,6 +1,7 @@
 #include "cli/game.hpp"
 
 #include "core/discovery.hpp"
+#include "core/mod_plugins.hpp"
 #include "core/game_build.hpp"
 #include "core/pe_image.hpp"
 #include "core/resolver.hpp"
@@ -41,13 +42,12 @@ bool ranges_overlap(const CodeRange& a, const CodeRange& b) {
 // Plugins that load together and declare overlapping code ranges (design §16).
 // The same range at the same address is the normal case of a chain, not a
 // warning. One warning per pair of plugins, at the earlier plugin's symbol.
-std::vector<OverlapWarning> find_overlaps(const std::vector<const GamePlugin*>& loaded,
-                                          const std::filesystem::path& plugins_dir) {
+std::vector<OverlapWarning> find_overlaps(const std::vector<const CheckReport*>& loaded) {
     std::vector<OverlapWarning> warnings;
     for (size_t i = 0; i < loaded.size(); ++i) {
         for (size_t j = i + 1; j < loaded.size(); ++j) {
-            const CheckReport& a = loaded[i]->report;
-            const CheckReport& b = loaded[j]->report;
+            const CheckReport& a = *loaded[i];
+            const CheckReport& b = *loaded[j];
             const CodeRange* first_a = nullptr;
             const CodeRange* first_b = nullptr;
             size_t hits = 0;
@@ -64,7 +64,7 @@ std::vector<OverlapWarning> find_overlaps(const std::vector<const GamePlugin*>& 
             OverlapWarning w;
             w.plugin = a.plugin;
             w.other = b.plugin;
-            w.file = shown(plugins_dir / loaded[i]->folder / a.manifest->symbols);
+            w.file = shown(a.manifest->folder / a.manifest->symbols);
             w.line = first_a->line;
             w.message = "code range of symbol " + first_a->symbol + " (rva " + hex(first_a->rva) + ", " +
                         std::to_string(first_a->size) + " byte(s)) overlaps symbol " + first_b->symbol + " of plugin " +
@@ -137,6 +137,57 @@ GameReport check_game(const GameOptions& options) {
         plugin.disabled = !settings.enabled || by_id;
         report.plugins.push_back(std::move(plugin));
     }
+    // The plugins of the playset's mods, decided as the loader decides them.
+    std::set<std::string> local_ids;
+    for (const GamePlugin& plugin : report.plugins) {
+        local_ids.insert(plugin.report.manifest ? plugin.report.manifest->id : plugin.folder);
+    }
+    const std::filesystem::path user_dir = options.user_dir.empty() ? eu4_user_dir(options.game_dir) : options.user_dir;
+    const ModDiscovery mods = discover_mod_plugins(anvil_dir, user_dir, local_ids);
+    report.user_dir = shown(user_dir);
+    report.playset_found = mods.playset.found;
+    report.enabled_mods = mods.playset.mods.size();
+    if (!mods.playset.error.empty()) {
+        report.problems.push_back({shown(user_dir / "dlc_load.json"), 0,
+                                   mods.playset.error + " (the loader then loads no plugins from mods)"});
+    }
+    if (!mods.trust.error.empty()) {
+        report.problems.push_back({shown(anvil_dir / "trust.toml"), mods.trust.line,
+                                   mods.trust.error + " (the loader then approves no plugin from a mod)"});
+    }
+    for (const PlaysetMod& mod : mods.playset.mods) {
+        if (!mod.error.empty() && !mod.error.starts_with("a zipped mod")) {
+            report.mod_warnings.push_back("mod " + mod.descriptor + ": " + mod.error);
+        }
+    }
+    for (const ModPlugin& p : mods.plugins) {
+        GameModPlugin gm;
+        gm.id = p.id;
+        gm.mod = p.mod.name;
+        gm.descriptor = p.mod.descriptor;
+        gm.workshop_id = p.mod.workshop_id;
+        gm.folder = shown(p.folder);
+        gm.state = state_name(p.state);
+        gm.reason = p.reason;
+        gm.hash = p.hash;
+        if (p.manifest) gm.version = p.manifest->version.to_string();
+        if (p.approval && p.bound) {
+            gm.approved_version = p.approval->version;
+            gm.approved_hash = p.approval->hash;
+            gm.approved_date = p.approval->approved;
+        }
+        if (p.loads()) gm.loads_from = shown(p.load_folder);
+        gm.copy_missing = p.copy_missing;
+        gm.others = p.others;
+        CheckOptions check;
+        check.plugin_dir = p.loads() && !p.copy_missing ? p.load_folder : p.folder;
+        check.exe = exe;
+        check.write_lock = false;
+        check.build_of = options.build_of;
+        gm.report = check_plugin(check);
+        gm.status = "skipped";
+        report.mod_plugins.push_back(std::move(gm));
+    }
 
     // Discovery as the loader does it: a broken plugin.toml or a missing entry
     // skips the plugin before the resolver sees it.
@@ -144,7 +195,8 @@ GameReport check_game(const GameOptions& options) {
     input.host_api = kManifestApi;
     input.host_version = Version::parse(ANVIL_VERSION);
     input.disabled = settings.disabled_plugins;
-    std::map<std::filesystem::path, size_t> by_folder;
+    std::map<std::filesystem::path, const CheckReport*> by_folder;
+    std::map<std::filesystem::path, size_t> mod_by_folder;  // index in mod_plugins
     std::vector<Skipped> skipped;
     for (size_t i = 0; i < report.plugins.size(); ++i) {
         const GamePlugin& plugin = report.plugins[i];
@@ -157,13 +209,27 @@ GameReport check_game(const GameOptions& options) {
             skipped.push_back({plugin.report.manifest->id, std::move(reason), folder, plugin.disabled});
             continue;
         }
-        by_folder[folder] = i;
+        by_folder[folder] = &plugin.report;
         input.manifests.push_back(*plugin.report.manifest);
+    }
+    for (size_t i = 0; i < report.mod_plugins.size(); ++i) {
+        GameModPlugin& gm = report.mod_plugins[i];
+        if (!mods.plugins[i].loads()) continue;
+        const bool disabled = !settings.enabled || disabled_ids.contains(gm.id);
+        const std::filesystem::path folder = gm.report.manifest ? gm.report.manifest->folder : mods.plugins[i].load_folder;
+        mod_by_folder[folder] = i;
+        std::string reason = gm.report.manifest ? missing_entry_reason(*gm.report.manifest) : gm.report.skip_reason;
+        if (!reason.empty()) {
+            skipped.push_back({gm.id, std::move(reason), folder, disabled});
+            continue;
+        }
+        by_folder[folder] = &gm.report;
+        input.manifests.push_back(*gm.report.manifest);
     }
     // The symbols are verified (and their build compared) by check_plugin already.
     input.verify = [&](const Manifest& m) {
         const auto it = by_folder.find(m.folder);
-        return it == by_folder.end() ? std::string() : report.plugins[it->second].report.skip_reason;
+        return it == by_folder.end() ? std::string() : it->second->skip_reason;
     };
 
     ResolveResult resolved;
@@ -177,21 +243,40 @@ GameReport check_game(const GameOptions& options) {
     skipped.insert(skipped.end(), resolved.skipped.begin(), resolved.skipped.end());
 
     std::set<std::filesystem::path> loaded_folders;
-    std::vector<const GamePlugin*> loaded;
+    std::vector<const CheckReport*> loaded;
     for (const Manifest& m : resolved.order) {
         loaded_folders.insert(m.folder);
-        report.load_order.push_back({m.id, m.version.to_string(), m.phase == Phase::Early ? "early" : "main", name_of(m.folder)});
-        loaded.push_back(&report.plugins[by_folder.at(m.folder)]);
+        const auto mod = mod_by_folder.find(m.folder);
+        const bool from_mod = mod != mod_by_folder.end();
+        report.load_order.push_back({m.id, m.version.to_string(), m.phase == Phase::Early ? "early" : "main",
+                                     from_mod ? std::string() : name_of(m.folder),
+                                     from_mod ? report.mod_plugins[mod->second].mod : std::string()});
+        loaded.push_back(by_folder.at(m.folder));
     }
-    for (const Skipped& s : skipped) report.skipped.push_back({s.id, name_of(s.folder), s.reason, s.disabled});
+    for (const Skipped& s : skipped) {
+        const auto mod = mod_by_folder.find(s.folder);
+        if (mod == mod_by_folder.end()) {
+            report.skipped.push_back({s.id, name_of(s.folder), s.reason, s.disabled, {}});
+            continue;
+        }
+        GameModPlugin& gm = report.mod_plugins[mod->second];
+        gm.skip_reason = s.reason;
+        if (s.disabled) gm.status = "disabled";
+        report.skipped.push_back({s.id, {}, s.reason, s.disabled, gm.mod});
+    }
     for (size_t i = 0; i < report.plugins.size(); ++i) {
         GamePlugin& plugin = report.plugins[i];
         plugin.status = loaded_folders.contains(folders[i]) ? "loaded" : plugin.disabled ? "disabled" : "skipped";
     }
-    report.warnings = find_overlaps(loaded, plugins_dir);
+    for (const auto& [folder, i] : mod_by_folder) {
+        if (loaded_folders.contains(folder)) report.mod_plugins[i].status = "loaded";
+    }
+    report.warnings = find_overlaps(loaded);
 
     // Exit code: anything that keeps a plugin from loading, or that is wrong in
-    // a plugin that should, is a problem; what the player disabled is not.
+    // a plugin that should, is a problem; what the player disabled is not, and
+    // neither is a plugin from a mod that waits for the player (pending, a
+    // conflict, shadowed, an update pending).
     bool problems = !report.problems.empty();
     for (const GamePlugin& plugin : report.plugins) {
         if (plugin.disabled) continue;
@@ -199,6 +284,17 @@ GameReport check_game(const GameOptions& options) {
             report.exit_code = kExitCannotCheck;
             if (report.cannot_check.empty()) report.cannot_check = plugin.folder + ": " + plugin.report.cannot_check;
         } else if (!plugin.report.problems.empty()) {
+            problems = true;
+        }
+    }
+    for (size_t i = 0; i < report.mod_plugins.size(); ++i) {
+        const GameModPlugin& gm = report.mod_plugins[i];
+        if (mods.plugins[i].state == ModPluginState::Invalid) problems = true;
+        if (!mods.plugins[i].loads() || gm.status == "disabled") continue;
+        if (gm.report.exit_code == kExitCannotCheck) {
+            report.exit_code = kExitCannotCheck;
+            if (report.cannot_check.empty()) report.cannot_check = gm.id + " from mod '" + gm.mod + "': " + gm.report.cannot_check;
+        } else if (!gm.report.problems.empty()) {
             problems = true;
         }
     }
@@ -216,17 +312,45 @@ const GamePlugin* plugin_in(const GameReport& report, const std::string& folder)
     return nullptr;
 }
 
+const GameModPlugin* mod_plugin_in(const GameReport& report, const SkippedPlugin& s) {
+    for (const GameModPlugin& plugin : report.mod_plugins) {
+        if (plugin.id == s.id && plugin.mod == s.mod && !plugin.loads_from.empty()) return &plugin;
+    }
+    return nullptr;
+}
+
+// The checks of a skipped plugin, local or from a mod; nullptr when unknown.
+const CheckReport* report_of(const GameReport& report, const SkippedPlugin& s) {
+    if (!s.mod.empty()) {
+        const GameModPlugin* plugin = mod_plugin_in(report, s);
+        return plugin != nullptr ? &plugin->report : nullptr;
+    }
+    const GamePlugin* plugin = plugin_in(report, s.folder);
+    return plugin != nullptr ? &plugin->report : nullptr;
+}
+
+// A plugin from a mod whose problems count: one that loads or should, unless disabled.
+bool mod_problems_count(const GameModPlugin& p) { return !p.loads_from.empty() && p.status != "disabled"; }
+
 size_t counted_problems(const GameReport& report) {
     size_t count = report.problems.size();
     for (const GamePlugin& plugin : report.plugins) {
         if (!plugin.disabled) count += plugin.report.problems.size();
     }
+    for (const GameModPlugin& plugin : report.mod_plugins) {
+        if (plugin.state == "invalid") ++count;
+        else if (mod_problems_count(plugin)) count += plugin.report.problems.size();
+    }
     // A plugin that fails its own checks is already counted by them.
     for (const SkippedPlugin& s : report.skipped) {
-        const GamePlugin* plugin = plugin_in(report, s.folder);
-        if (!s.disabled && (plugin == nullptr || plugin->report.problems.empty())) ++count;
+        const CheckReport* checks = report_of(report, s);
+        if (!s.disabled && (checks == nullptr || checks->problems.empty())) ++count;
     }
     return count;
+}
+
+std::string mod_label(const GameModPlugin& p) {
+    return "mod '" + p.mod + "' (" + (p.workshop_id.empty() ? std::string("local mod") : "Workshop " + p.workshop_id) + ")";
 }
 
 std::string game_json(const GameReport& report) {
@@ -260,11 +384,45 @@ std::string game_json(const GameReport& report) {
     }
     out += report.plugins.empty() ? "],\n" : "\n  ],\n";
 
+    const auto string_or_null = [](const std::string& text) { return text.empty() ? std::string("null") : json_string(text); };
+    out += "  \"mods\": {\"user_dir\": " + json_string(report.user_dir) +
+           ", \"dlc_load\": " + (report.playset_found ? "true" : "false") +
+           ", \"enabled\": " + std::to_string(report.enabled_mods) + ", \"warnings\": [";
+    for (size_t i = 0; i < report.mod_warnings.size(); ++i) out += (i == 0 ? "" : ", ") + json_string(report.mod_warnings[i]);
+    out += "]},\n  \"mod_plugins\": [";
+    for (size_t i = 0; i < report.mod_plugins.size(); ++i) {
+        const GameModPlugin& p = report.mod_plugins[i];
+        const std::string in = "      ";
+        out += std::string(i == 0 ? "\n" : ",\n") + "    {\n";
+        out += in + "\"id\": " + json_string(p.id) + ",\n";
+        out += in + "\"mod\": {\"name\": " + json_string(p.mod) + ", \"descriptor\": " + json_string(p.descriptor) +
+               ", \"workshop_id\": " + string_or_null(p.workshop_id) + ", \"folder\": " + json_string(p.folder) + "},\n";
+        out += in + "\"state\": " + json_string(p.state) + ",\n";
+        out += in + "\"reason\": " + json_string(p.reason) + ",\n";
+        out += in + "\"status\": " + json_string(p.status) + ",\n";
+        if (!p.skip_reason.empty()) out += in + "\"skip_reason\": " + json_string(p.skip_reason) + ",\n";
+        out += in + "\"version\": " + string_or_null(p.version) + ",\n";
+        out += in + "\"hash\": " + string_or_null(p.hash) + ",\n";
+        out += in + "\"approved\": " +
+               (p.approved_hash.empty() ? std::string("null")
+                                        : "{\"version\": " + json_string(p.approved_version) + ", \"hash\": " +
+                                              json_string(p.approved_hash) + ", \"date\": " + json_string(p.approved_date) + "}") +
+               ",\n";
+        out += in + "\"loads_from\": " + string_or_null(p.loads_from) + ",\n";
+        out += in + "\"copy_missing\": " + (p.copy_missing ? "true" : "false") + ",\n";
+        out += in + "\"others\": [";
+        for (size_t j = 0; j < p.others.size(); ++j) out += (j == 0 ? "" : ", ") + json_string(p.others[j]);
+        out += "],\n" + in + "\"check\": " + report_json(p.report, in, p.report.manifest ? shown(p.report.manifest->folder) : p.folder) +
+               "\n    }";
+    }
+    out += report.mod_plugins.empty() ? "],\n" : "\n  ],\n";
+
     out += "  \"load_order\": [";
     for (size_t i = 0; i < report.load_order.size(); ++i) {
         const LoadedPlugin& p = report.load_order[i];
         out += std::string(i == 0 ? "\n" : ",\n") + "    {\"id\": " + json_string(p.id) + ", \"version\": " + json_string(p.version) +
-               ", \"phase\": " + json_string(p.phase) + ", \"folder\": " + json_string(p.folder) + "}";
+               ", \"phase\": " + json_string(p.phase) + ", \"folder\": " + json_string(p.folder) +
+               (p.mod.empty() ? std::string() : ", \"mod\": " + json_string(p.mod)) + "}";
     }
     out += report.load_order.empty() ? "],\n" : "\n  ],\n";
 
@@ -272,7 +430,8 @@ std::string game_json(const GameReport& report) {
     for (size_t i = 0; i < report.skipped.size(); ++i) {
         const SkippedPlugin& s = report.skipped[i];
         out += std::string(i == 0 ? "\n" : ",\n") + "    {\"id\": " + json_string(s.id) + ", \"folder\": " + json_string(s.folder) +
-               ", \"reason\": " + json_string(s.reason) + ", \"disabled\": " + (s.disabled ? "true" : "false") + "}";
+               ", \"reason\": " + json_string(s.reason) + ", \"disabled\": " + (s.disabled ? "true" : "false") +
+               (s.mod.empty() ? std::string() : ", \"mod\": " + json_string(s.mod)) + "}";
     }
     out += report.skipped.empty() ? "],\n" : "\n  ],\n";
 
@@ -311,20 +470,43 @@ std::string format_game_report(const GameReport& report, Format format) {
             out += summary + (plugin.disabled ? " (disabled)" : "") + "\n";
         }
     }
+    std::vector<Problem> mod_warnings;
+    for (const std::string& w : report.mod_warnings) mod_warnings.push_back({report.user_dir + "/dlc_load.json", 0, w});
+    out += problem_lines(mod_warnings, format, "warning");
+    if (!report.mod_plugins.empty() || report.enabled_mods > 0) {
+        out += "plugins in mods (" + std::to_string(report.mod_plugins.size()) + ", " + std::to_string(report.enabled_mods) +
+               " enabled mod(s) in " + report.user_dir + "):\n";
+    }
+    for (const GameModPlugin& p : report.mod_plugins) {
+        const bool counts = mod_problems_count(p);
+        out += "  " + p.id + (p.version.empty() ? "" : " " + p.version) + " in " + mod_label(p) + ": " + p.state + "; " +
+               p.reason + (p.status == "loaded" ? " (loads)" : "") + "\n";
+        if (!p.skip_reason.empty()) out += "    skipped: " + p.skip_reason + "\n";
+        if (p.state == "invalid" && github) {
+            out += "::error file=" + github_escape(p.folder + "/plugin.toml", true) + ",title=anvil check::" +
+                   github_escape(p.id + " in " + mod_label(p) + ": " + p.reason, false) + "\n";
+        }
+        out += problem_lines(p.report.problems, format, counts ? "error" : "warning");
+    }
     out += "load order (" + std::to_string(report.load_order.size()) + "):\n";
     for (size_t i = 0; i < report.load_order.size(); ++i) {
         const LoadedPlugin& p = report.load_order[i];
-        out += "  " + std::to_string(i + 1) + ". " + p.id + " " + p.version + " (" + p.phase + ")\n";
+        out += "  " + std::to_string(i + 1) + ". " + p.id + " " + p.version + " (" + p.phase + ")" +
+               (p.mod.empty() ? "" : " from mod '" + p.mod + "'") + "\n";
     }
     out += "skipped (" + std::to_string(report.skipped.size()) + "):\n";
     for (const SkippedPlugin& s : report.skipped) {
-        out += "  " + s.id + (s.disabled ? " (disabled)" : "") + ": " + s.reason + "\n";
+        out += "  " + s.id + (s.mod.empty() ? "" : " from mod '" + s.mod + "'") + (s.disabled ? " (disabled)" : "") + ": " +
+               s.reason + "\n";
         if (github && !s.disabled) {
             // The plugin's own problems already explain a plugin that fails its checks.
-            const GamePlugin* plugin = plugin_in(report, s.folder);
-            if (plugin != nullptr && !plugin->report.problems.empty()) continue;
-            out += "::error file=" + github_escape(report.game_dir + "/anvil/plugins/" + s.folder + "/plugin.toml", true) +
-                   ",title=anvil check::" + github_escape(s.id + " is skipped: " + s.reason, false) + "\n";
+            const CheckReport* checks = report_of(report, s);
+            if (checks != nullptr && !checks->problems.empty()) continue;
+            const GameModPlugin* from_mod = s.mod.empty() ? nullptr : mod_plugin_in(report, s);
+            const std::string file = from_mod != nullptr ? from_mod->folder + "/plugin.toml"
+                                                         : report.game_dir + "/anvil/plugins/" + s.folder + "/plugin.toml";
+            out += "::error file=" + github_escape(file, true) + ",title=anvil check::" +
+                   github_escape(s.id + " is skipped: " + s.reason, false) + "\n";
         }
     }
     std::vector<Problem> warnings;
@@ -333,6 +515,14 @@ std::string format_game_report(const GameReport& report, Format format) {
 
     out += "game " + report.game_dir + ": " + std::to_string(report.plugins.size()) + " plugin(s), " +
            std::to_string(report.load_order.size()) + " will load, " + std::to_string(report.skipped.size()) + " skipped";
+    if (!report.mod_plugins.empty()) {
+        size_t waiting = 0;
+        for (const GameModPlugin& p : report.mod_plugins) {
+            if (p.state == "pending" || p.state == "update-pending" || p.state == "conflict") ++waiting;
+        }
+        out += ", " + std::to_string(report.mod_plugins.size()) + " in mods (" + std::to_string(waiting) +
+               " waiting for the player)";
+    }
     if (!report.warnings.empty()) out += ", " + std::to_string(report.warnings.size()) + " warning(s)";
     if (report.exit_code == kExitCannotCheck) {
         out += ": cannot check completely\n";

@@ -80,6 +80,9 @@ std::string check_setting_value(const Setting& setting, const SettingValue& valu
 // `error` set when it does not fit.
 std::optional<SettingValue> parse_setting_text(const Setting& setting, std::string_view text, std::string& error);
 
+// A TOML basic string: "text" with its escapes.
+std::string toml_string(std::string_view text);
+
 // The value as a TOML value: true, 1024, 0.5, "on", "Ctrl+F12".
 std::string setting_toml(const Setting& setting, const SettingValue& value);
 

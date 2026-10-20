@@ -85,6 +85,8 @@ std::string format_float(double value) {
     return out;
 }
 
+}  // namespace
+
 std::string toml_string(std::string_view text) {
     std::string out = "\"";
     for (const char c : text) {
@@ -108,6 +110,8 @@ std::string toml_string(std::string_view text) {
     }
     return out + "\"";
 }
+
+namespace {
 
 std::string option_list(const Setting& s) {
     std::string out;

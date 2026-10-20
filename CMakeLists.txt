@@ -42,15 +42,20 @@ add_library(anvil_core STATIC
     src/core/anvil_toml_edit.cpp
     src/core/crash_history.cpp
     src/core/discovery.cpp
+    src/core/files.cpp
     src/core/game_build.cpp
     src/core/instructions.cpp
     src/core/log.cpp
     src/core/manifest.cpp
+    src/core/mod_plugins.cpp
     src/core/pe_image.cpp
+    src/core/playset.cpp
+    src/core/plugin_hash.cpp
     src/core/resolver.cpp
     src/core/semver.cpp
     src/core/settings.cpp
-    src/core/symbols.cpp)
+    src/core/symbols.cpp
+    src/core/trust.cpp)
 target_include_directories(anvil_core PUBLIC include src)
 target_link_libraries(anvil_core PUBLIC tomlplusplus::tomlplusplus Zydis bcrypt)
 target_compile_definitions(anvil_core PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE
@@ -206,6 +211,29 @@ if(ANVIL_BUILD_TESTS)
     target_link_libraries(anvil_game_tests PRIVATE anvil_tool)
     add_dependencies(anvil_game_tests anvil)
     add_test(NAME anvil_game_tests COMMAND anvil_game_tests $<TARGET_FILE:anvil>)
+
+    # Plugins in mods (design §14, #60): the playset, the folder hash,
+    # trust.toml, the decisions and approved copies, on made-up playsets.
+    add_executable(anvil_workshop_tests tests/workshop_tests.cpp)
+    target_link_libraries(anvil_workshop_tests PRIVATE anvil_core)
+    target_compile_definitions(anvil_workshop_tests PRIVATE ANVIL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME anvil_workshop_tests COMMAND anvil_workshop_tests)
+
+    # The loader's start-up with plugins in mods, in child processes of the
+    # test (tests/startup_tests.cpp), with mod-probe: a plugin without symbols.
+    set(ANVIL_MOD_PROBE_DIR ${CMAKE_BINARY_DIR}/test-plugins/mod-probe)
+    add_library(anvil_mod_probe SHARED tests/plugins/mod-probe/mod_probe.c)
+    target_include_directories(anvil_mod_probe PRIVATE include)
+    set_target_properties(anvil_mod_probe PROPERTIES OUTPUT_NAME mod-probe
+        RUNTIME_OUTPUT_DIRECTORY ${ANVIL_MOD_PROBE_DIR}$<0:> PDB_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test-plugins$<0:>)
+    if(MSVC)
+        target_compile_options(anvil_mod_probe PRIVATE /W4 /WX)
+    endif()
+    configure_file(tests/plugins/mod-probe/plugin.toml ${ANVIL_MOD_PROBE_DIR}/plugin.toml COPYONLY)
+    add_executable(anvil_startup_tests tests/startup_tests.cpp)
+    target_link_libraries(anvil_startup_tests PRIVATE anvil_loader)
+    add_dependencies(anvil_startup_tests anvil_mod_probe)
+    add_test(NAME anvil_startup_tests COMMAND anvil_startup_tests ${ANVIL_MOD_PROBE_DIR})
 
     # The Manager's core: zips, Steam's files, install plans, plugin zips.
     add_executable(anvil_manager_tests tests/manager_tests.cpp)

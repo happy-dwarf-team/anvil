@@ -4,9 +4,11 @@
 // Usage: anvil_game_tests <path of anvil.exe>
 #include "cli/game.hpp"
 #include "core/game_build.hpp"
+#include "core/mod_plugins.hpp"
 #include "test_image.hpp"
 #include "test_support.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -39,6 +41,7 @@ std::string symbols(const std::string& build, const std::string& name = "speed_o
 struct Game {
     fs::path root;
     fs::path dir;  // the EU4 folder
+    fs::path user;  // EU4's user folder: dlc_load.json and mod/
     std::string exe_sha256;
 
     Game() {
@@ -49,6 +52,8 @@ struct Game {
         write(dir / "eu4.exe", std::string(bytes.begin(), bytes.end()));
         exe_sha256 = sha256_file(dir / "eu4.exe");
         fs::create_directories(dir / "anvil" / "plugins");
+        user = root / "user";
+        fs::create_directories(user / "mod");
     }
     ~Game() {
         std::error_code ec;
@@ -68,9 +73,37 @@ struct Game {
 
     void settings(const std::string& text) const { write(dir / "anvil" / "anvil.toml", text); }
 
+    // A local mod <user>/mod/<mod>, enabled in dlc_load.json, with a plugin in its anvil/<id>.
+    fs::path mod_plugin(const std::string& mod, const std::string& id, const std::string& extra = "",
+                        const std::string& symbols_text = "") {
+        const fs::path folder = user / "mod" / mod / "anvil" / id;
+        write(folder / "plugin.toml", plugin_toml(id, (symbols_text.empty() ? "" : "symbols = \"symbols.toml\"\n") + extra));
+        if (!symbols_text.empty()) write(folder / "symbols.toml", symbols_text);
+        write(folder / (id + ".dll"), "MZ " + mod);
+        write(user / "mod" / (mod + ".mod"), "name=\"" + mod + "\"\npath=\"mod/" + mod + "\"\n");
+        if (std::find(mods.begin(), mods.end(), mod) == mods.end()) mods.push_back(mod);
+        std::string json = "{\"enabled_mods\":[";
+        for (size_t i = 0; i < mods.size(); ++i) json += (i ? ",\"mod/" : "\"mod/") + mods[i] + ".mod\"";
+        write(user / "dlc_load.json", json + "],\"disabled_dlcs\":[]}");
+        return folder;
+    }
+
+    // Approves the plugin `id` of `mod` as the overlay or the Manager does.
+    bool approve(const std::string& id, const std::string& mod) const {
+        const ModDiscovery d = discover_mod_plugins(dir / "anvil", user, {});
+        for (const ModPlugin& p : d.plugins) {
+            std::string error;
+            if (p.id == id && p.mod.name == mod) return approve_mod_plugin(dir / "anvil", p, p.hash, "", error);
+        }
+        return false;
+    }
+
+    std::vector<std::string> mods;
+
     GameReport check(const fs::path& game = {}) const {
         GameOptions options;
         options.game_dir = game.empty() ? dir : game;
+        options.user_dir = user;
         const std::string sha = exe_sha256;
         options.build_of = [sha](std::string_view actual) -> const char* { return actual == sha ? "test-build" : nullptr; };
         return check_game(options);
@@ -245,6 +278,104 @@ int main(int argc, char** argv) {
         CHECK(alone.check().warnings.empty() && alone.check().exit_code == kExitOk);
     });
 
+    run("plugins in mods: approved, pending, conflicting, shadowed and invalid ones with their reasons", [&] {
+        Game game;
+        game.plugin("a-local");
+        game.plugin("z-needs-mod", requires_plugin("m-approved"));
+        game.mod_plugin("Mod One", "m-approved", requires_plugin("a-local"));
+        game.mod_plugin("Mod One", "m-pending");
+        game.mod_plugin("Mod One", "a-local");  // the local plugin wins
+        game.mod_plugin("Mod One", "m-twice");
+        game.mod_plugin("Mod Two", "m-twice");
+        game.mod_plugin("Mod Two", "Bad");  // not a plugin id
+        CHECK(game.approve("m-approved", "Mod One"));
+        GameReport r = game.check();
+        const auto mod_plugin = [&](const std::string& id, const std::string& mod) -> const GameModPlugin* {
+            for (const auto& p : r.mod_plugins) {
+                if (p.id == id && p.mod == mod) return &p;
+            }
+            return nullptr;
+        };
+        CHECK(r.playset_found && r.enabled_mods == 2 && r.mod_plugins.size() == 6 && r.mod_warnings.empty());
+        CHECK(loaded(r) == "a-local,m-approved,z-needs-mod");
+        const GameModPlugin* approved = mod_plugin("m-approved", "Mod One");
+        CHECK(approved->state == "approved" && approved->status == "loaded" && !approved->copy_missing);
+        CHECK(contains(approved->loads_from, "/anvil/data/anvil/approved/m-approved/" + approved->hash));
+        CHECK(approved->approved_hash == approved->hash && approved->approved_version == "1.0.0" && approved->workshop_id.empty());
+        CHECK(approved->report.manifest && approved->report.manifest->folder.wstring().find(L"approved") != std::wstring::npos);
+        CHECK(mod_plugin("m-pending", "Mod One")->state == "pending" && mod_plugin("m-pending", "Mod One")->status == "skipped");
+        CHECK(mod_plugin("a-local", "Mod One")->state == "shadowed");
+        CHECK(mod_plugin("m-twice", "Mod One")->state == "conflict" && mod_plugin("m-twice", "Mod Two")->others[0] == "Mod One");
+        CHECK(mod_plugin("Bad", "Mod Two")->state == "invalid");
+        CHECK(r.exit_code == kExitProblems);  // the invalid one; the others wait for the player
+
+        const std::string text = format_game_report(r, Format::Text);
+        CHECK(contains(text, "plugins in mods (6, 2 enabled mod(s) in "));
+        CHECK(contains(text, "  m-approved 1.0.0 in mod 'Mod One' (local mod): approved; approved on "));
+        CHECK(contains(text, " (loads)\n") && contains(text, "  m-pending 1.0.0 in mod 'Mod One' (local mod): pending; waiting for approval"));
+        CHECK(contains(text, "  2. m-approved 1.0.0 (main) from mod 'Mod One'\n"));
+        CHECK(contains(text, ", 6 in mods (3 waiting for the player): 1 problem(s)\n"));
+        const std::string json = format_game_report(r, Format::Json);
+        CHECK(contains(json, "\"mods\": {\"user_dir\": ") && contains(json, "\"dlc_load\": true, \"enabled\": 2, \"warnings\": []},"));
+        CHECK(contains(json, "\"mod_plugins\": [\n    {\n      \"id\": ") && contains(json, "\"state\": \"conflict\""));
+        CHECK(contains(json, "\"phase\": \"main\", \"folder\": \"\", \"mod\": \"Mod One\"}"));
+        CHECK(contains(json, "\"approved\": {\"version\": \"1.0.0\", \"hash\": \"" + approved->hash + "\", \"date\": \""));
+        CHECK(contains(json, "\"workshop_id\": null") && contains(json, "\"approved\": null"));
+        const std::string github = format_game_report(r, Format::Github);
+        CHECK(contains(github, "::error file=") && contains(github, "Mod Two/anvil/Bad/plugin.toml,title=anvil check::Bad in mod"));
+
+        fs::remove_all(game.user / "mod" / "Mod Two" / "anvil" / "Bad");
+        CHECK(game.check().exit_code == kExitOk);
+
+        // Disabled in anvil.toml: listed as such, and what needs it is skipped.
+        game.settings("disabled_plugins = [\"m-approved\"]\n");
+        r = game.check();
+        CHECK(mod_plugin("m-approved", "Mod One")->status == "disabled" && skipped_for(r, "m-approved", "disabled in anvil.toml", true));
+        CHECK(skipped_for(r, "z-needs-mod", "m-approved") && r.exit_code == kExitProblems);
+        CHECK(contains(format_game_report(r, Format::Text), "  m-approved from mod 'Mod One' (disabled): disabled in anvil.toml\n"));
+    });
+
+    run("plugins in mods: an update loads the approved copy; a missing copy is reported, not made", [&] {
+        Game game;
+        const fs::path folder = game.mod_plugin("M", "p");
+        CHECK(game.approve("p", "M"));
+        GameReport r = game.check();
+        const std::string hash = r.mod_plugins[0].hash;
+        const fs::path copy = approved_copy(game.dir / "anvil", "p", hash);
+        write(folder / "p.dll", "MZ new");  // Steam updates the mod
+        r = game.check();
+        CHECK(r.mod_plugins[0].state == "update-pending" && r.mod_plugins[0].status == "loaded" && loaded(r) == "p");
+        CHECK(r.mod_plugins[0].hash != hash && r.mod_plugins[0].approved_hash == hash && r.exit_code == kExitOk);
+        CHECK(r.mod_plugins[0].report.manifest && r.mod_plugins[0].report.manifest->folder == copy);
+
+        write(folder / "p.dll", "MZ M");  // back to the approved files, without the copy
+        fs::remove_all(copy);
+        r = game.check();
+        CHECK(r.mod_plugins[0].state == "approved" && r.mod_plugins[0].copy_missing && loaded(r) == "p");
+        CHECK(r.mod_plugins[0].report.manifest && r.mod_plugins[0].report.manifest->folder == folder);
+        CHECK(!fs::exists(copy));
+        CHECK(contains(format_game_report(r, Format::Json), "\"copy_missing\": true"));
+    });
+
+    run("plugins in mods: a dlc_load.json or trust.toml that does not parse is a problem", [&] {
+        Game game;
+        game.mod_plugin("M", "p");
+        write(game.user / "dlc_load.json", "{");
+        GameReport r = game.check();
+        CHECK(r.exit_code == kExitProblems && r.mod_plugins.empty() && r.problems.size() == 1);
+        CHECK(contains(r.problems[0].file, "dlc_load.json") && contains(r.problems[0].message, "no plugins from mods"));
+        game.mod_plugin("M", "p");
+        write(game.dir / "anvil" / "trust.toml", "[[plugin]]\nid = 1\n");
+        r = game.check();
+        CHECK(r.exit_code == kExitProblems && r.problems.size() == 1 && r.problems[0].line == 2);
+        CHECK(contains(r.problems[0].message, "approves no plugin from a mod") && r.mod_plugins[0].state == "pending");
+        fs::remove(game.dir / "anvil" / "trust.toml");
+        write(game.user / "mod" / "M.mod", "name=\"M\"\n");
+        r = game.check();
+        CHECK(r.mod_warnings.size() == 1 && contains(r.mod_warnings[0], "mod mod/M.mod: the descriptor has no path"));
+        CHECK(r.exit_code == kExitOk && contains(format_game_report(r, Format::Text), "warning: mod mod/M.mod: the descriptor has no path"));
+    });
+
     run("output formats", [&] {
         const Game game;
         game.plugin("a-core", "", symbols("test-build"));
@@ -304,10 +435,10 @@ int main(int argc, char** argv) {
         // anvil.exe knows only real game builds, so a plugin with symbols fails here by design.
         game.plugin("c-symbols", "", symbols("test-build"));
 
-        const Run json = run_anvil(anvil, "check --game " + quoted(game.dir) + " --format json");
+        const Run json = run_anvil(anvil, "check --game " + quoted(game.dir) + " --user-dir " + quoted(game.user) + " --format json");
         CHECK(json.exit_code == 1 && contains(json.out, "\"load_order\"") && contains(json.out, "\"skipped\""));
         CHECK(contains(json.out, "is not a game build this Anvil knows"));
-        const Run text = run_anvil(anvil, "check --game=" + quoted(game.dir));
+        const Run text = run_anvil(anvil, "check --game=" + quoted(game.dir) + " --user-dir=" + quoted(game.user));
         std::printf("%d\n%s\n", text.exit_code, text.out.c_str());
         CHECK(text.exit_code == 1 && contains(text.out, "load order (1):\n  1. a-plain 1.0.0 (main)\n"));
         CHECK(contains(text.out, "  b-conflict: conflicts with a-plain 1.0.0"));
@@ -315,7 +446,7 @@ int main(int argc, char** argv) {
 
         const Game clean;
         clean.plugin("a-plain");
-        const Run ok = run_anvil(anvil, "check --game " + quoted(clean.dir) + " --format github");
+        const Run ok = run_anvil(anvil, "check --game " + quoted(clean.dir) + " --user-dir " + quoted(clean.user) + " --format github");
         CHECK(ok.exit_code == 0 && contains(ok.out, "1 will load, 0 skipped: OK"));
 
         CHECK(run_anvil(anvil, "check --game " + quoted(game.root / "missing")).exit_code == 2);
@@ -323,6 +454,8 @@ int main(int argc, char** argv) {
         CHECK(run_anvil(anvil, "check --game " + quoted(game.dir) + " " + quoted(game.dir)).exit_code == 2);
         CHECK(run_anvil(anvil, "check --game " + quoted(game.dir) + " --exe " + quoted(game.dir / "eu4.exe")).exit_code == 2);
         CHECK(run_anvil(anvil, "check --game " + quoted(game.dir) + " --format xml").exit_code == 2);
+        CHECK(run_anvil(anvil, "check --game " + quoted(game.dir) + " --user-dir").exit_code == 2);
+        CHECK(run_anvil(anvil, "check " + quoted(game.dir) + " --user-dir " + quoted(game.user)).exit_code == 2);
         CHECK(contains(run_anvil(anvil, "--help").out, "check --game <EU4 folder> [--format text|json|github]"));
     });
 

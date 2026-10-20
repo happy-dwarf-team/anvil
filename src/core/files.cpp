@@ -1,8 +1,8 @@
 #include "files.hpp"
 
-#include "core/log.hpp"
+#include "log.hpp"
 
-namespace anvil::manager {
+namespace anvil {
 
 namespace fs = std::filesystem;
 
@@ -83,4 +83,4 @@ bool write_file_atomic(const std::filesystem::path& file, std::string_view bytes
     return true;
 }
 
-}  // namespace anvil::manager
+}  // namespace anvil

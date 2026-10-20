@@ -1,0 +1,8 @@
+id = "mod-probe"
+name = "Mod probe"
+version = "1.0.0"
+description = "Test plugin shipped in a mod: no symbols, logs that it loaded."
+api = 2
+entry = "mod-probe.dll"
+phase = "main"
+affects_gameplay = false
