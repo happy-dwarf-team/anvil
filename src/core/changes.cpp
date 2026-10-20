@@ -496,35 +496,53 @@ void ChangeRegistry::set_profile(bool on) {
 // Called by a code site's context stub on the game's thread, without the
 // registry's lock: it reads only the published list. dispatch_counted is the
 // stub's target instead when the site was created with profile = true.
+//
 void ChangeRegistry::dispatch(AnvilCpuContext* cpu) { run_callbacks<false>(cpu); }
 void ChangeRegistry::dispatch_counted(AnvilCpuContext* cpu) { run_callbacks<true>(cpu); }
 
+namespace {
+LONG unhandled(EXCEPTION_POINTERS* info) { return UnhandledExceptionFilter(info); }
+}  // namespace
+
+// The context stub has no unwind data, so the system's exception dispatch
+// cannot get past it to the thread's start, whose filter calls the
+// unhandled-exception filter (Anvil's crash report, then the game's): a
+// callback's exception that nothing below handled would end the process
+// without either. So this frame does what the thread's start does. A __try
+// costs nothing until an exception is raised.
 template <bool Count> void ChangeRegistry::run_callbacks(AnvilCpuContext* cpu) {
-    auto* stub = reinterpret_cast<CpuStub*>(cpu->rip);  // kCpuStubState, pushed as rip
-    const Dispatch* list = stub->current.load(std::memory_order_acquire);
-    cpu->rip = list->resume;
-    const Dispatch::Item* const end = list->items() + list->count;
-    for (const Dispatch::Item* at = list->items(); at != end; ++at) {
-        const Dispatch::Item& item = *at;
-        if constexpr (Count) {
-            if (item.counter != nullptr) item.counter->fetch_add(1, std::memory_order_relaxed);
-        }
-        item.callback(cpu, item.user);
-        if (cpu->rip == list->resume) continue;
-        // A new rip ends the chain here (§8.2): the rest is skipped.
-        if (item.mid && !stub->rip_noticed.exchange(true)) {
-            try {
-                ChangeRegistry& registry = *stub->registry;
-                const std::string message = "mid hook " + registry.where(stub->address) + " changed rip to " +
-                                            registry.where(cpu->rip) +
-                                            ": the rest of the chain at this address is skipped (reported once)";
-                std::lock_guard lock(registry.notice_mutex_);
-                if (registry.notice_) registry.notice_(item.owner, message);
-            } catch (...) {
-                // Never unwind into the game.
+    __try {
+        auto* stub = reinterpret_cast<CpuStub*>(cpu->rip);  // kCpuStubState, pushed as rip
+        const Dispatch* list = stub->current.load(std::memory_order_acquire);
+        cpu->rip = list->resume;
+        const Dispatch::Item* const end = list->items() + list->count;
+        for (const Dispatch::Item* at = list->items(); at != end; ++at) {
+            const Dispatch::Item& item = *at;
+            if constexpr (Count) {
+                if (item.counter != nullptr) item.counter->fetch_add(1, std::memory_order_relaxed);
             }
+            item.callback(cpu, item.user);
+            if (cpu->rip == list->resume) continue;
+            // A new rip ends the chain here (§8.2): the rest is skipped.
+            if (item.mid && !stub->rip_noticed.exchange(true)) notice_rip(*stub, item.owner, cpu->rip);
+            return;
         }
-        return;
+    } __except (unhandled(GetExceptionInformation())) {
+        TerminateProcess(GetCurrentProcess(), GetExceptionCode());
+    }
+}
+
+// The first mid hook per address that changes rip, to the notice sink.
+void ChangeRegistry::notice_rip(const CpuStub& stub, OwnerId owner, uintptr_t rip) {
+    try {
+        ChangeRegistry& registry = *stub.registry;
+        const std::string message = "mid hook " + registry.where(stub.address) + " changed rip to " +
+                                    registry.where(rip) +
+                                    ": the rest of the chain at this address is skipped (reported once)";
+        std::lock_guard lock(registry.notice_mutex_);
+        if (registry.notice_) registry.notice_(owner, message);
+    } catch (...) {
+        // Never unwind into the game.
     }
 }
 

@@ -189,6 +189,8 @@ void walk_here(AnvilCpuContext*, void*) {
 
 __declspec(noinline) int call_scratch(Fn f, int x) { return f(x) + 1; }
 
+void quiet(AnvilCpuContext*, void*) {}
+
 // ---- the child process ---------------------------------------------------------
 
 volatile int* volatile g_null = nullptr;
@@ -196,6 +198,10 @@ volatile bool g_stop = false;
 fs::path g_child_dir;
 
 __declspec(noinline) void crash_here() { *g_null = 1; }
+
+// A plugin's mid-hook callback that crashes: the walk leaves it through the
+// context stub.
+void crash_in_callback(AnvilCpuContext*, void*) { crash_here(); }
 
 __declspec(noinline) int recurse(int depth) {
     volatile char pad[256];
@@ -241,6 +247,7 @@ int child(const std::string& mode, const fs::path& dir) {
     static Scratch image(0x10000);
     image.put(0x100, kAddOne);
     image.put(0x200, kAddOne);
+    image.put(0x300, kAddOne);
     static ChangeRegistry registry(image.at(0), 0x10000);
     static std::vector<std::unique_ptr<AnvilPlugin>> plugins;
     plugins.push_back(plugin("crasher", "issues = \"https://example.org/crasher/issues\"\n", GetModuleHandleW(nullptr)));
@@ -251,6 +258,13 @@ int child(const std::string& mode, const fs::path& dir) {
     (void)crasher;
     const uint8_t ud2[] = {0x0F, 0x0B};
     if (registry.patch_bytes(patcher, in_image(image.at(0x200)), ud2, sizeof(ud2)) != ChangeStatus::Ok) return 10;
+    if (mode == "mid") {
+        // Mid hooks at two sites; the crash is under the second.
+        if (registry.mid_hook(patcher, in_image(image.at(0x300)), quiet, nullptr) != ChangeStatus::Ok) return 15;
+        if (registry.mid_hook(crasher, in_image(image.at(0x100)), crash_in_callback, nullptr) != ChangeStatus::Ok) {
+            return 16;
+        }
+    }
 
     std::ofstream(dir / "anvil.log") << "[    1.0 ms] info  [anvil] line one\r\n[    2.0 ms] info  [anvil] line two\r\n";
     crash::Setup setup;
@@ -285,7 +299,7 @@ int child(const std::string& mode, const fs::path& dir) {
             crash_here();
             return 0;
         };
-    } else if (mode == "change") {
+    } else if (mode == "change" || mode == "mid") {
         body = [](LPVOID p) -> DWORD {
             return static_cast<DWORD>(call_scratch(reinterpret_cast<Fn>(p), 1));
         };
@@ -295,7 +309,8 @@ int child(const std::string& mode, const fs::path& dir) {
         return 12;
     }
     // A thread of its own with the default stack guarantee, like the game's.
-    HANDLE thread = CreateThread(nullptr, 256 * 1024, body, reinterpret_cast<void*>(image.at(0x200)),
+    HANDLE thread = CreateThread(nullptr, 256 * 1024, body,
+                                 reinterpret_cast<void*>(image.at(mode == "mid" ? 0x100 : 0x200)),
                                  STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
     if (!keep_running) {
         WaitForSingleObject(thread, 60000);
@@ -745,6 +760,20 @@ int main(int argc, char** argv) {
         CHECK(contains(r.text, "Verdict: in plugin patcher's change."));
         // The caller is in the test executable, "crasher"'s module.
         CHECK(contains(r.text, "[plugin crasher]"));
+    });
+
+    run("crash capture: a crash in a mid hook's callback is reported through its context stub (child process)", [&] {
+        const ChildResult r = run_child("mid", root / "mid");
+        CHECK(r.exit == 0xC0DE && r.next_filter);
+        CHECK(Json::valid(r.json));
+        CHECK(contains(r.json, "\"code\": \"0xC0000005\""));
+        CHECK(contains(r.json, "\"level\": \"in_plugin_code\""));
+        // The return into the context stub names its site and change:
+        // the mid hook at 0x100, not the one at 0x300.
+        CHECK(contains(r.json, "\"source\": \"context stub\""));
+        CHECK(contains(r.json, "\"kind\": \"mid hook\", \"label\": \"mid hook rva 0x100\""));
+        CHECK(!contains(r.json, "mid hook rva 0x300"));
+        CHECK(contains(r.json, "\"module\": \"game.exe\", \"offset\": \"0x100\""));
     });
 
     run("crash capture: a stack overflow writes the report and a minidump (child process)", [&] {

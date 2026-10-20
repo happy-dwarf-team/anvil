@@ -349,6 +349,7 @@ Decided in [Crash attribution to plugins](https://github.com/happy-dwarf-team/an
     - The report is built in fixed buffers: no allocation and no lock. The registry is asked with try-locks, and the crashed thread's memory is read with `ReadProcessMemory`. A fault while writing leaves a partial report with a note.
     - After the report the helper adds a small minidump (`MiniDumpNormal` with thread info and unloaded modules) and rewrites the report to name it. A dump writer stuck on a lock of the crashed thread costs only the dump. Until then the file waits as `pending-<pid>.dmp`, which the system deletes when the process ends without a kept dump.
     - On a stack overflow the VEH hands over at once, because the filter may have no stack left. The game's main thread gets a 64 KB stack guarantee for the handlers.
+    - Windows calls the filter from a thread's start, which it reaches by unwinding, and it cannot unwind through a context stub (no unwind data). So the dispatch loop of mid hooks and block replacements calls the unhandled-exception filter itself, as a thread's start does, for an exception a callback leaves unhandled; without it such a crash ended the game with no report (1.0).
   - Not caught: `__fastfail` and `/GS` failures (they bypass both), `TerminateProcess`, and an exception that a frame handler of the game catches before the filter. One report per process.
 - **Report:** `anvil/crashes/<time>.json` and `.txt`, with the minidump `<time>.dmp`, keeping the last 10. It contains:
   - the code and the address as module + offset;
