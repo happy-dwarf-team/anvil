@@ -423,6 +423,8 @@ void draw_status() {
             ImGui::TextColored(color, "%s", p.state.c_str());
             ImGui::TableNextColumn();
             std::string details = p.reason;
+            // A skipped one's reason names its mod already.
+            if (!p.mod.empty() && p.state != "skipped") details = "from mod '" + p.mod + "'" + (details.empty() ? "" : "; " + details);
             if (p.suspended) details += details.empty() ? "suspended in this game" : "; suspended in this game";
             if (p.gameplay) details += details.empty() ? "changes the game" : "; changes the game";
             ImGui::TextWrapped("%s", details.c_str());
