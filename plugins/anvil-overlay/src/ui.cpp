@@ -563,8 +563,11 @@ void draw_setting(const std::string& plugin, AnvilSetting id, const AnvilControl
     }
     help_marker(info.description);
     if (current != saved) {
+        // restart = true: the saved value waits for the next start. Otherwise
+        // an ANVIL_<ID>_<NAME> variable overrides it until the next change.
         ImGui::SameLine();
-        ImGui::TextDisabled("(now %s; applies at the next start)", current.c_str());
+        ImGui::TextDisabled(info.restart ? "(now %s; applies at the next start)" : "(now %s, from the environment)",
+                            current.c_str());
     }
     if (saved != fallback) {
         ImGui::SameLine();

@@ -2,8 +2,8 @@
 // Direct3D 9 device, for notifications and the panel.
 //
 // Getting the device (no symbols, so it works on every build):
-//   1. at the entry point it replaces eu4.exe's imports of Direct3DCreate9 and
-//      Direct3DCreate9Ex (d3d9.dll), before the game creates its renderer;
+//   1. at the entry point it hooks Direct3DCreate9 and Direct3DCreate9Ex in
+//      d3d9.dll with hook_function_at, before the game creates its renderer;
 //   2. on the object they return it hooks CreateDevice (and CreateDeviceEx)
 //      in d3d9.dll with hook_function_at;
 //   3. on the device it hooks EndScene, Reset (and ResetEx), chained with any
@@ -360,8 +360,15 @@ struct AnvilOverlay : anvil::Plugin {
             shared().mark_dirty();
         });
 
-        host.replace_import(g_create9, "d3d9.dll", "Direct3DCreate9", on_create9);
-        host.replace_import(g_create9ex, "d3d9.dll", "Direct3DCreate9Ex", on_create9ex);
+        // eu4.exe imports both from d3d9.dll, which is therefore loaded, but its
+        // renderer also looks them up with GetProcAddress (the 1.37.5 lab run
+        // never called the imports), so the exports themselves are hooked.
+        if (HMODULE d3d9 = GetModuleHandleW(L"d3d9.dll")) {
+            host.hook_at(g_create9, reinterpret_cast<void*>(GetProcAddress(d3d9, "Direct3DCreate9")), on_create9);
+            host.hook_at(g_create9ex, reinterpret_cast<void*>(GetProcAddress(d3d9, "Direct3DCreate9Ex")), on_create9ex);
+        } else {
+            host.info("d3d9.dll is not loaded: no Direct3D 9, the overlay stays off");
+        }
         host.replace_import(g_async_key_state, "USER32.dll", "GetAsyncKeyState", on_async_key_state);
         host.replace_import(g_key_state, "USER32.dll", "GetKeyState", on_key_state);
 
@@ -380,7 +387,7 @@ struct AnvilOverlay : anvil::Plugin {
             s.start_ready.store(true);
         }
         const char* key = host.c_api().setting_string(host.self(), cfg::panel_key.id);
-        host.info("Direct3DCreate9(Ex) replaced; panel key {}", key != nullptr && *key != '\0' ? key : "(none)");
+        host.info("Direct3DCreate9(Ex) hooked; panel key {}", key != nullptr && *key != '\0' ? key : "(none)");
     }
 };
 

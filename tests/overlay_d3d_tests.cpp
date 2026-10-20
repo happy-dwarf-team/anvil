@@ -146,7 +146,7 @@ int main(int argc, char** argv) {
     bus.register_service("anvil", ANVIL_CONTROL_SERVICE, ANVIL_CONTROL_VERSION, control.service());
 
     AnvilPlugin& overlay = *plugins.front();
-    run("overlay: loads early and replaces the imports", [&] {
+    run("overlay: loads early and hooks Direct3DCreate9(Ex)", [&] {
         overlay.module = LoadLibraryExW((dir / overlay.manifest.entry).c_str(), nullptr,
                                         LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
         CHECK(overlay.module != nullptr);
@@ -155,7 +155,7 @@ int main(int argc, char** argv) {
         const LoadOutcome outcome = run_plugin_load(overlay, host, fn);
         CHECK(outcome.result == ANVIL_OK && outcome.staged == 4 && changes.count(overlay.owner) == 4);
         overlay.state = outcome.result == ANVIL_OK ? "loaded" : "failed";
-        CHECK(contains(log, "Direct3DCreate9(Ex) replaced; panel key Ctrl+Shift+F12"));
+        CHECK(contains(log, "Direct3DCreate9(Ex) hooked; panel key Ctrl+Shift+F12"));
         control.loading_done();
     });
     if (overlay.state != "loaded") {
