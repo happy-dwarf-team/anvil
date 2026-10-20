@@ -480,6 +480,11 @@ int main(int argc, char** argv) {
         CHECK(refusal({{"a/plugin.toml", plugin_toml("a")}, {"a/a.dll", "MZ"}, {"__MACOSX/a/._a.dll", "x"}}).empty());
         CHECK(contains(refusal({{"plugin.toml", plugin_toml("anvil-game")}, {"anvil-game.dll", "MZ"}}), "comes with Anvil"));
         CHECK(contains(refusal({{"plugin.toml", plugin_toml("a")}}), "a.dll"));  // no entry DLL
+        // anvil/plugins/<id> holds another plugin: it is not replaced.
+        write(game / "anvil" / "plugins" / "a" / "plugin.toml", plugin_toml("b"));
+        write(game / "anvil" / "plugins" / "a" / "b.dll", "MZ");
+        CHECK(contains(refusal({{"plugin.toml", plugin_toml("a")}, {"a.dll", "MZ"}}), "holds the plugin b"));
+        fs::remove_all(game / "anvil");
         CHECK(!refusal({{"plugin.toml", "id = \"a\"\nbroken = \n"}}).empty());
         CHECK(!fs::exists(game / "anvil"));
     });

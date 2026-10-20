@@ -34,7 +34,8 @@ struct PluginZipCheck {
 
 // Unpacks the plugin to a fresh folder below `temp_dir` and checks it
 // against the game's eu4.exe; removes that folder again. A standard plugin
-// (it comes with Anvil) and a zip without a plugin.toml are refused.
+// (it comes with Anvil), a zip without a plugin.toml and a plugin whose
+// folder anvil/plugins/<id> holds another plugin are refused.
 PluginZipCheck check_plugin_zip(const ZipArchive& zip, const std::filesystem::path& game_dir,
                                 const std::filesystem::path& temp_dir,
                                 const std::vector<std::string>& standard_plugins);

@@ -132,6 +132,12 @@ PluginZipCheck check_plugin_zip(const ZipArchive& zip, const fs::path& game_dir,
     for (const fs::path& folder : plugin_folders(plugins)) {
         const ManifestResult installed = load_manifest(folder);
         const std::string name = narrow(folder.filename().wstring());
+        if (installed.manifest && installed.manifest->id != m.id && name == m.id) {
+            // Another plugin in the folder this one would take: never replaced.
+            out.error = "anvil/plugins/" + name + " holds the plugin " + installed.manifest->id +
+                        "; move or remove it first";
+            return out;
+        }
         if ((installed.manifest && installed.manifest->id == m.id) || (!installed.manifest && name == m.id)) {
             if (!out.installed_folder.empty() && name != m.id) continue;  // prefer the folder named like the id
             out.installed_folder = name;
