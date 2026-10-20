@@ -38,15 +38,15 @@ This is verified for direct starts and through the Paradox launcher (EU4 engine 
 <EU4>/anvil/
     anvil.toml                         enabled, disabled_plugins, profile, log_level, allow_ironman/allow_multiplayer (§13)
     anvil.log, anvil.prev.log
-    trust.toml                         approvals of Workshop plugins (§14)
+    trust.toml                         approvals of plugins from mods (§14)
     crashes/<time>.json|.txt|.dmp      last 10 crash reports with minidumps (§12)
     plugins/<plugin-id>/               local plugins: trusted by placement
         plugin.toml  symbols.toml  settings.toml  <entry>.dll  (+ read-only files)
     data/<plugin-id>/                  writable per plugin; settings.toml holds the player's values
-    data/anvil/approved/<id>/<hash>/   the previously approved copy of a Workshop plugin
+    data/anvil/approved/<id>/<hash>/   the approved copy a plugin from a mod loads from (§14)
     data/anvil/unfinished-starts.txt   starts in a row that ended before the game was ready (§10)
     data/anvil/crash-shown.txt         the last crash report the overlay announced (§15)
-<mod folder of an enabled mod>/anvil/<plugin-id>/   Workshop plugins (§14)
+<mod folder of an enabled mod>/anvil/<plugin-id>/   plugins from mods, Workshop or local (§14)
 ```
 
 ## 4. Core and standard plugins
@@ -61,7 +61,7 @@ Core:
 - symbol verification;
 - the registry of changes and the chains;
 - services and events;
-- the approval decision for Workshop plugins;
+- the approval decision for plugins from mods;
 - crash capture and attribution;
 - suspending gameplay plugins (§13);
 - plugin status (`anvil.status`) and the log.
@@ -302,11 +302,11 @@ The C ABI is [`include/anvil/anvil_plugin.h`](../include/anvil/anvil_plugin.h) (
    - Without `anvil-game` (disabled or missing) there is no ready signal, so a crash at any time of a session counts.
    - The standard plugins `anvil-game` and `anvil-overlay` still load in safe mode, so the overlay can explain it. One of them is left out ("safe mode; the crash before it was …") when a report of the starts that led to safe mode puts the crash in its code or its change (`in_plugin_code`, `in_plugin_change`), so the safe start cannot end the same way. Those reports are the newest ones written before the game was ready, at most one per counted start; a start that hung or was killed wrote none, so an older report may stand in for it.
 4. The build is identified.
-5. Plugins are discovered: local `anvil/plugins/*`, and Workshop plugins in enabled mods (approved versions only, §14).
+5. Plugins are discovered: local `anvil/plugins/*`, and plugins in the mods enabled in the playset (approved versions only, from their approved copies, §14).
 6. Resolve and verify:
    - API version and the `anvil` range;
    - the build of `symbols`;
-   - duplicates (the local plugin wins over a Workshop one with the same id);
+   - duplicates (a local plugin wins over plugins from mods with the same id; two mods with one id are decided by the approval, §14);
    - disabled ids;
    - the symbols (§7);
    - `conflicts` (the declaring plugin is skipped, see below);
@@ -419,6 +419,68 @@ Decided in [Workshop distribution and trust model](https://github.com/happy-dwar
   - the prompt shows the name, authors, version, mod, `affects_gameplay`, symbol count, hash, `repository` and a native-code warning.
 - **Anvil itself** cannot be installed by the Workshop (items never land next to `eu4.exe`); the Manager installs it (§15).
 
+### 14.1 How it is built (1.3)
+
+Decided in [Workshop discovery and trust](https://github.com/happy-dwarf-team/anvil/issues/60) ([decisions](https://github.com/happy-dwarf-team/anvil/issues/60#issuecomment-6295248386)). The code is in `src/core/playset.cpp`, `plugin_hash.cpp`, `trust.cpp` and `mod_plugins.cpp`, which are part of `anvil_core`, so the loader, `anvil check --game` and the Manager use the same rules.
+
+- **The playset**
+  - EU4's user folder is the path in `<EU4>/userdir.txt` when that file names one; otherwise it is `Documents\Paradox Interactive\Europa Universalis IV` (`SHGetFolderPathW`, which eu4.exe imports).
+  - Anvil reads the `enabled_mods` of `dlc_load.json` there, in order.
+  - Each entry names a descriptor (`mod/ugc_123.mod`). Anvil reads only its top-level `name`, `path` and `archive`; blocks such as `tags = { … }` and comments are skipped. A relative `path` is in the user folder.
+  - A zipped mod (`archive` without `path`) cannot carry plugins and is skipped without a warning. A descriptor that cannot be read is a warning. A `dlc_load.json` that does not parse means no plugins from mods.
+  - A mod is a Workshop item only when its folder is `…/workshop/content/236850/<id>`. A local mod whose descriptor got a `remote_file_id` from an upload stays local.
+  - Disabling a mod stops its plugins and keeps their approvals.
+- **The folder hash** is the SHA-256, in lower-case hex, of the lines `<relative path> \0 <size> \0 <SHA-256 of the file> \n` for every file below `<mod>/anvil/<id>/`, sorted by path.
+  - The path is UTF-8, with `/` and ASCII letters in lower case. The size is decimal, and each file's SHA-256 is lower-case hex.
+  - Empty folders do not count. The hash is the same on every machine and covers added, removed and renamed files.
+  - A link (junction or symbolic link), two paths that differ only in case, more than 4096 files or more than 256 MB is an error, and the plugin is invalid.
+- **`anvil/trust.toml`**
+  - One `[[plugin]]` table per id:
+    ```toml
+    [[plugin]]
+    id = "hello"
+    version = "1.0.0"                # plugin.toml's version when it was approved, for the player
+    mod = "mod/ugc_3290499798.mod"   # the descriptor as dlc_load.json lists it: the approval binds the id to this mod
+    mod_name = "Hello"
+    workshop_id = "3290499798"       # "" for a local mod
+    hash = "…64 hex digits…"
+    approved = 2026-10-20T18:05:11Z  # UTC
+    ```
+  - The schema is strict: an unknown or missing key, an id twice, or a hash that is not 64 lower-case hex digits is an error.
+  - A file that does not parse approves nothing. Anvil does not overwrite it, and it removes no approved copy until the file is fixed or removed.
+  - Anvil writes the file atomically, sorted by id, and reads it back before it replaces the old one.
+- **Decisions.** Every `<mod>/anvil/<id>/` of an enabled mod is in one of these states:
+  - **shadowed:** a local plugin in `anvil/plugins` has this id (or this folder name, when its `plugin.toml` is broken) and wins over every mod. The log names the mods it shadows.
+  - **conflict:** two or more enabled mods have a plugin with this id. The one that `trust.toml` binds the id to is decided as below, and the others are in conflict. With none bound, none loads until the player approves one, and that approval binds the id to that mod.
+  - **approved:** the approval binds the id to this mod with this hash. The plugin loads from `anvil/data/anvil/approved/<id>/<hash>/`. A missing copy is made again from the mod folder and checked against the approved hash.
+  - **update pending:** the approval binds the id to this mod with another hash, and that hash's approved copy exists. The approved copy loads until the new hash is approved; this is also the case when the new version is broken.
+  - **pending:** no approval, or one bound to another mod.
+  - **invalid:** the folder name is not a plugin id, or `plugin.toml` does not parse, has another id, or its entry is missing, or the folder cannot be hashed.
+- **Loading**
+  - Approved plugins go through the resolver with the local ones, from their copies (§7, §10).
+  - Right before `LoadLibrary`, the core hashes the copy again with every file open and no write or delete sharing, and keeps the files open until the DLL is mapped. A copy that no longer has the approved hash fails to load with "its approved copy changed".
+  - Safe mode skips plugins from mods.
+  - At each start, before any plugin loads, the copies that `trust.toml` no longer names are removed: revoked ids, older hashes and unfinished copies.
+  - With one mod that has a plugin, discovery took about 2 ms of start-up in the tests and 3 ms in the game. The first start after the files were copied took 29 ms (EU4 engine lab, `docs/anvil-workshop-trust-game-test.md`).
+- **Approval and revocation** (`approve_mod_plugin`, `revoke_mod_plugin`)
+  - An approval takes the hash the player was shown. It checks that hash against the mod folder, copies the folder into a temporary folder under `approved/<id>/`, checks the copy and moves it into place. Only then does it write `trust.toml`, replacing an earlier approval of the id.
+  - Copies of the id other than the new one and the one the running game loaded are removed where possible.
+  - A revocation removes the entry and the copies, except the one in use.
+  - Both take effect from the next start.
+- **In the overlay** (§15)
+  - `anvil.control` lists the plugins in mods with what the prompt shows and offers `approve_mod_plugin` and `revoke_mod_plugin`.
+  - A non-blocking notice lists the plugins that wait (new, an update, a conflict) and leads to the panel's **Mods** tab. There the player approves, with a second click, or revokes. The game never pauses.
+  - Plugins that wait for approval are not repeated in the "not loaded" notice.
+- **In the Manager** (§15)
+  - A **Mods** tab shows the same states and reasons from `anvil check --game`.
+  - The player can approve before launch through a prompt, and can revoke.
+  - An approval reads the playset again and goes through only when the same mod still has that plugin with the hash that was shown.
+- **`anvil check --game [--user-dir <folder>]`**
+  - It lists the plugins in mods with their state, reason, hash and approval, checks each one, and resolves the approved ones together with the local plugins.
+  - It writes nothing, so a missing copy is reported, not made.
+  - Plugins that wait for the player (pending, update pending, conflict, shadowed) do not fail the check; invalid ones do.
+  - JSON adds `mods` and `mod_plugins`, and the `load_order` and `skipped` entries of a plugin from a mod get `mod`.
+
 ## 15. Player UI
 
 Decided in [Player UI: in-game overlay and Anvil Manager](https://github.com/happy-dwarf-team/anvil/issues/26).
@@ -473,7 +535,7 @@ Decided in [Player UI: in-game overlay and Anvil Manager](https://github.com/hap
 
 - **`anvil.exe`** (in the SDK archive) is built from the core's own library:
   - `anvil gen [--lang c|cpp|rust]`;
-  - `anvil check` with strict schemas (`plugin.toml`, `symbols.toml`, `settings.toml`) and the names `anvil gen` refuses in any language it writes (the generators' own checks, so a name that cannot be generated is reported at its line before the build), which also verifies, with `--exe`, the build, bytes, memory, pointers, exports, values and instruction boundaries; with `--game <folder>`, every installed plugin and the conflicts between them;
+  - `anvil check` with strict schemas (`plugin.toml`, `symbols.toml`, `settings.toml`) and the names `anvil gen` refuses in any language it writes (the generators' own checks, so a name that cannot be generated is reported at its line before the build), which also verifies, with `--exe`, the build, bytes, memory, pointers, exports, values and instruction boundaries; with `--game <folder>`, every installed plugin, the plugins in the enabled mods (`--user-dir` picks EU4's user folder; §14.1) and the conflicts between them;
   - `--format text|json|github`; exit codes 0 OK, 1 problems, 2 cannot check.
 - **`anvil gen [--lang c|cpp|rust] <symbols.toml> <out-dir>`** writes both headers without `--lang` (`--lang rust` writes only `symbols.gen.rs`, and `settings.gen.rs` for a settings file, §9) and leaves a file alone when its content would not change:
   - `symbols.gen.h`: `SYM_<NAME>` ids, `sym_<name>_fn` pointer types from `signature`, `SYMVAL_<SYMBOL>_<VALUE>` constants;
@@ -617,7 +679,7 @@ Exceeding a budget blocks the release and any change to stubs, chains or core st
 ## 19. Security
 
 Plugins are native code with the game's permissions:
-- local plugins are trusted by placement, and Workshop plugins need per-version approval;
+- local plugins are trusted by placement, and plugins from mods (Workshop or local) need per-version approval;
 - Anvil and its standard plugins never download anything; the Manager's release check is opt-in and only links;
 - releases are built by GitHub Actions with SHA-256 sums and provenance attestation. Code signing is fog.
 

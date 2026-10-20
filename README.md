@@ -17,9 +17,13 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
 - Anvil ships as a `version.dll` placed next to `eu4.exe`. Windows loads it
   together with the game; it forwards every `version.dll` call to the system
   copy and, in addition, loads plugins.
-- Plugins live in `anvil/plugins/<plugin-id>/` (manifest + DLL). Later, plugins
-  can also come from EU4 mods enabled in the Paradox launcher (Steam Workshop),
-  each version only after the player approves it.
+- Plugins live in `anvil/plugins/<plugin-id>/` (manifest + DLL). They can also
+  come in EU4 mods, from the Steam Workshop or the local mod folder, as
+  `anvil/<plugin-id>/` in the mod. Such a plugin loads only while its mod is
+  enabled in the playset and only after the player approves its exact files
+  in the overlay or in AnvilManager.exe. An update waits for a new approval.
+  Approvals are kept in `anvil/trust.toml`, and an approved plugin loads from
+  Anvil's own copy in `anvil/data/anvil/approved/`.
 - A plugin that uses game addresses declares them, for one EU4 build, in its
   `symbols.toml`; on another build it is skipped. Broken plugins, plugins
   written for an older plugin API or an empty `plugins` folder mean the game
