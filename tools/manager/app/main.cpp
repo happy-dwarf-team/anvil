@@ -13,6 +13,7 @@
 #include <d3d11.h>
 #include <objbase.h>
 #include <shellapi.h>
+#include <windowsx.h>
 
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
@@ -117,7 +118,59 @@ void load_fonts(float scale) {
     style.ScaleAllSizes(scale);
 }
 
+bool is_button_message(UINT message) {
+    switch (message) {
+    case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_LBUTTONDBLCLK:
+    case WM_RBUTTONDOWN: case WM_RBUTTONUP: case WM_RBUTTONDBLCLK:
+    case WM_MBUTTONDOWN: case WM_MBUTTONUP: case WM_MBUTTONDBLCLK:
+    case WM_XBUTTONDOWN: case WM_XBUTTONUP: case WM_XBUTTONDBLCLK:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Posted mouse input (issue #106): automated tests post WM_MOUSEMOVE and the
+// button messages to the window without moving the cursor. The Win32 backend
+// would lose such a position at once: its TrackMouseEvent sends WM_MOUSELEAVE
+// as soon as the real cursor is outside the window, and without tracking it
+// reads GetCursorPos every frame while the window is in front. A posted
+// message shows itself by a cursor position (GetMessagePos) that is not the
+// one in lParam; while the last mouse message was posted, the leave is kept
+// from ImGui, so the position stays until the real mouse comes back.
+bool g_posted_pointer = false;
+
+bool is_posted(HWND window, LPARAM lparam) {
+    POINT at{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+    ClientToScreen(window, &at);
+    const DWORD cursor = GetMessagePos();
+    return at.x != GET_X_LPARAM(cursor) || at.y != GET_Y_LPARAM(cursor);
+}
+
+// Returns true when the message is not for ImGui.
+bool filter_mouse(HWND window, UINT message, LPARAM lparam) {
+    if (ImGui::GetCurrentContext() == nullptr) return false;
+    if (message == WM_MOUSELEAVE) return g_posted_pointer;
+    if (message != WM_MOUSEMOVE && !is_button_message(message)) return false;
+    const bool posted = is_posted(window, lparam);
+    if (g_posted_pointer && !posted) {
+        // The real mouse is back. The posted move's tracking ended in the leave
+        // ImGui did not get, so its leaving is tracked again here.
+        TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, window, 0};
+        TrackMouseEvent(&track);
+    }
+    g_posted_pointer = posted;
+    // A button message carries the position of the click; ImGui gets it before
+    // the button, so a click lands there even without a move before it. A real
+    // click has the position of its last move anyway.
+    if (is_button_message(message)) {
+        ImGui::GetIO().AddMousePosEvent(static_cast<float>(GET_X_LPARAM(lparam)), static_cast<float>(GET_Y_LPARAM(lparam)));
+    }
+    return false;
+}
+
 LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    if (filter_mouse(window, message, lparam)) return 0;
     if (ImGui_ImplWin32_WndProcHandler(window, message, wparam, lparam)) return 1;
     switch (message) {
     case WM_SIZE:
