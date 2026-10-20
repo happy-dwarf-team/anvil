@@ -92,8 +92,8 @@ Plan plan_install(const Package& package, const Installation& installation, cons
 // Uninstall (issue #59): version.dll first (only Anvil's), so the game is
 // vanilla at once, then the standard plugins, the package's other files
 // except anvil.toml and AnvilManager.exe; the player's plugins, anvil/data,
-// anvil/crashes, the logs and anvil.toml stay. With `everything` the whole
-// anvil/ folder goes too.
+// the crash reports, the logs and anvil.toml stay; an empty anvil/crashes
+// goes. With `everything` the whole anvil/ folder goes too.
 Plan plan_uninstall(const Package& package, const Installation& installation, bool everything);
 
 struct ApplyResult {
