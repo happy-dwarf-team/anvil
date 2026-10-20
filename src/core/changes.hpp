@@ -34,7 +34,7 @@ const char* change_status_name(ChangeStatus status);
 // Kinds in this registry. Function hooks, mid hooks and block replacements at
 // one address share one code site and its SafetyHook hook; pointer swaps chain
 // like import replacements but on any declared slot.
-enum class ChangeKind {
+enum class ChangeKind : uint8_t {
     FunctionHook,
     MidHook,
     BlockReplacement,
@@ -268,9 +268,9 @@ private:
     ChangeStatus code_site(OwnerId owner, const ChangeTarget& target, ChangeKind kind, size_t span,
                            const std::string& label, Site*& out);
     bool add_call_stub(Site& code, const Site* call);
-    ChangeStatus add_link(OwnerId owner, Site& site, ChangeKind kind, uintptr_t detour, std::vector<uint8_t> bytes,
-                          std::string label, void** next, ChangeId* out, void* user = nullptr, uintptr_t resume = 0,
-                          size_t span = 0, const char* symbol = nullptr);
+    ChangeStatus add_link(OwnerId owner, Site& site, ChangeKind kind, uintptr_t detour,
+                          std::unique_ptr<uint8_t[]> bytes, const std::string& label, void** next, ChangeId* out,
+                          void* user = nullptr, uintptr_t resume = 0, size_t span = 0, const char* symbol = nullptr);
     ChangeStatus enable(std::vector<ChangeId> ids);
     ChangeStatus move_links(OwnerId owner, bool suspend);
     bool relink(Site& site);
