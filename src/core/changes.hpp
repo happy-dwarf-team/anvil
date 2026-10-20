@@ -256,6 +256,7 @@ private:
     static void dispatch(AnvilCpuContext* cpu);
     static void dispatch_counted(AnvilCpuContext* cpu);
     template <bool Count> static void run_callbacks(AnvilCpuContext* cpu);
+    static void notice_rip(const CpuStub& stub, OwnerId owner, uintptr_t rip);
     static uintptr_t entry_of(const Change& link);
 
     ChangeStatus refuse(OwnerId owner, ChangeStatus status, const std::string& message);
