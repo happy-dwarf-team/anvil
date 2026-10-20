@@ -44,17 +44,34 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
 
 ## Install / uninstall
 
-Download `anvil-windows-x64.zip` from the
+Download from the
 [Releases page](https://github.com/happy-dwarf-team/anvil/releases) (the newest
 build is always at
 [releases/latest](https://github.com/happy-dwarf-team/anvil/releases/latest)).
-`SHA256SUMS.txt` next to it holds the archive's checksum, and the archive
-contains its own `SHA256SUMS.txt` for the extracted files.
+`SHA256SUMS.txt` there holds the checksums of the assets.
 
-Install: extract the archive into the game folder (the one that contains
-`eu4.exe`). Uninstall: delete `version.dll` and the `anvil` folder.
+**With Anvil Manager (`AnvilManager.exe`).** Run it, and it finds the game
+through Steam (or lets you pick the folder that contains `eu4.exe`).
+"Install Anvil" copies `version.dll`, the standard plugins and the Manager
+into that folder; from then on, start the Manager there.
+- It shows which plugins will load and why, and turns plugins on and off.
+- It installs a plugin from its release zip after checking it against your
+  `eu4.exe`, and edits plugin settings.
+- It shows crash reports and the log, and starts the game through Steam.
+- "Repair" puts back Anvil's own files.
+- "Uninstall Anvil" removes `version.dll`, the standard plugins and the
+  Manager, and keeps your plugins, their settings and `anvil/anvil.toml`.
+  Tick "Also remove my plugins…" to remove the `anvil` folder too.
+- To update Anvil, run the Manager of the newer release.
+- While the game runs, the Manager only shows. It is not code-signed, so
+  Windows SmartScreen may ask once ("More info" → "Run anyway").
+
+**By hand.** Extract `anvil-windows-x64.zip` into the game folder (the
+archive has its own `SHA256SUMS.txt` for the extracted files). To uninstall,
+delete `version.dll`, `AnvilManager.exe` and the `anvil` folder.
+
 `eu4.exe` is never changed, so Steam updates and "Verify integrity of game
-files" keep working.
+files" keep working. Without `version.dll` the game starts vanilla.
 
 ## Building
 

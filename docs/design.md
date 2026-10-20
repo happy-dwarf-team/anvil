@@ -626,7 +626,7 @@ Plugins are native code with the game's permissions:
 - CMake, with MSVC (VS 2022) as the reference toolchain. C++23 inside Anvil, a C ABI at the boundary, and the static CRT.
 - **Tests:** unit tests for manifests, symbols, settings, the resolver, chains (orders, removal in any order, conflicts, staging, suspension) and the CLI, plus microbenchmarks and a Rust hello build.
 - **Lab checks:** the vanilla copy, the proxy without `anvil/`, each standard plugin, the budgets, and E1/E2 for the Workshop.
-- **Releases:** release-please and Conventional Commits, squash-merged PRs; the release workflow attaches the Anvil zip, the SDK archive, `anvil.exe`, the Manager and `anvil-sys`.
+- **Releases:** release-please and Conventional Commits, squash-merged PRs; the release workflow attaches the Anvil zip (`version.dll`, `anvil/` and `AnvilManager.exe`), `AnvilManager.exe` on its own, the SDK archive (with `anvil.exe`) and publishes `anvil-sys`. The three assets are in `SHA256SUMS.txt` and have a build attestation.
 
 ## 21. Open items and fog
 
