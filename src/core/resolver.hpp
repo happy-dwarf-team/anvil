@@ -25,6 +25,8 @@ struct Skipped {
     std::string reason;
     std::filesystem::path folder;  // the plugin folder
     bool disabled = false;         // disabled by the player in anvil.toml, not a fault
+    std::string mod;               // the mod's name for a plugin from a mod (design §14)
+    bool awaiting_approval = false;  // a plugin from a mod that waits for the player's approval
 };
 
 struct ResolveResult {

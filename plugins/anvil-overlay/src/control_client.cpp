@@ -1,5 +1,7 @@
 #include "control_client.hpp"
 
+#include <cstddef>
+
 namespace overlay {
 namespace {
 
@@ -44,6 +46,10 @@ std::vector<PluginRow> ControlClient::plugins() const {
         row.disabled = p.disabled != 0;
         row.disabled_next = p.disabled_next_start != 0;
         row.settings = p.settings;
+        if (p.size > offsetof(AnvilControlPlugin, awaiting_approval)) {
+            row.mod = text_or_empty(p.mod);
+            row.awaiting_approval = p.awaiting_approval != 0;
+        }
         rows.push_back(std::move(row));
     }
     return rows;
@@ -151,6 +157,65 @@ std::string ControlClient::disable_next_start(const std::string& plugin) const {
     AnvilControlResult out{};
     out.size = sizeof(out);
     return result_text(service_->disable_next_start(plugin.c_str(), &out), out);
+}
+
+namespace {
+// The core has the functions of 1.3 (appended to the table).
+bool has_mod_plugins(const AnvilControlService* service) {
+    return service != nullptr && service->size >= offsetof(AnvilControlService, revoke_mod_plugin) + sizeof(void*);
+}
+}  // namespace
+
+std::vector<ModRow> ControlClient::mod_plugins() const {
+    std::vector<ModRow> rows;
+    if (!has_mod_plugins(service_)) return rows;
+    const uint32_t count = service_->mod_plugin_count();
+    for (uint32_t i = 0; i < count; ++i) {
+        AnvilControlModPlugin m{};
+        m.size = sizeof(m);
+        if (service_->mod_plugin(i, &m) == 0) break;
+        ModRow row;
+        row.index = i;
+        row.id = text_or_empty(m.id);
+        row.name = text_or_empty(m.name);
+        row.version = text_or_empty(m.version);
+        row.authors = text_or_empty(m.authors);
+        row.description = text_or_empty(m.description);
+        row.repository = text_or_empty(m.repository);
+        row.issues = text_or_empty(m.issues);
+        row.mod = text_or_empty(m.mod);
+        row.workshop_id = text_or_empty(m.workshop_id);
+        row.state = text_or_empty(m.state);
+        row.reason = text_or_empty(m.reason);
+        row.hash = text_or_empty(m.hash);
+        row.others = text_or_empty(m.others);
+        row.approved_version = text_or_empty(m.approved_version);
+        row.approved_hash = text_or_empty(m.approved_hash);
+        row.approved_date = text_or_empty(m.approved_date);
+        row.gameplay = m.affects_gameplay != 0;
+        row.symbols = m.symbols;
+        row.loaded = m.loaded != 0;
+        row.can_approve = m.can_approve != 0;
+        row.can_revoke = m.can_revoke != 0;
+        row.approved_next = m.approved_next_start != 0;
+        row.revoked_next = m.revoked_next_start != 0;
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
+std::string ControlClient::approve_mod_plugin(const ModRow& plugin) const {
+    if (!has_mod_plugins(service_)) return "this Anvil has no plugins from mods";
+    AnvilControlResult out{};
+    out.size = sizeof(out);
+    return result_text(service_->approve_mod_plugin(plugin.index, plugin.hash.c_str(), &out), out);
+}
+
+std::string ControlClient::revoke_mod_plugin(const ModRow& plugin) const {
+    if (!has_mod_plugins(service_)) return "this Anvil has no plugins from mods";
+    AnvilControlResult out{};
+    out.size = sizeof(out);
+    return result_text(service_->revoke_mod_plugin(plugin.index, &out), out);
 }
 
 std::vector<std::string> split_list(const std::string& text) {
