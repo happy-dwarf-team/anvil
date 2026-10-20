@@ -66,7 +66,8 @@ std::vector<Notice> start_notices(const StartFacts& facts) {
     for (const PluginRow& p : facts.plugins) {
         if (p.state == "failed") {
             lines.push_back(p.id + ": failed: " + p.reason);
-        } else if (p.state == "skipped" && !p.disabled && !(facts.safe_mode && p.reason == "safe mode")) {
+        } else if (p.state == "skipped" && !p.disabled && !p.awaiting_approval &&
+                   !(facts.safe_mode && p.reason == "safe mode")) {
             lines.push_back(p.id + ": " + p.reason);
         }
     }
@@ -79,6 +80,30 @@ std::vector<Notice> start_notices(const StartFacts& facts) {
         n.lines.assign(lines.begin(), lines.begin() + static_cast<std::ptrdiff_t>(shown));
         if (lines.size() > shown) n.lines.push_back("and " + std::to_string(lines.size() - shown) + " more");
         n.actions.push_back({NoticeAction::Type::OpenPanel, {}, "Details"});
+        notices.push_back(std::move(n));
+    }
+
+    // Plugins in mods that wait for the player (design §14): a notice that
+    // leads to the panel; nothing is approved without a click there.
+    std::vector<std::string> waiting;
+    for (const ModRow& m : facts.mod_plugins) {
+        if (!m.waiting()) continue;
+        const std::string what = m.state == "update-pending" ? "an update; the approved " + m.approved_version + " runs"
+                                 : m.state == "conflict"     ? "the same id as mod(s) " + m.others
+                                                             : "new";
+        waiting.push_back(m.id + (m.version.empty() ? "" : " " + m.version) + " from mod '" + m.mod + "': " + what);
+    }
+    if (!waiting.empty()) {
+        Notice n;
+        n.id = "approvals";
+        n.kind = NoticeKind::Info;
+        n.title = std::to_string(waiting.size()) +
+                  (waiting.size() == 1 ? " plugin from a mod waits for your approval" : " plugins from mods wait for your approval");
+        const size_t shown = std::min(waiting.size(), kMaxListed);
+        n.lines.assign(waiting.begin(), waiting.begin() + static_cast<std::ptrdiff_t>(shown));
+        if (waiting.size() > shown) n.lines.push_back("and " + std::to_string(waiting.size() - shown) + " more");
+        n.lines.push_back("Plugins are native code. Approved ones load from the next start.");
+        n.actions.push_back({NoticeAction::Type::OpenPanel, {}, "Review"});
         notices.push_back(std::move(n));
     }
     return notices;

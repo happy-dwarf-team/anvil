@@ -3,6 +3,7 @@
 // against the core's service on fake plugins.
 #include "core/control.hpp"
 #include "core/host.hpp"
+#include "core/mod_plugins.hpp"
 #include "core/settings.hpp"
 #include "test_support.hpp"
 
@@ -122,6 +123,43 @@ int main() {
         CHECK(find(start_notices(facts), "not-loaded") != nullptr);
     });
 
+    run("notices: plugins from mods that wait for approval lead to the panel", [] {
+        const auto mod_row = [](const std::string& id, const std::string& state, bool can_approve = true) {
+            ModRow m;
+            m.id = id;
+            m.version = "1.0.0";
+            m.mod = "Mod " + id;
+            m.state = state;
+            m.can_approve = can_approve;
+            m.approved_version = "0.9.0";
+            m.others = "Other Mod";
+            return m;
+        };
+        StartFacts facts;
+        PluginRow waiting = row("new", "skipped", "from mod 'Mod new' (local mod): waiting for approval");
+        waiting.awaiting_approval = true;
+        facts.plugins = {waiting};
+        facts.mod_plugins = {mod_row("new", "pending"), mod_row("upd", "update-pending"), mod_row("two", "conflict"),
+                             mod_row("ok", "approved", false), mod_row("bad", "invalid", false),
+                             mod_row("local", "shadowed", false)};
+        auto notices = start_notices(facts);
+        const Notice* n = find(notices, "approvals");
+        CHECK(notices.size() == 1 && n != nullptr && n->kind == NoticeKind::Info && !n->lasting);  // not "not loaded"
+        if (n == nullptr) return;
+        CHECK(n->title == "3 plugins from mods wait for your approval" && n->lines.size() == 4);
+        CHECK(n->lines[0] == "new 1.0.0 from mod 'Mod new': new");
+        CHECK(n->lines[1] == "upd 1.0.0 from mod 'Mod upd': an update; the approved 0.9.0 runs");
+        CHECK(n->lines[2] == "two 1.0.0 from mod 'Mod two': the same id as mod(s) Other Mod");
+        CHECK(n->lines[3].find("native code") != std::string::npos);
+        CHECK(n->actions.size() == 1 && n->actions[0].type == NoticeAction::Type::OpenPanel);
+        // Approved in this game: nothing waits any more.
+        for (ModRow& m : facts.mod_plugins) m.approved_next = true;
+        CHECK(find(start_notices(facts), "approvals") == nullptr);
+        // A plugin from a mod that cannot load for another reason is "not loaded".
+        facts.plugins[0].awaiting_approval = false;
+        CHECK(find(start_notices(facts), "not-loaded") != nullptr);
+    });
+
     run("notices: ironman and multiplayer", [] {
         SessionFacts facts;
         CHECK(session_notices(facts).empty());
@@ -199,6 +237,50 @@ int main() {
         CHECK(client.log_tail(10).empty());
         CHECK(split_list("a, b,,c ") == std::vector<std::string>({"a", "b", "c"}) && split_list("").empty());
         CHECK(!ControlClient().status().loading_done && ControlClient().plugins().empty());
+        CHECK(client.mod_plugins().empty() && ControlClient().mod_plugins().empty());
+        fs::remove_all(dir, ignored);
+    });
+
+    run("control client: plugins from mods, approved and revoked", [] {
+        const fs::path dir = fs::temp_directory_path() / "anvil-overlay-client-mods";
+        std::error_code ignored;
+        fs::remove_all(dir, ignored);
+        const fs::path anvil = dir / "eu4" / "anvil";
+        const fs::path user = dir / "user";
+        const auto write = [](const fs::path& file, const std::string& text) {
+            fs::create_directories(file.parent_path());
+            std::ofstream(file, std::ios::binary) << text;
+        };
+        write(user / "mod" / "m" / "anvil" / "probe" / "plugin.toml",
+              plugin_toml("probe", "authors = [\"A\"]\nrepository = \"https://example.org/p\"\n"));
+        write(user / "mod" / "m" / "anvil" / "probe" / "probe.dll", "MZ");
+        write(user / "mod" / "m.mod", "name=\"M\"\npath=\"mod/m\"\n");
+        write(user / "dlc_load.json", "{\"enabled_mods\":[\"mod/m.mod\"]}");
+        const anvil::ModDiscovery mods = anvil::discover_mod_plugins(anvil, user, {});
+        std::vector<std::unique_ptr<AnvilPlugin>> plugins;
+        std::vector<anvil::Skipped> skipped;
+        anvil::ControlSources sources;
+        sources.anvil_dir = anvil;
+        sources.plugins = &plugins;
+        sources.skipped = &skipped;
+        sources.mods = &mods;
+        anvil::Control control(sources);
+        control.loading_done();
+        ControlClient client(control.service());
+        auto rows = client.mod_plugins();
+        CHECK(rows.size() == 1 && rows[0].id == "probe" && rows[0].mod == "M" && rows[0].state == "pending");
+        CHECK(rows[0].authors == "A" && rows[0].repository == "https://example.org/p" && rows[0].hash.size() == 64);
+        CHECK(rows[0].waiting() && rows[0].can_approve && !rows[0].can_revoke);
+        CHECK(client.approve_mod_plugin(rows[0]).empty());
+        rows = client.mod_plugins();
+        CHECK(rows[0].approved_next && !rows[0].waiting() && rows[0].can_revoke);
+        CHECK(client.revoke_mod_plugin(rows[0]).empty());
+        rows = client.mod_plugins();
+        CHECK(!rows[0].approved_next && rows[0].waiting());
+        ModRow changed = rows[0];
+        changed.hash = std::string(64, '0');
+        CHECK(client.approve_mod_plugin(changed) == "the plugin's hash is not the one shown");
+        CHECK(!client.revoke_mod_plugin(rows[0]).empty());
         fs::remove_all(dir, ignored);
     });
 

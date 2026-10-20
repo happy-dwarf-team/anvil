@@ -22,7 +22,7 @@ struct NoticeAction {
 };
 
 struct Notice {
-    std::string id;  // stable: "safe-mode", "crash", "not-loaded", "ironman", "multiplayer"
+    std::string id;  // stable: "safe-mode", "crash", "not-loaded", "approvals", "ironman", "multiplayer"
     NoticeKind kind = NoticeKind::Info;
     std::string title;
     std::vector<std::string> lines;
@@ -38,6 +38,7 @@ struct StartFacts {
     uint32_t unfinished_starts = 0;
     std::vector<PluginRow> plugins;
     std::optional<CrashInfo> crash;  // the previous crash, if any
+    std::vector<ModRow> mod_plugins;  // plugins in mods (design §14)
 };
 std::vector<Notice> start_notices(const StartFacts& facts);
 

@@ -3,11 +3,13 @@
 #include "control/anvil_control.h"
 #include "crash_history.hpp"
 #include "gameplay_policy.hpp"
+#include "mod_plugins.hpp"
 #include "resolver.hpp"
 #include "settings.hpp"
 
 #include <atomic>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -38,6 +40,9 @@ struct ControlSources {
     // The newest crash report written before this start ("": none). Read at
     // start-up, before this process could write one.
     std::string previous_crash;
+    // The plugins in the playset's mods as the start decided them (design
+    // §14); may be null. Does not change after start-up.
+    const ModDiscovery* mods = nullptr;
 };
 
 // The core's private service for anvil-overlay (src/control/anvil_control.h,
@@ -70,6 +75,13 @@ public:
     AnvilResult disable_next_start(std::string_view plugin_id, std::string& error);
     bool disabled_next_start(std::string_view plugin_id) const;
 
+    // Plugins in mods (design §14). Approving or revoking changes trust.toml
+    // for the next start; what this start loaded stays.
+    uint32_t mod_plugin_count() const;
+    bool mod_plugin(uint32_t index, AnvilControlModPlugin& out) const;
+    AnvilResult approve_mod_plugin(uint32_t index, std::string_view hash, std::string& error);
+    AnvilResult revoke_mod_plugin(uint32_t index, std::string& error);
+
 private:
     struct CrashCache {
         CrashSummary summary;
@@ -86,6 +98,21 @@ private:
     std::set<std::string, std::less<>> disabled_next_;  // under mutex_
     bool crash_loaded_ = false;                         // under mutex_
     std::unique_ptr<CrashCache> crash_;                 // under mutex_, then fixed
+
+    // The strings of each mod plugin's view, made once.
+    struct ModView {
+        std::string name, version, authors, description, repository, issues, others;
+        std::string approved_version, approved_hash, approved_date;
+        uint32_t symbols = 0;
+    };
+    // Which mod and hash trust.toml binds an id to now ("" mod: none).
+    struct Binding {
+        std::string mod;
+        std::string hash;
+    };
+    std::vector<ModView> mod_views_;
+    std::map<std::string, Binding, std::less<>> bindings_;  // under mutex_
+    std::string running_hash(const std::string& id) const;  // the approved copy this start loaded for the id
 };
 
 // The value as text, as parse_setting_text reads it back: true/false, a

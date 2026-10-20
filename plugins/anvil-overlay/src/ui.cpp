@@ -22,7 +22,7 @@ IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND window, UINT message,
 namespace overlay {
 namespace {
 
-enum class Tab { None, Status, Settings, Crash, Log };
+enum class Tab { None, Status, Mods, Settings, Crash, Log };
 
 struct ShownNotice {
     Notice notice;
@@ -47,6 +47,8 @@ struct Ui {
     ULONGLONG refreshed = 0;
     AnvilControlStatus status{};
     std::vector<PluginRow> plugins;
+    std::vector<ModRow> mods;
+    std::string confirm_approve;  // the mod plugin (id/mod) whose approval waits for a second click
     std::vector<std::string> warnings;
     bool crash_loaded = false;
     std::optional<CrashInfo> crash;
@@ -115,6 +117,7 @@ void refresh(bool force) {
     const ControlClient& control = shared().control;
     u.status = control.status();
     u.plugins = control.plugins();
+    u.mods = control.mod_plugins();
     u.warnings = control.warnings();
     load_crash();
     u.refreshed = now;
@@ -155,6 +158,7 @@ void build_start_notices(ULONGLONG now) {
     facts.safe_mode = status.safe_mode != 0;
     facts.unfinished_starts = status.unfinished_starts;
     facts.plugins = control.plugins();
+    facts.mod_plugins = control.mod_plugins();
     load_crash();
     facts.crash = u.crash;
     for (Notice& n : start_notices(facts)) u.start.push_back({std::move(n), now, false});
@@ -310,7 +314,9 @@ void run_action(const Notice& notice, const NoticeAction& action) {
         return;
     }
     s.panel_open.store(true);
-    ui().requested_tab = notice.id == "crash" || (notice.id == "safe-mode" && ui().crash) ? Tab::Crash : Tab::Status;
+    ui().requested_tab = notice.id == "crash" || (notice.id == "safe-mode" && ui().crash) ? Tab::Crash
+                         : notice.id == "approvals"                                ? Tab::Mods
+                                                                                   : Tab::Status;
     refresh(true);
 }
 
@@ -438,6 +444,118 @@ void draw_status() {
         }
         ImGui::EndChild();
     }
+}
+
+// ---- plugins in mods (design §14) ---------------------------------------------------
+
+std::string mod_key(const ModRow& m) { return m.id + "/" + m.mod; }
+
+std::string mod_source(const ModRow& m) {
+    return "mod '" + m.mod + "' (" + (m.workshop_id.empty() ? std::string("local mod") : "Workshop " + m.workshop_id) + ")";
+}
+
+// After an approval or a revocation: the panel and the notice show what is left.
+void mods_changed() {
+    refresh(true);
+    const bool any_waiting = std::any_of(ui().mods.begin(), ui().mods.end(), [](const ModRow& m) { return m.waiting(); });
+    for (ShownNotice& shown : ui().start) {
+        if (shown.notice.id == "approvals" && !any_waiting) shown.closed = true;
+    }
+}
+
+void approve(const ModRow& m) {
+    const std::string error = shared().control.approve_mod_plugin(m);
+    if (error.empty()) {
+        say(m.id + " " + m.version + " from " + mod_source(m) + " is approved; it loads from the next start.", false);
+    } else {
+        say("Cannot approve " + m.id + ": " + error, true);
+    }
+    ui().confirm_approve.clear();
+    mods_changed();
+}
+
+void revoke(const ModRow& m) {
+    const std::string error = shared().control.revoke_mod_plugin(m);
+    if (error.empty()) {
+        say("The approval of " + m.id + " is revoked; it does not load from the next start.", false);
+    } else {
+        say("Cannot revoke " + m.id + ": " + error, true);
+    }
+    mods_changed();
+}
+
+const char* state_text(const ModRow& m) {
+    if (m.approved_next) return "approved for the next start";
+    if (m.revoked_next) return "revoked from the next start";
+    if (m.state == "approved") return m.loaded ? "approved, loaded" : "approved";
+    if (m.state == "update-pending") return m.loaded ? "update waits; the approved version is loaded" : "update waits";
+    if (m.state == "pending") return "waits for approval";
+    if (m.state == "conflict") return "conflict";
+    if (m.state == "shadowed") return "a local plugin wins";
+    return "cannot be approved";
+}
+
+void draw_mods() {
+    Ui& u = ui();
+    if (u.mods.empty()) {
+        ImGui::TextWrapped("No enabled mod in the playset has plugins (anvil/<id>/ in the mod's folder).");
+        return;
+    }
+    ImGui::TextWrapped("Plugins from mods are native code: they run with the game's permissions and can do anything "
+                       "your Windows account can. Approve only plugins whose authors you trust. An approval covers "
+                       "these exact files (their hash); an update waits for a new approval. Approved plugins load "
+                       "from the next start, from Anvil's own copy.");
+    ImGui::Separator();
+    if (ImGui::BeginChild("mods", ImVec2(0.0f, 0.0f))) {
+        for (const ModRow& m : u.mods) {
+            ImGui::PushID(mod_key(m).c_str());
+            const ImVec4 color = m.approved_next || m.state == "approved" ? kGreen
+                                 : m.state == "invalid" || m.revoked_next ? kRed
+                                                                          : kAmber;
+            const std::string header = m.id + (m.version.empty() ? "" : " " + m.version) + "  -  " + mod_source(m);
+            const bool open = ImGui::CollapsingHeader(header.c_str(), m.waiting() ? ImGuiTreeNodeFlags_DefaultOpen : 0);
+            ImGui::SameLine();
+            ImGui::TextColored(color, "%s", state_text(m));
+            if (open) {
+                ImGui::Indent();
+                if (!m.name.empty()) ImGui::Text("Name: %s", m.name.c_str());
+                if (!m.authors.empty()) ImGui::TextWrapped("Authors: %s", m.authors.c_str());
+                if (!m.description.empty()) ImGui::TextWrapped("%s", m.description.c_str());
+                if (m.gameplay) {
+                    ImGui::TextColored(kAmber, "Changes the game (affects_gameplay): suspended in ironman and multiplayer "
+                                               "unless you allow it.");
+                } else {
+                    ImGui::TextUnformatted("Does not change the game's simulation (affects_gameplay = false).");
+                }
+                ImGui::Text("Game addresses (symbols): %u", m.symbols);
+                ImGui::TextWrapped("Hash: %s", m.hash.empty() ? "-" : m.hash.c_str());
+                if (!m.repository.empty()) ImGui::TextWrapped("Source: %s", m.repository.c_str());
+                if (!m.approved_hash.empty()) {
+                    ImGui::TextWrapped("Approved: %s on %s (hash %s)", m.approved_version.c_str(),
+                                       m.approved_date.substr(0, 10).c_str(), m.approved_hash.substr(0, 8).c_str());
+                }
+                ImGui::TextWrapped("%s", m.reason.c_str());
+                if (m.can_approve && !m.approved_next) {
+                    if (u.confirm_approve == mod_key(m)) {
+                        ImGui::TextColored(kAmber, "Approve native code from %s? It loads from the next start.",
+                                           mod_source(m).c_str());
+                        if (ImGui::Button("Approve")) approve(m);
+                        ImGui::SameLine();
+                        if (ImGui::Button("Cancel")) u.confirm_approve.clear();
+                    } else if (ImGui::Button(m.state == "update-pending" ? "Approve the update..." : "Approve...")) {
+                        u.confirm_approve = mod_key(m);
+                    }
+                }
+                if (m.can_revoke) {
+                    if (m.can_approve && !m.approved_next) ImGui::SameLine();
+                    if (ImGui::Button("Revoke the approval")) revoke(m);
+                }
+                ImGui::Unindent();
+            }
+            ImGui::PopID();
+        }
+    }
+    ImGui::EndChild();
 }
 
 std::string edit_key(const std::string& plugin, AnvilSetting setting) {
@@ -705,6 +823,7 @@ void draw_panel() {
                 }
             };
             tab("Status", Tab::Status, draw_status);
+            tab("Mods", Tab::Mods, draw_mods);
             tab("Settings", Tab::Settings, draw_settings);
             tab("Crash report", Tab::Crash, draw_crash);
             tab("Log", Tab::Log, draw_log);

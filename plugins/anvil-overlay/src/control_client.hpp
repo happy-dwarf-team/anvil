@@ -19,6 +19,28 @@ struct PluginRow {
     bool disabled = false;       // by the player at this start
     bool disabled_next = false;  // listed in anvil.toml now
     uint32_t settings = 0;
+    std::string mod;                 // a plugin from a mod: the mod's name
+    bool awaiting_approval = false;  // skipped until the player approves it
+};
+
+// A plugin in a mod (design §14), as anvil.control reports it.
+struct ModRow {
+    uint32_t index = 0;  // for approve_mod_plugin / revoke_mod_plugin
+    std::string id, name, version, authors, description, repository, issues;
+    std::string mod, workshop_id, state, reason, hash, others;
+    std::string approved_version, approved_hash, approved_date;
+    bool gameplay = false;
+    uint32_t symbols = 0;
+    bool loaded = false;
+    bool can_approve = false;
+    bool can_revoke = false;
+    bool approved_next = false;  // approved in this game; loads from the next start
+    bool revoked_next = false;
+
+    // Waits for the player: not approved yet, an update, or a conflict.
+    bool waiting() const {
+        return can_approve && !approved_next && (state == "pending" || state == "update-pending" || state == "conflict");
+    }
 };
 
 struct CrashInfo {
@@ -54,6 +76,11 @@ public:
     std::string set_text(const std::string& plugin, AnvilSetting setting, const std::string& text) const;
     std::string reset(const std::string& plugin, AnvilSetting setting) const;
     std::string disable_next_start(const std::string& plugin) const;
+
+    // Plugins in mods; none from a core without them.
+    std::vector<ModRow> mod_plugins() const;
+    std::string approve_mod_plugin(const ModRow& plugin) const;  // with the hash it shows
+    std::string revoke_mod_plugin(const ModRow& plugin) const;
 
 private:
     const AnvilControlService* service_;

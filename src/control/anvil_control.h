@@ -1,7 +1,9 @@
 /*
  * anvil.control v1: the core's private service for anvil-overlay (design §15,
  * #58). Status and start-up warnings, the settings of every plugin, the
- * previous crash report, the log tail and "disable at the next start".
+ * previous crash report, the log tail and "disable at the next start"; since
+ * 1.3 the plugins in mods with their approval (#60). Fields and functions
+ * are only appended: a caller checks `size` before it reads a later one.
  *
  * Not part of the SDK: it lives in the Anvil repository, only Anvil's own
  * plugins use it, and it may change in a minor release (a new version is
@@ -63,7 +65,42 @@ typedef struct AnvilControlPlugin {
     int disabled;            /* listed in disabled_plugins at this start */
     int disabled_next_start; /* listed in disabled_plugins of anvil.toml now */
     uint32_t settings;       /* declared settings (setting_info) */
+    /* Appended in 1.3 (design §14): a plugin from a mod. */
+    const char *mod;         /* the mod's name; "" for a local plugin */
+    int awaiting_approval;   /* skipped until the player approves it (mod_plugin) */
 } AnvilControlPlugin;
+
+/* A plugin in <mod>/anvil/<id>/ of an enabled mod, as the start found it
+ * (design §14, #60). Strings are valid for the process. */
+typedef struct AnvilControlModPlugin {
+    uint32_t size;
+    const char *id;
+    const char *name;        /* plugin.toml; "" when it does not parse */
+    const char *version;
+    const char *authors;     /* ", " between them */
+    const char *description;
+    const char *repository;  /* may be "" */
+    const char *issues;
+    const char *mod;         /* the mod's name */
+    const char *workshop_id; /* "" for a local mod */
+    /* "approved" | "update-pending" | "pending" | "conflict" | "shadowed" | "invalid" */
+    const char *state;
+    const char *reason;
+    const char *hash;        /* of the folder in the mod (64 hex digits); "" when it cannot be hashed */
+    const char *others;      /* conflict, shadowed: the other mods with this id, ", " between them */
+    /* trust.toml's approval of the id for this mod at this start; "" when none. */
+    const char *approved_version;
+    const char *approved_hash;
+    const char *approved_date;
+    int affects_gameplay;
+    uint32_t symbols;        /* declared in its symbols.toml; 0 without one */
+    int loaded;              /* loaded at this start (from its approved copy) */
+    int can_approve;         /* approve_mod_plugin can approve it now */
+    int can_revoke;          /* an approval binds the id to this mod now */
+    /* Changed in this process; applies from the next start. */
+    int approved_next_start;
+    int revoked_next_start;
+} AnvilControlModPlugin;
 
 enum {
     ANVIL_CONTROL_SETTING_BOOL = 0,
@@ -170,6 +207,22 @@ typedef struct AnvilControlService {
      * of the file and its comments, written atomically. Only on the player's
      * request. ANVIL_OK when it is listed (also when it already was). */
     AnvilResult (*disable_next_start)(const char *plugin_id, AnvilControlResult *out);
+
+    /* --- plugins in mods (appended in 1.3, design §14) --- */
+    uint32_t (*mod_plugin_count)(void);
+    /* 0 when index >= mod_plugin_count(). */
+    int (*mod_plugin)(uint32_t index, AnvilControlModPlugin *out);
+    /* Approves the plugin at `index` with the hash the player was shown:
+     * copies it to anvil/data/anvil/approved/<id>/<hash>/, checks the copy
+     * and binds the id to its mod in anvil/trust.toml. It loads from the
+     * next start; the copy this start loaded stays. Only on the player's
+     * request. INVALID_ARGUMENT when the hash is not the plugin's, NOT_FOUND
+     * for an unknown index, INTERNAL with `error` when it cannot be done. It
+     * copies and hashes files, so it may take a moment. */
+    AnvilResult (*approve_mod_plugin)(uint32_t index, const char *hash, AnvilControlResult *out);
+    /* Removes the approval of the plugin's id from anvil/trust.toml: it no
+     * longer loads from the next start. Only on the player's request. */
+    AnvilResult (*revoke_mod_plugin)(uint32_t index, AnvilControlResult *out);
 } AnvilControlService;
 
 #ifdef __cplusplus

@@ -7,12 +7,14 @@
 #include "core/discovery.hpp"
 #include "core/host.hpp"
 #include "core/log.hpp"
+#include "core/mod_plugins.hpp"
 #include "core/safe_mode.hpp"
 #include "core/settings.hpp"
 #include "test_support.hpp"
 
 #include <windows.h>
 
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -378,6 +380,7 @@ void control_tests() {
         CHECK(std::string(status.anvil_version) == "1.1.0" && std::string(status.game_build) == "eu4-1.37.5-steam-win64");
         CHECK(status.plugins == 5 && status.skipped == 2 && status.loading_done == 0 && status.loaded == 0);
         AnvilControlPlugin p{};
+        p.size = sizeof(p);
         CHECK(svc.plugin(0, &p) == 1 && std::string(p.state) == "pending");  // states only after loading
 
         control.loading_done();
@@ -477,6 +480,94 @@ void control_tests() {
         fs::remove_all(dir);
     });
 
+
+    run("control: plugins in mods, approved and revoked for the next start", [] {
+        const fs::path dir = fresh_dir("anvil-control-mods");
+        const fs::path anvil = dir / "eu4" / "anvil";
+        const fs::path user = dir / "user";
+        const fs::path mod = user / "mod" / "probe-mod";
+        write_file(mod / "anvil" / "probe" / "plugin.toml",
+                   plugin_toml("probe", "symbols = \"symbols.toml\"\nauthors = [\"A\", \"B\"]\nrepository = \"https://example.org/p\"\n"));
+        write_file(mod / "anvil" / "probe" / "symbols.toml",
+                   "build = \"b\"\n\n[symbol.one]\nrva = 0x1000\nbytes = \"C3\"\nmemory = \"code\"\n\n"
+                   "[symbol.two]\nrva = 0x1010\nbytes = \"C3\"\nmemory = \"code\"\n");
+        write_file(mod / "anvil" / "probe" / "probe.dll", "MZ");
+        write_file(user / "mod" / "probe-mod.mod", "name=\"Probe Mod\"\npath=\"mod/probe-mod\"\n");
+        write_file(user / "dlc_load.json", "{\"enabled_mods\":[\"mod/probe-mod.mod\"]}");
+
+        std::vector<std::unique_ptr<AnvilPlugin>> plugins;
+        ModDiscovery mods = discover_mod_plugins(anvil, user, {});
+        std::vector<Skipped> skipped{{"probe", "from mod 'Probe Mod' (local mod): waiting", mods.plugins[0].folder}};
+        skipped[0].mod = "Probe Mod";
+        skipped[0].awaiting_approval = true;
+        ControlSources sources;
+        sources.anvil_dir = anvil;
+        sources.plugins = &plugins;
+        sources.skipped = &skipped;
+        sources.mods = &mods;
+        std::string hash;
+        {
+            Control control(sources);
+            control.loading_done();
+            const AnvilControlService& svc = *control.service();
+            CHECK(svc.mod_plugin_count() == 1);
+            AnvilControlModPlugin m{};
+            m.size = sizeof(m);
+            CHECK(svc.mod_plugin(0, &m) == 1 && std::string(m.id) == "probe" && std::string(m.state) == "pending");
+            CHECK(std::string(m.mod) == "Probe Mod" && std::string(m.workshop_id).empty() && std::string(m.authors) == "A, B");
+            CHECK(std::string(m.repository) == "https://example.org/p" && m.symbols == 2 && m.affects_gameplay == 0);
+            CHECK(std::string(m.hash).size() == 64 && m.can_approve == 1 && m.can_revoke == 0 && m.loaded == 0);
+            CHECK(std::string(m.approved_hash).empty() && svc.mod_plugin(1, &m) == 0);
+            hash = m.hash;
+            AnvilControlPlugin p{};
+            p.size = sizeof(p);
+            CHECK(svc.plugin(0, &p) == 1 && std::string(p.mod) == "Probe Mod" && p.awaiting_approval == 1);
+            // A caller built before the fields were appended gets only its part.
+            AnvilControlPlugin short_struct{};
+            short_struct.size = offsetof(AnvilControlPlugin, mod);
+            CHECK(svc.plugin(0, &short_struct) == 1 && short_struct.mod == nullptr &&
+                  short_struct.size == offsetof(AnvilControlPlugin, mod));
+
+            AnvilControlResult result{};
+            CHECK(svc.approve_mod_plugin(0, "00", &result) == ANVIL_ERROR_INVALID_ARGUMENT);
+            CHECK(svc.approve_mod_plugin(1, hash.c_str(), &result) == ANVIL_ERROR_NOT_FOUND);
+            CHECK(svc.revoke_mod_plugin(0, &result) == ANVIL_ERROR_NOT_FOUND);
+            CHECK(svc.approve_mod_plugin(0, hash.c_str(), &result) == ANVIL_OK && result.saved == 1);
+            CHECK(svc.mod_plugin(0, &m) == 1 && m.approved_next_start == 1 && m.can_approve == 0 && m.can_revoke == 1);
+            CHECK(std::string(m.state) == "pending");  // this start's decision stays
+            CHECK(read_trust(anvil / "trust.toml").find("probe") != nullptr);
+            CHECK(fs::exists(approved_copy(anvil, "probe", hash) / "probe.dll"));
+            CHECK(svc.revoke_mod_plugin(0, &result) == ANVIL_OK);
+            CHECK(svc.mod_plugin(0, &m) == 1 && m.approved_next_start == 0 && m.can_approve == 1 && m.can_revoke == 0);
+            CHECK(read_trust(anvil / "trust.toml").find("probe") == nullptr);
+            CHECK(svc.approve_mod_plugin(0, hash.c_str(), &result) == ANVIL_OK);
+        }
+        {
+            // The next start: approved and loaded from its copy, which stays when revoked.
+            mods = discover_mod_plugins(anvil, user, {});
+            CHECK(mods.plugins[0].state == ModPluginState::Approved);
+            auto loaded = make_plugin("probe", "loaded", "", anvil / "data");
+            loaded->plugin_dir = mods.plugins[0].load_folder.wstring();
+            loaded->approved_hash = hash;
+            plugins.push_back(std::move(loaded));
+            skipped.clear();
+            Control control(sources);
+            control.loading_done();
+            const AnvilControlService& svc = *control.service();
+            AnvilControlModPlugin m{};
+            m.size = sizeof(m);
+            CHECK(svc.mod_plugin(0, &m) == 1 && std::string(m.state) == "approved" && m.loaded == 1);
+            CHECK(std::string(m.approved_hash) == hash && m.can_approve == 0 && m.can_revoke == 1 && m.approved_next_start == 0);
+            AnvilControlPlugin p{};
+            p.size = sizeof(p);
+            CHECK(svc.plugin(0, &p) == 1 && std::string(p.mod) == "Probe Mod" && p.awaiting_approval == 0);
+            AnvilControlResult result{};
+            CHECK(svc.revoke_mod_plugin(0, &result) == ANVIL_OK);
+            CHECK(svc.mod_plugin(0, &m) == 1 && m.revoked_next_start == 1 && m.can_approve == 1);
+            CHECK(fs::exists(approved_copy(anvil, "probe", hash)));  // in use by this start
+        }
+        fs::remove_all(dir);
+    });
     run("control: the previous crash is new once", [] {
         const fs::path dir = fresh_dir("anvil-control-previous");
         const fs::path anvil = dir / "anvil";

@@ -419,7 +419,10 @@ void startup_impl(const std::filesystem::path& game_dir) {
             const std::string label = p.id + " from mod '" + p.mod.name + "' (" +
                                       (p.mod.workshop_id.empty() ? std::string("local mod") : "Workshop " + p.mod.workshop_id) + ")";
             const auto skip = [&](const std::string& reason) {
-                g_runtime->skipped.push_back({p.id, label.substr(p.id.size() + 1) + ": " + reason, p.folder});
+                Skipped s{p.id, label.substr(p.id.size() + 1) + ": " + reason, p.folder};
+                s.mod = p.mod.name;
+                s.awaiting_approval = !p.loads() && (p.state == ModPluginState::Pending || p.state == ModPluginState::Conflict);
+                g_runtime->skipped.push_back(std::move(s));
             };
             if (p.state == ModPluginState::Shadowed) {
                 shadowed[p.id].push_back(p.mod.name);
@@ -506,6 +509,7 @@ void startup_impl(const std::filesystem::path& game_dir) {
     sources.safe_mode = record.safe_mode;
     sources.unfinished_starts = record.unfinished;
     if (!crash_names.empty()) sources.previous_crash = crash_names.front();
+    sources.mods = &g_runtime->mods;
     g_runtime->control = std::make_unique<Control>(std::move(sources));
     if (g_runtime->bus.register_service("anvil", ANVIL_CONTROL_SERVICE, ANVIL_CONTROL_VERSION,
                                         g_runtime->control->service()) != ANVIL_OK) {

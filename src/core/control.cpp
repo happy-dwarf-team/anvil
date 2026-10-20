@@ -5,6 +5,8 @@
 #include "host.hpp"
 #include "log.hpp"
 #include "plugin_settings.hpp"
+#include "plugin_hash.hpp"
+#include "symbols.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -53,8 +55,20 @@ void svc_status(AnvilControlStatus* out) {
     g_control->status(*out);
 }
 
+// Fills the caller's struct only as far as its `size` says (an overlay built
+// before fields were appended passes a smaller one).
+template <typename T, typename Fill> int fill_sized(T* out, Fill&& fill) {
+    if (g_control == nullptr || out == nullptr || out->size < sizeof(uint32_t)) return 0;
+    T full{};
+    if (!fill(full)) return 0;
+    const uint32_t size = out->size;
+    std::memcpy(out, &full, std::min<size_t>(size, sizeof(T)));
+    out->size = std::min<uint32_t>(size, sizeof(T));
+    return 1;
+}
+
 int svc_plugin(uint32_t index, AnvilControlPlugin* out) {
-    return g_control != nullptr && out != nullptr && g_control->plugin(index, *out) ? 1 : 0;
+    return fill_sized(out, [&](AnvilControlPlugin& full) { return g_control->plugin(index, full); });
 }
 
 int svc_warning(uint32_t index, AnvilControlSink sink, void* context) {
@@ -196,6 +210,32 @@ AnvilResult svc_disable_next_start(const char* plugin_id, AnvilControlResult* ou
     return r;
 }
 
+uint32_t svc_mod_plugin_count() { return g_control != nullptr ? g_control->mod_plugin_count() : 0; }
+
+int svc_mod_plugin(uint32_t index, AnvilControlModPlugin* out) {
+    return fill_sized(out, [&](AnvilControlModPlugin& full) { return g_control->mod_plugin(index, full); });
+}
+
+AnvilResult svc_approve_mod_plugin(uint32_t index, const char* hash, AnvilControlResult* out) {
+    reset_result(out);
+    if (g_control == nullptr || hash == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
+    std::string error;
+    const AnvilResult r = g_control->approve_mod_plugin(index, hash, error);
+    if (out != nullptr) out->saved = r == ANVIL_OK ? 1 : 0;
+    copy_error(out, error);
+    return r;
+}
+
+AnvilResult svc_revoke_mod_plugin(uint32_t index, AnvilControlResult* out) {
+    reset_result(out);
+    if (g_control == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
+    std::string error;
+    const AnvilResult r = g_control->revoke_mod_plugin(index, error);
+    if (out != nullptr) out->saved = r == ANVIL_OK ? 1 : 0;
+    copy_error(out, error);
+    return r;
+}
+
 const AnvilControlService kService{
     sizeof(AnvilControlService),
     svc_status,
@@ -212,6 +252,10 @@ const AnvilControlService kService{
     svc_previous_crash,
     svc_log_tail,
     svc_disable_next_start,
+    svc_mod_plugin_count,
+    svc_mod_plugin,
+    svc_approve_mod_plugin,
+    svc_revoke_mod_plugin,
 };
 
 const char* skipped_state(const Skipped&) { return "skipped"; }
@@ -225,6 +269,32 @@ Control::Control(ControlSources sources) : sources_(std::move(sources)) {
         for (const auto& p : *sources_.plugins) versions_.push_back(p->manifest.version.to_string());
     }
     disabled_next_.insert(sources_.disabled.begin(), sources_.disabled.end());
+    if (sources_.mods != nullptr) {
+        for (const TrustEntry& e : sources_.mods->trust.entries) bindings_[e.id] = {e.mod, e.hash};
+        for (const ModPlugin& p : sources_.mods->plugins) {
+            ModView v;
+            if (p.manifest) {
+                const Manifest& m = *p.manifest;
+                v.name = m.name;
+                v.version = m.version.to_string();
+                for (const auto& a : m.authors) v.authors += (v.authors.empty() ? "" : ", ") + a;
+                v.description = m.description;
+                v.repository = m.repository;
+                v.issues = m.issues;
+                if (!m.symbols.empty()) {
+                    const SymbolFileResult symbols = load_symbols(p.folder / m.symbols);
+                    if (symbols.file) v.symbols = static_cast<uint32_t>(symbols.file->symbols.size());
+                }
+            }
+            for (const auto& o : p.others) v.others += (v.others.empty() ? "" : ", ") + o;
+            if (p.approval && p.bound) {
+                v.approved_version = p.approval->version;
+                v.approved_hash = p.approval->hash;
+                v.approved_date = p.approval->approved;
+            }
+            mod_views_.push_back(std::move(v));
+        }
+    }
     g_control = this;
 }
 
@@ -296,6 +366,12 @@ bool Control::plugin(uint32_t index, AnvilControlPlugin& out) const {
             out.reason = "";
         }
         out.suspended = sources_.policy != nullptr && sources_.policy->suspended(p.owner) ? 1 : 0;
+        out.mod = "";
+        if (sources_.mods != nullptr && !p.approved_hash.empty()) {
+            for (const ModPlugin& m : sources_.mods->plugins) {
+                if (m.loads() && m.load_folder.wstring() == p.plugin_dir) out.mod = m.mod.name.c_str();
+            }
+        }
     } else {
         const Skipped& s = (*sources_.skipped)[index - resolved];
         id = s.id;
@@ -306,6 +382,8 @@ bool Control::plugin(uint32_t index, AnvilControlPlugin& out) const {
         out.state = skipped_state(s);
         out.reason = s.reason.c_str();
         out.disabled = s.disabled ? 1 : 0;
+        out.mod = s.mod.c_str();
+        out.awaiting_approval = s.awaiting_approval ? 1 : 0;
     }
     out.disabled_next_start = disabled_next_start(id) ? 1 : 0;
     return true;
@@ -403,6 +481,109 @@ AnvilResult Control::disable_next_start(std::string_view plugin_id, std::string&
     disabled_next_.insert(std::string(plugin_id));
     Log::instance().write(ANVIL_LOG_INFO, "anvil",
                           std::string(plugin_id) + " is disabled from the next start (disabled_plugins in anvil.toml)");
+    return ANVIL_OK;
+}
+
+// ---- plugins in mods ---------------------------------------------------------------
+
+uint32_t Control::mod_plugin_count() const {
+    return sources_.mods != nullptr ? static_cast<uint32_t>(sources_.mods->plugins.size()) : 0;
+}
+
+std::string Control::running_hash(const std::string& id) const {
+    if (sources_.mods == nullptr || sources_.plugins == nullptr) return {};
+    for (const ModPlugin& m : sources_.mods->plugins) {
+        if (m.id != id || !m.loads()) continue;
+        for (const auto& p : *sources_.plugins) {
+            if (p->plugin_dir == m.load_folder.wstring()) return p->approved_hash;
+        }
+    }
+    return {};
+}
+
+bool Control::mod_plugin(uint32_t index, AnvilControlModPlugin& out) const {
+    if (index >= mod_plugin_count()) return false;
+    const ModPlugin& p = sources_.mods->plugins[index];
+    const ModView& v = mod_views_[index];
+    out = AnvilControlModPlugin{};
+    out.size = sizeof(out);
+    out.id = p.id.c_str();
+    out.name = v.name.c_str();
+    out.version = v.version.c_str();
+    out.authors = v.authors.c_str();
+    out.description = v.description.c_str();
+    out.repository = v.repository.c_str();
+    out.issues = v.issues.c_str();
+    out.mod = p.mod.name.c_str();
+    out.workshop_id = p.mod.workshop_id.c_str();
+    out.state = state_name(p.state);
+    out.reason = p.reason.c_str();
+    out.hash = p.hash.c_str();
+    out.others = v.others.c_str();
+    out.approved_version = v.approved_version.c_str();
+    out.approved_hash = v.approved_hash.c_str();
+    out.approved_date = v.approved_date.c_str();
+    out.affects_gameplay = p.manifest && p.manifest->affects_gameplay ? 1 : 0;
+    out.symbols = v.symbols;
+    if (p.loads() && loading_done_.load(std::memory_order_acquire) && sources_.plugins != nullptr) {
+        for (const auto& r : *sources_.plugins) {
+            if (r->plugin_dir == p.load_folder.wstring() && r->state == "loaded") out.loaded = 1;
+        }
+    }
+    std::lock_guard lock(mutex_);
+    const auto it = bindings_.find(p.id);
+    const bool bound_now = it != bindings_.end() && it->second.mod == p.mod.descriptor;
+    const bool bound_at_start = p.bound;
+    out.approved_next_start = bound_now && it->second.hash == p.hash && !(bound_at_start && p.approval->hash == p.hash);
+    out.revoked_next_start = bound_at_start && !bound_now;
+    const bool approvable = p.problem.empty() && !p.hash.empty() && p.manifest && p.state != ModPluginState::Shadowed;
+    out.can_approve = approvable && !(bound_now && it->second.hash == p.hash) ? 1 : 0;
+    out.can_revoke = bound_now ? 1 : 0;
+    return true;
+}
+
+AnvilResult Control::approve_mod_plugin(uint32_t index, std::string_view hash, std::string& error) {
+    if (index >= mod_plugin_count()) {
+        error = "no such plugin from a mod";
+        return ANVIL_ERROR_NOT_FOUND;
+    }
+    const ModPlugin& p = sources_.mods->plugins[index];
+    if (hash != p.hash) {
+        error = "the plugin's hash is not the one shown";
+        return ANVIL_ERROR_INVALID_ARGUMENT;
+    }
+    const std::string label = p.id + " from mod '" + p.mod.name + "'";
+    std::lock_guard lock(mutex_);
+    if (!anvil::approve_mod_plugin(sources_.anvil_dir, p, p.hash, running_hash(p.id), error)) {
+        Log::instance().write(ANVIL_LOG_WARNING, "anvil", "cannot approve " + label + ": " + error);
+        return ANVIL_ERROR_INTERNAL;
+    }
+    bindings_[p.id] = {p.mod.descriptor, p.hash};
+    Log::instance().write(ANVIL_LOG_INFO, "anvil",
+                          label + " " + (p.manifest ? p.manifest->version.to_string() : std::string()) + " is approved (hash " +
+                              short_hash(p.hash) + "); it loads from the next start");
+    return ANVIL_OK;
+}
+
+AnvilResult Control::revoke_mod_plugin(uint32_t index, std::string& error) {
+    if (index >= mod_plugin_count()) {
+        error = "no such plugin from a mod";
+        return ANVIL_ERROR_NOT_FOUND;
+    }
+    const ModPlugin& p = sources_.mods->plugins[index];
+    std::lock_guard lock(mutex_);
+    const auto it = bindings_.find(p.id);
+    if (it == bindings_.end() || it->second.mod != p.mod.descriptor) {
+        error = "no approval binds " + p.id + " to mod '" + p.mod.name + "'";
+        return ANVIL_ERROR_NOT_FOUND;
+    }
+    if (!anvil::revoke_mod_plugin(sources_.anvil_dir, p.id, running_hash(p.id), error)) {
+        Log::instance().write(ANVIL_LOG_WARNING, "anvil", "cannot revoke " + p.id + ": " + error);
+        return ANVIL_ERROR_INTERNAL;
+    }
+    bindings_.erase(it);
+    Log::instance().write(ANVIL_LOG_INFO, "anvil",
+                          "the approval of " + p.id + " from mod '" + p.mod.name + "' is revoked; it does not load from the next start");
     return ANVIL_OK;
 }
 
