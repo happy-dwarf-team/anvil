@@ -312,6 +312,39 @@ ChangeStatus from_safetyhook(const safetyhook::InlineHook::Error& error, std::st
     }
 }
 
+// A site's original bytes: up to 16 in place (stolen bytes, a call, a slot,
+// a short patch), a longer byte patch on the heap. The part of std::vector a
+// site uses, without a heap block for the usual few bytes.
+class OriginalBytes {
+public:
+    OriginalBytes() = default;
+    OriginalBytes(const OriginalBytes&) = delete;
+    OriginalBytes& operator=(const OriginalBytes&) = delete;
+    ~OriginalBytes() { resize(0); }
+
+    void resize(size_t size) {
+        if (size_ > sizeof(local_)) delete[] heap_;
+        size_ = size;
+        if (size_ > sizeof(local_)) heap_ = new uint8_t[size_]();
+        else std::memset(local_, 0, sizeof(local_));
+    }
+    void assign(const uint8_t* first, const uint8_t* last) {
+        resize(static_cast<size_t>(last - first));
+        std::memcpy(data(), first, size_);
+    }
+    uint8_t* data() { return size_ > sizeof(local_) ? heap_ : local_; }
+    const uint8_t* data() const { return size_ > sizeof(local_) ? heap_ : local_; }
+    size_t size() const { return size_; }
+    uint8_t operator[](size_t i) const { return data()[i]; }
+
+private:
+    union {
+        uint8_t local_[16] = {};
+        uint8_t* heap_;
+    };
+    size_t size_ = 0;
+};
+
 }  // namespace
 
 // One change: a link of a chain, or one owner of a (shared) byte patch. Kept
@@ -384,7 +417,7 @@ struct ChangeRegistry::Site {
     ChangeKind kind = ChangeKind::BytePatch;
     uintptr_t address = 0;
     size_t footprint = 0;           // bytes this site owns: stolen bytes, call, slot, patch
-    std::vector<uint8_t> original;  // those bytes as the game shipped them
+    OriginalBytes original;         // those bytes as the game shipped them
     uintptr_t terminal = 0;         // where the innermost next leads: trampoline (or call stub), callee, pointer
     uint8_t* entry = nullptr;       // code site, redirect: the stub the game jumps to first
     std::unique_ptr<safetyhook::InlineHook> hook;  // code site
