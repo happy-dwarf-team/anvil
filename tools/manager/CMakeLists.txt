@@ -28,6 +28,7 @@ set(ANVIL_MINIZ_LICENSE ${miniz_SOURCE_DIR}/LICENSE CACHE INTERNAL "")
 add_library(anvil_manager_core STATIC
     src/game.cpp
     src/install.cpp
+    src/mods.cpp
     src/plugin_zip.cpp
     src/release_check.cpp
     src/zip.cpp)
