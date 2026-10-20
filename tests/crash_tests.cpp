@@ -328,6 +328,10 @@ int child(const std::string& mode, const fs::path& dir) {
 // ---- the parent side -------------------------------------------------------------
 
 struct ChildResult {
+    std::string mode;
+    int failures_before = 0;  // g_failures when the child had ended
+    std::string output;       // the child's stdout and stderr
+    std::string listing;      // the crash folder after the child
     DWORD exit = 0;
     std::string json, text;
     std::vector<fs::path> reports;  // *.json in the crash folder
@@ -351,15 +355,35 @@ ChildResult run_child(const char* mode, const fs::path& dir) {
     wchar_t self[MAX_PATH * 2] = {};
     GetModuleFileNameW(nullptr, self, static_cast<DWORD>(std::size(self)));
     std::wstring command = L"\"" + std::wstring(self) + L"\" --child " + widen(mode) + L" \"" + dir.wstring() + L"\"";
+    // The child's output goes to a file, printed when a check fails.
+    SECURITY_ATTRIBUTES inherit{sizeof(inherit), nullptr, TRUE};
+    const fs::path output = dir / "child-output.txt";
+    HANDLE out = CreateFileW(output.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &inherit, CREATE_ALWAYS,
+                             FILE_ATTRIBUTE_NORMAL, nullptr);
     STARTUPINFOW si{sizeof(si)};
+    if (out != INVALID_HANDLE_VALUE) {
+        si.dwFlags = STARTF_USESTDHANDLES;
+        si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+        si.hStdOutput = out;
+        si.hStdError = out;
+    }
     PROCESS_INFORMATION pi{};
-    if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) return r;
+    r.mode = mode;
+    const BOOL started =
+        CreateProcessW(nullptr, command.data(), nullptr, nullptr, out != INVALID_HANDLE_VALUE, 0, nullptr, nullptr, &si, &pi);
+    if (out != INVALID_HANDLE_VALUE) CloseHandle(out);
+    if (!started) return r;
     if (WaitForSingleObject(pi.hProcess, 90000) != WAIT_OBJECT_0) TerminateProcess(pi.hProcess, 99);
     GetExitCodeProcess(pi.hProcess, &r.exit);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
+    r.failures_before = g_failures;
+    r.output = read_file(output);
     for (const auto& entry : fs::directory_iterator(dir / "crashes")) {
         const auto name = entry.path().filename().wstring();
+        if (name.rfind(L"2000-", 0) != 0) {
+            r.listing += " " + entry.path().filename().string() + " (" + std::to_string(fs::file_size(entry.path())) + " B)";
+        }
         if (entry.path().extension() == L".json") r.reports.push_back(entry.path());
         if (name.rfind(L"pending-", 0) == 0) r.pending_left = true;
     }
@@ -372,6 +396,15 @@ ChildResult run_child(const char* mode, const fs::path& dir) {
     }
     r.next_filter = fs::exists(dir / "next-filter.txt");
     return r;
+}
+
+// After a child test's checks: when one failed, what the child did, so that a
+// failure explains itself (#98).
+void explain(const ChildResult& r) {
+    if (g_failures == r.failures_before) return;
+    std::printf("  child %s: exit 0x%08lX, next filter %s, crash folder:%s\n", r.mode.c_str(), r.exit,
+                r.next_filter ? "called" : "not called", r.listing.empty() ? " (nothing new)" : r.listing.c_str());
+    if (!r.output.empty()) std::printf("  child output:\n%s\n", r.output.c_str());
 }
 
 }  // namespace
@@ -746,6 +779,7 @@ int main(int argc, char** argv) {
         CHECK(contains(r.text, "Verdict: in plugin crasher's code."));
         CHECK(contains(r.text, "Minidump: 20"));
         CHECK(r.dump && !r.pending_left);
+        explain(r);
     });
 
     // #82: EU4's filter kept the crashed thread and the game reached the menu;
@@ -761,6 +795,7 @@ int main(int argc, char** argv) {
         CHECK(fs::exists(dir / "dump-while-running.txt"));       // the dump was kept before readiness
         CHECK(contains(r.json, "\"minidump\": \"20"));
         CHECK(r.dump && !r.pending_left);
+        explain(r);
     });
 
     run("crash capture: an illegal instruction in a plugin's byte patch (child process)", [&] {
@@ -774,6 +809,7 @@ int main(int argc, char** argv) {
         CHECK(contains(r.text, "Verdict: in plugin patcher's change."));
         // The caller is in the test executable, "crasher"'s module.
         CHECK(contains(r.text, "[plugin crasher]"));
+        explain(r);
     });
 
     run("crash capture: a crash in a mid hook's callback is reported through its context stub (child process)", [&] {
@@ -788,6 +824,7 @@ int main(int argc, char** argv) {
         CHECK(contains(r.json, "\"kind\": \"mid hook\", \"label\": \"mid hook rva 0x100\""));
         CHECK(!contains(r.json, "mid hook rva 0x300"));
         CHECK(contains(r.json, "\"module\": \"game.exe\", \"offset\": \"0x100\""));
+        explain(r);
     });
 
     run("crash capture: a stack overflow writes the report and a minidump (child process)", [&] {
@@ -801,6 +838,7 @@ int main(int argc, char** argv) {
         CHECK(contains(r.json, "\"repeats\": "));
         CHECK(contains(r.text, "KERNEL32.dll+"));
         CHECK(r.dump && !r.pending_left);
+        explain(r);
     });
     fs::remove_all(root);
 
