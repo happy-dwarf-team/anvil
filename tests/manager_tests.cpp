@@ -1,0 +1,490 @@
+// Unit tests for the Manager's core (tools/manager, design §15, issue #59):
+// zips, Steam's files, the install, repair and uninstall plans, plugin zips
+// and the release check, on made-up game folders in the temporary folder.
+// Nothing here needs, or touches, a real game.
+// Usage: anvil_manager_tests <path of version.dll>
+#include "core/game_build.hpp"
+#include "files.hpp"
+#include "game.hpp"
+#include "install.hpp"
+#include "plugin_zip.hpp"
+#include "release_check.hpp"
+#include "test_image.hpp"
+#include "test_support.hpp"
+#include "zip.hpp"
+
+#include <windows.h>
+
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
+
+namespace {
+
+using namespace anvil;
+using namespace anvil::manager;
+namespace fs = std::filesystem;
+
+void write(const fs::path& path, const std::string& text) {
+    fs::create_directories(path.parent_path());
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << text;
+}
+
+std::string read(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    std::stringstream s;
+    s << in.rdbuf();
+    return s.str();
+}
+
+bool contains(const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; }
+
+std::string zip_refusal(const std::vector<std::pair<std::string, std::string>>& files) {
+    std::string error;
+    return ZipArchive::open(make_zip(files), error) ? std::string() : error;
+}
+
+std::optional<ZipArchive> zip_of(const std::vector<std::pair<std::string, std::string>>& files) {
+    std::string error;
+    auto zip = ZipArchive::open(make_zip(files), error);
+    if (!zip) std::printf("  zip error: %s\n", error.c_str());
+    return zip;
+}
+
+// A temporary folder removed at the end of a test.
+struct TempDir {
+    fs::path dir;
+    explicit TempDir(const std::string& name) {
+        dir = fs::temp_directory_path() / ("anvil_manager_tests_" + name + "_" + std::to_string(GetCurrentProcessId()));
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+    }
+    ~TempDir() {
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+    }
+};
+
+// A game folder with a synthetic eu4.exe (the build is unknown to Anvil).
+fs::path make_game(const fs::path& dir) {
+    const auto bytes = TestImage().file();
+    write(dir / "eu4.exe", std::string(bytes.begin(), bytes.end()));
+    return dir;
+}
+
+// A package like the one the Manager carries, with the real version.dll.
+std::optional<Package> make_package(const std::string& version_dll) {
+    std::string error;
+    auto zip = ZipArchive::open(make_zip({
+                                    {"version.dll", version_dll},
+                                    {"anvil/anvil.toml", "enabled = true\ndisabled_plugins = []\n"},
+                                    {"anvil/plugins/README.txt", "Put each plugin into its own folder here.\n"},
+                                    {"anvil/plugins/anvil-game/plugin.toml", plugin_toml("anvil-game")},
+                                    {"anvil/plugins/anvil-game/anvil-game.dll", "MZ game"},
+                                    {"anvil/plugins/anvil-overlay/plugin.toml", plugin_toml("anvil-overlay")},
+                                    {"anvil/plugins/anvil-overlay/anvil-overlay.dll", "MZ overlay"},
+                                    {"anvil/docs/LICENSE", "MIT"},
+                                    {"anvil/docs/third-party/miniz-LICENSE.txt", "MIT"},
+                                }),
+                                error);
+    if (!zip) return std::nullopt;
+    auto package = load_package(std::move(*zip), ANVIL_VERSION, error);
+    if (!package) std::printf("  package error: %s\n", error.c_str());
+    return package;
+}
+
+bool has_step(const Plan& plan, Step::Kind kind, const std::string& path) {
+    return std::any_of(plan.steps.begin(), plan.steps.end(),
+                       [&](const Step& s) { return s.kind == kind && s.path == path; });
+}
+
+bool make_junction(const fs::path& link, const fs::path& target) {
+    const std::wstring command = L"cmd /c mklink /J \"" + link.wstring() + L"\" \"" + target.wstring() + L"\" >nul";
+    return _wsystem(command.c_str()) == 0;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    if (argc >= 2 && std::string(argv[1]) == "--sleep") {  // the "game" of the running-game test
+        Sleep(30000);
+        return 0;
+    }
+    if (argc < 2) {
+        std::printf("usage: anvil_manager_tests <version.dll>\n");
+        return 2;
+    }
+    const std::string version_dll = read(argv[1]);
+    CHECK(!version_dll.empty());
+
+    run("zip: names that would leave the folder or alias another are refused", [] {
+        CHECK(zip_refusal({{"a/b.txt", "x"}, {"c.txt", "y"}}).empty());
+        CHECK(contains(zip_refusal({{"../evil.dll", "x"}}), "'..' part"));
+        CHECK(contains(zip_refusal({{"a/../../evil.dll", "x"}}), "'..' part"));
+        CHECK(contains(unsafe_path_reason("/abs.dll"), "absolute path"));  // miniz will not even write it
+        CHECK(contains(zip_refusal({{"\\abs.dll", "x"}}), "absolute path"));
+        CHECK(contains(zip_refusal({{"C:/x.dll", "x"}}), "drive or stream"));
+        CHECK(contains(zip_refusal({{"a.dll:stream", "x"}}), "drive or stream"));
+        CHECK(contains(zip_refusal({{"a/./b", "x"}}), "'.' part"));
+        CHECK(contains(zip_refusal({{"a//b", "x"}}), "empty folder name"));
+        CHECK(contains(zip_refusal({{"a/b.", "x"}}), "ending in a dot or space"));
+        CHECK(contains(zip_refusal({{"a /b", "x"}}), "ending in a dot or space"));
+        CHECK(contains(zip_refusal({{"con.txt", "x"}}), "reserved device name"));
+        CHECK(contains(zip_refusal({{"a/LPT1", "x"}}), "reserved device name"));
+        CHECK(zip_refusal({{"a/com10.txt", "x"}, {"console.txt", "y"}}).empty());
+        CHECK(contains(zip_refusal({{"a?.txt", "x"}}), "does not allow"));
+        CHECK(contains(zip_refusal({{"A.txt", "x"}, {"a.txt", "y"}}), "differ only in case"));
+        CHECK(contains(zip_refusal({{"a", "x"}, {"a/b", "y"}}), "both a file and a folder"));
+        std::string error;
+        CHECK(!ZipArchive::open(std::vector<uint8_t>{'P', 'K', 3, 4}, error) && contains(error, "not a zip archive"));
+    });
+
+    run("zip: backslashes are separators, UTF-8 names and contents read back", [] {
+        const auto zip = zip_of({{"dir\\file.txt", "one"}, {"zaż\xC3\xB3\xC5\x82\xC4\x87.txt", std::string(100000, 'z')}});
+        CHECK(zip.has_value());
+        if (!zip) return;
+        CHECK(zip->entries().size() == 2);
+        const ZipEntry* file = zip->find("dir/file.txt");
+        CHECK(file != nullptr && file->size == 3);
+        std::string error;
+        CHECK(file != nullptr && zip->read(*file, error) == std::optional<std::string>("one"));
+        const ZipEntry* utf8 = zip->find("zaż\xC3\xB3\xC5\x82\xC4\x87.txt");
+        CHECK(utf8 != nullptr && zip->read(*utf8, error)->size() == 100000);
+    });
+
+    run("files: remove_tree removes a junction, never what it points to", [] {
+        const TempDir temp("tree");
+        write(temp.dir / "outside" / "keep.txt", "keep");
+        write(temp.dir / "tree" / "a" / "b.txt", "b");
+        CHECK(make_junction(temp.dir / "tree" / "link", temp.dir / "outside"));
+        std::vector<fs::path> files;
+        list_files(temp.dir / "tree", files);
+        CHECK(files.size() == 2);  // a/b.txt and the link itself
+        CHECK(SetFileAttributesW((temp.dir / "tree" / "a" / "b.txt").c_str(), FILE_ATTRIBUTE_READONLY));
+        CHECK(remove_tree(temp.dir / "tree") == 0);
+        CHECK(!fs::exists(temp.dir / "tree") && read(temp.dir / "outside" / "keep.txt") == "keep");
+        CHECK(remove_tree(temp.dir / "missing") == 0);
+    });
+
+    run("steam: libraryfolders.vdf in both formats, app manifests, game folders", [] {
+        const std::string current =
+            "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"C:\\\\Program Files (x86)\\\\Steam\"\n"
+            "\t\t\"apps\"\n\t\t{\n\t\t\t\"228980\"\t\t\"1\"\n\t\t}\n\t}\n\t\"1\"\n\t{\n\t\t\"path\"\t\t\"D:\\\\Games\\\\Steam\"\n"
+            "\t\t\"apps\"\n\t\t{\n\t\t\t\"236850\"\t\t\"123\"\n\t\t}\n\t}\n}\n";
+        std::string error;
+        const auto vdf = parse_vdf(current, error);
+        CHECK(vdf.has_value());
+        if (vdf) {
+            const auto libraries = steam_libraries(*vdf);
+            // The library that has the game comes first.
+            CHECK(libraries.size() == 2 && libraries[0] == fs::path(L"D:\\Games\\Steam") &&
+                  libraries[1] == fs::path(L"C:\\Program Files (x86)\\Steam"));
+        }
+        const auto old = parse_vdf("\"LibraryFolders\" { \"TimeNextStatsReport\" \"1\" \"1\" \"E:\\\\Lib\" } // old\n", error);
+        CHECK(old.has_value() && steam_libraries(*old) == std::vector<fs::path>({fs::path(L"E:\\Lib")}));
+        CHECK(!parse_vdf("\"a\" { \"b\" \"c\"", error) && contains(error, "not closed"));
+        CHECK(!parse_vdf("\"a\" \"b\" }", error));
+        CHECK(!parse_vdf("\"a\" \"unterminated", error));
+
+        const TempDir temp("steam");
+        const fs::path steam = temp.dir / "Steam";
+        const fs::path library = temp.dir / "Library";
+        std::string escaped = library.string();
+        for (size_t at = escaped.find('\\'); at != std::string::npos; at = escaped.find('\\', at + 2)) escaped.insert(at, "\\");
+        write(steam / "steamapps" / "libraryfolders.vdf",
+              "\"libraryfolders\" { \"0\" { \"path\" \"" + escaped + "\" \"apps\" { \"236850\" \"1\" } } }");
+        CHECK(find_steam_games(steam).empty());  // no eu4.exe yet
+        write(library / "steamapps" / "appmanifest_236850.acf", "\"AppState\" { \"appid\" \"236850\" \"installdir\" \"EU4 Custom\" }");
+        make_game(library / "steamapps" / "common" / "EU4 Custom");
+        make_game(steam / "steamapps" / "common" / "Europa Universalis IV");  // the default name in Steam's own library
+        const auto games = find_steam_games(steam);
+        CHECK(games.size() == 2);
+        if (games.size() == 2) {
+            CHECK(same_file(games[0], library / "steamapps" / "common" / "EU4 Custom"));
+            CHECK(same_file(games[1], steam / "steamapps" / "common" / "Europa Universalis IV"));
+        }
+        // An installdir that would leave steamapps/common is not followed.
+        write(library / "steamapps" / "appmanifest_236850.acf", "\"AppState\" { \"installdir\" \"..\\\\..\" }");
+        CHECK(find_steam_games(steam).size() == 1);
+    });
+
+    run("game folder: eu4.exe hashed, its build looked up", [] {
+        const TempDir temp("folder");
+        CHECK(inspect_game_folder(temp.dir / "missing").error == "the folder does not exist");
+        CHECK(contains(inspect_game_folder(temp.dir).error, "no eu4.exe"));
+        make_game(temp.dir);
+        const GameFolder game = inspect_game_folder(temp.dir);
+        CHECK(game.error.empty() && game.has_exe && game.exe_sha256 == sha256_file(temp.dir / "eu4.exe"));
+        CHECK(game.build.empty());  // the synthetic image is no known build
+        CHECK(same_file(temp.dir / "eu4.exe", temp.dir / "." / "EU4.EXE"));
+        CHECK(!same_file(temp.dir / "eu4.exe", temp.dir / "missing.exe"));
+        CHECK(runs_from(temp.dir / "AnvilManager.exe", temp.dir));
+    });
+
+    run("game running: an eu4.exe from this folder makes the Manager read-only", [&] {
+        const TempDir temp("running");
+        const fs::path game = make_game(temp.dir / "game");
+        const fs::path other = make_game(temp.dir / "other");
+        CHECK(!game_running(game));
+        wchar_t self[MAX_PATH] = {};
+        GetModuleFileNameW(nullptr, self, MAX_PATH);
+        CHECK(CopyFileW(self, (game / "eu4.exe").c_str(), FALSE));
+        std::wstring command = L"\"" + (game / "eu4.exe").wstring() + L"\" --sleep";
+        STARTUPINFOW startup{sizeof(startup)};
+        PROCESS_INFORMATION process{};
+        CHECK(CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &process));
+        CHECK(game_running(game));
+        CHECK(!game_running(other));
+        TerminateProcess(process.hProcess, 0);
+        WaitForSingleObject(process.hProcess, 5000);
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+        CHECK(!game_running(game));
+    });
+
+    run("package: version.dll's resource names Anvil and its version", [&] {
+        const TempDir temp("product");
+        write(temp.dir / "version.dll", version_dll);
+        const auto product = read_dll_product(temp.dir / "version.dll");
+        CHECK(product && product->name == "Anvil" && product->version == ANVIL_VERSION);
+        write(temp.dir / "plain.dll", read(temp.dir / "version.dll").substr(0, 64));
+        CHECK(!read_dll_product(temp.dir / "plain.dll"));
+        const auto exe = TestImage().file();
+        write(temp.dir / "image.dll", std::string(exe.begin(), exe.end()));
+        CHECK(!read_dll_product(temp.dir / "image.dll"));  // no version resource
+
+        std::string error;
+        auto not_package = zip_of({{"readme.txt", "x"}});
+        CHECK(not_package && !load_package(std::move(*not_package), "1.0.0", error) && contains(error, "no version.dll"));
+    });
+
+    run("install: everything is written, version.dll last, the Manager copied", [&] {
+        const auto package = make_package(version_dll);
+        CHECK(package.has_value());
+        if (!package) return;
+        CHECK(package->standard_plugins == std::vector<std::string>({"anvil-game", "anvil-overlay"}));
+        const TempDir temp("install");
+        const fs::path game = make_game(temp.dir / "game");
+        write(temp.dir / "Downloads" / "AnvilManager.exe", "manager");
+        const fs::path manager = temp.dir / "Downloads" / "AnvilManager.exe";
+
+        Installation before = inspect_installation(*package, game);
+        CHECK(before.dll == Installation::Dll::Missing && !before.anvil_folder && !before.intact());
+        CHECK(before.missing.size() == package->files.size());
+        const Plan plan = plan_install(*package, before, game, manager, false);
+        CHECK(plan.refused.empty() && plan.steps.size() == package->files.size() + 1);
+        CHECK(plan.steps.back().kind == Step::Kind::Write && plan.steps.back().path == "version.dll");
+        CHECK(has_step(plan, Step::Kind::CopyManager, "AnvilManager.exe") && has_step(plan, Step::Kind::Write, kPlayerToml));
+        const ApplyResult applied = apply_plan(*package, plan, game, manager);
+        CHECK(applied.ok && applied.done == plan.steps.size());
+        CHECK(read(game / "AnvilManager.exe") == "manager" && read(game / "version.dll") == version_dll);
+        CHECK(read(game / "anvil" / "plugins" / "anvil-game" / "anvil-game.dll") == "MZ game");
+
+        const Installation after = inspect_installation(*package, game);
+        CHECK(after.intact() && after.installed() && after.dll_version == ANVIL_VERSION && after.manager_copy);
+        // Nothing to do: the Manager running from the folder is not copied onto itself.
+        CHECK(plan_install(*package, after, game, game / "AnvilManager.exe", false).steps.empty());
+        CHECK(!fs::exists(game / "anvil" / "anvil.toml.anvil-new"));
+    });
+
+    run("repair: what differs is written again, extra files go, anvil.toml stays", [&] {
+        const auto package = make_package(version_dll);
+        if (!package) return;
+        const TempDir temp("repair");
+        const fs::path game = make_game(temp.dir / "game");
+        apply_plan(*package, plan_install(*package, inspect_installation(*package, game), game, {}, false), game, {});
+        write(game / "anvil" / "anvil.toml", "# mine\ndisabled_plugins = [\"x\"]\n");
+        write(game / "anvil" / "plugins" / "anvil-game" / "anvil-game.dll", "changed");
+        fs::remove(game / "anvil" / "plugins" / "README.txt");
+        write(game / "anvil" / "plugins" / "anvil-overlay" / "stale.txt", "old");
+        write(temp.dir / "outside" / "keep.txt", "keep");
+        CHECK(make_junction(game / "anvil" / "plugins" / "anvil-overlay" / "link", temp.dir / "outside"));
+        write(game / "anvil" / "plugins" / "mine" / "plugin.toml", plugin_toml("mine"));
+
+        const Installation broken = inspect_installation(*package, game);
+        CHECK(!broken.intact() && broken.installed());
+        CHECK(broken.differing == std::vector<std::string>({"anvil/plugins/anvil-game/anvil-game.dll"}));
+        CHECK(broken.missing == std::vector<std::string>({"anvil/plugins/README.txt"}));
+        CHECK(broken.extra == std::vector<std::string>({"anvil/plugins/anvil-overlay/link", "anvil/plugins/anvil-overlay/stale.txt"}));
+        const Plan plan = plan_install(*package, broken, game, {}, false);
+        CHECK(plan.steps.size() == 4 && has_step(plan, Step::Kind::Remove, "anvil/plugins/anvil-overlay/link"));
+        CHECK(apply_plan(*package, plan, game, {}).ok);
+        CHECK(inspect_installation(*package, game).intact());
+        CHECK(read(game / "anvil" / "anvil.toml") == "# mine\ndisabled_plugins = [\"x\"]\n");
+        CHECK(read(temp.dir / "outside" / "keep.txt") == "keep");
+        CHECK(fs::exists(game / "anvil" / "plugins" / "mine" / "plugin.toml"));
+    });
+
+    run("install: another mod's version.dll is replaced only on purpose", [&] {
+        const auto package = make_package(version_dll);
+        if (!package) return;
+        const TempDir temp("foreign");
+        const fs::path game = make_game(temp.dir / "game");
+        write(game / "version.dll", read(game / "eu4.exe"));  // a PE without Anvil's resource
+        const Installation foreign = inspect_installation(*package, game);
+        CHECK(foreign.dll == Installation::Dll::Foreign && !foreign.installed());
+        const Plan refused = plan_install(*package, foreign, game, {}, false);
+        CHECK(!refused.refused.empty() && refused.steps.empty());
+        CHECK(!apply_plan(*package, refused, game, {}).ok);
+        const Plan replace = plan_install(*package, foreign, game, {}, true);
+        CHECK(replace.refused.empty() && replace.steps.back().path == "version.dll");
+        CHECK(apply_plan(*package, replace, game, {}).ok && inspect_installation(*package, game).intact());
+        // Uninstall leaves a foreign version.dll alone.
+        write(game / "version.dll", read(game / "eu4.exe"));
+        const Plan uninstall = plan_uninstall(*package, inspect_installation(*package, game), false);
+        CHECK(!has_step(uninstall, Step::Kind::Remove, "version.dll"));
+        CHECK(apply_plan(*package, uninstall, game, {}).ok && fs::exists(game / "version.dll"));
+    });
+
+    run("update: an older Anvil is noted and replaced", [&] {
+        const auto package = make_package(version_dll);
+        if (!package) return;
+        Installation older;
+        older.dll = Installation::Dll::Anvil;
+        older.dll_version = "0.9.0";
+        older.differing = {"version.dll"};
+        const Plan plan = plan_install(*package, older, fs::temp_directory_path(), {}, false);
+        CHECK(plan.steps.size() == 1 && plan.steps[0].path == "version.dll");
+        CHECK(!plan.notes.empty() && contains(plan.notes[0], "Anvil 0.9.0 is updated to"));
+    });
+
+    run("uninstall: the player's data stays unless everything goes", [&] {
+        const auto package = make_package(version_dll);
+        if (!package) return;
+        for (const bool everything : {false, true}) {
+            const TempDir temp(everything ? "uninstall_all" : "uninstall");
+            const fs::path game = make_game(temp.dir / "game");
+            write(temp.dir / "AnvilManager.exe", "manager");
+            apply_plan(*package, plan_install(*package, inspect_installation(*package, game), game, temp.dir / "AnvilManager.exe", false),
+                       game, temp.dir / "AnvilManager.exe");
+            write(game / "anvil" / "plugins" / "mine" / "plugin.toml", plugin_toml("mine"));
+            write(game / "anvil" / "data" / "mine" / "settings.toml", "x = 1\n");
+            write(game / "anvil" / "crashes" / "2026-10-20_10-00-00.json", "{}");
+            write(game / "anvil" / "anvil.log", "log");
+
+            const Plan plan = plan_uninstall(*package, inspect_installation(*package, game), everything);
+            CHECK(plan.steps.front().kind == Step::Kind::Remove && plan.steps.front().path == "version.dll");
+            CHECK(has_step(plan, Step::Kind::RemoveManager, "AnvilManager.exe"));
+            const ApplyResult result = apply_plan(*package, plan, game, temp.dir / "AnvilManager.exe");
+            CHECK(result.ok && !result.manager_left);
+            CHECK(!fs::exists(game / "version.dll") && !fs::exists(game / "AnvilManager.exe") && fs::exists(game / "eu4.exe"));
+            CHECK(fs::exists(temp.dir / "AnvilManager.exe"));  // the one that ran
+            if (everything) {
+                CHECK(!fs::exists(game / "anvil"));
+            } else {
+                CHECK(!fs::exists(game / "anvil" / "plugins" / "anvil-game") && !fs::exists(game / "anvil" / "plugins" / "anvil-overlay"));
+                CHECK(!fs::exists(game / "anvil" / "plugins" / "README.txt") && !fs::exists(game / "anvil" / "docs"));
+                CHECK(fs::exists(game / "anvil" / "plugins" / "mine" / "plugin.toml"));
+                CHECK(fs::exists(game / "anvil" / "data" / "mine" / "settings.toml"));
+                CHECK(fs::exists(game / "anvil" / "crashes") && fs::exists(game / "anvil" / "anvil.log"));
+                CHECK(fs::exists(game / "anvil" / "anvil.toml"));
+            }
+        }
+        // Running from the folder: the exe is left to the caller.
+        const TempDir temp("uninstall_self");
+        const fs::path game = make_game(temp.dir / "game");
+        apply_plan(*package, plan_install(*package, inspect_installation(*package, game), game, {}, false), game, {});
+        write(game / "AnvilManager.exe", "manager");
+        const Plan plan = plan_uninstall(*package, inspect_installation(*package, game), false);
+        const ApplyResult result = apply_plan(*package, plan, game, game / "AnvilManager.exe");
+        CHECK(result.ok && result.manager_left && fs::exists(game / "AnvilManager.exe"));
+        // Without a plugin of the player's, the empty folders go too; anvil.toml keeps anvil/.
+        CHECK(!fs::exists(game / "anvil" / "plugins") && fs::exists(game / "anvil" / "anvil.toml"));
+    });
+
+    run("plugin zip: checked against eu4.exe before anything is copied", [&] {
+        const TempDir temp("plugin_zip");
+        const fs::path game = make_game(temp.dir / "game");
+        fs::create_directories(game / "anvil" / "plugins");
+        const std::vector<std::string> standard = {"anvil-game", "anvil-overlay"};
+        std::string gameplay = plugin_toml("hello", "", "1.2.0");
+        gameplay.replace(gameplay.find("affects_gameplay = false"), 24, "affects_gameplay = true");
+
+        // The template's layout: <id>/... at the root of the zip.
+        auto zip = zip_of({{"hello/plugin.toml", plugin_toml("hello", "authors = [\"Ann\"]\n")}, {"hello/hello.dll", "MZ"}});
+        CHECK(zip.has_value());
+        if (!zip) return;
+        PluginZipCheck check = check_plugin_zip(*zip, game, temp.dir / "tmp", standard);
+        CHECK(check.error.empty() && check.id == "hello" && check.version == "1.0.0" && check.root == "hello/");
+        CHECK(!check.would_skip && check.installed_folder.empty() && check.files.size() == 2);
+        CHECK(check.report.manifest && check.report.manifest->authors == std::vector<std::string>({"Ann"}));
+        CHECK(!fs::exists(game / "anvil" / "plugins" / "hello"));  // checking copies nothing into the game
+        CHECK(fs::is_empty(temp.dir / "tmp"));
+        PluginInstallResult installed = install_plugin_zip(*zip, check, game);
+        CHECK(installed.ok && read(game / "anvil" / "plugins" / "hello" / "hello.dll") == "MZ");
+
+        // A newer version replaces it; the player's data stays.
+        write(game / "anvil" / "data" / "hello" / "settings.toml", "x = 1\n");
+        write(game / "anvil" / "plugins" / "hello" / "old.txt", "old");
+        zip = zip_of({{"plugin.toml", plugin_toml("hello", "", "1.1.0")}, {"hello.dll", "MZ 1.1"}});
+        check = check_plugin_zip(*zip, game, temp.dir / "tmp", standard);
+        CHECK(check.error.empty() && check.root.empty() && check.installed_folder == "hello" && check.installed_version == "1.0.0");
+        installed = install_plugin_zip(*zip, check, game);
+        CHECK(installed.ok && read(game / "anvil" / "plugins" / "hello" / "hello.dll") == "MZ 1.1");
+        CHECK(!fs::exists(game / "anvil" / "plugins" / "hello" / "old.txt"));
+        CHECK(read(game / "anvil" / "data" / "hello" / "settings.toml") == "x = 1\n");
+        CHECK(fs::is_empty(game / "anvil" / "data" / "anvil" / "manager"));
+
+        // Installed under another folder name: that folder is replaced by anvil/plugins/<id>.
+        fs::rename(game / "anvil" / "plugins" / "hello", game / "anvil" / "plugins" / "hello-1.1");
+        zip = zip_of({{"anvil/plugins/hello/plugin.toml", gameplay}, {"anvil/plugins/hello/hello.dll", "MZ 1.2"}});
+        check = check_plugin_zip(*zip, game, temp.dir / "tmp", standard);
+        CHECK(check.error.empty() && check.root == "anvil/plugins/hello/" && check.installed_folder == "hello-1.1");
+        CHECK(check.report.manifest && check.report.manifest->affects_gameplay);
+        CHECK(install_plugin_zip(*zip, check, game).ok);
+        CHECK(!fs::exists(game / "anvil" / "plugins" / "hello-1.1") && read(game / "anvil" / "plugins" / "hello" / "hello.dll") == "MZ 1.2");
+
+        // Symbols for a build this eu4.exe is not: the loader would skip it.
+        zip = zip_of({{"sym/plugin.toml", plugin_toml("sym", "symbols = \"symbols.toml\"\n")}, {"sym/sym.dll", "MZ"},
+                      {"sym/symbols.toml", "build = \"eu4-1.37.5-steam-win64\"\n\n[symbol.f]\nrva = 0x1000\nbytes = \"48 8B\"\nmemory = \"code\"\n"}});
+        check = check_plugin_zip(*zip, game, temp.dir / "tmp", standard);
+        CHECK(check.error.empty() && check.would_skip && contains(check.report.skip_reason, "game build unknown"));
+        CHECK(!contains(check.report.skip_reason, "anvil-manager-check"));  // no temporary paths shown
+
+        remove_plugin_folder(game, "hello", standard, check.error);
+        CHECK(!fs::exists(game / "anvil" / "plugins" / "hello") && fs::exists(game / "anvil" / "data" / "hello"));
+        std::string error;
+        CHECK(!remove_plugin_folder(game, "anvil-game", standard, error) && contains(error, "comes with Anvil"));
+        CHECK(!remove_plugin_folder(game, "..", standard, error));
+    });
+
+    run("plugin zip: refusals", [&] {
+        const TempDir temp("plugin_zip_refusals");
+        const fs::path game = make_game(temp.dir / "game");
+        const std::vector<std::string> standard = {"anvil-game", "anvil-overlay"};
+        const auto refusal = [&](const std::vector<std::pair<std::string, std::string>>& files) {
+            const auto zip = zip_of(files);
+            return zip ? check_plugin_zip(*zip, game, temp.dir / "tmp", standard).error : std::string("<no zip>");
+        };
+        CHECK(contains(refusal({{"readme.txt", "x"}}), "no plugin.toml"));
+        CHECK(contains(refusal({{"a/plugin.toml", plugin_toml("a")}, {"b/plugin.toml", plugin_toml("b")}}), "more than one plugin"));
+        CHECK(contains(refusal({{"a/plugin.toml", plugin_toml("a")}, {"a/a.dll", "MZ"}, {"other.txt", "x"}}), "outside the plugin's folder"));
+        CHECK(refusal({{"a/plugin.toml", plugin_toml("a")}, {"a/a.dll", "MZ"}, {"__MACOSX/a/._a.dll", "x"}}).empty());
+        CHECK(contains(refusal({{"plugin.toml", plugin_toml("anvil-game")}, {"anvil-game.dll", "MZ"}}), "comes with Anvil"));
+        CHECK(contains(refusal({{"plugin.toml", plugin_toml("a")}}), "a.dll"));  // no entry DLL
+        CHECK(!refusal({{"plugin.toml", "id = \"a\"\nbroken = \n"}}).empty());
+        CHECK(!fs::exists(game / "anvil"));
+    });
+
+    run("release check: the latest release, a link only to the repository", [] {
+        const std::string json = "{\"url\":\"https://api.github.com/x\",\"assets\":[{\"tag_name\":\"v0.0.1\"}],"
+                                 "\"html_url\":\"https://github.com/happy-dwarf-team/anvil/releases/tag/v1.2.0\","
+                                 "\"tag_name\":\"v1.2.0\",\"draft\":false,\"body\":\"caf\\u00e9 \\\"quoted\\\"\",\"n\":-1.5e3}";
+        const auto release = parse_release(json);
+        CHECK(release && release->tag == "v1.2.0" &&
+              release->url == "https://github.com/happy-dwarf-team/anvil/releases/tag/v1.2.0");
+        CHECK(!parse_release("{\"tag_name\":\"v1.2.0\",\"html_url\":\"https://evil.example/releases\"}"));
+        CHECK(!parse_release("{\"tag_name\":\"v1.2.0\",\"html_url\":\"https://github.com/happy-dwarf-team/anvil/releases/x y\"}"));
+        CHECK(!parse_release("{\"tag_name\":\"v1.2.0\"}"));
+        CHECK(!parse_release("{\"tag_name\":\"v1.2.0\",") && !parse_release("[]") && !parse_release(""));
+        CHECK(newer_release("v1.2.0", "1.1.0") && newer_release("1.1.1", "1.1.0"));
+        CHECK(!newer_release("v1.1.0", "1.1.0") && !newer_release("v1.0.9", "1.1.0") && !newer_release("latest", "1.1.0"));
+        CHECK(!newer_release("v1.2.0-rc.1", "1.2.0"));
+    });
+
+    std::printf("%d checks, %d failed\n", g_checks, g_failures);
+    return g_failures == 0 ? 0 : 1;
+}

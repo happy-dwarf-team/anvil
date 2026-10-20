@@ -161,6 +161,9 @@ add_subdirectory(plugins/anvil-game)
 add_subdirectory(plugins/anvil-overlay)
 unset(CMAKE_COMPILE_WARNING_AS_ERROR)
 
+# AnvilManager.exe, the player's installer and management tool (design §15).
+add_subdirectory(tools/manager)
+
 # anvil_bench: microbenchmarks per kind of change and of the start-up parsers
 # (design §17). CI runs it as its own step against bench/baseline-ci.json; the
 # lab runs it pinned through bench/run-lab.ps1. Not part of ctest.
@@ -193,6 +196,12 @@ if(ANVIL_BUILD_TESTS)
     target_link_libraries(anvil_game_tests PRIVATE anvil_tool)
     add_dependencies(anvil_game_tests anvil)
     add_test(NAME anvil_game_tests COMMAND anvil_game_tests $<TARGET_FILE:anvil>)
+
+    # The Manager's core: zips, Steam's files, install plans, plugin zips.
+    add_executable(anvil_manager_tests tests/manager_tests.cpp)
+    target_link_libraries(anvil_manager_tests PRIVATE anvil_manager_core)
+    add_dependencies(anvil_manager_tests version_dll)
+    add_test(NAME anvil_manager_tests COMMAND anvil_manager_tests $<TARGET_FILE:version_dll>)
 
     add_executable(anvil_cli_tests tests/test_cli.cpp)
     target_link_libraries(anvil_cli_tests PRIVATE anvil_tool)
