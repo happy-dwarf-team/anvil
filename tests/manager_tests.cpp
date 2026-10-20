@@ -7,6 +7,8 @@
 #include "files.hpp"
 #include "game.hpp"
 #include "install.hpp"
+#include "mods.hpp"
+#include "core/trust.hpp"
 #include "plugin_zip.hpp"
 #include "release_check.hpp"
 #include "test_image.hpp"
@@ -507,6 +509,43 @@ int main(int argc, char** argv) {
         CHECK(newer_release("v1.2.0", "1.1.0") && newer_release("1.1.1", "1.1.0"));
         CHECK(!newer_release("v1.1.0", "1.1.0") && !newer_release("v1.0.9", "1.1.0") && !newer_release("latest", "1.1.0"));
         CHECK(!newer_release("v1.2.0-rc.1", "1.2.0"));
+    });
+
+    run("plugins from mods: approved and revoked as the Manager showed them", [] {
+        TempDir temp("mods");
+        const fs::path game = make_game(temp.dir / "game");
+        const fs::path user = temp.dir / "user";
+        fs::create_directories(game / "anvil" / "plugins");
+        const fs::path folder = user / "mod" / "m" / "anvil" / "probe";
+        write(folder / "plugin.toml", plugin_toml("probe"));
+        write(folder / "probe.dll", "MZ");
+        write(user / "mod" / "m.mod", "name=\"M\"\npath=\"mod/m\"\n");
+        write(user / "dlc_load.json", "{\"enabled_mods\":[\"mod/m.mod\"]}");
+        cli::GameOptions options;
+        options.game_dir = game;
+        options.user_dir = user;
+        cli::GameReport report = cli::check_game(options);
+        CHECK(report.mod_plugins.size() == 1 && report.mod_plugins[0].state == "pending");
+        std::string error;
+        CHECK(!revoke_shown_plugin(game, report.mod_plugins[0], error) && contains(error, "no approval binds probe"));
+
+        // The files changed after the check: no approval.
+        cli::GameModPlugin shown = report.mod_plugins[0];
+        write(folder / "probe.dll", "MZ changed");
+        CHECK(!approve_shown_plugin(game, user, report, shown, error) && contains(error, "changed since they were shown"));
+        report = cli::check_game(options);
+        shown = report.mod_plugins[0];
+        CHECK(approve_shown_plugin(game, user, report, shown, error));
+        report = cli::check_game(options);
+        CHECK(report.mod_plugins[0].state == "approved" && report.mod_plugins[0].status == "loaded");
+        CHECK(report.load_order.size() == 1 && report.load_order[0].mod == "M");
+
+        // The mod is no longer enabled.
+        write(user / "dlc_load.json", "{\"enabled_mods\":[]}");
+        CHECK(!approve_shown_plugin(game, user, report, shown, error) && contains(error, "no longer has this plugin"));
+        CHECK(revoke_shown_plugin(game, report.mod_plugins[0], error));
+        CHECK(read_trust(game / "anvil" / "trust.toml").entries.empty());
+        CHECK(!fs::exists(game / "anvil" / "data" / "anvil" / "approved" / "probe"));
     });
 
     std::printf("%d checks, %d failed\n", g_checks, g_failures);

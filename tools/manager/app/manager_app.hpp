@@ -64,6 +64,7 @@ private:
     void draw_game_bar();
     void draw_anvil_tab();
     void draw_plugins_tab();
+    void draw_mods_tab();
     void draw_settings_tab();
     void draw_crashes_tab();
     void draw_log_tab();
@@ -72,6 +73,7 @@ private:
     void draw_modals();
     void draw_plan_modal();
     void draw_zip_modal();
+    void draw_approve_modal();
 
     void start_plan(bool uninstall);
     void run_plan();
@@ -119,6 +121,8 @@ private:
     bool open_message_ = false;
     bool open_plan_ = false;
     bool open_zip_ = false;
+    bool open_approve_ = false;
+    std::optional<cli::GameModPlugin> approve_;  // the plugin from a mod the approval modal asks about
     bool close_after_message_ = false;
     bool show_settings_tab_ = false;
     bool log_previous_ = false;

@@ -3,7 +3,9 @@
 #include "core/anvil_toml_edit.hpp"
 #include "core/crash_history.hpp"
 #include "core/log.hpp"
+#include "core/playset.hpp"
 #include "core/semver.hpp"
+#include "mods.hpp"
 
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
@@ -168,6 +170,10 @@ void ManagerApp::draw() {
         }
         if (ImGui::BeginTabItem("Plugins")) {
             draw_plugins_tab();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Mods")) {
+            draw_mods_tab();
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Settings", nullptr, show_settings_tab_ ? ImGuiTabItemFlags_SetSelected : 0)) {
@@ -379,7 +385,21 @@ void ManagerApp::draw_plugins_tab() {
         colored_wrapped(kBad, "Cannot check the plugins: " + report->cannot_check);
         return;
     }
-    for (const cli::Problem& problem : report->problems) colored_wrapped(kBad, "anvil.toml: " + problem.message);
+    for (const cli::Problem& problem : report->problems) {
+        // dlc_load.json and trust.toml are shown on the Mods tab.
+        if (u8(fs::path(widen(problem.file)).filename()) == "anvil.toml") colored_wrapped(kBad, "anvil.toml: " + problem.message);
+    }
+    if (!report->mod_plugins.empty()) {
+        size_t waiting = 0;
+        for (const cli::GameModPlugin& p : report->mod_plugins) {
+            waiting += p.state == "pending" || p.state == "update-pending" || p.state == "conflict" ? 1 : 0;
+        }
+        const std::string text = std::to_string(report->mod_plugins.size()) + " plugin(s) from enabled mods" +
+                                 (waiting > 0 ? ", " + std::to_string(waiting) + " waiting for your approval" : std::string()) +
+                                 ": see the Mods tab.";
+        if (waiting > 0) colored_wrapped(kWarn, text);
+        else weak(text);
+    }
     if (!report->enabled) colored_wrapped(kWarn, "anvil.toml says enabled = false: no plugin loads.");
     if (snapshot_->installation && !snapshot_->installation->installed()) {
         colored_wrapped(kWarn, "version.dll is not Anvil's or missing: nothing below loads until Anvil is installed.");
@@ -488,10 +508,145 @@ void ManagerApp::draw_plugins_tab() {
         ImGui::Spacing();
         weak("Load order:");
         std::string order;
-        for (const cli::LoadedPlugin& p : report->load_order) order += (order.empty() ? "" : " > ") + p.id + " " + p.version;
+        for (const cli::LoadedPlugin& p : report->load_order) order += (order.empty() ? "" : " > ") + p.id + " " + p.version +
+                                                                    (p.mod.empty() ? "" : " (mod '" + p.mod + "')");
         wrapped(order);
     }
     for (const cli::OverlapWarning& warning : report->warnings) colored_wrapped(kWarn, warning.message);
+}
+
+namespace {
+
+std::string mod_source(const cli::GameModPlugin& p) {
+    return "mod '" + p.mod + "' (" + (p.workshop_id.empty() ? std::string("local mod") : "Workshop " + p.workshop_id) + ")";
+}
+
+// What a plugin from a mod waits for, or does, in the player's words.
+std::string mod_state_text(const cli::GameModPlugin& p) {
+    if (p.state == "approved") return p.status == "loaded" ? "approved: loads" : "approved, but " + p.skip_reason;
+    if (p.state == "update-pending") return "an update waits for approval; the approved " + p.approved_version + " loads";
+    if (p.state == "pending") return "waits for approval: does not load";
+    if (p.state == "conflict") return "conflict: does not load";
+    if (p.state == "shadowed") return "a plugin in anvil/plugins has this id and loads instead";
+    return "cannot be approved: does not load";
+}
+
+}  // namespace
+
+void ManagerApp::draw_mods_tab() {
+    const auto& report = snapshot_->report;
+    ImGui::Spacing();
+    ImGui::BeginDisabled(pending_.valid());
+    if (ImGui::Button("Check again")) refresh();
+    ImGui::EndDisabled();
+    ImGui::Spacing();
+    if (!report) {
+        wrapped("Anvil is not installed in this folder: no plugins load.");
+        return;
+    }
+    wrapped("Mods from the Workshop or your mod folder can carry plugins in their anvil/<id>/ folder. Only the mods "
+            "enabled in the playset the game starts with count (" + std::to_string(report->enabled_mods) +
+            " enabled; the launcher changes the playset). A plugin from a mod loads only after you approve its exact "
+            "files; an update waits for a new approval while the approved version keeps loading.");
+    if (!report->playset_found) weak("No dlc_load.json in " + report->user_dir + ": no mods are enabled.");
+    for (const std::string& w : report->mod_warnings) colored_wrapped(kWarn, w);
+    for (const cli::Problem& problem : report->problems) {
+        const std::string file = u8(fs::path(widen(problem.file)).filename());
+        if (file != "anvil.toml") colored_wrapped(kBad, file + ": " + problem.message);
+    }
+    if (report->mod_plugins.empty()) {
+        ImGui::Spacing();
+        weak("No enabled mod has plugins.");
+        return;
+    }
+    if (read_only() && running_) colored_wrapped(kWarn, "The game is running: approvals can be changed after it closes.");
+    ImGui::Spacing();
+    for (const cli::GameModPlugin& p : report->mod_plugins) {
+        ImGui::PushID((p.id + "/" + p.descriptor).c_str());
+        ImGui::Separator();
+        const auto& m = p.report.manifest;
+        ImGui::Text("%s %s", m && !m->name.empty() ? m->name.c_str() : p.id.c_str(), p.version.c_str());
+        ImGui::SameLine();
+        weak("id " + p.id + ", " + mod_source(p));
+        const bool good = p.state == "approved" && p.status == "loaded";
+        const bool waits = p.state == "pending" || p.state == "update-pending" || p.state == "conflict";
+        colored_wrapped(good ? kGood : waits ? kWarn : p.state == "shadowed" ? ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled) : kBad,
+                        mod_state_text(p));
+        weak(p.reason);
+        if (!p.others.empty()) weak("Other mods with this id: " + join(p.others));
+        for (const cli::Problem& problem : p.report.problems) colored_wrapped(kWarn, problem.message);
+        const bool approved_here = !p.approved_hash.empty() && p.approved_hash == p.hash;
+        const bool can_approve = p.state != "invalid" && p.state != "shadowed" && !p.hash.empty() && m && !approved_here;
+        ImGui::BeginDisabled(read_only());
+        if (can_approve && ImGui::Button(p.state == "update-pending" ? "Approve the update..." : "Approve...")) {
+            approve_ = p;
+            open_approve_ = true;
+        }
+        if (!p.approved_hash.empty()) {
+            if (can_approve) ImGui::SameLine();
+            if (ImGui::Button("Revoke the approval")) {
+                std::string error;
+                if (!revoke_shown_plugin(game_, p, error)) failed("The approval was not revoked", error, false);
+                refresh();
+            }
+        }
+        ImGui::EndDisabled();
+        ImGui::PopID();
+    }
+}
+
+void ManagerApp::draw_approve_modal() {
+    next_modal(40);
+    if (!ImGui::BeginPopupModal("Approve a plugin from a mod###approve", nullptr, ImGuiWindowFlags_NoSavedSettings)) return;
+    if (!approve_ || !snapshot_ || !snapshot_->report) {
+        ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+        return;
+    }
+    const cli::GameModPlugin& p = *approve_;
+    const Manifest& m = *p.report.manifest;
+    ImGui::Text("%s %s", m.name.empty() ? m.id.c_str() : m.name.c_str(), p.version.c_str());
+    weak("id " + m.id + (m.authors.empty() ? std::string() : ", by " + join(m.authors)));
+    weak("from " + mod_source(p));
+    if (!m.description.empty()) wrapped(m.description);
+    if (!m.repository.empty() && m.repository.starts_with("https://")) {
+        if (ImGui::SmallButton("Open its repository")) open_url(m.repository);
+    }
+    ImGui::Spacing();
+    colored_wrapped(kWarn, "A plugin is native code: it runs inside the game with your rights, like any program. "
+                           "Approve plugins only from authors you trust.");
+    if (m.affects_gameplay) {
+        bullet("It changes the game. Anvil keeps it out of ironman and multiplayer games unless you allow it there.");
+    } else {
+        bullet("It says it does not change the game (affects_gameplay = false).");
+    }
+    bullet(p.report.has_symbols ? std::to_string(p.report.symbols) + " game address(es) declared in symbols.toml"
+                                : "It declares no game addresses (no symbols.toml).");
+    bullet("Hash of its files: " + p.hash);
+    if (p.state == "update-pending") bullet("It replaces the approved " + p.approved_version + " from the next start.");
+    if (p.state == "conflict") bullet("Other enabled mods have a plugin with this id; this approval picks this one.");
+    if (p.status == "skipped" && !p.report.skip_reason.empty()) colored_wrapped(kBad, "Anvil would still skip it: " + p.report.skip_reason);
+    ImGui::Spacing();
+    if (ImGui::Button("Approve")) {
+        std::string error;
+        if (!approve_shown_plugin(game_, eu4_user_dir(game_), *snapshot_->report, p, error)) {
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+            approve_.reset();
+            failed("The plugin was not approved", error, false);
+            refresh();
+            return;
+        }
+        approve_.reset();
+        refresh();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel")) {
+        approve_.reset();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
 }
 
 void ManagerApp::open_settings(const cli::GamePlugin& plugin) {
@@ -886,10 +1041,12 @@ void ManagerApp::failed(const std::string& what, const std::string& error, bool 
 void ManagerApp::draw_modals() {
     if (open_plan_) ImGui::OpenPopup("###plan");
     if (open_zip_) ImGui::OpenPopup("###zip");
+    if (open_approve_) ImGui::OpenPopup("###approve");
     if (open_message_) ImGui::OpenPopup("###message");
-    open_plan_ = open_zip_ = open_message_ = false;
+    open_plan_ = open_zip_ = open_message_ = open_approve_ = false;
     draw_plan_modal();
     draw_zip_modal();
+    draw_approve_modal();
 
     next_modal(36);
     if (ImGui::BeginPopupModal((message_title_ + "###message").c_str(), nullptr, ImGuiWindowFlags_NoSavedSettings)) {
