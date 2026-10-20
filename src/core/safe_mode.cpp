@@ -39,7 +39,7 @@ void write_count(const std::wstring& file, unsigned count) {
     CloseHandle(h);
 }
 
-constexpr std::array<std::string_view, 0> kSafeModePlugins{};
+constexpr std::array<std::string_view, 2> kSafeModePlugins{"anvil-game", "anvil-overlay"};
 
 }  // namespace
 
@@ -48,6 +48,27 @@ bool loads_in_safe_mode(std::string_view id) {
         if (id == standard) return true;
     }
     return false;
+}
+
+std::string safe_mode_exclusion(std::string_view id, const std::vector<CrashSummary>& crashes) {
+    for (const CrashSummary& crash : crashes) {
+        if (crash_in_plugin(crash, id)) {
+            return "safe mode; the crash before it was " + (crash.summary.empty() ? crash.level : crash.summary) +
+                   " (report " + crash.name + ")";
+        }
+    }
+    return {};
+}
+
+std::vector<CrashSummary> safe_mode_crashes(const std::filesystem::path& crash_dir, unsigned unfinished) {
+    std::vector<CrashSummary> crashes;
+    for (const std::string& name : crash_report_names(crash_dir)) {
+        if (crashes.size() >= unfinished) break;
+        if (auto crash = load_crash_summary(crash_dir, name); crash && crash->before_game_ready) {
+            crashes.push_back(std::move(*crash));
+        }
+    }
+    return crashes;
 }
 
 StartRecord StartMarker::begin(const std::filesystem::path& file) {

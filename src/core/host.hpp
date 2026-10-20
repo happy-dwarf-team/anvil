@@ -31,6 +31,7 @@ struct AnvilPlugin {
     std::wstring data_dir;
     HMODULE module = nullptr;
     std::string state = "pending";  // pending | loaded | failed
+    std::string reason;             // why it failed, for the overlay (anvil.control)
     // Inside anvil_plugin_load the load itself is the plugin's group.
     std::atomic<bool> loading{false};
 };

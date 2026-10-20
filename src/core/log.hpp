@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace anvil {
 
@@ -22,6 +23,12 @@ public:
     bool try_write(AnvilLogLevel level, std::string_view source, std::string_view message);
     void set_min_level(AnvilLogLevel level);
     bool is_open() const;
+    // Every warning and error written so far (whatever the minimum level),
+    // as "[source] message", at most kMaxWarnings: what the overlay lists as
+    // the warnings of the start (design §15).
+    static constexpr size_t kMaxWarnings = 256;
+    std::vector<std::string> warnings() const;
+    size_t warning_count() const;
 
 private:
     Log() = default;

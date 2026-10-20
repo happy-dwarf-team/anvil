@@ -7,7 +7,9 @@
 #include "log.hpp"
 #include "manifest.hpp"
 #include "changes.hpp"
+#include "control.hpp"
 #include "crash.hpp"
+#include "crash_history.hpp"
 #include "plugin_symbols.hpp"
 #include "resolver.hpp"
 #include "safe_mode.hpp"
@@ -50,6 +52,7 @@ struct Runtime {
     std::vector<std::unique_ptr<AnvilPlugin>> plugins;  // resolved, in load order
     std::vector<Skipped> skipped;
     StartMarker start_marker;  // safe mode: starts that ended before game_ready
+    std::unique_ptr<Control> control;  // anvil.control, the overlay's view of the core (design §15)
     LARGE_INTEGER start{};
     LARGE_INTEGER frequency{};
 };
@@ -108,6 +111,7 @@ void load_plugin(AnvilPlugin& plugin) {
     const std::filesystem::path dll = std::filesystem::path(plugin.plugin_dir) / plugin.manifest.entry;
     const std::string label = plugin.manifest.id + " " + plugin.manifest.version.to_string();
     if (std::string reason = failed_dependency(plugin); !reason.empty()) {
+        plugin.reason = reason;
         plugin.state = "failed";
         g_runtime->policy->forget(plugin.owner);
         log_error(label + ": not loaded; " + reason);
@@ -116,13 +120,16 @@ void load_plugin(AnvilPlugin& plugin) {
     plugin.module = LoadLibraryExW(dll.c_str(), nullptr,
                                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (plugin.module == nullptr) {
+        const DWORD error = GetLastError();
+        plugin.reason = "cannot load " + plugin.manifest.entry + " (error " + std::to_string(error) + ")";
         plugin.state = "failed";
         g_runtime->policy->forget(plugin.owner);
-        log_error(label + ": cannot load " + narrow(dll.wstring()) + " (error " + std::to_string(GetLastError()) + ")");
+        log_error(label + ": cannot load " + narrow(dll.wstring()) + " (error " + std::to_string(error) + ")");
         return;
     }
     const auto fn = reinterpret_cast<PluginLoadFn>(GetProcAddress(plugin.module, "anvil_plugin_load"));
     if (fn == nullptr) {
+        plugin.reason = "the entry DLL does not export anvil_plugin_load";
         plugin.state = "failed";
         g_runtime->policy->forget(plugin.owner);
         log_error(label + ": entry DLL does not export anvil_plugin_load");
@@ -138,14 +145,15 @@ void load_plugin(AnvilPlugin& plugin) {
         log_error(label + ": its " + std::to_string(outcome.staged) + " change(s) could not be enabled");
     }
     if (outcome.result != ANVIL_OK) {
-        plugin.state = "failed";
-        g_runtime->policy->forget(plugin.owner);
         char code[32] = {};
         if (outcome.exception != 0) std::snprintf(code, sizeof(code), "0x%08lX", outcome.exception);
-        log_error(label + ": anvil_plugin_load " +
-                  (outcome.exception != 0 ? std::string("crashed with exception ") + code
-                                          : std::string("returned ") + result_name(outcome.result)) +
-                  "; " + std::to_string(outcome.staged) + " change(s) rolled back; plugin stays inactive");
+        plugin.reason = "anvil_plugin_load " + (outcome.exception != 0
+                                                    ? std::string("crashed with exception ") + code
+                                                    : std::string("returned ") + result_name(outcome.result));
+        plugin.state = "failed";
+        g_runtime->policy->forget(plugin.owner);
+        log_error(label + ": " + plugin.reason + "; " + std::to_string(outcome.staged) +
+                  " change(s) rolled back; plugin stays inactive");
         // The DLL is not unloaded: threads it may have started could still run.
         return;
     }
@@ -177,6 +185,7 @@ DWORD WINAPI main_phase(LPVOID) {
     }
     // The end of the core start-up of design §17 (entry point -> end of loading).
     log_info("plugins loaded at " + fmt_ms(elapsed_ms()));
+    g_runtime->control->loading_done();
     g_runtime->bus.publish(ANVIL_EVENT_PLUGINS_LOADED, nullptr);
     write_summary();
     if (g_runtime->build != nullptr) {
@@ -265,10 +274,17 @@ void startup_impl(const std::filesystem::path& game_dir) {
         log_warning(std::to_string(record.unfinished) + " previous start(s) ended before the game was ready; safe mode "
                     "after " + std::to_string(kSafeModeAfter));
     }
+    // The newest crash report of an earlier start, for the overlay; and in
+    // safe mode the reports of the starts that led to it: a standard plugin
+    // the crash was in is left out, so the safe start cannot end the same way.
+    const std::filesystem::path crash_dir = g_runtime->anvil_dir / "crashes";
+    const std::vector<std::string> crash_names = crash_report_names(crash_dir);
+    std::vector<CrashSummary> safe_mode_reports;
+    if (record.safe_mode) safe_mode_reports = safe_mode_crashes(crash_dir, record.unfinished);
     // Crash capture (design §12): the vectored handler, the filter ahead of
     // the game's and the helper thread, before any plugin code runs.
     crash::Setup capture;
-    capture.crash_dir = g_runtime->anvil_dir / "crashes";
+    capture.crash_dir = crash_dir;
     capture.log_file = g_runtime->anvil_dir / "anvil.log";
     capture.image = exe;
     capture.sources.changes = g_runtime->changes.get();
@@ -354,6 +370,12 @@ void startup_impl(const std::filesystem::path& game_dir) {
             g_runtime->skipped.push_back({parsed.manifest->id, "safe mode", folder});
             continue;
         }
+        if (record.safe_mode) {
+            if (std::string reason = safe_mode_exclusion(parsed.manifest->id, safe_mode_reports); !reason.empty()) {
+                g_runtime->skipped.push_back({parsed.manifest->id, std::move(reason), folder});
+                continue;
+            }
+        }
         input.manifests.push_back(*parsed.manifest);
     }
     log_info("discovered " + std::to_string(folders.size()) + " plugin folder(s) in " + narrow(plugins_dir.wstring()));
@@ -382,6 +404,25 @@ void startup_impl(const std::filesystem::path& game_dir) {
         plugin->manifest = std::move(m);
         g_runtime->policy->add(plugin->manifest, plugin->owner);
         g_runtime->plugins.push_back(std::move(plugin));
+    }
+
+    // anvil.control (src/control/anvil_control.h): what the overlay shows and
+    // changes. Registered before any plugin loads; the overlay is early.
+    ControlSources sources;
+    sources.anvil_dir = g_runtime->anvil_dir;
+    sources.anvil_version = kAnvilVersion;
+    sources.game_build = game.build_id;
+    sources.plugins = &g_runtime->plugins;
+    sources.skipped = &g_runtime->skipped;
+    sources.policy = g_runtime->policy.get();
+    sources.disabled = settings.disabled_plugins;
+    sources.safe_mode = record.safe_mode;
+    sources.unfinished_starts = record.unfinished;
+    if (!crash_names.empty()) sources.previous_crash = crash_names.front();
+    g_runtime->control = std::make_unique<Control>(std::move(sources));
+    if (g_runtime->bus.register_service("anvil", ANVIL_CONTROL_SERVICE, ANVIL_CONTROL_VERSION,
+                                        g_runtime->control->service()) != ANVIL_OK) {
+        log_warning("cannot register " ANVIL_CONTROL_SERVICE);
     }
 
     // Early plugins: here, before the game's runtime starts.

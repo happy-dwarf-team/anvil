@@ -1,7 +1,11 @@
 #pragma once
 
+#include "crash_history.hpp"
+
 #include <filesystem>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace anvil {
 
@@ -20,9 +24,21 @@ namespace anvil {
 // the plugins again.
 inline constexpr unsigned kSafeModeAfter = 2;
 
-// The standard plugins that still load in safe mode: today none. anvil-game
-// and anvil-overlay (#58) join when the overlay explains safe mode.
+// The standard plugins that still load in safe mode: anvil-game and
+// anvil-overlay, so the overlay can explain it (design §10, #58).
 bool loads_in_safe_mode(std::string_view id);
+
+// Why a standard plugin that loads in safe mode is left out of this safe
+// start: one of `crashes` (the reports of the starts that led to it) was in
+// the plugin's own code or in its change, so loading it again could end this
+// start the same way. Empty when it loads.
+std::string safe_mode_exclusion(std::string_view id, const std::vector<CrashSummary>& crashes);
+
+// The reports of the starts that led to a safe start: of the newest reports
+// in `crash_dir`, those written before the game was ready, at most
+// `unfinished` of them. A start that hung or was killed wrote none, so an
+// older report may stand in for it.
+std::vector<CrashSummary> safe_mode_crashes(const std::filesystem::path& crash_dir, unsigned unfinished);
 
 struct StartRecord {
     unsigned unfinished = 0;  // starts before this one that ended before game_ready

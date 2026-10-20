@@ -39,6 +39,8 @@ FetchContent_MakeAvailable(tomlplusplus safetyhook)
 # depend on running inside the game process, so the CLI applies the same rules
 # as the loader.
 add_library(anvil_core STATIC
+    src/core/anvil_toml_edit.cpp
+    src/core/crash_history.cpp
     src/core/discovery.cpp
     src/core/game_build.cpp
     src/core/instructions.cpp
@@ -64,6 +66,7 @@ endif()
 # Linked into version.dll and the tests, never into anvil.exe.
 add_library(anvil_loader STATIC
     src/core/changes.cpp
+    src/core/control.cpp
     src/core/crash.cpp
     src/core/crash_report.cpp
     src/core/gameplay_policy.cpp
@@ -170,7 +173,7 @@ endif()
 if(ANVIL_BUILD_TESTS)
     enable_testing()
     add_executable(anvil_tests tests/test_main.cpp tests/manifest_tests.cpp tests/resolver_tests.cpp
-        tests/change_tests.cpp tests/gameplay_tests.cpp tests/settings_tests.cpp)
+        tests/change_tests.cpp tests/gameplay_tests.cpp tests/settings_tests.cpp tests/control_tests.cpp)
     target_link_libraries(anvil_tests PRIVATE anvil_loader)
     target_compile_definitions(anvil_tests PRIVATE ANVIL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_dependencies(anvil_tests version_dll)
