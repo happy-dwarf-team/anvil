@@ -213,9 +213,11 @@ void usage() {
 
 int memory_main(size_t changes, const char* out_path);  // memory.cpp
 int memory_core_main(int argc, char** argv);
+int memory_kind_main(int argc, char** argv);
 
 int main(int argc, char** argv) {
     if (argc > 1 && std::strcmp(argv[1], "--memory-core") == 0) return memory_core_main(argc, argv);
+    if (argc > 1 && std::strcmp(argv[1], "--memory-kind") == 0) return memory_kind_main(argc, argv);
     bool memory = false;
     int changes = 1000;
     int repetitions = 31;
