@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.3.0](https://github.com/happy-dwarf-team/anvil/compare/v1.2.1...v1.3.0) (2026-10-20)
+
+
+### Features
+
+* **core:** discover plugins in enabled mods and load approved ones ([#113](https://github.com/happy-dwarf-team/anvil/issues/113)) ([74fce2d](https://github.com/happy-dwarf-team/anvil/commit/74fce2d96c1a3a7eb0584fd0c01786e88ca4fb49))
+* **manager:** approve, revoke and show plugins from mods ([#116](https://github.com/happy-dwarf-team/anvil/issues/116)) ([2484cc2](https://github.com/happy-dwarf-team/anvil/commit/2484cc219a5091eb081ca3ab2d6d26df5ce2daab))
+* **overlay:** approve and revoke plugins from mods in the panel ([#114](https://github.com/happy-dwarf-team/anvil/issues/114)) ([e825771](https://github.com/happy-dwarf-team/anvil/commit/e8257713824c1b5f9bedf61ccbbcad47bb6a422d))
+
+
+### Bug Fixes
+
+* **crash:** report a stack overflow on the game's other threads where Windows enables AMX ([#119](https://github.com/happy-dwarf-team/anvil/issues/119)) ([baf9bc8](https://github.com/happy-dwarf-team/anvil/commit/baf9bc8784c438be53249236aba08ea058fb64cd))
+
 ## [1.2.1](https://github.com/happy-dwarf-team/anvil/compare/v1.2.0...v1.2.1) (2026-10-20)
 
 
