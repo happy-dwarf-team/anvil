@@ -256,6 +256,9 @@ Plan plan_uninstall(const Package& package, const Installation& installation, bo
         }
         plan.steps.push_back({Step::Kind::RemoveTree, "anvil/docs"});
         plan.steps.push_back({Step::Kind::RemoveIfEmpty, "anvil/plugins"});
+        // Crash capture creates anvil/crashes at every start (issue #108); only
+        // a folder without reports goes.
+        plan.steps.push_back({Step::Kind::RemoveIfEmpty, "anvil/crashes"});
         plan.steps.push_back({Step::Kind::RemoveIfEmpty, "anvil"});
         plan.notes.push_back("Your plugins, anvil/anvil.toml, anvil/data, anvil/crashes and the logs stay.");
     }

@@ -398,11 +398,15 @@ int main(int argc, char** argv) {
         const fs::path game = make_game(temp.dir / "game");
         apply_plan(*package, plan_install(*package, inspect_installation(*package, game), game, {}, false), game, {});
         write(game / "AnvilManager.exe", "manager");
+        fs::create_directories(game / "anvil" / "crashes");  // as crash capture leaves it after a start
         const Plan plan = plan_uninstall(*package, inspect_installation(*package, game), false);
+        CHECK(has_step(plan, Step::Kind::RemoveIfEmpty, "anvil/crashes"));
         const ApplyResult result = apply_plan(*package, plan, game, game / "AnvilManager.exe");
         CHECK(result.ok && result.manager_left && fs::exists(game / "AnvilManager.exe"));
-        // Without a plugin of the player's, the empty folders go too; anvil.toml keeps anvil/.
-        CHECK(!fs::exists(game / "anvil" / "plugins") && fs::exists(game / "anvil" / "anvil.toml"));
+        // Without a plugin of the player's or a crash report, the empty folders
+        // go too (issue #108); anvil.toml keeps anvil/.
+        CHECK(!fs::exists(game / "anvil" / "plugins") && !fs::exists(game / "anvil" / "crashes"));
+        CHECK(fs::exists(game / "anvil" / "anvil.toml"));
     });
 
     run("plugin zip: checked against eu4.exe before anything is copied", [&] {
