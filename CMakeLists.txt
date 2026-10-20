@@ -160,6 +160,16 @@ add_subdirectory(plugins/anvil-game)
 # panel on Direct3D 9, through the core's anvil.control), released next to it.
 add_subdirectory(plugins/anvil-overlay)
 unset(CMAKE_COMPILE_WARNING_AS_ERROR)
+# The standard plugins ship only inside the package, so their version is
+# Anvil's: release-please bumps both manifests with version.txt.
+foreach(_standard anvil-game anvil-overlay)
+    set(_manifest plugins/${_standard}/plugin.toml)
+    file(STRINGS ${_manifest} _manifest_version LIMIT_COUNT 1 REGEX "^version = \"[^\"]*\"$")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_manifest})
+    if(NOT _manifest_version STREQUAL "version = \"${PROJECT_VERSION}\"")
+        message(FATAL_ERROR "${_manifest} must have version = \"${PROJECT_VERSION}\" (version.txt), found '${_manifest_version}'")
+    endif()
+endforeach()
 
 # AnvilManager.exe, the player's installer and management tool (design §15).
 add_subdirectory(tools/manager)
