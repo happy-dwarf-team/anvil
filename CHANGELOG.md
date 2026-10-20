@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.1](https://github.com/happy-dwarf-team/anvil/compare/v1.2.0...v1.2.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **manager:** accept posted mouse messages from automated tests ([#111](https://github.com/happy-dwarf-team/anvil/issues/111)) ([11243d0](https://github.com/happy-dwarf-team/anvil/commit/11243d0bd5d69988668074af00d648d3aa087bfa))
+* **manager:** remove an empty anvil/crashes folder on uninstall ([#110](https://github.com/happy-dwarf-team/anvil/issues/110)) ([245935e](https://github.com/happy-dwarf-team/anvil/commit/245935e273c7c0f9358077309314f4fe06282d31))
+* release the standard plugins at Anvil's version ([#109](https://github.com/happy-dwarf-team/anvil/issues/109)) ([be510e8](https://github.com/happy-dwarf-team/anvil/commit/be510e89b5c2defb550611080f8082987761ce23))
+
 ## [1.2.0](https://github.com/happy-dwarf-team/anvil/compare/v1.1.0...v1.2.0) (2026-10-20)
 
 
