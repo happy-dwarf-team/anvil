@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.1.0](https://github.com/happy-dwarf-team/anvil/compare/v1.0.0...v1.1.0) (2026-10-20)
+
+
+### Features
+
+* **core:** add the private anvil.control service for the overlay ([#93](https://github.com/happy-dwarf-team/anvil/issues/93)) ([46f611e](https://github.com/happy-dwarf-team/anvil/commit/46f611e40fab81f3b8edc5fe37d6ec76dc5fb199))
+* **overlay:** add the anvil-overlay standard plugin ([#96](https://github.com/happy-dwarf-team/anvil/issues/96)) ([bb19b7a](https://github.com/happy-dwarf-team/anvil/commit/bb19b7a0dfeab2d75e9596f36e7dfa4c4eae9984))
+
+
+### Bug Fixes
+
+* **core:** report a crash in a mid hook's or block replacement's callback ([#95](https://github.com/happy-dwarf-team/anvil/issues/95)) ([3d292de](https://github.com/happy-dwarf-team/anvil/commit/3d292deca5e72b469ab0355e3b18d4deda9eceb1))
+
+
+### Performance
+
+* **core:** share one context stub so mid hooks and block replacements fit 1 KB ([#97](https://github.com/happy-dwarf-team/anvil/issues/97)) ([3ccf840](https://github.com/happy-dwarf-team/anvil/commit/3ccf840845168b01c6451ada3ffcafc0ce6c820c)), closes [#90](https://github.com/happy-dwarf-team/anvil/issues/90)
+* **core:** trim the heap of every change, most of all mid hooks and block replacements ([#92](https://github.com/happy-dwarf-team/anvil/issues/92)) ([c4582f3](https://github.com/happy-dwarf-team/anvil/commit/c4582f33a881bdaf0d430774db3e903ff9d5830d)), closes [#90](https://github.com/happy-dwarf-team/anvil/issues/90)
+
 ## [1.0.0](https://github.com/happy-dwarf-team/anvil/compare/v0.2.0...v1.0.0) (2026-10-20)
 
 
