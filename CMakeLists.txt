@@ -156,6 +156,9 @@ endif()
 # with Anvil in anvil/plugins/anvil-game/.
 set(CMAKE_COMPILE_WARNING_AS_ERROR ON)
 add_subdirectory(plugins/anvil-game)
+# anvil-overlay, the standard plugin of design §15 (notifications and the
+# panel on Direct3D 9, through the core's anvil.control), released next to it.
+add_subdirectory(plugins/anvil-overlay)
 unset(CMAKE_COMPILE_WARNING_AS_ERROR)
 
 # anvil_bench: microbenchmarks per kind of change and of the start-up parsers
@@ -248,6 +251,22 @@ if(ANVIL_BUILD_TESTS)
     add_dependencies(anvil_game_plugin_tests anvil_game)
     add_test(NAME anvil_game_plugin_tests COMMAND anvil_game_plugin_tests ${CMAKE_BINARY_DIR}/plugin)
 
+    # anvil-overlay's notices and key matching, and anvil check on its folder
+    # (tests/overlay_tests.cpp).
+    add_executable(anvil_overlay_tests tests/overlay_tests.cpp plugins/anvil-overlay/src/notices.cpp
+        plugins/anvil-overlay/src/control_client.cpp)
+    target_include_directories(anvil_overlay_tests PRIVATE src/control)
+    target_link_libraries(anvil_overlay_tests PRIVATE anvil_loader)
+    add_test(NAME anvil_overlay_tests COMMAND anvil_overlay_tests)
+    # The same on a real Direct3D 9 device with this test as the game image;
+    # passes with a note where no device can be created.
+    add_executable(anvil_overlay_d3d_tests tests/overlay_d3d_tests.cpp)
+    target_include_directories(anvil_overlay_d3d_tests PRIVATE src/control)
+    target_link_libraries(anvil_overlay_d3d_tests PRIVATE anvil_loader d3d9)
+    add_dependencies(anvil_overlay_d3d_tests anvil_overlay)
+    add_test(NAME anvil_overlay_d3d_tests COMMAND anvil_overlay_d3d_tests ${CMAKE_BINARY_DIR}/plugin)
+    add_test(NAME anvil_overlay_check COMMAND anvil check ${CMAKE_CURRENT_SOURCE_DIR}/plugins/anvil-overlay)
+
     # The symbols.lock of anvil-game and of every example matches its
     # symbols.toml (anvil check without --exe; the locks come from anvil check
     # --exe on the real eu4.exe).
@@ -291,6 +310,8 @@ install(FILES dist/anvil.toml DESTINATION anvil COMPONENT anvil)
 install(FILES dist/plugins-README.txt DESTINATION anvil/plugins RENAME README.txt COMPONENT anvil)
 install(FILES $<TARGET_FILE:anvil_game> plugins/anvil-game/plugin.toml plugins/anvil-game/symbols.toml
     DESTINATION anvil/plugins/anvil-game COMPONENT anvil)
+install(FILES $<TARGET_FILE:anvil_overlay> plugins/anvil-overlay/plugin.toml plugins/anvil-overlay/settings.toml
+    DESTINATION anvil/plugins/anvil-overlay COMPONENT anvil)
 install(FILES LICENSE README.md DESTINATION anvil/docs COMPONENT anvil)
 # Third-party code compiled into version.dll: ship its license texts.
 # Zydis is declared inside SafetyHook's scope; fetch its properties here.
@@ -302,6 +323,7 @@ install(FILES ${tomlplusplus_SOURCE_DIR}/LICENSE DESTINATION anvil/docs/third-pa
 install(FILES ${safetyhook_SOURCE_DIR}/LICENSE DESTINATION anvil/docs/third-party RENAME safetyhook-LICENSE.txt COMPONENT anvil)
 install(FILES ${zydis_SOURCE_DIR}/LICENSE DESTINATION anvil/docs/third-party RENAME zydis-LICENSE.txt COMPONENT anvil)
 install(FILES ${zydis_SOURCE_DIR}/dependencies/zycore/LICENSE DESTINATION anvil/docs/third-party RENAME zycore-LICENSE.txt COMPONENT anvil)
+install(FILES ${ANVIL_OVERLAY_IMGUI_LICENSE} DESTINATION anvil/docs/third-party RENAME imgui-LICENSE.txt COMPONENT anvil)
 
 # SDK archive (cmake --install ... --component sdk): what plugin authors fetch
 # (design §16). FetchContent_MakeAvailable runs the CMakeLists.txt at its root;

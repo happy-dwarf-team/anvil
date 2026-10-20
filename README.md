@@ -30,11 +30,17 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
   ([include/anvil/anvil_game.h](include/anvil/anvil_game.h)). Plugins that
   change the simulation need it: in ironman and multiplayer games Anvil takes
   their changes out unless the player allows them in `anvil/anvil.toml`.
+- Anvil also ships `anvil-overlay` (`anvil/plugins/anvil-overlay/`): in-game
+  notices about plugins that were not loaded, the previous crash and safe
+  mode, and a panel on `Ctrl+Shift+F12` with the status, "disable at the next
+  start", the crash report, the log and every plugin's settings. It draws on
+  the game's Direct3D 9 renderer and stays off with OpenGL.
 - Each start writes `anvil/anvil.log`: what was loaded, what was skipped and why.
 - A crash writes a report to `anvil/crashes/` (the last 10 are kept): where it
   happened and which plugins were involved, with each plugin's `issues` link.
   After two starts in a row that ended before the game was ready, the next
-  start loads no plugins (safe mode).
+  start loads only Anvil's standard plugins (safe mode), and the overlay says
+  why.
 
 ## Install / uninstall
 
