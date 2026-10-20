@@ -320,6 +320,11 @@ void startup_impl(const std::filesystem::path& game_dir) {
     capture.unfinished_starts = record.unfinished;
     capture.safe_mode = record.safe_mode;
     if (std::string error; !crash::install(capture, error)) log_warning("crash capture: " + error);
+    if (const ULONG guarantee = crash::thread_guarantee(); guarantee != 0) {
+        log_info("crash capture: the CPU state saved with an exception does not fit in a thread's default stack "
+                 "guarantee (AMX); new threads with 256 KB of stack or more get " +
+                 std::to_string(guarantee / 1024) + " KB");
+    }
     AnvilGameInfo& game = g_runtime->game;
     game.size = sizeof(AnvilGameInfo);
     game.build_id = g_runtime->build ? g_runtime->build->id : nullptr;
