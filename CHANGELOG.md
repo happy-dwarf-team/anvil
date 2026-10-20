@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.0](https://github.com/happy-dwarf-team/anvil/compare/v1.1.0...v1.2.0) (2026-10-20)
+
+
+### Features
+
+* **manager:** add AnvilManager.exe, the player's installer and management tool ([#101](https://github.com/happy-dwarf-team/anvil/issues/101)) ([5f57b1a](https://github.com/happy-dwarf-team/anvil/commit/5f57b1a0079326df8ad3e436f5ad6ce77275cf57))
+* **manager:** add the Manager's core with game detection, install plans and plugin zips ([#100](https://github.com/happy-dwarf-team/anvil/issues/100)) ([a0981fa](https://github.com/happy-dwarf-team/anvil/commit/a0981faa4fb0ed402c95702d441582664c3297a4))
+* **release:** ship AnvilManager.exe as an asset and in the Anvil zip ([#102](https://github.com/happy-dwarf-team/anvil/issues/102)) ([ef139a9](https://github.com/happy-dwarf-team/anvil/commit/ef139a9d0d77c154d1c0fee6373bd7e826dfe493))
+
 ## [1.1.0](https://github.com/happy-dwarf-team/anvil/compare/v1.0.0...v1.1.0) (2026-10-20)
 
 
