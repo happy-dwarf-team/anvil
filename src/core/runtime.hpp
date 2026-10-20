@@ -25,7 +25,7 @@ void shutdown();
 // The settings of a plugin that resolved (loaded, failed or not loaded yet),
 // for in-game editors (design §11): PluginSettings::set saves a value and
 // applies it. nullptr for any other id, or before start-up has resolved the
-// plugins. The overlay (#58) reaches it through an Anvil service.
+// plugins. The overlay reaches it through anvil.control (control.hpp).
 PluginSettings* plugin_settings(std::string_view plugin_id);
 
 }  // namespace anvil

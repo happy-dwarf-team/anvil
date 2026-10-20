@@ -43,3 +43,4 @@ void resolver_tests();  // resolver_tests.cpp
 void change_tests();    // change_tests.cpp
 void gameplay_tests();  // gameplay_tests.cpp
 void settings_tests();  // settings_tests.cpp
+void control_tests();   // control_tests.cpp

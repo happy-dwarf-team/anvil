@@ -692,7 +692,7 @@ int main(int argc, char** argv) {
         std::ofstream(file) << "garbage";
         StartMarker g;
         CHECK(g.begin(file).unfinished == 0);
-        CHECK(!loads_in_safe_mode("tongs") && !loads_in_safe_mode("anvil-game"));
+        CHECK(!loads_in_safe_mode("tongs") && loads_in_safe_mode("anvil-game") && loads_in_safe_mode("anvil-overlay"));
         fs::remove_all(dir);
     });
 

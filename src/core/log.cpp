@@ -12,6 +12,7 @@ namespace {
 struct LogState {
     std::mutex mutex;
     std::vector<std::string> pending;  // lines written before open()
+    std::vector<std::string> warnings;  // "[source] message", at most Log::kMaxWarnings
     HANDLE file = INVALID_HANDLE_VALUE;
     AnvilLogLevel minimum = ANVIL_LOG_INFO;
     LARGE_INTEGER start{};
@@ -99,6 +100,16 @@ std::string format_line(AnvilLogLevel level, std::string_view source, std::strin
 }
 
 // Under the log's lock.
+void keep_warning(LogState& s, AnvilLogLevel level, std::string_view source, std::string_view message) {
+    if (level < ANVIL_LOG_WARNING || s.warnings.size() >= Log::kMaxWarnings) return;
+    std::string line = "[";
+    line.append(source.data(), source.size());
+    line += "] ";
+    line.append(message.data(), message.size());
+    s.warnings.push_back(std::move(line));
+}
+
+// Under the log's lock.
 void append_line(LogState& s, std::string line) {
     if (s.file == INVALID_HANDLE_VALUE) {
         if (s.pending.size() < 4096) {
@@ -114,10 +125,15 @@ void append_line(LogState& s, std::string line) {
 void Log::write(AnvilLogLevel level, std::string_view source, std::string_view message) {
     LogState& s = state();
     if (level < s.minimum) {
+        if (level >= ANVIL_LOG_WARNING) {
+            std::lock_guard lock(s.mutex);
+            keep_warning(s, level, source, message);
+        }
         return;
     }
     std::string line = format_line(level, source, message);
     std::lock_guard lock(s.mutex);
+    keep_warning(s, level, source, message);
     append_line(s, std::move(line));
 }
 
@@ -131,6 +147,7 @@ bool Log::try_write(AnvilLogLevel level, std::string_view source, std::string_vi
     if (!lock.owns_lock()) {
         return false;
     }
+    keep_warning(s, level, source, message);
     append_line(s, std::move(line));
     return true;
 }
@@ -141,6 +158,18 @@ void Log::set_min_level(AnvilLogLevel level) {
 
 bool Log::is_open() const {
     return state().file != INVALID_HANDLE_VALUE;
+}
+
+std::vector<std::string> Log::warnings() const {
+    LogState& s = state();
+    std::lock_guard lock(s.mutex);
+    return s.warnings;
+}
+
+size_t Log::warning_count() const {
+    LogState& s = state();
+    std::lock_guard lock(s.mutex);
+    return s.warnings.size();
 }
 
 void log_info(std::string_view message) { Log::instance().write(ANVIL_LOG_INFO, "anvil", message); }
