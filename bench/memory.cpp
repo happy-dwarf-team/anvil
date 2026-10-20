@@ -258,7 +258,8 @@ int core_child(const std::filesystem::path& game_dir, const std::filesystem::pat
 
 bool run_core(Core& core, std::string& error) {
     std::error_code ec;
-    const auto dir = std::filesystem::temp_directory_path(ec) / ("anvil-bench-memory-" + std::to_string(GetCurrentProcessId()));
+    const auto dir =
+        std::filesystem::temp_directory_path(ec) / ("anvil-bench-memory-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::remove_all(dir, ec);
     std::filesystem::create_directories(dir / "anvil" / "plugins", ec);
     if (ec) {
@@ -270,6 +271,7 @@ bool run_core(Core& core, std::string& error) {
     const auto result_file = dir / "core-result.txt";
     std::wstring command = L"\"" + self_path() + L"\" --memory-core \"" + dir.wstring() + L"\" \"" +
                            result_file.wstring() + L"\"";
+    SetEnvironmentVariableW(L"ANVIL_DISABLE", nullptr);  // the child inherits it; its start-up must load
     STARTUPINFOW si{};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
