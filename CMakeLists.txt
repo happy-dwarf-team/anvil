@@ -245,9 +245,13 @@ if(ANVIL_BUILD_TESTS)
     add_dependencies(anvil_game_plugin_tests anvil_game)
     add_test(NAME anvil_game_plugin_tests COMMAND anvil_game_plugin_tests ${CMAKE_BINARY_DIR}/plugin)
 
-    # anvil-game's symbols.lock matches its symbols.toml (anvil check without
-    # --exe; the lock comes from anvil check --exe on the real eu4.exe).
+    # The symbols.lock of anvil-game and of every example matches its
+    # symbols.toml (anvil check without --exe; the locks come from anvil check
+    # --exe on the real eu4.exe).
     add_test(NAME anvil_game_symbols_lock COMMAND anvil check ${CMAKE_CURRENT_SOURCE_DIR}/plugins/anvil-game)
+    foreach(example hello-c hello-cpp hello-rust)
+        add_test(NAME anvil_${example}_symbols_lock COMMAND anvil check ${CMAKE_CURRENT_SOURCE_DIR}/examples/${example})
+    endforeach()
 
     # The wrapper's signature checks: each source must fail to compile with
     # the static_assert, and the compiler's note must name the symbol. The
