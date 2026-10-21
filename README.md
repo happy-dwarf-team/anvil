@@ -1,9 +1,16 @@
 # Anvil
 
+[![build](https://github.com/happy-dwarf-team/anvil/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/happy-dwarf-team/anvil/actions/workflows/build.yml)
+[![Latest release](https://img.shields.io/github/v/release/happy-dwarf-team/anvil)](https://github.com/happy-dwarf-team/anvil/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/happy-dwarf-team/anvil)](LICENSE)
+
 Anvil is a plugin loader for **Europa Universalis IV** (Windows, Steam). It lets
 native plugins improve or extend the game **without modifying `eu4.exe`**.
 
-> Status: stage 1 (core loader), early public releases — see
+**Install guide, plugin catalog and docs for plugin authors:
+[anvil.happydwarf.dev](https://anvil.happydwarf.dev).**
+
+> Status: Anvil 1.x with plugin API 2 — see
 > [Releases](https://github.com/happy-dwarf-team/anvil/releases) and
 > [CHANGELOG.md](CHANGELOG.md). Supported game build: EU4 1.37.5 (Steam,
 > Windows 64-bit); on other builds only plugins that use no game addresses load. Design:
