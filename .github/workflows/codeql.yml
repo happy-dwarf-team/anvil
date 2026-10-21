@@ -46,11 +46,12 @@ jobs:
           languages: c-cpp
           build-mode: manual
 
+      # What ships, in parallel: version.dll, anvil.exe, the Manager and the standard plugins.
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DANVIL_BUILD_TESTS=OFF -DANVIL_BUILD_EXAMPLES=OFF -DANVIL_BUILD_BENCH=OFF
 
       - name: Build
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release --parallel
 
       - uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
