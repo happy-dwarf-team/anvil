@@ -4,12 +4,26 @@ name: codeql
 # Windows, as in build.yml, so CodeQL sees the code as MSVC compiles it (the
 # default setup analyses it without a build on Linux, where the Windows
 # headers are missing). The workflows and the Rust SDK are analysed without a build.
-# Results go to Security -> Code scanning.
+# Results go to Security -> Code scanning. Pushes and pull requests that
+# change only documentation or release files skip it; the weekly run still
+# analyses main.
 
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - docs/**
+      - LICENSE
+      - version.txt
+      - .release-please-manifest.json
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - docs/**
+      - LICENSE
+      - version.txt
+      - .release-please-manifest.json
   schedule:
     - cron: "17 4 * * 1"
 
@@ -32,11 +46,12 @@ jobs:
           languages: c-cpp
           build-mode: manual
 
+      # What ships, in parallel: version.dll, anvil.exe, the Manager and the standard plugins.
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DANVIL_BUILD_TESTS=OFF -DANVIL_BUILD_EXAMPLES=OFF -DANVIL_BUILD_BENCH=OFF
 
       - name: Build
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release --parallel
 
       - uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
