@@ -735,8 +735,8 @@ CrashVerdict build_report(const ReportInput& in, TextBuffer& j, TextBuffer& t) {
     if (in.context != nullptr) {
         bool first = true;
         for (const Register& r : kRegisters) {
-            j.putf("%s\"%s\": \"0x%llX\"", first ? "" : ", ", r.name,
-                   static_cast<unsigned long long>(in.context->*r.field));
+            const DWORD64 value = in.context->*r.field;
+            j.putf("%s\"%s\": \"0x%llX\"", first ? "" : ", ", r.name, static_cast<unsigned long long>(value));
             first = false;
         }
         j.putf(", \"rflags\": \"0x%lX\"", in.context->EFlags);
