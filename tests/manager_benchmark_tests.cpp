@@ -9,9 +9,11 @@
 // the receiver's tests validate. ANVIL_UPDATE_FIXTURES=1 writes that fixture
 // again after a deliberate change.
 #include "benchmark_report.hpp"
+#include "benchmark_run.hpp"
 #include "benchmark_series.hpp"
 #include "core/benchmark_record.hpp"
 #include "core/crash_history.hpp"
+#include "core/log.hpp"
 #include "files.hpp"
 #include "json.hpp"
 #include "test_support.hpp"
@@ -22,7 +24,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <regex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -643,5 +647,318 @@ void manager_benchmark_tests() {
         CHECK(report_stamp().size() == 19 && report_stamp()[10] == 'T');
         CHECK(benchmarks_dir("C:/Games/EU4") == fs::path("C:/Games/EU4/anvil/data/anvil/benchmarks"));
         fs::remove_all(dir);
+    });
+}
+
+// ---- the runner, with this test as the game ----------------------------------------------
+
+namespace {
+
+std::wstring env(const wchar_t* name) {
+    wchar_t value[512] = {};
+    const DWORD n = GetEnvironmentVariableW(name, value, 512);
+    return n > 0 && n < 512 ? std::wstring(value, n) : std::wstring();
+}
+
+// The game folder of a runner test, with the fake game's modes: one per
+// start, in turn, from modes.txt.
+struct FakeGame {
+    fs::path dir;
+    explicit FakeGame(const std::string& modes) {
+        dir = fs::temp_directory_path() / ("anvil-bench-run-" + std::to_string(GetCurrentProcessId()) + "-" +
+                                           std::to_string(GetTickCount64()));
+        fs::create_directories(dir / "anvil" / "data" / "anvil");
+        std::ofstream(dir / "modes.txt", std::ios::binary) << modes;
+    }
+    ~FakeGame() {
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+    }
+};
+
+RunnerConfig fake_config(const FakeGame& game, int target, Arm first) {
+    wchar_t self[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, self, MAX_PATH);
+    RunnerConfig c;
+    c.game_dir = game.dir;
+    c.exe = self;
+    c.arguments = L"--bench-game";
+    c.plugin = "stub";
+    c.target = target;
+    c.first = first;
+    c.ready_timeout = std::chrono::milliseconds(3000);
+    c.close_after = std::chrono::milliseconds(3000);
+    c.kill_after = std::chrono::milliseconds(1000);
+    c.pause = std::chrono::milliseconds(0);
+    c.poll = std::chrono::milliseconds(20);
+    return c;
+}
+
+RunProgress finish(SeriesRunner& runner, int seconds = 60) {
+    for (int i = 0; i < seconds * 50 && !runner.done(); ++i) Sleep(20);
+    return runner.progress();
+}
+
+LRESULT CALLBACK fake_window(HWND window, UINT message, WPARAM w, LPARAM l) {
+    if (message == WM_CLOSE) {
+        PostQuitMessage(0);
+        return 0;
+    }
+    return DefWindowProcW(window, message, w, l);
+}
+
+// A Windows environment block from its entries.
+std::wstring block(std::initializer_list<const wchar_t*> entries) {
+    std::wstring out;
+    for (const wchar_t* e : entries) {
+        out += e;
+        out += L'\0';
+    }
+    out += L'\0';
+    return out;
+}
+
+}  // namespace
+
+// The fake eu4.exe: `anvil_manager_tests --bench-game`, started by the
+// runner in a FakeGame folder. It writes the core's own record with a stub
+// participant (the role Bellows 0.10 plays) and ends as its mode says.
+int fake_benchmark_game() {
+    if (env(L"SteamAppId") != L"236850") return 3;
+    std::string error;
+    const auto arm = parse_benchmark_arm(narrow(env(L"ANVIL_BENCHMARK")), error);
+    if (!arm) return 4;
+    const fs::path dir = fs::current_path();
+    std::vector<std::string> modes;
+    {
+        std::ifstream in(dir / "modes.txt", std::ios::binary);
+        for (std::string m; std::getline(in, m, ',');) modes.push_back(m);
+    }
+    int n = 0;
+    {
+        std::ifstream in(dir / "starts.txt");
+        in >> n;
+    }
+    std::ofstream(dir / "starts.txt", std::ios::trunc) << n + 1;
+    const std::string mode = modes.empty() ? "quit" : modes[static_cast<size_t>(n) % modes.size()];
+    if (mode == "no-record") return 0;
+    if (mode == "hang") Sleep(INFINITE);
+    if (mode == "crash") {
+        write_file_atomic(dir / "anvil" / "crashes" / ("2026-10-26T12-00-0" + std::to_string(n) + ".json"),
+                          "{\n  \"time\": \"x\",\n  \"level\": \"in_plugin_code\",\n  \"before_game_ready\": true,\n"
+                          "  \"plugins_involved\": [\"stub\"]\n}\n",
+                          error);
+        return 1;
+    }
+
+    BenchmarkRecord r;
+    r.write = "ready";
+    r.anvil_version = "1.5.0";
+    r.arm = *arm;
+    r.process_id = GetCurrentProcessId();
+    FILETIME created{}, exited{}, kernel{}, user{};
+    GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user);
+    r.creation_filetime = (static_cast<uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+    r.entry_filetime = r.creation_filetime + 50 * 10'000;
+    r.qpc_frequency = 10'000'000;
+    r.entry_qpc = 1;
+    r.ready_qpc = 1 + 20'000'000;  // 2 s after the entry point
+    r.plugins.push_back(BenchmarkRecordPlugin{"anvil-game", "1.5.0", "loaded", false, "", std::nullopt});
+    if (arm->with) {
+        BenchmarkParticipant stub;
+        stub.id = arm->plugin;
+        stub.fields = {field("work.ms", ANVIL_BENCHMARK_INT, ANVIL_BENCHMARK_UNIT_MS, "Work")};
+        stub.values = {int64_t{12}};
+        if (mode == "learning") stub.learning = "first_start";
+        r.plugins.push_back(BenchmarkRecordPlugin{arm->plugin, "0.1.0", "loaded", false, "", stub});
+    } else {
+        r.plugins.push_back(BenchmarkRecordPlugin{arm->plugin, "", "disabled", true, "", std::nullopt});
+    }
+    r.game_first_opens = BenchmarkOpenCost{10000, 300.0};
+    r.first_start_since_boot = false;
+    r.definitions_changed = false;
+    r.input_during_start = false;
+    if (mode == "slow") Sleep(1500);
+    const fs::path record = start_record_file(dir);
+    write_file_atomic(record, benchmark_record_json(r), error);
+    if (mode == "stuck") Sleep(INFINITE);
+    if (mode == "window") {
+        WNDCLASSW wc{};
+        wc.lpfnWndProc = fake_window;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = L"anvil-fake-game";
+        RegisterClassW(&wc);
+        CreateWindowExW(0, wc.lpszClassName, L"fake game", WS_OVERLAPPEDWINDOW, 0, 0, 100, 100, nullptr, nullptr,
+                        wc.hInstance, nullptr);
+        MSG msg;
+        while (GetMessageW(&msg, nullptr, 0, 0) > 0) DispatchMessageW(&msg);
+        return 0;
+    }
+    Sleep(200);  // the participant finishes its after-ready work
+    if (r.plugins[1].participant) r.plugins[1].participant->done = true;
+    r.write = "end";
+    write_file_atomic(record, benchmark_record_json(r), error);
+    return 0;
+}
+
+void manager_runner_tests() {
+    run("runner: the child's environment carries the arm and SteamAppId", [] {
+        const std::wstring current = block({L"=C:=C:\\x", L"Path=C:\\Windows", L"steamappid=1", L"ANVIL_BENCHMARK=old", L"Zed=1"});
+        CHECK(benchmark_environment(current, Arm::With, "bellows") ==
+              block({L"=C:=C:\\x", L"ANVIL_BENCHMARK=with:bellows", L"Path=C:\\Windows", L"SteamAppId=236850", L"Zed=1"}));
+        CHECK(benchmark_environment(L"", Arm::Without, "b") == block({L"ANVIL_BENCHMARK=without:b", L"SteamAppId=236850"}));
+    });
+
+    run("runner: a series of starts that quit by themselves completes", [] {
+        FakeGame game("quit");
+        int reads = 0;
+        RunnerConfig c = fake_config(game, 3, Arm::With);
+        c.environment = [&] {
+            ++reads;
+            return SeriesEnvironment{true, "mods", "0.1.0", "dll"};
+        };
+        SeriesRunner runner(c);
+        const RunProgress p = finish(runner);
+        CHECK(p.phase == RunPhase::Done && p.series.complete() && arms(p.series) == "BAABBA");
+        CHECK(reads == 1 + 2 * 6);  // when the series starts, then before and after every start
+        for (const StartRow& row : p.series.rows()) {
+            CHECK(row.valid && row.warm() && row.time_ms == 2050 && !row.killed);
+            CHECK(row.open_cost && !row.open_cost->from_plugin);  // the stub reports no open_cost()
+        }
+        CHECK(p.series.rows()[0].plugins.size() == 2 && p.series.rows()[0].plugins[1].done);
+        CHECK(!fs::exists(game.dir / "anvil" / "anvil.toml"));  // nothing is written but by the game
+        ReportInput in = example_input(p.series);
+        in.plugins.push_back(ReportPluginSource{"stub", "local", "", std::string(64, 'a')});
+        in.compared_version = "0.1.0";
+        const Json report = benchmark_report(in);
+        CHECK(report["plugin_schemas"]["stub"]["work.ms"]["unit"].as_string() == "ms");
+        CHECK(report["versions"]["plugins"].items().size() == 2);  // anvil-game and stub
+    });
+
+    run("runner: starts that do not count are replaced; a crash is read from its report", [] {
+        FakeGame game("learning,no-record,quit,quit,crash,quit,quit,quit,quit");
+        SeriesRunner runner(fake_config(game, 3, Arm::With));
+        const RunProgress p = finish(runner);
+        const auto& rows = p.series.rows();
+        CHECK(p.series.complete() && rows.size() == 9 && p.series.extra_starts_used() == 3);
+        CHECK(rows.size() > 3 && rows[0].discard_reason == "plugin_learning" && rows[1].discard_reason == "no_record");
+        CHECK(rows.size() > 4 && rows[4].discard_reason == "crash" && rows[4].crash &&
+              rows[4].crash->attribution == "in_plugin_code" && rows[4].crash->plugin == "stub" && rows[4].crash->before_ready);
+    });
+
+    run("runner: no ready in time is a timeout; the process is killed", [] {
+        FakeGame game("hang");
+        RunnerConfig c = fake_config(game, 3, Arm::Without);
+        c.ready_timeout = std::chrono::milliseconds(300);
+        SeriesRunner runner(c);
+        const RunProgress p = finish(runner);
+        CHECK(p.series.stop_reason() == "timeout" && p.series.rows().size() == 1 && p.series.rows()[0].killed);
+    });
+
+    run("runner: WM_CLOSE after ready ends a game that does not quit; a kill stops the series", [] {
+        {
+            FakeGame game("window");
+            RunnerConfig c = fake_config(game, 3, Arm::Without);
+            c.close_after = std::chrono::milliseconds(100);
+            SeriesRunner runner(c);
+            const RunProgress p = finish(runner);
+            CHECK(p.series.complete() && p.series.rows().size() == 6 && !p.series.rows()[0].killed);
+        }
+        FakeGame game("stuck");
+        RunnerConfig c = fake_config(game, 3, Arm::Without);
+        c.close_after = std::chrono::milliseconds(100);
+        c.kill_after = std::chrono::milliseconds(200);
+        SeriesRunner runner(c);
+        const RunProgress p = finish(runner);
+        CHECK(p.series.stop_reason() == "quit_failed" && p.series.rows().size() == 1);
+        CHECK(p.series.rows()[0].killed && p.series.rows()[0].valid && p.series.rows()[0].time_ms == 2050);
+    });
+
+    run("runner: the player's stop lets the start finish; a changed environment stops the series", [] {
+        {
+            FakeGame game("slow");
+            RunnerConfig c = fake_config(game, 3, Arm::Without);
+            c.pause = std::chrono::milliseconds(5000);
+            SeriesRunner runner(c);
+            for (int i = 0; i < 500 && runner.progress().phase != RunPhase::Loading; ++i) Sleep(10);
+            runner.stop();
+            CHECK(runner.progress().stopping);
+            const RunProgress p = finish(runner);
+            CHECK(p.series.stop_reason() == "player" && p.series.rows().size() == 1 && p.series.rows()[0].valid);
+        }
+        FakeGame game("quit");
+        int reads = 0;
+        RunnerConfig c = fake_config(game, 3, Arm::Without);
+        c.environment = [&] { return SeriesEnvironment{true, ++reads >= 5 ? "other mods" : "mods", "0.1.0", "dll"}; };
+        SeriesRunner runner(c);
+        const RunProgress p = finish(runner);
+        // Read 5 is after the second start: that start is discarded and ends the series.
+        CHECK(p.series.stop_reason() == "environment_changed" && p.series.rows().size() == 2);
+        CHECK(p.series.rows().back().discard_reason == "environment_changed" && p.environment_change == "the enabled mods changed");
+
+        FakeGame missing("quit");
+        RunnerConfig m = fake_config(missing, 3, Arm::Without);
+        m.exe = missing.dir / "eu4.exe";
+        SeriesRunner none(m);
+        const RunProgress q = finish(none);
+        CHECK(q.series.stop_reason() == "environment_changed" && q.series.rows().empty() && !q.start_error.empty());
+    });
+
+    run("setup: the checks before a series", [] {
+        SetupFacts f;
+        f.steam_running = true;
+        f.installed_anvil = "1.5.0";
+        f.anvil_game_loads = true;
+        f.plugin = "bellows";
+        f.comparable = ComparablePlugin{"bellows", "0.10.0", "workshop", "1999999900", "x.dll", false};
+        std::vector<SetupCheck> checks = setup_checks(f);
+        CHECK(checks.size() == 8 && checks_pass(checks));
+        f.on_battery = true;
+        checks = setup_checks(f);
+        CHECK(checks_pass(checks) && !checks.back().ok && !checks.back().blocks);
+        const std::vector<std::function<void(SetupFacts&)>> failing{
+            [](SetupFacts& x) { x.steam_running = false; }, [](SetupFacts& x) { x.eu4_running = true; },
+            [](SetupFacts& x) { x.unfinished_starts = 2; }, [](SetupFacts& x) { x.installed_anvil = "1.3.0"; },
+            [](SetupFacts& x) { x.installed_anvil.clear(); }, [](SetupFacts& x) { x.anvil_game_loads = false; },
+            [](SetupFacts& x) { x.comparable.reset(); }, [](SetupFacts& x) { x.comparable->update_pending = true; }};
+        for (const auto& change : failing) {
+            SetupFacts g = f;
+            change(g);
+            CHECK(!checks_pass(setup_checks(g)));
+        }
+        f.unfinished_starts = 1;
+        CHECK(checks_pass(setup_checks(f)));
+
+        const SeriesEnvironment a{true, "m", "1", "h"};
+        CHECK(environment_change(a, a).empty());
+        CHECK(environment_change(a, SeriesEnvironment{false, "m", "1", "h"}) == "Steam is no longer running");
+        CHECK(environment_change(a, SeriesEnvironment{true, "m", "2", "h"}) == "the compared plugin's version changed");
+        CHECK(environment_change(a, SeriesEnvironment{true, "m", "1", "i"}) == "the compared plugin's files changed");
+    });
+
+    run("setup: the system, drives and mods read without elevation", [] {
+        const ReportSystem s = read_system(fs::temp_directory_path(), fs::temp_directory_path());
+        CHECK(!s.cpu.empty() && s.cpu.size() <= 128 && s.logical_cores >= 1 && s.ram_gb >= 1 && s.windows_build >= 10000);
+        const std::set<std::string> kinds{"nvme", "sata_ssd", "hdd", "other", "unknown"};
+        CHECK(kinds.count(s.drive_game) && kinds.count(s.drive_user) && kinds.count(s.drive_workshop));
+        CHECK(drive_kind("") == "unknown" && s.antivirus.size() <= 8);
+        std::printf("  this computer: %s, %d cores, %d GB, temp on %s, build %d, %zu antivirus\n", s.cpu.c_str(),
+                    s.logical_cores, s.ram_gb, s.drive_game.c_str(), s.windows_build, s.antivirus.size());
+
+        const fs::path user = fs::temp_directory_path() / ("anvil-bench-mods-" + std::to_string(GetCurrentProcessId()));
+        const fs::path workshop = user / "steamapps" / "workshop" / "content" / "236850" / "123";
+        std::string error;
+        write_file_atomic(user / "mod" / "ugc_123.mod", "name = \"W\"\npath = \"" + workshop.generic_string() + "\"\n", error);
+        write_file_atomic(user / "mod" / "local.mod", "name = \"L\"\npath = \"mod/local\"\n", error);
+        write_file_atomic(user / "dlc_load.json", "{\"enabled_mods\":[\"mod/ugc_123.mod\",\"mod/local.mod\"]}", error);
+        for (int i = 0; i < 120; ++i) write_file_atomic(workshop / ("f" + std::to_string(i) + ".txt"), "x", error);
+        write_file_atomic(user / "mod" / "local" / "a.txt", "y", error);
+        const ReportMods m = read_mods(user);
+        CHECK(m.enabled == 2 && m.local == 1 && (m.workshop_ids == std::vector<std::string>{"123"}));
+        CHECK(m.files == 100 && m.size_mb == 0);  // 121 files, rounded
+        CHECK(workshop_folder("C:/Lib/steamapps/common/EU4", user) == workshop.parent_path());
+        CHECK(workshop_folder("C:/Lib/steamapps/common/EU4", user / "none") == fs::path("C:/Lib/steamapps/workshop/content/236850"));
+        std::error_code ec;
+        fs::remove_all(user, ec);
     });
 }
