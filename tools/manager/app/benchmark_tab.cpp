@@ -334,6 +334,17 @@ void BenchmarkTab::start(const BenchmarkContext& context) {
 
 void BenchmarkTab::poll(const BenchmarkContext& context) {
     using namespace std::chrono;
+    if (sending_.valid() && sending_.wait_for(0s) == std::future_status::ready) {
+        const SendOutcome outcome = sending_.get();
+        send_outcome_ = send_outcome_text(outcome);
+        send_failed_ = !send_accepted(outcome);
+        if (send_accepted(outcome)) {
+            sent_ = true;
+            std::string error;
+            if (!report_file_.empty() && !mark_sent(report_file_, error)) keep_error_ = error;
+            kept_.reset();
+        }
+    }
     if (runner_) {
         progress_ = runner_->progress();
         if (progress_.phase != RunPhase::Done) return;
@@ -389,6 +400,10 @@ void BenchmarkTab::show_report(Json report, fs::path file) {
     report_file_ = std::move(file);
     fields_start_.clear();
     copy_outcome_.clear();
+    send_outcome_.clear();
+    send_failed_ = false;
+    std::error_code ec;
+    sent_ = !report_file_.empty() && fs::exists(sent_marker(report_file_), ec);
     screen_ = Screen::Result;
 }
 
@@ -641,9 +656,8 @@ void BenchmarkTab::draw_preview() {
     wrapped(std::to_string(m["enabled"].as_integer()) + " enabled (" + std::to_string(m["local"].as_integer()) +
             " local, counted only), about " + std::to_string(m["files"].as_integer()) + " files and " +
             std::to_string(m["size_mb"].as_integer()) + " MB");
-    const bool sent = !report_file_.empty() && fs::exists(sent_marker(report_file_));
     bool include = include_ids_;
-    ImGui::BeginDisabled(sent || !workshop_ids_);
+    ImGui::BeginDisabled(sent_ || sending_.valid() || !workshop_ids_);
     if (ImGui::Checkbox("Include the Workshop ids of my mods", &include)) switch_workshop_ids(include);
     ImGui::EndDisabled();
     if (m["workshop_ids"].is_array()) {
@@ -777,11 +791,26 @@ void BenchmarkTab::draw_send() {
     char size[32];
     std::snprintf(size, sizeof(size), "%.1f KB", static_cast<double>(report_text_.size()) / 1024.0);
     ImGui::Spacing();
+    ImGui::BeginDisabled(sent_ || sending_.valid());
+    const std::string send = sent_ ? std::string("Sent") : sending_.valid() ? std::string("Sending...") : "Send (" + std::string(size) + ")";
+    if (ImGui::Button(send.c_str())) sending_ = std::async(std::launch::async, post_report, report_text_);
+    ImGui::EndDisabled();
+    ImGui::SameLine();
     if (ImGui::Button((std::string("Copy (") + size + ")").c_str())) {
         copy_outcome_ = copy_to_clipboard(window_, report_text_) ? "Copied. Paste it into an issue or a message."
                                                                  : "The clipboard could not be opened.";
     }
+    if (!send_outcome_.empty()) {
+        if (send_failed_) colored_wrapped(kWarn, send_outcome_);
+        else colored_wrapped(kGood, send_outcome_);
+    }
     if (!copy_outcome_.empty()) weak(copy_outcome_);
+    ImGui::Spacing();
+    weak_wrapped("Send uploads this report to bench.happydwarf.dev, run on Cloudflare. Cloudflare sees your IP address "
+                 "for rate limiting; it is not stored. The server adds only the day it received the report, and keeps "
+                 "reports for 24 months. To have this report deleted, send its series id " +
+                 (*report_)["series_id"].as_string() + " to " + kPrivacyAddress + ".");
+    if (ImGui::SmallButton("The privacy note")) open_url(kPrivacyUrl);
 }
 
 }  // namespace anvil::manager

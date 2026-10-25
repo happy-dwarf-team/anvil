@@ -1,5 +1,6 @@
 #pragma once
 
+#include "benchmark_send.hpp"
 #include "install.hpp"
 #include "release_check.hpp"
 
@@ -61,5 +62,9 @@ struct ReleaseCheck {
     std::string error;
 };
 ReleaseCheck fetch_latest_release();
+
+// Send: POST the report to https://bench.happydwarf.dev/reports as
+// application/json, once. Runs on a worker thread.
+SendOutcome post_report(std::string body);
 
 }  // namespace anvil::manager
