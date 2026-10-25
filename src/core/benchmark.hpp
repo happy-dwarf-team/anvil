@@ -104,6 +104,21 @@ private:
     std::set<std::string> warned_;                    // under mutex_
 };
 
+// The arm of a benchmark start, from the start's environment
+// (docs/spec/benchmark-v1.md §2): ANVIL_BENCHMARK=with:<plugin id> or
+// without:<plugin id>. The variable also marks the start as a benchmark start.
+inline constexpr const wchar_t* kBenchmarkVariable = L"ANVIL_BENCHMARK";
+
+struct BenchmarkArm {
+    bool with = false;   // with the compared plugin, or without it
+    std::string plugin;  // the compared plugin's id
+    std::string text() const { return (with ? "with:" : "without:") + plugin; }
+};
+
+// nullopt with `error` for anything but with:<id> or without:<id>, where the
+// id is a valid plugin id.
+std::optional<BenchmarkArm> parse_benchmark_arm(std::string_view text, std::string& error);
+
 // `group.field` or `field`: identifiers of [a-z0-9_], zero or one dot, at
 // most ANVIL_BENCHMARK_MAX_NAME characters. Enum options and learning()
 // reasons follow the same rule.
