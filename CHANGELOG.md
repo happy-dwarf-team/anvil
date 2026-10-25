@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.4.0](https://github.com/happy-dwarf-team/anvil/compare/v1.3.0...v1.4.0) (2026-10-25)
+
+
+### Features
+
+* **api:** add the anvil.benchmark v1 service for plugin fields ([#138](https://github.com/happy-dwarf-team/anvil/issues/138)) ([12386e7](https://github.com/happy-dwarf-team/anvil/commit/12386e7861b4ed64eba7784191a163cc344336b7))
+* **core:** read the benchmark arm and leave the compared plugin out ([#141](https://github.com/happy-dwarf-team/anvil/issues/141)) ([f751cff](https://github.com/happy-dwarf-team/anvil/commit/f751cff8b9274d69b26e2dd2b8f73a7b70192842))
+* **core:** write the benchmark start record with open cost and labels ([#142](https://github.com/happy-dwarf-team/anvil/issues/142)) ([f26c978](https://github.com/happy-dwarf-team/anvil/commit/f26c97803ac7f062af4e38fdeb88008ae8bcefc0))
+* **game:** quit a benchmark start once every participant is done ([#143](https://github.com/happy-dwarf-team/anvil/issues/143)) ([e5559b3](https://github.com/happy-dwarf-team/anvil/commit/e5559b3c8a7ccb8b29fe27fd2da8f0a0cbbf9325))
+* **manager:** classify benchmark starts and compute the series result ([#147](https://github.com/happy-dwarf-team/anvil/issues/147)) ([9e97c38](https://github.com/happy-dwarf-team/anvil/commit/9e97c38c40b8f1f5c4a11a14d68317d9be12600f))
+
 ## [1.3.0](https://github.com/happy-dwarf-team/anvil/compare/v1.2.1...v1.3.0) (2026-10-20)
 
 
