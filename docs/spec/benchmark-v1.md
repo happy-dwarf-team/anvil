@@ -89,7 +89,12 @@ its own file.
 
 - In a benchmark start, `anvil-game` pushes `SDL_QUIT` on the main thread once
   `anvil-game.ready` has fired and every benchmark participant has called
-  `done()`, or 30 s after ready. This quits like the menu's Quit: exit code 0,
+  `done()`, or 30 s after ready. The core decides when: after its ready record
+  it waits until every plugin is loaded and every participant is done (at most
+  30 s after ready), writes the record a last time (`"write": "end"`) and publishes
+  `anvil.benchmark_quit`; `anvil-game` then pushes `SDL_QUIT` through SDL's
+  `SDL_PushEvent` after the next frame, once it has checked that SDL's own
+  table still points there. This quits like the menu's Quit: exit code 0,
   about 1.1 s, `settings.txt` unchanged, no restart, safe mode untouched
   (anvil#134). `anvil-game` loads in both arms.
 - **Fallbacks by the Manager:** 45 s after ready, if the process still runs, it
@@ -281,8 +286,13 @@ involved, so an older Anvil still loads the plugin (anvil#135).
   with the process it started.
 - **Two writes:** at `anvil-game.ready` (the time, the plugin states and the
   fields set so far; written on a thread of the core, off the game's main
-  thread) and a final one at exit (`"write": "ready"` or `"exit"`). The exit
-  write waits for no lock: when one is busy, the ready write stays. A crash after ready leaves the
+  thread) and a final one when the quit is decided (section 2), with every
+  `done` and the values set by then (`"write": "ready"` or `"end"`). The final
+  write is not at exit: in two lab starts that quit through `SDL_QUIT`, the
+  game ended its process without Anvil's `DLL_PROCESS_DETACH` handler running
+  (it wrote no log line), so a write there would never happen. Values a late
+  participant sets after the final write are lost; its entry has
+  `done: false`. A crash after ready leaves the
   first write; a crash before ready leaves no record, so that row carries only
   the crash and its attribution level.
 - **Contents:**
@@ -623,12 +633,28 @@ Documentation only, in Bellows (`docs:`, no release of its own):
 These are hypotheses or untested paths, not decisions:
 
 - Whether Steam needs the 5 s pause to register the game's exit.
-- The warm and cold thresholds, taken from one lab machine.
+- The warm and cold thresholds, taken from one lab machine. Anvil 1.4's own
+  measurement of the game's first opens (11 817 files until ready) gave
+  0.031 ms per file without Bellows and 0.034 ms with Bellows 0.9 loaded but
+  not a participant, and 0.33 ms (inside the band) in a start with Bellows
+  that came first after a pause and reached ready about 4.8 s later than a later
+  one; n = 1 each. With a plugin that opens the game's files ahead of it, the
+  game's own first opens are not a clean signal, which is why its
+  `open_cost` replaces them.
 - The boot marker under Fast Startup, which restores the kernel from
   `hiberfil.sys` and may not reset `GetTickCount64`; untested.
 - The Manager's own `WM_CLOSE` fallback: tried from a script, not from the
-  Manager.
+  Manager (again with Anvil 1.4 on a start without the arm: exit code 0,
+  `settings.txt` unchanged).
 - Quitting while a dialog is open at ready; not tried.
+- `input_during_start` was true in both lab starts with Bellows and false in
+  the one without (n = 1 each). Bellows sends no input, so it was most likely
+  real use of the computer during those starts, but that was not checked.
+- The game ends its process after `SDL_QUIT` without Anvil's
+  `DLL_PROCESS_DETACH` handler running (no log line from it in two starts), so
+  the start record has no write at exit (section 6). Whatever else Anvil does
+  in that handler (the call counters of `profile = true`) is worth checking
+  in a normal quit too.
 - Whether the cause of the reboot's ~4.45 ms first-open cost is Defender's
   filter or cold NTFS metadata (needs an elevated trace; it does not change
   the classification).

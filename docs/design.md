@@ -389,7 +389,7 @@ Decided in [Gameplay-affecting plugins in ironman, achievements and multiplayer]
 
 ### 13.1 `anvil-game`
 
-A standard plugin (`plugins/anvil-game`, released in `anvil/plugins/anvil-game/`), `phase = "early"` so that early plugins can depend on it, `affects_gameplay = false`. Its `symbols.toml` declares every address and offset it reads (11 symbols, checked with `anvil check --exe`; the lock is committed and checked in CI). It hooks the frame function (`0x14C25A0(app, outer)`); after each frame of the main loop (`outer = 1`) on the main thread (the thread of the first such frame) while the game is not quitting (`app+0x83`, `app+0x2F8`) it does, in this order:
+A standard plugin (`plugins/anvil-game`, released in `anvil/plugins/anvil-game/`), `phase = "early"` so that early plugins can depend on it, `affects_gameplay = false`. Its `symbols.toml` declares every address and offset it reads (13 symbols, checked with `anvil check --exe`; the lock is committed and checked in CI). It hooks the frame function (`0x14C25A0(app, outer)`); after each frame of the main loop (`outer = 1`) on the main thread (the thread of the first such frame) while the game is not quitting (`app+0x83`, `app+0x2F8`) it does, in this order:
 
 1. **Readiness:** the first frame after the game sets its ready flag (the byte at `0x233FF4E`, set once at the end of start-up) publishes `anvil-game.ready`. The core logs `game ready at … ms` from it; the core itself no longer knows the flag.
 2. **Session:** a session runs when the root object (`0x233FE78`) holds a session of the game's class (vtable `0x1CB8460`, verified through its slot `+0x100`), that session has a game-speed object, and the date is set. Ironman is the root byte `+0x24D0`, multiplayer the game's own check `0x6EAA10(session)`, the two inputs of the console's multiplayer/ironman gate. A change of the session object, of ironman or of multiplayer ends the session and starts a new one; `anvil-game.session` carries `STARTED` or `ENDED` with the flags and a number. Reads that fault (a half-built root) change nothing. Quitting from a session publishes no `ENDED`.
@@ -399,6 +399,8 @@ A standard plugin (`plugins/anvil-game`, released in `anvil/plugins/anvil-game/`
 Frames drawn inside a game update or a save load (`outer = 0`) and frames on other threads are passed on untouched. Saves load inside one frame of the main loop (a static finding of the lab), so a session should start at the end of the frame that loaded it, before the next game update; this is not yet checked in the game.
 
 Service `anvil-game.game` version 1: `ready()`, `main_thread_id()`, `frame_number()`, `run_on_main_thread(work, context)` and `session(&out)`. Queued work never runs once the game quits, and frames stop while a save loads, so callers wait with a limit.
+
+In a start-up benchmark start (`anvil.benchmark` active, [docs/spec/benchmark-v1.md](spec/benchmark-v1.md) §2) it subscribes to the core's `anvil.benchmark_quit` and, after the next frame, pushes `SDL_QUIT` through SDL 2.0.4's `SDL_PushEvent` (`sdl_dynapi_init`, `sdl_push_event`), as the menu's Quit does; it does nothing when SDL's dynamic API slot 88 no longer points at that function.
 
 ## 14. Workshop distribution and trust
 

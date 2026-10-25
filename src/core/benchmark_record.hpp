@@ -46,7 +46,7 @@ struct BenchmarkRecordPlugin {
 };
 
 struct BenchmarkRecord {
-    const char* write = "ready";  // "ready" | "end" | "exit"
+    const char* write = "ready";  // "ready" | "end" (the quit is decided)
     std::string anvil_version;
     BenchmarkArm arm;
     uint32_t process_id = 0;

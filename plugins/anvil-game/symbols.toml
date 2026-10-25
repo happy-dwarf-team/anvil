@@ -89,3 +89,22 @@ bytes = "48 89 5C 24 08 57 48 83 EC 20 48 8B 01 48 8B F9 FF 90 18 03 00 00"
 memory = "code"
 signature = "bool (void* session)"
 note = "multiplayer check through session vtable slot 0x318, as the console registration calls it"
+
+# --- quitting a benchmark start (docs/spec/benchmark-v1.md §2) ---
+# SDL 2.0.4 is linked into eu4.exe with its dynamic API; SDL_QUIT pushed on the
+# main thread quits like the menu's Quit (anvil#134). Taken from Tongs' "Input".
+
+[symbol.sdl_dynapi_init]
+rva = 0x17325DD
+bytes = "48 8D 0D AC 45 01 00 48 89 0D D5 DC 87 00"   # lea rcx,[SDL_PushEvent]; mov [slot 88],rcx
+memory = "code"
+values.push_event = { at = 3, rip_relative = 7 }
+values.push_event_slot = { at = 10, rip_relative = 14 }
+note = "SDL 2.0.4 dynamic API: slot 88 of the jump table is SDL_PushEvent"
+
+[symbol.sdl_push_event]
+rva = 0x1746B90
+bytes = "40 57 48 83 EC 20 48 8B F9 E8 82 B3 01 00 89 47 04"   # push rdi; sub rsp,20h; mov rdi,rcx; call SDL_GetTicks; mov [rdi+4],eax
+memory = "code"
+signature = "int (void* event)"
+note = "SDL_PushEvent: stamps the event's time with SDL_GetTicks, then queues it"

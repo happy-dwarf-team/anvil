@@ -80,7 +80,7 @@ struct Runtime {
     LARGE_INTEGER ready{};             // anvil-game.ready
     std::optional<bool> input_during_start;
     std::optional<bool> first_start_since_boot, definitions_changed;  // computed for the ready record
-    std::atomic<bool> record_written{false};  // the ready record is on disk
+    std::atomic<bool> plugins_loaded{false};  // the main phase has processed every plugin
 };
 
 Runtime* g_runtime = nullptr;
@@ -98,6 +98,12 @@ double elapsed_ms() {
            static_cast<double>(g_runtime->frequency.QuadPart ? g_runtime->frequency.QuadPart : 1);
 }
 
+// The ms from the entry point to `at` (a QueryPerformanceCounter value).
+double ms_since_entry(LARGE_INTEGER at) {
+    return static_cast<double>(at.QuadPart - g_runtime->start.QuadPart) * 1000.0 /
+           static_cast<double>(g_runtime->frequency.QuadPart ? g_runtime->frequency.QuadPart : 1);
+}
+
 std::string fmt_ms(double ms) {
     char buffer[32];
     std::snprintf(buffer, sizeof(buffer), "%.1f ms", ms);
@@ -110,9 +116,8 @@ std::filesystem::path benchmark_record_file() {
     return g_runtime->anvil_dir / "data" / "anvil" / "benchmark-start.json";
 }
 
-// What the record says now. `exiting`: the process exits (DllMain), so
-// nothing may wait for a lock; nullopt when one is busy.
-std::optional<BenchmarkRecord> benchmark_record(const char* write, bool exiting) {
+// What the record says now.
+BenchmarkRecord benchmark_record(const char* write) {
     BenchmarkRecord r;
     r.write = write;
     r.anvil_version = kAnvilVersion;
@@ -126,12 +131,7 @@ std::optional<BenchmarkRecord> benchmark_record(const char* write, bool exiting)
     if (GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) {
         r.creation_filetime = (static_cast<uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
     }
-    std::vector<BenchmarkParticipant> participants;
-    if (!exiting) {
-        participants = g_runtime->benchmark->participants();
-    } else if (!g_runtime->benchmark->try_participants(participants)) {
-        return std::nullopt;
-    }
+    std::vector<BenchmarkParticipant> participants = g_runtime->benchmark->participants();
     for (const auto& p : g_runtime->plugins) {
         BenchmarkRecordPlugin out;
         out.id = p->manifest.id;
@@ -172,7 +172,40 @@ std::optional<bool> input_since_entry() {
     return static_cast<int32_t>(info.dwTime - g_runtime->entry_tick) > 0;  // 32-bit ticks wrap
 }
 
+// After ready: waits until every plugin is loaded and every participant has
+// called done(), at most ANVIL_BENCHMARK_QUIT_LIMIT_MS after ready; then the
+// end record and ANVIL_BENCHMARK_EVENT_QUIT, on which anvil-game quits the
+// game (docs/spec/benchmark-v1.md §2).
+void quit_when_done() {
+    const double ready_ms = ms_since_entry(g_runtime->ready);
+    std::vector<std::string> waiting;
+    for (;;) {
+        waiting.clear();
+        if (!g_runtime->plugins_loaded.load(std::memory_order_acquire)) waiting.push_back("(plugins still loading)");
+        for (const auto& p : g_runtime->benchmark->participants()) {
+            if (!p.done) waiting.push_back(p.id);
+        }
+        if (waiting.empty() || elapsed_ms() - ready_ms >= ANVIL_BENCHMARK_QUIT_LIMIT_MS) break;
+        Sleep(20);
+    }
+    // The last write: the game ends its process without Anvil's exit handler
+    // running (two lab starts), so nothing is written at exit.
+    if (std::string error; !write_benchmark_record(benchmark_record("end"), error)) {
+        log_warning("benchmark: cannot write the start record: " + error);
+    }
+    const std::string after = fmt_ms(elapsed_ms() - ready_ms) + " after ready";
+    if (waiting.empty()) {
+        log_info("benchmark: every participant is done " + after + "; quitting");
+    } else {
+        std::string list;
+        for (const auto& id : waiting) list += (list.empty() ? "" : ", ") + id;
+        log_warning("benchmark: still not done " + after + ": " + list + "; quitting anyway");
+    }
+    g_runtime->bus.publish(ANVIL_BENCHMARK_EVENT_QUIT, nullptr);
+}
+
 // The ready record, off the game's main thread: the labels need the event log.
+// Then the wait for the participants, on the same thread.
 DWORD WINAPI write_ready_record(LPVOID) {
     try {
         if (g_runtime->history_read.load(std::memory_order_acquire) && g_runtime->previous_start) {
@@ -183,16 +216,20 @@ DWORD WINAPI write_ready_record(LPVOID) {
                 g_runtime->definitions_changed = *update > previous.entry_filetime;
             }
         }
-        const auto record = benchmark_record("ready", false);
         std::string error;
-        if (record && write_benchmark_record(*record, error)) {
-            g_runtime->record_written.store(true, std::memory_order_release);
+        if (write_benchmark_record(benchmark_record("ready"), error)) {
             log_info("benchmark: start record written at ready (" + fmt_ms(elapsed_ms()) + ")");
         } else {
             log_warning("benchmark: cannot write the start record: " + error);
         }
     } catch (const std::exception& e) {
         log_warning(std::string("benchmark: cannot write the start record: ") + e.what());
+    }
+    try {
+        quit_when_done();
+    } catch (const std::exception& e) {
+        log_warning(std::string("benchmark: ") + e.what() + "; quitting now");
+        g_runtime->bus.publish(ANVIL_BENCHMARK_EVENT_QUIT, nullptr);
     }
     return 0;
 }
@@ -347,6 +384,7 @@ DWORD WINAPI main_phase(LPVOID) {
     }
     // The end of the core start-up of design §17 (entry point -> end of loading).
     log_info("plugins loaded at " + fmt_ms(elapsed_ms()));
+    g_runtime->plugins_loaded.store(true, std::memory_order_release);
     g_runtime->control->loading_done();
     g_runtime->bus.publish(ANVIL_EVENT_PLUGINS_LOADED, nullptr);
     if (std::string error; !write_file_atomic(
@@ -769,12 +807,6 @@ PluginSettings* plugin_settings(std::string_view plugin_id) {
 void shutdown() {
     try {
         if (g_runtime != nullptr && g_runtime->changes && g_runtime->profile) write_call_counts();
-        // The final record of a benchmark start, only after the ready one: a
-        // start that exits before ready leaves none (docs/spec/benchmark-v1.md §6).
-        if (g_runtime != nullptr && g_runtime->arm && g_runtime->record_written.load(std::memory_order_acquire)) {
-            std::string error;
-            if (const auto record = benchmark_record("exit", true)) write_benchmark_record(*record, error);
-        }
         // Closed before the game was ready, without a crash: not counted.
         if (g_runtime != nullptr && g_runtime->start_marker.active() && !crash::crashed()) {
             g_runtime->start_marker.clean_exit();
