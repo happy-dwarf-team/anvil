@@ -31,6 +31,7 @@
 #include <set>
 #include <cstdio>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -254,6 +255,26 @@ void startup_impl(const std::filesystem::path& game_dir) {
         return;
     }
 
+    // A benchmark start (docs/spec/benchmark-v1.md §2): the arm is in the
+    // environment the Manager started the game with; anvil.toml is never
+    // written for it.
+    std::optional<BenchmarkArm> arm;
+    {
+        wchar_t text[96] = {};
+        const DWORD n = GetEnvironmentVariableW(kBenchmarkVariable, text, static_cast<DWORD>(std::size(text)));
+        if (n > 0) {
+            std::string error;
+            const std::string value = n < std::size(text) ? narrow(text) : std::string("(too long)");
+            arm = n < std::size(text) ? parse_benchmark_arm(value, error) : std::nullopt;
+            if (arm) {
+                log_info("benchmark start: arm " + arm->text());
+            } else {
+                log_warning("ANVIL_BENCHMARK=" + value + " ignored, so this is not a benchmark start: " +
+                            (error.empty() ? std::string("too long") : error));
+            }
+        }
+    }
+
     HMODULE exe = GetModuleHandleW(nullptr);
     wchar_t exePath[MAX_PATH * 2] = {};
     GetModuleFileNameW(exe, exePath, static_cast<DWORD>(std::size(exePath)));
@@ -356,6 +377,7 @@ void startup_impl(const std::filesystem::path& game_dir) {
     input.host_version = Version::parse(kAnvilVersion);
     input.game_build = game.build_id;
     input.disabled = settings.disabled_plugins;
+    if (arm && !arm->with) input.benchmark_without = arm->plugin;
     // symbols.toml: its build and every symbol are checked here, before any
     // plugin is loaded. The image is read through the registry, so bytes a
     // plugin has already changed read in their original form (design §7).
@@ -524,9 +546,8 @@ void startup_impl(const std::filesystem::path& game_dir) {
         log_warning("cannot register " ANVIL_CONTROL_SERVICE);
     }
     // anvil.benchmark: plugins declare their fields inside anvil_plugin_load,
-    // so it is there before any plugin loads too. No start is a benchmark
-    // start yet (active = false): the arm comes with the start's environment.
-    g_runtime->benchmark = std::make_unique<Benchmark>(false, [](const AnvilPlugin& plugin, const std::string& message) {
+    // so it is there before any plugin loads too.
+    g_runtime->benchmark = std::make_unique<Benchmark>(arm.has_value(), [](const AnvilPlugin& plugin, const std::string& message) {
         Log::instance().write(ANVIL_LOG_WARNING, plugin.manifest.id, message);
     });
     if (g_runtime->bus.register_service("anvil", ANVIL_BENCHMARK_SERVICE, ANVIL_BENCHMARK_SERVICE_VERSION,

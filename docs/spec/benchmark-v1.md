@@ -65,14 +65,17 @@ its own file.
   Steam running and `SteamAppId=236850` in the child's environment. Without
   either, the game starts without the Steam client and overlay, which is not
   the player's usual start (anvil#128, anvil#134).
-- The **arm** is passed in the start's environment, for example
-  `ANVIL_BENCHMARK=without:bellows` or `ANVIL_BENCHMARK=with:bellows` (the exact
-  form is fixed in implementation). The same variable marks the start as a
-  benchmark start for the core and for plugins.
+- The **arm** is passed in the start's environment as
+  `ANVIL_BENCHMARK=without:<plugin id>` or `ANVIL_BENCHMARK=with:<plugin id>`,
+  for example `ANVIL_BENCHMARK=without:bellows`. The same variable marks the
+  start as a benchmark start for the core and for plugins (`active()`). Any
+  other value is ignored with a warning in `anvil.log`, and the start is then
+  not a benchmark start.
 - In the arm without, the core treats the compared plugin as disabled at the
   point of the resolver where `disabled_plugins` applies (state `disabled`), so
-  both arms pay mod discovery. `anvil.toml` is never written, so nothing needs
-  restoring if the Manager dies mid-series (anvil#131).
+  both arms pay mod discovery. A plugin the player disabled stays disabled by
+  the player. `anvil.toml` is never written, so nothing needs restoring if the
+  Manager dies mid-series (anvil#131).
 
 ### The time
 

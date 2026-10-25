@@ -187,6 +187,12 @@ ResolveResult resolve(const ResolveInput& input) {
             result.skipped.push_back({m.id, "disabled in anvil.toml", m.folder, true});
             continue;
         }
+        if (!input.benchmark_without.empty() && m.id == input.benchmark_without) {
+            Skipped s{m.id, "left out by the start-up benchmark (ANVIL_BENCHMARK=without:" + m.id + ")", m.folder, true};
+            s.benchmark_arm = true;
+            result.skipped.push_back(std::move(s));
+            continue;
+        }
         if (m.api != input.host_api) {
             result.skipped.push_back({m.id, "built for plugin API " + std::to_string(m.api) + ", Anvil provides API " +
                                                 std::to_string(input.host_api), m.folder});

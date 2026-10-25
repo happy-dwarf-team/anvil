@@ -15,6 +15,9 @@ struct ResolveInput {
     std::optional<Version> host_version;  // Anvil version, checked against each plugin's "anvil" range
     const char* game_build = nullptr;  // nullptr = unknown build
     std::vector<std::string> disabled;  // ids disabled in anvil.toml
+    // A benchmark start without the compared plugin (ANVIL_BENCHMARK=
+    // without:<id>): that id is disabled at the same point, without anvil.toml.
+    std::string benchmark_without;
     // Optional check after the API and Anvil version checks (the plugin's
     // symbols.toml); returns why the plugin must be skipped, empty = keep it.
     std::function<std::string(const Manifest&)> verify;
@@ -24,7 +27,8 @@ struct Skipped {
     std::string id;     // may be a folder name when the manifest is broken
     std::string reason;
     std::filesystem::path folder;  // the plugin folder
-    bool disabled = false;         // disabled by the player in anvil.toml, not a fault
+    bool disabled = false;         // disabled by the player in anvil.toml, or by the benchmark arm; not a fault
+    bool benchmark_arm = false;    // disabled by the arm of a benchmark start (ResolveInput::benchmark_without)
     std::string mod;               // the mod's name for a plugin from a mod (design §14)
     bool awaiting_approval = false;  // a plugin from a mod that waits for the player's approval
 };
