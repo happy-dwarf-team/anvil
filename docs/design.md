@@ -60,7 +60,7 @@ Core:
 - build identity (the core's only game knowledge);
 - symbol verification;
 - the registry of changes and the chains;
-- services and events;
+- services and events, and its own services `anvil.control` (§15) and `anvil.benchmark` (the start-up benchmark, [docs/spec/benchmark-v1.md](spec/benchmark-v1.md) §5);
 - the approval decision for plugins from mods;
 - crash capture and attribution;
 - suspending gameplay plugins (§13);

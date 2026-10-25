@@ -6,6 +6,8 @@ struct Root;  // types named in symbols.toml are declared before the header
 #include "settings.gen.hpp"
 #include "symbols.gen.hpp"
 
+#include <anvil/anvil_benchmark.hpp>
+
 #include <cstdio>
 #include <string_view>
 #include <type_traits>
@@ -20,6 +22,19 @@ static_assert(std::is_base_of_v<anvil::Site, sym::Types::root_and_date> && sym::
 static_assert(sym::root_and_date.root == 0x233FE78 && sym::root_and_date.date_offset == 0x1DD0);
 static_assert(std::is_same_v<decltype(sym::root)::Type, Root> && sym::root.id == 3);
 static_assert(std::string_view(sym::root.value) == "root");
+
+// The anvil.benchmark wrapper: fields at compile time, set() by value type.
+constexpr const char* kBenchModes[] = {"off", "on"};
+constexpr AnvilBenchmarkField kBenchMode = anvil::Benchmark::enum_field("warmup.mode", kBenchModes, "Mode");
+static_assert(kBenchMode.kind == ANVIL_BENCHMARK_ENUM && kBenchMode.option_count == 2);
+static_assert(anvil::Benchmark::int_field("warmup.opened", ANVIL_BENCHMARK_UNIT_COUNT).unit == ANVIL_BENCHMARK_UNIT_COUNT);
+static_assert(anvil::Benchmark::flag_field("saved").kind == ANVIL_BENCHMARK_FLAG);
+static_assert(requires(const anvil::Benchmark b) {
+    { b.set("a", 1) } -> std::same_as<AnvilResult>;
+    { b.set("a", 1.5) } -> std::same_as<AnvilResult>;
+    { b.set("a", true) } -> std::same_as<AnvilResult>;
+    { b.set_enum("a", "on") } -> std::same_as<AnvilResult>;
+});
 
 static_assert(cfg::enabled.id == 0 && cfg::panel_key.id == 5);
 static_assert(std::is_same_v<decltype(cfg::enabled)::Value, bool> && cfg::enabled.default_value && !cfg::enabled.restart);

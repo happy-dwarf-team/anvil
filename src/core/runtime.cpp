@@ -1,5 +1,6 @@
 #include "runtime.hpp"
 
+#include "benchmark.hpp"
 #include "discovery.hpp"
 #include "mod_plugins.hpp"
 #include "plugin_hash.hpp"
@@ -57,6 +58,7 @@ struct Runtime {
     StartMarker start_marker;  // safe mode: starts that ended before game_ready
     ModDiscovery mods;  // plugins in the playset's mods (design §14)
     std::unique_ptr<Control> control;  // anvil.control, the overlay's view of the core (design §15)
+    std::unique_ptr<Benchmark> benchmark;  // anvil.benchmark (docs/spec/benchmark-v1.md §5)
     LARGE_INTEGER start{};
     LARGE_INTEGER frequency{};
 };
@@ -172,6 +174,7 @@ void load_plugin(AnvilPlugin& plugin) {
                                                     : std::string("returned ") + result_name(outcome.result));
         plugin.state = "failed";
         g_runtime->policy->forget(plugin.owner);
+        g_runtime->benchmark->forget(&plugin);
         log_error(label + ": " + plugin.reason + "; " + std::to_string(outcome.staged) +
                   " change(s) rolled back; plugin stays inactive");
         // The DLL is not unloaded: threads it may have started could still run.
@@ -519,6 +522,16 @@ void startup_impl(const std::filesystem::path& game_dir) {
     if (g_runtime->bus.register_service("anvil", ANVIL_CONTROL_SERVICE, ANVIL_CONTROL_VERSION,
                                         g_runtime->control->service()) != ANVIL_OK) {
         log_warning("cannot register " ANVIL_CONTROL_SERVICE);
+    }
+    // anvil.benchmark: plugins declare their fields inside anvil_plugin_load,
+    // so it is there before any plugin loads too. No start is a benchmark
+    // start yet (active = false): the arm comes with the start's environment.
+    g_runtime->benchmark = std::make_unique<Benchmark>(false, [](const AnvilPlugin& plugin, const std::string& message) {
+        Log::instance().write(ANVIL_LOG_WARNING, plugin.manifest.id, message);
+    });
+    if (g_runtime->bus.register_service("anvil", ANVIL_BENCHMARK_SERVICE, ANVIL_BENCHMARK_SERVICE_VERSION,
+                                        g_runtime->benchmark->service()) != ANVIL_OK) {
+        log_warning("cannot register " ANVIL_BENCHMARK_SERVICE);
     }
 
     // Early plugins: here, before the game's runtime starts.
