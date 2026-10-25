@@ -14,8 +14,8 @@
     {
       "binding": "DB",
       "database_name": "anvil-bench",
-      // Set when the database is created (README.md, "First deployment").
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      // Created in the EU jurisdiction (README.md, "First deployment").
+      "database_id": "030cca9d-34de-41a2-af66-bee76f898d5d",
       "migrations_dir": "migrations"
     }
   ],
