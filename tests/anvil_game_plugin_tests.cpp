@@ -5,6 +5,7 @@
 // the gameplay policy listens to its session event as the core does. Also the
 // session tracker and the work queue on their own.
 // Usage: anvil_game_plugin_tests <folder with one folder per plugin>
+#include "core/benchmark.hpp"
 #include "core/changes.hpp"
 #include "core/gameplay_policy.hpp"
 #include "core/host.hpp"
@@ -40,6 +41,15 @@ constexpr const char* kBuild = "eu4-1.37.5-steam-win64";
 bool g_multiplayer = false;  // what the stand-in of the session's vtable slot 0x318 answers
 bool fake_is_multiplayer_slot(void*) { return g_multiplayer; }
 
+// The types of the events the stand-in of SDL_PushEvent got, and its time stamp.
+std::vector<uint32_t> g_pushed;
+int fake_push_event_rest(const void* event) {
+    uint32_t type = 0;
+    std::memcpy(&type, event, sizeof(type));
+    g_pushed.push_back(type);
+    return 1;
+}
+
 // eu4.exe's size and sections, reserved; pages are committed only where the
 // symbols of anvil-game lie:
 //   .text  0x1000    code   the declared bytes; frame and is_multiplayer callable
@@ -52,10 +62,12 @@ struct FakeEu4 {
     FakeEu4() {
         base = static_cast<uint8_t*>(VirtualAlloc(nullptr, kSize, MEM_RESERVE, PAGE_NOACCESS));
         commit(0x0, PAGE_READWRITE);
-        for (uint32_t page : {0x205000u, 0x6E9000u, 0x6EA000u, 0x802000u, 0x848000u, 0x1432000u, 0x14C2000u}) {
+        for (uint32_t page : {0x205000u, 0x6E9000u, 0x6EA000u, 0x802000u, 0x848000u, 0x1432000u, 0x14C2000u,
+                              0x1732000u, 0x1746000u, 0x1761000u}) {
             commit(page, PAGE_EXECUTE_READWRITE);
         }
         commit(0x1CB8000, PAGE_READWRITE);
+        commit(0x1FB0000, PAGE_READWRITE);
         commit(0x233F000, PAGE_READWRITE);
         write_headers();
 
@@ -83,6 +95,17 @@ struct FakeEu4 {
         put(0x6EAA10, {0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0x01, 0x48, 0x8B,
                        0xF9, 0xFF, 0x90, 0x18, 0x03, 0x00, 0x00, 0x48, 0x83, 0xC4, 0x20, 0x5F, 0x48, 0x8B, 0x5C,
                        0x24, 0x08, 0xC3});
+        // SDL's dynamic API: the init stores SDL_PushEvent in slot 88 (0x1FB02C0).
+        put(0x17325DD, {0x48, 0x8D, 0x0D, 0xAC, 0x45, 0x01, 0x00, 0x48, 0x89, 0x0D, 0xD5, 0xDC, 0x87, 0x00});
+        put_pointer(0x1FB02C0, address(0x1746B90));
+        // SDL_PushEvent: the declared bytes (push rdi; sub rsp,20h; mov rdi,rcx;
+        // call SDL_GetTicks; mov [rdi+4],eax), then mov rcx,rdi; mov rax,
+        // fake_push_event_rest; call rax; add rsp,20h; pop rdi; ret.
+        put(0x1746B90, {0x40, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xF9, 0xE8, 0x82, 0xB3, 0x01, 0x00, 0x89, 0x47,
+                        0x04, 0x48, 0x89, 0xF9, 0x48, 0xB8});
+        put_pointer(0x1746BA6, reinterpret_cast<uintptr_t>(&fake_push_event_rest));
+        put(0x1746BAE, {0xFF, 0xD0, 0x48, 0x83, 0xC4, 0x20, 0x5F, 0xC3});
+        put(0x1761F20, {0xB8, 0xD2, 0x04, 0x00, 0x00, 0xC3});  // SDL_GetTicks: mov eax,1234; ret
         // The game session's vtable: slot 0x100 = speed_object, slot 0x318 = the multiplayer answer.
         put_pointer(0x1CB8460 + 0x100, address(0x8024D0));
         put_pointer(0x1CB8460 + 0x318, reinterpret_cast<uintptr_t>(&fake_is_multiplayer_slot));
@@ -266,6 +289,11 @@ int main(int argc, char** argv) {
         log.push_back(id + ": " + m);
     });
     policy.subscribe();
+    // A benchmark start, as the core registers it before any plugin loads.
+    Benchmark& bench = *new Benchmark(true, [&log](const AnvilPlugin& p, const std::string& m) {
+        log.push_back(p.manifest.id + ": " + m);
+    });
+    bus.register_service("anvil", ANVIL_BENCHMARK_SERVICE, ANVIL_BENCHMARK_SERVICE_VERSION, bench.service());
     Heard& heard = *new Heard;
     for (const char* event : {ANVIL_GAME_EVENT_READY, ANVIL_GAME_EVENT_FRAME, ANVIL_GAME_EVENT_SESSION}) {
         bus.subscribe("listener", event, listen, &heard);
@@ -285,7 +313,7 @@ int main(int argc, char** argv) {
         const std::string reason = check_plugin_symbols(dir / parsed.manifest->symbols, kBuild, changes, image.address(0),
                                                         &verified, &declared);
         if (!reason.empty()) std::printf("  %s\n", reason.c_str());
-        CHECK(reason.empty() && verified.symbols.size() == 11);
+        CHECK(reason.empty() && verified.symbols.size() == 13);
         if (!reason.empty()) return;
         auto* p = new AnvilPlugin;
         p->context = &context;
@@ -456,6 +484,27 @@ int main(int argc, char** argv) {
         CHECK(host.publish(&other, "other.event", nullptr) == ANVIL_OK);
         CHECK(!changes.suspended(gp));
         CHECK(contains(log, "other: publish anvil-game.session refused: plugins publish only events named other.<name>"));
+    });
+
+    run("anvil-game: a benchmark start quits on the core's event, on the main thread", [&] {
+        CHECK(contains(log, "anvil-game: benchmark start: the game quits after ready once every participant is done"));
+        g_pushed.clear();
+        // From another thread, as the core publishes it.
+        std::thread([&] { bus.publish(ANVIL_BENCHMARK_EVENT_QUIT, nullptr); }).join();
+        CHECK(g_pushed.empty());  // only after the next frame of the main loop
+        frame(game.app, 1);
+        CHECK((g_pushed == std::vector<uint32_t>{0x100}));
+        CHECK(std::any_of(log.begin(), log.end(), [](const std::string& l) {
+            return l.starts_with("anvil-game: benchmark start: SDL_QUIT pushed (frame ") && l.ends_with(", result 1)");
+        }));
+
+        // Someone took over SDL's table: no quit.
+        image.put_pointer(0x1FB02C0, image.address(0x1761F20));
+        bus.publish(ANVIL_BENCHMARK_EVENT_QUIT, nullptr);
+        frame(game.app, 1);
+        CHECK((g_pushed == std::vector<uint32_t>{0x100}));
+        CHECK(contains(log, "anvil-game: benchmark start: SDL's SDL_PushEvent slot points elsewhere; not quitting"));
+        image.put_pointer(0x1FB02C0, image.address(0x1746B90));
     });
 
     if (g_failures != 0) {

@@ -81,6 +81,7 @@ struct Runtime {
     std::optional<bool> input_during_start;
     std::optional<bool> first_start_since_boot, definitions_changed;  // computed for the ready record
     std::atomic<bool> record_written{false};  // the ready record is on disk
+    std::atomic<bool> plugins_loaded{false};  // the main phase has processed every plugin
 };
 
 Runtime* g_runtime = nullptr;
@@ -95,6 +96,12 @@ double elapsed_ms() {
     LARGE_INTEGER now{};
     QueryPerformanceCounter(&now);
     return static_cast<double>(now.QuadPart - g_runtime->start.QuadPart) * 1000.0 /
+           static_cast<double>(g_runtime->frequency.QuadPart ? g_runtime->frequency.QuadPart : 1);
+}
+
+// The ms from the entry point to `at` (a QueryPerformanceCounter value).
+double ms_since_entry(LARGE_INTEGER at) {
+    return static_cast<double>(at.QuadPart - g_runtime->start.QuadPart) * 1000.0 /
            static_cast<double>(g_runtime->frequency.QuadPart ? g_runtime->frequency.QuadPart : 1);
 }
 
@@ -172,7 +179,39 @@ std::optional<bool> input_since_entry() {
     return static_cast<int32_t>(info.dwTime - g_runtime->entry_tick) > 0;  // 32-bit ticks wrap
 }
 
+// After ready: waits until every plugin is loaded and every participant has
+// called done(), at most ANVIL_BENCHMARK_QUIT_LIMIT_MS after ready; then the
+// end record and ANVIL_BENCHMARK_EVENT_QUIT, on which anvil-game quits the
+// game (docs/spec/benchmark-v1.md §2).
+void quit_when_done() {
+    const double ready_ms = ms_since_entry(g_runtime->ready);
+    std::vector<std::string> waiting;
+    for (;;) {
+        waiting.clear();
+        if (!g_runtime->plugins_loaded.load(std::memory_order_acquire)) waiting.push_back("(plugins still loading)");
+        for (const auto& p : g_runtime->benchmark->participants()) {
+            if (!p.done) waiting.push_back(p.id);
+        }
+        if (waiting.empty() || elapsed_ms() - ready_ms >= ANVIL_BENCHMARK_QUIT_LIMIT_MS) break;
+        Sleep(20);
+    }
+    if (const auto record = benchmark_record("end", false)) {
+        std::string error;
+        if (!write_benchmark_record(*record, error)) log_warning("benchmark: cannot write the start record: " + error);
+    }
+    const std::string after = fmt_ms(elapsed_ms() - ready_ms) + " after ready";
+    if (waiting.empty()) {
+        log_info("benchmark: every participant is done " + after + "; quitting");
+    } else {
+        std::string list;
+        for (const auto& id : waiting) list += (list.empty() ? "" : ", ") + id;
+        log_warning("benchmark: still not done " + after + ": " + list + "; quitting anyway");
+    }
+    g_runtime->bus.publish(ANVIL_BENCHMARK_EVENT_QUIT, nullptr);
+}
+
 // The ready record, off the game's main thread: the labels need the event log.
+// Then the wait for the participants, on the same thread.
 DWORD WINAPI write_ready_record(LPVOID) {
     try {
         if (g_runtime->history_read.load(std::memory_order_acquire) && g_runtime->previous_start) {
@@ -193,6 +232,12 @@ DWORD WINAPI write_ready_record(LPVOID) {
         }
     } catch (const std::exception& e) {
         log_warning(std::string("benchmark: cannot write the start record: ") + e.what());
+    }
+    try {
+        quit_when_done();
+    } catch (const std::exception& e) {
+        log_warning(std::string("benchmark: ") + e.what() + "; quitting now");
+        g_runtime->bus.publish(ANVIL_BENCHMARK_EVENT_QUIT, nullptr);
     }
     return 0;
 }
@@ -347,6 +392,7 @@ DWORD WINAPI main_phase(LPVOID) {
     }
     // The end of the core start-up of design §17 (entry point -> end of loading).
     log_info("plugins loaded at " + fmt_ms(elapsed_ms()));
+    g_runtime->plugins_loaded.store(true, std::memory_order_release);
     g_runtime->control->loading_done();
     g_runtime->bus.publish(ANVIL_EVENT_PLUGINS_LOADED, nullptr);
     if (std::string error; !write_file_atomic(

@@ -57,9 +57,10 @@ int child(const fs::path& game_dir) {
     const fs::path log = game_dir / "anvil" / "anvil.log";
     const ULONGLONG deadline = GetTickCount64() + 30000;
     while (!contains(read(log), "[anvil] status: ") && GetTickCount64() < deadline) Sleep(5);
-    // A copy of mod-probe published anvil-game.ready: wait for the benchmark's ready record too.
-    if (GetEnvironmentVariableW(L"ANVIL_PROBE_PUBLISH", nullptr, 0) > 0 && GetEnvironmentVariableW(L"ANVIL_BENCHMARK", nullptr, 0) > 0) {
-        while (!contains(read(log), "benchmark: start record written at ready") && GetTickCount64() < deadline) Sleep(5);
+    // A copy of mod-probe published anvil-game.ready: wait until the benchmark start would quit.
+    if (GetEnvironmentVariableW(L"ANVIL_PROBE_PUBLISH", nullptr, 0) > 0 &&
+        GetEnvironmentVariableW(L"ANVIL_BENCHMARK", nullptr, 0) > 0) {
+        while (!contains(read(log), " after ready; quitting") && GetTickCount64() < deadline) Sleep(5);
     }
     anvil::shutdown();  // not counted as an unfinished start (safe mode)
     return contains(read(log), "[anvil] status: ") ? 0 : 1;
@@ -277,6 +278,7 @@ int main(int argc, char** argv) {
         log = game.start();
         CHECK(contains(log, "[mod-probe] benchmark fields set (active)"));
         CHECK(contains(log, "benchmark: start record written at ready"));
+        CHECK(contains(log, "benchmark: every participant is done ") && contains(log, " after ready; quitting"));
         std::string record = read(record_file);
         CHECK(contains(record, "{\"format\":1,\"write\":\"exit\",\"anvil\":\""));
         CHECK(contains(record, "\"arm\":{\"with\":true,\"plugin\":\"mod-probe\"}"));

@@ -89,7 +89,12 @@ its own file.
 
 - In a benchmark start, `anvil-game` pushes `SDL_QUIT` on the main thread once
   `anvil-game.ready` has fired and every benchmark participant has called
-  `done()`, or 30 s after ready. This quits like the menu's Quit: exit code 0,
+  `done()`, or 30 s after ready. The core decides when: after its ready record
+  it waits until every plugin is loaded and every participant is done (at most
+  30 s after ready), writes the record again (`"write": "end"`) and publishes
+  `anvil.benchmark_quit`; `anvil-game` then pushes `SDL_QUIT` through SDL's
+  `SDL_PushEvent` after the next frame, once it has checked that SDL's own
+  table still points there. This quits like the menu's Quit: exit code 0,
   about 1.1 s, `settings.txt` unchanged, no restart, safe mode untouched
   (anvil#134). `anvil-game` loads in both arms.
 - **Fallbacks by the Manager:** 45 s after ready, if the process still runs, it
@@ -282,7 +287,9 @@ involved, so an older Anvil still loads the plugin (anvil#135).
 - **Two writes:** at `anvil-game.ready` (the time, the plugin states and the
   fields set so far; written on a thread of the core, off the game's main
   thread) and a final one at exit (`"write": "ready"` or `"exit"`). The exit
-  write waits for no lock: when one is busy, the ready write stays. A crash after ready leaves the
+  write waits for no lock: when one is busy, the last write stays. A third
+  write, `"end"`, comes when the quit is decided (section 2), so the fields
+  set after ready are kept even then. A crash after ready leaves the
   first write; a crash before ready leaves no record, so that row carries only
   the crash and its attribution level.
 - **Contents:**

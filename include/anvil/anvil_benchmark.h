@@ -9,7 +9,8 @@
  * Declaring fields inside anvil_plugin_load, even zero of them, makes the
  * plugin a benchmark participant, which promises one done() call: in a
  * benchmark start the game quits once it is ready and every participant is
- * done, or 30 s after ready. The schema is fixed for the start.
+ * done, or 30 s after ready (ANVIL_BENCHMARK_EVENT_QUIT). The schema is fixed
+ * for the start.
  *
  * Outside a benchmark start (active() is 0) every call checks its arguments
  * the same way and nothing is recorded, so a plugin may call it always.
@@ -36,6 +37,13 @@ extern "C" {
 
 #define ANVIL_BENCHMARK_SERVICE "anvil.benchmark"
 #define ANVIL_BENCHMARK_SERVICE_VERSION 1
+
+/* Published by the core once in a benchmark start, on a thread of its own,
+ * when the game is ready and every participant has called done(), or
+ * ANVIL_BENCHMARK_QUIT_LIMIT_MS after ready. Payload NULL. anvil-game then
+ * quits the game the way the menu's Quit does. */
+#define ANVIL_BENCHMARK_EVENT_QUIT "anvil.benchmark_quit"
+#define ANVIL_BENCHMARK_QUIT_LIMIT_MS 30000
 
 /* Limits of one plugin's declaration. Names and enum options are `group.field`
  * or `field`, from identifiers of [a-z0-9_] with zero or one dot. */

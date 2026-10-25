@@ -10,7 +10,12 @@
 //   4. the frame event.
 // Frames drawn inside a game update or a save load (outer = 0) and frames on
 // any other thread are passed on untouched.
+//
+// In a start-up benchmark start it also quits the game when the core says so
+// (ANVIL_BENCHMARK_EVENT_QUIT): SDL_QUIT pushed on the main thread, which is
+// what the menu's Quit does (docs/spec/benchmark-v1.md §2, anvil#134).
 #include <anvil/anvil.hpp>
+#include <anvil/anvil_benchmark.hpp>
 #include <anvil/anvil_game.h>
 
 #include <windows.h>
@@ -152,6 +157,34 @@ std::uintptr_t on_frame(void* app, std::uint8_t outer) noexcept {
     return result;
 }
 
+// ---- quitting a benchmark start ---------------------------------------------------
+
+constexpr std::uint32_t kSdlQuit = 0x100;  // SDL_QUIT
+
+// An SDL_Event of SDL 2.0.4 (a 56-byte union); its first field is the type.
+struct alignas(8) SdlEvent {
+    unsigned char bytes[56];
+};
+
+// On the main thread, after a frame.
+void push_quit(void*) {
+    const anvil::Host host;
+    const std::uintptr_t base = host.game().image_base;
+    // SDL's own calls go through its dynamic API table; it still points at
+    // the SDL_PushEvent we call, or something else has taken it over.
+    std::uintptr_t slot = 0;
+    std::memcpy(&slot, reinterpret_cast<const void*>(base + sym::sdl_dynapi_init.push_event_slot), sizeof(slot));
+    const auto push_event = host.function(sym::sdl_push_event);
+    if (slot != base + sym::sdl_dynapi_init.push_event || slot != reinterpret_cast<std::uintptr_t>(push_event)) {
+        host.warn("benchmark start: SDL's SDL_PushEvent slot points elsewhere; not quitting");
+        return;
+    }
+    SdlEvent event{};
+    std::memcpy(event.bytes, &kSdlQuit, sizeof(kSdlQuit));
+    const int result = push_event(&event);
+    host.info("benchmark start: SDL_QUIT pushed (frame {}, result {})", g_frame_number.load(), result);
+}
+
 // ---- the service ------------------------------------------------------------
 
 int service_ready() { return g_ready.load(std::memory_order_acquire) ? 1 : 0; }
@@ -200,6 +233,12 @@ struct AnvilGame : anvil::Plugin {
         host.hook(g_frame, sym::frame, on_frame);
         host.info("frame hook staged; events {}, {}, {}; service {} v{}", ANVIL_GAME_EVENT_READY, ANVIL_GAME_EVENT_FRAME,
                   ANVIL_GAME_EVENT_SESSION, ANVIL_GAME_SERVICE, ANVIL_GAME_SERVICE_VERSION);
+        // The core decides when (every participant done, or the limit); the
+        // quit itself needs the main thread.
+        if (anvil::Benchmark(host).active()) {
+            host.subscribe(ANVIL_BENCHMARK_EVENT_QUIT, [] { g_work.push(&push_quit, nullptr); });
+            host.info("benchmark start: the game quits after ready once every participant is done");
+        }
     }
 };
 
