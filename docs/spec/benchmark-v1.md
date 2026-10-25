@@ -326,7 +326,11 @@ involved, so an older Anvil still loads the plugin (anvil#135).
 ## 7. The benchmark report
 
 One JSON document per series. The local copy, the preview, what **Send**
-uploads and what **Copy** copies are the same bytes (anvil#130).
+uploads and what **Copy** copies are the same bytes (anvil#130). The exact
+document is the JSON Schema of its format,
+[`report-format-1.schema.json`](../../services/bench-receiver/schemas/report-format-1.schema.json)
+for format 1, with an
+[example](../../services/bench-receiver/examples/report-format-1.json).
 
 ### Contents
 
@@ -476,6 +480,9 @@ Decided in anvil#132.
   `body`, the raw text byte for byte. Envelope fields (Anvil version, compared
   plugin and version, series state) are indexed generated columns from
   `json_extract`; per-format views read rows with `json_each`. No R2.
+- A second table, `daily_counts`, holds the number of reports received per
+  UTC day for the daily limit, so a request reads one row instead of counting
+  the day's reports; past days are deleted daily.
 - Nothing else is stored: no IP address, country, User-Agent or time of day.
   The IP lives only in the rate limiter's counters.
 - `invocation_logs = false`; one log line per request with status, format and

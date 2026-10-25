@@ -1,0 +1,1129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bench.happydwarf.dev/schemas/report-format-1.schema.json",
+  "title": "Anvil start-up benchmark report, format 1",
+  "description": "One benchmark series as Anvil Manager keeps, previews, sends and copies it (docs/spec/benchmark-v1.md, section 7). Format 1 is exactly this schema: any change to it is a new format. Plugin field values under starts[].plugins.<id>.fields are checked against plugin_schemas by the receiver, not here.",
+  "type": "object",
+  "required": [
+    "format",
+    "series_id",
+    "series",
+    "starts",
+    "plugin_schemas",
+    "result",
+    "system",
+    "mods",
+    "versions"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "series_id": {
+      "description": "Random UUID v4, new for every series; only used to drop a repeated Send.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "series": {
+      "$ref": "#/$defs/series"
+    },
+    "starts": {
+      "description": "One row per start in the order they ran, discarded starts included.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/start"
+      }
+    },
+    "plugin_schemas": {
+      "description": "The declared fields of every benchmark participant, once per report, without labels.",
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": {
+        "$ref": "#/$defs/plugin_id"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/plugin_schema"
+      }
+    },
+    "result": {
+      "$ref": "#/$defs/result"
+    },
+    "system": {
+      "$ref": "#/$defs/system"
+    },
+    "mods": {
+      "$ref": "#/$defs/mods"
+    },
+    "versions": {
+      "$ref": "#/$defs/versions"
+    }
+  },
+  "$defs": {
+    "plugin_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "maxLength": 64
+    },
+    "name": {
+      "description": "A field or enum option name: identifiers [a-z0-9_] with zero or one dot.",
+      "type": "string",
+      "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)?$",
+      "maxLength": 64
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$",
+      "maxLength": 64
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "workshop_id": {
+      "type": "string",
+      "pattern": "^[0-9]{1,20}$"
+    },
+    "arm": {
+      "enum": [
+        "without",
+        "with"
+      ]
+    },
+    "ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3600000
+    },
+    "text": {
+      "description": "A short product name read from Windows; no control characters.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+    },
+    "series": {
+      "type": "object",
+      "required": [
+        "state",
+        "stop_reason",
+        "compared",
+        "target"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "enum": [
+            "complete",
+            "stopped"
+          ]
+        },
+        "stop_reason": {
+          "enum": [
+            null,
+            "player",
+            "too_many_discarded",
+            "quit_failed",
+            "crashed",
+            "safe_mode",
+            "plugin_not_loaded",
+            "plugin_not_participant",
+            "timeout",
+            "environment_changed"
+          ]
+        },
+        "compared": {
+          "type": "object",
+          "required": [
+            "id",
+            "version"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/plugin_id"
+            },
+            "version": {
+              "$ref": "#/$defs/version"
+            }
+          }
+        },
+        "target": {
+          "description": "Valid warm starts per arm the player chose.",
+          "enum": [
+            3,
+            5,
+            10
+          ]
+        }
+      },
+      "if": {
+        "properties": {
+          "state": {
+            "const": "complete"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "stop_reason": {
+            "const": null
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "stop_reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "start": {
+      "type": "object",
+      "required": [
+        "position",
+        "arm",
+        "time_ms",
+        "valid",
+        "discard_reason",
+        "killed",
+        "cold_start",
+        "input_during_start",
+        "crash",
+        "plugins"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "position": {
+          "description": "1 for the first start of the series.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        },
+        "arm": {
+          "$ref": "#/$defs/arm"
+        },
+        "time_ms": {
+          "description": "Milliseconds from process creation to anvil-game.ready; null when the start never reached ready.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 3600000
+        },
+        "valid": {
+          "type": "boolean"
+        },
+        "discard_reason": {
+          "enum": [
+            null,
+            "plugin_learning",
+            "crash",
+            "safe_mode",
+            "arm_mismatch",
+            "not_participant",
+            "timeout",
+            "no_record",
+            "environment_changed"
+          ]
+        },
+        "killed": {
+          "description": "The Manager killed the process.",
+          "type": "boolean"
+        },
+        "cold_start": {
+          "$ref": "#/$defs/cold_start"
+        },
+        "input_during_start": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "crash": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "attribution",
+            "plugin"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "attribution": {
+              "enum": [
+                "in_plugin_code",
+                "in_plugin_change",
+                "plugin_on_stack",
+                "no_plugin"
+              ]
+            },
+            "plugin": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[a-z0-9-]+$",
+              "maxLength": 64
+            }
+          }
+        },
+        "plugins": {
+          "description": "Every discovered plugin's state in this start; empty when the start left no record.",
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {
+            "$ref": "#/$defs/plugin_id"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/plugin_state"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "valid": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "discard_reason": {
+            "const": null
+          },
+          "time_ms": {
+            "$ref": "#/$defs/ms"
+          },
+          "cold_start": {
+            "properties": {
+              "class": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "discard_reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "cold_start": {
+      "description": "The raw cold-start signals and the class the Manager derived from them.",
+      "type": "object",
+      "required": [
+        "first_since_boot",
+        "definitions_changed",
+        "open_cost",
+        "class"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "first_since_boot": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "definitions_changed": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "open_cost": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "source",
+            "plugin",
+            "files",
+            "ms"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "enum": [
+                "game",
+                "plugin"
+              ]
+            },
+            "plugin": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[a-z0-9-]+$",
+              "maxLength": 64
+            },
+            "files": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000000
+            },
+            "ms": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 3600000
+            }
+          },
+          "if": {
+            "properties": {
+              "source": {
+                "const": "game"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "plugin": {
+                "const": null
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "plugin": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "class": {
+          "enum": [
+            null,
+            "warm",
+            "cold",
+            "unclear"
+          ]
+        }
+      }
+    },
+    "plugin_state": {
+      "type": "object",
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "loaded",
+            "disabled",
+            "skipped",
+            "failed"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "loaded"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/plugin_loaded"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "disabled"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "state",
+              "by"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "const": "disabled"
+              },
+              "by": {
+                "enum": [
+                  "arm",
+                  "player"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "skipped"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "state",
+              "reason"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "const": "skipped"
+              },
+              "reason": {
+                "enum": [
+                  "safe_mode",
+                  "conflict",
+                  "dependency",
+                  "verification",
+                  "approval",
+                  "other"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "failed"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "state"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "const": "failed"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "plugin_schema": {
+      "type": "object",
+      "maxProperties": 128,
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/field"
+      }
+    },
+    "field": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "int",
+            "number",
+            "enum",
+            "flag"
+          ]
+        },
+        "unit": {
+          "enum": [
+            "ms",
+            "count",
+            "bytes",
+            "mb",
+            "percent"
+          ]
+        },
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/name"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "enum"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "options"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "options"
+          ]
+        }
+      }
+    },
+    "arm_summary": {
+      "type": "object",
+      "required": [
+        "n",
+        "median_ms",
+        "min_ms",
+        "max_ms",
+        "times_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "n": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 200
+        },
+        "median_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "min_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 3600000
+        },
+        "max_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 3600000
+        },
+        "times_ms": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/ms"
+          }
+        }
+      }
+    },
+    "result": {
+      "description": "The result the player was shown, computed by the Manager from the rows (section 4).",
+      "type": "object",
+      "required": [
+        "computed_by",
+        "warm",
+        "difference",
+        "cold",
+        "not_counted",
+        "input_during_start",
+        "extra_starts_used",
+        "not_measured"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "computed_by": {
+          "const": "manager"
+        },
+        "warm": {
+          "type": "object",
+          "required": [
+            "without",
+            "with"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "without": {
+              "$ref": "#/$defs/arm_summary"
+            },
+            "with": {
+              "$ref": "#/$defs/arm_summary"
+            }
+          }
+        },
+        "difference": {
+          "description": "Warm median with the plugin minus without it; null unless both arms have a warm start.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "ms",
+            "percent",
+            "ranges_overlap"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "ms": {
+              "type": "number"
+            },
+            "percent": {
+              "type": "number"
+            },
+            "ranges_overlap": {
+              "type": "boolean"
+            }
+          }
+        },
+        "cold": {
+          "type": "object",
+          "required": [
+            "starts",
+            "difference"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "starts": {
+              "type": "array",
+              "maxItems": 200,
+              "items": {
+                "type": "object",
+                "required": [
+                  "position",
+                  "arm",
+                  "time_ms",
+                  "kind"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "position": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 200
+                  },
+                  "arm": {
+                    "$ref": "#/$defs/arm"
+                  },
+                  "time_ms": {
+                    "$ref": "#/$defs/ms"
+                  },
+                  "kind": {
+                    "enum": [
+                      "after_boot",
+                      "after_definitions_update",
+                      "open_cost"
+                    ]
+                  }
+                }
+              }
+            },
+            "difference": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "required": [
+                "ms",
+                "percent"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "ms": {
+                  "type": "number"
+                },
+                "percent": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        },
+        "not_counted": {
+          "description": "Starts outside both groups: discarded ones by discard_reason, and unclear ones.",
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "required": [
+              "position",
+              "reason"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "position": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200
+              },
+              "reason": {
+                "enum": [
+                  "unclear",
+                  "plugin_learning",
+                  "crash",
+                  "safe_mode",
+                  "arm_mismatch",
+                  "not_participant",
+                  "timeout",
+                  "no_record",
+                  "environment_changed"
+                ]
+              }
+            }
+          }
+        },
+        "input_during_start": {
+          "description": "Positions of the starts with keyboard or mouse input; they still count.",
+          "type": "array",
+          "maxItems": 200,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "extra_starts_used": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 200
+        },
+        "not_measured": {
+          "description": "The \"not measured\" line; time_to_ready (times run to anvil-game.ready) is always there.",
+          "type": "array",
+          "uniqueItems": true,
+          "contains": {
+            "const": "time_to_ready"
+          },
+          "items": {
+            "enum": [
+              "time_to_ready",
+              "no_cold_without",
+              "no_cold_with",
+              "below_target",
+              "stopped"
+            ]
+          }
+        }
+      }
+    },
+    "drive": {
+      "enum": [
+        "nvme",
+        "sata_ssd",
+        "hdd",
+        "other",
+        "unknown"
+      ]
+    },
+    "system": {
+      "type": "object",
+      "required": [
+        "cpu",
+        "logical_cores",
+        "ram_gb",
+        "drives",
+        "windows_build",
+        "antivirus"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "$ref": "#/$defs/text"
+        },
+        "logical_cores": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        },
+        "ram_gb": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "drives": {
+          "description": "Drive kind of the game folder, the EU4 user folder and the Workshop folder.",
+          "type": "object",
+          "required": [
+            "game",
+            "user",
+            "workshop"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "game": {
+              "$ref": "#/$defs/drive"
+            },
+            "user": {
+              "$ref": "#/$defs/drive"
+            },
+            "workshop": {
+              "$ref": "#/$defs/drive"
+            }
+          }
+        },
+        "windows_build": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "antivirus": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/text"
+          }
+        }
+      }
+    },
+    "mods": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "workshop_ids",
+        "local",
+        "files",
+        "size_mb"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "workshop_ids": {
+          "description": "The Workshop ids of the enabled Workshop mods; null when the player left them out.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "maxItems": 10000,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/workshop_id"
+          }
+        },
+        "local": {
+          "description": "Number of enabled local mods.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "size_mb": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "versions": {
+      "type": "object",
+      "required": [
+        "game",
+        "anvil",
+        "plugins"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "game": {
+          "description": "The known build's name (design section 6), or the SHA-256 of an unknown eu4.exe.",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "build"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "build": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9.-]+$",
+                  "maxLength": 64
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "sha256"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "sha256": {
+                  "$ref": "#/$defs/sha256"
+                }
+              }
+            }
+          ]
+        },
+        "anvil": {
+          "$ref": "#/$defs/version"
+        },
+        "plugins": {
+          "description": "Every plugin loaded in at least one arm.",
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "version",
+              "source",
+              "workshop_item",
+              "sha256",
+              "arms"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/plugin_id"
+              },
+              "version": {
+                "$ref": "#/$defs/version"
+              },
+              "source": {
+                "enum": [
+                  "local",
+                  "workshop"
+                ]
+              },
+              "workshop_item": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[0-9]{1,20}$"
+              },
+              "sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "arms": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 2,
+                "uniqueItems": true,
+                "items": {
+                  "$ref": "#/$defs/arm"
+                }
+              }
+            },
+            "if": {
+              "properties": {
+                "source": {
+                  "const": "workshop"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "workshop_item": {
+                  "type": "string"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "workshop_item": {
+                  "const": null
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "plugin_loaded": {
+      "required": [
+        "participant"
+      ],
+      "properties": {
+        "participant": {
+          "type": "boolean"
+        }
+      },
+      "if": {
+        "properties": {
+          "participant": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "state",
+          "participant",
+          "done",
+          "learning",
+          "fields"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "const": "loaded"
+          },
+          "participant": {
+            "const": true
+          },
+          "done": {
+            "type": "boolean"
+          },
+          "learning": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)?$",
+            "maxLength": 64
+          },
+          "fields": {
+            "description": "Values by field name; checked against plugin_schemas by the receiver.",
+            "type": "object",
+            "maxProperties": 128,
+            "propertyNames": {
+              "$ref": "#/$defs/name"
+            },
+            "additionalProperties": {
+              "type": [
+                "integer",
+                "number",
+                "string",
+                "boolean",
+                "null"
+              ]
+            }
+          }
+        }
+      },
+      "else": {
+        "required": [
+          "state",
+          "participant"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "const": "loaded"
+          },
+          "participant": {
+            "const": false
+          }
+        }
+      }
+    }
+  }
+}
