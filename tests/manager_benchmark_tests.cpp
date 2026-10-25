@@ -1,12 +1,28 @@
 // Unit tests for the Manager's start-up benchmark (docs/spec/benchmark-v1.md):
 // the start record as the core writes it, which starts count, the ABBA order,
-// the extra-start budget and the result. Part of anvil_manager_tests.
+// the extra-start budget, the result and the report. Part of
+// anvil_manager_tests.
+//
+// The report is checked against the receiver's own files: the series of
+// services/bench-receiver/examples/report-format-1.json gives that document,
+// and a stopped series gives test/fixtures/manager-report-stopped.json, which
+// the receiver's tests validate. ANVIL_UPDATE_FIXTURES=1 writes that fixture
+// again after a deliberate change.
+#include "benchmark_report.hpp"
 #include "benchmark_series.hpp"
 #include "core/benchmark_record.hpp"
+#include "core/crash_history.hpp"
+#include "files.hpp"
 #include "json.hpp"
 #include "test_support.hpp"
 
+#include <windows.h>
+
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <regex>
 #include <string>
 #include <vector>
 
@@ -14,6 +30,10 @@ using namespace anvil;
 using namespace anvil::manager;
 
 namespace {
+
+namespace fs = std::filesystem;
+
+const fs::path kReceiver = fs::path(ANVIL_SOURCE_DIR) / "services" / "bench-receiver";
 
 // A participant of the core's record, with one field of each kind.
 BenchmarkParticipant participant(const std::string& id) {
@@ -76,6 +96,117 @@ std::string arms(const Series& s) {
     std::string out;
     for (const StartRow& r : s.rows()) out += r.arm == Arm::Without ? 'A' : 'B';
     return out;
+}
+
+// ---- the series of the receiver's example report --------------------------------------
+
+BenchmarkField field(const char* name, AnvilBenchmarkKind kind, AnvilBenchmarkUnit unit, const char* label,
+                     std::vector<std::string> options = {}) {
+    return BenchmarkField{name, kind, unit, label, std::move(options)};
+}
+
+// Bellows as the example has it: a profile source per module, counters.
+// `profile` 0 none, 1 saved; nullopt values were never set.
+BenchmarkParticipant bellows(uint32_t profile, int64_t finish_ms, std::optional<int64_t> bytes, std::optional<int64_t> hits) {
+    const std::vector<std::string> modes{"off", "on", "verify", "failed"};
+    const std::vector<std::string> profiles{"none", "saved", "rebuilt"};
+    BenchmarkParticipant p;
+    p.id = "bellows";
+    p.done = true;
+    p.fields = {field("open_warmup.mode", ANVIL_BENCHMARK_ENUM, ANVIL_BENCHMARK_UNIT_NONE, "Open warm-up", modes),
+                field("open_warmup.profile", ANVIL_BENCHMARK_ENUM, ANVIL_BENCHMARK_UNIT_NONE, "Profile", profiles),
+                field("open_warmup.opened", ANVIL_BENCHMARK_INT, ANVIL_BENCHMARK_UNIT_COUNT, "Files opened"),
+                field("open_warmup.finish_ms", ANVIL_BENCHMARK_INT, ANVIL_BENCHMARK_UNIT_MS, "Finished after"),
+                field("ram_prefetch.mode", ANVIL_BENCHMARK_ENUM, ANVIL_BENCHMARK_UNIT_NONE, "", modes),
+                field("ram_prefetch.profile", ANVIL_BENCHMARK_ENUM, ANVIL_BENCHMARK_UNIT_NONE, "", profiles),
+                field("ram_prefetch.bytes", ANVIL_BENCHMARK_INT, ANVIL_BENCHMARK_UNIT_BYTES, "Prefetched"),
+                field("attr_cache.mode", ANVIL_BENCHMARK_ENUM, ANVIL_BENCHMARK_UNIT_NONE, "", modes),
+                field("attr_cache.hits", ANVIL_BENCHMARK_INT, ANVIL_BENCHMARK_UNIT_COUNT, "Hits")};
+    const auto value = [](std::optional<int64_t> v) { return v ? BenchmarkValue{*v} : BenchmarkValue{}; };
+    p.values = {BenchmarkOption{1}, BenchmarkOption{profile}, int64_t{11500}, finish_ms, BenchmarkOption{1},
+                BenchmarkOption{profile}, value(bytes), BenchmarkOption{1}, value(hits)};
+    p.open_cost = BenchmarkOpenCost{11500, static_cast<double>(finish_ms)};
+    return p;
+}
+
+BenchmarkRecord example_record(bool with, double ready_ms, double game_ms) {
+    BenchmarkRecord r = core_record(with, ready_ms);
+    r.plugins = {BenchmarkRecordPlugin{"anvil-game", "1.5.0", "loaded", false, "", std::nullopt},
+                 BenchmarkRecordPlugin{"anvil-overlay", "1.5.0", "loaded", false, "", std::nullopt},
+                 BenchmarkRecordPlugin{"bellows", "", "disabled", true, "", std::nullopt}};
+    r.game_first_opens = BenchmarkOpenCost{2400, game_ms};
+    r.definitions_changed = false;
+    return r;
+}
+
+StartObservation example_with(double ready_ms, BenchmarkParticipant p, bool input = false) {
+    BenchmarkRecord r = example_record(true, ready_ms, 96.0);
+    r.plugins[2] = BenchmarkRecordPlugin{"bellows", "0.10.0", "loaded", false, "", std::move(p)};
+    r.input_during_start = input;
+    return seen(r);
+}
+
+ReportInput example_input(const Series& series) {
+    ReportInput in;
+    in.series_id = "3f6c2a9e-8b1d-4c7a-9e2f-5a0b1c2d3e4f";
+    in.series = &series;
+    in.compared_version = "0.10.0";
+    in.system = ReportSystem{"AMD Ryzen 9 7950X 16-Core Processor", 32, 64, "nvme", "nvme", "nvme", 26200,
+                             {"Microsoft Defender Antivirus"}};
+    in.mods = ReportMods{4, {"1999999901", "1999999902", "1999999903"}, 1, 11500, 2300};
+    in.game_build = "eu4-1.37.5-steam-win64";
+    in.anvil_version = "1.5.0";
+    in.plugins = {ReportPluginSource{"anvil-game", "local", "", std::string(64, '1')},
+                  ReportPluginSource{"anvil-overlay", "local", "", std::string(64, '2')},
+                  ReportPluginSource{"bellows", "workshop", "1999999900", std::string(64, '3')}};
+    return in;
+}
+
+Series example_series() {
+    Series s("bellows", 3, Arm::Without);
+    BenchmarkRecord boot = example_record(false, 52300.0, 9600.0);
+    boot.first_start_since_boot = true;
+    s.add(seen(boot));
+    BenchmarkParticipant learning = bellows(0, 2300, std::nullopt, 0);
+    learning.learning = "new_mod_set";
+    s.add(example_with(39000.0, learning));
+    s.add(example_with(33800.0, bellows(1, 110, 1610612736, 48210)));
+    s.add(seen(example_record(false, 40900.0, 96.0)));
+    s.add(seen(example_record(false, 41500.0, 101.0)));
+    s.add(example_with(33500.0, bellows(1, 104, 1610612736, 48207)));
+    BenchmarkParticipant late = bellows(1, 121, 1610612736, std::nullopt);
+    late.done = false;
+    s.add(example_with(34100.0, late, true));
+    s.add(seen(example_record(false, 41000.0, 98.0)));
+    return s;
+}
+
+std::string read_file(const fs::path& file) {
+    std::ifstream in(file, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+// Where the members of two documents first differ, for the log.
+std::string first_difference(const Json& a, const Json& b, const std::string& at = "") {
+    if (a.type() != b.type() || a.is_array() != b.is_array()) return at;
+    if (a.is_object()) {
+        if (a.members().size() != b.members().size()) return at + " (members)";
+        for (size_t i = 0; i < a.members().size(); ++i) {
+            if (a.members()[i].first != b.members()[i].first) return at + "/" + a.members()[i].first + " (order)";
+            const std::string d = first_difference(a.members()[i].second, b.members()[i].second, at + "/" + a.members()[i].first);
+            if (!d.empty()) return d;
+        }
+        return "";
+    }
+    if (a.is_array()) {
+        if (a.items().size() != b.items().size()) return at + " (items)";
+        for (size_t i = 0; i < a.items().size(); ++i) {
+            const std::string d = first_difference(a.items()[i], b.items()[i], at + "/" + std::to_string(i));
+            if (!d.empty()) return d;
+        }
+        return "";
+    }
+    return a == b ? "" : at;
 }
 
 }  // namespace
@@ -380,5 +511,137 @@ void manager_benchmark_tests() {
         CHECK(!q.difference && !q.warm[0].median_ms && !q.warm[0].min_ms && q.warm[1].times_ms.size() == 1);
         CHECK(q.cold.size() == 2 && q.cold[1].kind == "open_cost" && q.cold_difference && q.cold_difference->ms == -10000.0);
         CHECK(q.cold_difference->percent == -20.0);
+    });
+
+    run("report: the series of the receiver's example gives that document", [] {
+        const Series s = example_series();
+        CHECK(s.complete());
+        const Json report = benchmark_report(example_input(s));
+        std::string error;
+        const auto example = parse_json(read_file(kReceiver / "examples" / "report-format-1.json"), error);
+        CHECK(example.has_value());
+        if (example) {
+            const std::string at = first_difference(report, *example);
+            if (!at.empty()) std::printf("  differs at %s\n", at.c_str());
+            CHECK(at.empty() && report == *example);
+        }
+        // What is kept, previewed, sent and copied reads back as the same document.
+        const std::string text = report_text(report);
+        const auto again = parse_json(text, error);
+        CHECK(again && *again == report && text.back() == '\n' && text.size() < 256 * 1024);
+        // Labels stay in the preview: the record has them, the report does not.
+        CHECK(text.find("Files opened") == std::string::npos && text.find("label") == std::string::npos);
+
+        // The Workshop-id switch.
+        Json without_ids = benchmark_report([&] {
+            ReportInput in = example_input(s);
+            in.include_workshop_ids = false;
+            return in;
+        }());
+        CHECK(without_ids["mods"]["workshop_ids"].is_null() && without_ids["mods"]["enabled"].as_integer() == 4);
+        Json switched = report;
+        set_workshop_ids(switched, std::nullopt);
+        CHECK(switched == without_ids);
+        set_workshop_ids(switched, std::vector<std::string>{"1999999901", "1999999902", "1999999903"});
+        CHECK(switched == report);
+    });
+
+    run("report: a stopped series matches the fixture the receiver validates", [] {
+        Series s("bellows", 5, Arm::With);
+        StartObservation crashed;
+        crashed.crash = StartCrash{"in_plugin_code", "bellows", true};
+        s.add(crashed);                                    // 1 B: crash before ready
+        s.add(start(Arm::Without, 44000.0, 0.5));          // 2 A: unclear
+        StartObservation unknown_input = start(Arm::Without, 41000.0);
+        unknown_input.record->input_during_start.reset();
+        s.add(unknown_input);                              // 3 A: warm, input unknown
+        BenchmarkRecord killed = core_record(true, 61000.0);
+        killed.plugins[1].participant = participant("bellows");
+        killed.plugins[1].participant->open_cost = BenchmarkOpenCost{11500, 9100.0};
+        killed.plugins.push_back(BenchmarkRecordPlugin{"old-ui", "", "skipped", false, "conflict", std::nullopt});
+        killed.plugins.push_back(BenchmarkRecordPlugin{"broken", "", "failed", false, "", std::nullopt});
+        killed.plugins.push_back(BenchmarkRecordPlugin{"late", "", "pending", false, "", std::nullopt});
+        killed.write = "ready";
+        StartObservation k = seen(killed);
+        k.killed = true;
+        s.add(k);                                          // 4 B: cold, killed
+        CHECK(s.over() && s.stop_reason() == "quit_failed");
+
+        ReportInput in = example_input(s);
+        in.series_id = "00000000-0000-4000-8000-000000000000";
+        in.compared_version = "0.10.0";
+        in.system.antivirus.clear();
+        in.system.drive_workshop = "unknown";
+        in.include_workshop_ids = false;
+        in.game_build.clear();
+        in.game_sha256 = "9AD3EFE1" + std::string(52, 'A') + "771A";
+        const Json report = benchmark_report(in);
+        CHECK(report["series"]["state"].as_string() == "stopped" && report["series"]["stop_reason"].as_string() == "quit_failed");
+        const Json& starts = report["starts"];
+        CHECK(starts.items().size() == 4 && starts.items()[0]["discard_reason"].as_string() == "crash");
+        CHECK(starts.items()[0]["crash"]["attribution"].as_string() == "in_plugin_code" && starts.items()[0]["time_ms"].is_null());
+        CHECK(starts.items()[0]["plugins"].members().empty() && starts.items()[0]["cold_start"]["open_cost"].is_null());
+        CHECK(starts.items()[1]["valid"].as_bool() && starts.items()[1]["cold_start"]["class"].as_string() == "unclear");
+        CHECK(starts.items()[3]["killed"].as_bool() && starts.items()[3]["cold_start"]["class"].as_string() == "cold");
+        CHECK(starts.items()[3]["plugins"].find("late") == nullptr);
+        CHECK(starts.items()[3]["plugins"]["old-ui"]["reason"].as_string() == "conflict");
+        CHECK(report["result"]["warm"]["with"]["median_ms"].is_null() && report["result"]["difference"].is_null());
+        CHECK(report["versions"]["game"]["sha256"].as_string().substr(0, 8) == "9ad3efe1");
+        CHECK(report["plugin_schemas"]["bellows"]["share"]["unit"].as_string() == "percent");
+        CHECK(report["plugin_schemas"]["bellows"]["flag"].find("unit") == nullptr);
+
+        const fs::path fixture = kReceiver / "test" / "fixtures" / "manager-report-stopped.json";
+        const std::string text = report_text(report);
+        if (const char* update = std::getenv("ANVIL_UPDATE_FIXTURES"); update != nullptr && std::string(update) == "1") {
+            fs::create_directories(fixture.parent_path());
+            std::ofstream(fixture, std::ios::binary | std::ios::trunc) << text;
+        }
+        std::string kept = read_file(fixture);
+        std::erase(kept, '\r');  // a checkout with core.autocrlf
+        const bool same = kept == text;
+        if (!same) std::printf("  %s differs from the Manager's report (ANVIL_UPDATE_FIXTURES=1 writes it)\n", fixture.string().c_str());
+        CHECK(same);
+    });
+
+    run("report: series ids are random UUID v4", [] {
+        const std::regex uuid("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$");
+        const std::string a = new_series_id(), b = new_series_id();
+        CHECK(std::regex_match(a, uuid) && std::regex_match(b, uuid) && a != b);
+    });
+
+    run("kept reports: the last 10, sent markers, the Workshop-id switch", [] {
+        const fs::path dir = fs::temp_directory_path() / ("anvil-bench-kept-" + std::to_string(GetCurrentProcessId()));
+        fs::remove_all(dir);
+        const Series s = example_series();
+        const std::string text = report_text(benchmark_report(example_input(s)));
+        fs::path first, file;
+        std::string error;
+        CHECK(keep_report(dir, "2026-10-26T10-00-00", text, first, error));
+        CHECK(first.filename() == "2026-10-26T10-00-00.json" && read_file(first) == text);
+        CHECK(keep_report(dir, "2026-10-26T10-00-00", text, file, error) && file.filename() == "2026-10-26T10-00-00-2.json");
+        CHECK(mark_sent(first, error) && fs::exists(dir / "2026-10-26T10-00-00.sent"));
+        CHECK(!rewrite_report(first, "{}", error) && read_file(first) == text);
+        CHECK(rewrite_report(file, text + " ", error) && read_file(file) == text + " ");
+
+        std::vector<KeptReport> kept = kept_reports(dir);
+        CHECK(kept.size() == 2 && kept[0].name == "2026-10-26T10-00-00-2" && !kept[0].sent);
+        CHECK(kept[1].sent && kept[1].readable && kept[1].compared == "bellows" && kept[1].version == "0.10.0");
+        CHECK(kept[1].state == "complete" && kept[1].stop_reason.empty());
+
+        for (int i = 1; i <= 10; ++i) {
+            char stamp[32];
+            std::snprintf(stamp, sizeof(stamp), "2026-10-26T11-%02d-00", i);
+            CHECK(keep_report(dir, stamp, text, file, error));
+        }
+        kept = kept_reports(dir);
+        CHECK(kept.size() == kKeptReports && kept.front().name == "2026-10-26T11-10-00" && kept.back().name == "2026-10-26T11-01-00");
+        CHECK(!fs::exists(first) && !fs::exists(dir / "2026-10-26T10-00-00.sent"));
+
+        write_file_atomic(dir / "zz-broken.json", "{", error);
+        kept = kept_reports(dir);
+        CHECK(kept.front().name == "zz-broken" && !kept.front().readable);
+        CHECK(report_stamp().size() == 19 && report_stamp()[10] == 'T');
+        CHECK(benchmarks_dir("C:/Games/EU4") == fs::path("C:/Games/EU4/anvil/data/anvil/benchmarks"));
+        fs::remove_all(dir);
     });
 }

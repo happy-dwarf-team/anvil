@@ -1,0 +1,185 @@
+{
+  "format": 1,
+  "series_id": "00000000-0000-4000-8000-000000000000",
+  "series": {
+    "state": "stopped",
+    "stop_reason": "quit_failed",
+    "compared": { "id": "bellows", "version": "0.10.0" },
+    "target": 5
+  },
+  "starts": [
+    {
+      "position": 1,
+      "arm": "with",
+      "time_ms": null,
+      "valid": false,
+      "discard_reason": "crash",
+      "killed": false,
+      "cold_start": {
+        "first_since_boot": null,
+        "definitions_changed": null,
+        "open_cost": null,
+        "class": null
+      },
+      "input_during_start": null,
+      "crash": { "attribution": "in_plugin_code", "plugin": "bellows" },
+      "plugins": {}
+    },
+    {
+      "position": 2,
+      "arm": "without",
+      "time_ms": 44000,
+      "valid": true,
+      "discard_reason": null,
+      "killed": false,
+      "cold_start": {
+        "first_since_boot": false,
+        "definitions_changed": null,
+        "open_cost": { "source": "game", "plugin": null, "files": 10000, "ms": 5000 },
+        "class": "unclear"
+      },
+      "input_during_start": false,
+      "crash": null,
+      "plugins": {
+        "anvil-game": { "state": "loaded", "participant": false },
+        "bellows": { "state": "disabled", "by": "arm" }
+      }
+    },
+    {
+      "position": 3,
+      "arm": "without",
+      "time_ms": 41000,
+      "valid": true,
+      "discard_reason": null,
+      "killed": false,
+      "cold_start": {
+        "first_since_boot": false,
+        "definitions_changed": null,
+        "open_cost": { "source": "game", "plugin": null, "files": 10000, "ms": 300 },
+        "class": "warm"
+      },
+      "input_during_start": null,
+      "crash": null,
+      "plugins": {
+        "anvil-game": { "state": "loaded", "participant": false },
+        "bellows": { "state": "disabled", "by": "arm" }
+      }
+    },
+    {
+      "position": 4,
+      "arm": "with",
+      "time_ms": 61000,
+      "valid": true,
+      "discard_reason": null,
+      "killed": true,
+      "cold_start": {
+        "first_since_boot": false,
+        "definitions_changed": null,
+        "open_cost": { "source": "plugin", "plugin": "bellows", "files": 11500, "ms": 9100 },
+        "class": "cold"
+      },
+      "input_during_start": false,
+      "crash": null,
+      "plugins": {
+        "anvil-game": { "state": "loaded", "participant": false },
+        "bellows": {
+          "state": "loaded",
+          "participant": true,
+          "done": true,
+          "learning": null,
+          "fields": {
+            "open_warmup.opened": 11500,
+            "open_warmup.mode": "on",
+            "share": 12.5,
+            "flag": null
+          }
+        },
+        "old-ui": { "state": "skipped", "reason": "conflict" },
+        "broken": { "state": "failed" }
+      }
+    }
+  ],
+  "plugin_schemas": {
+    "bellows": {
+      "open_warmup.opened": { "kind": "int", "unit": "count" },
+      "open_warmup.mode": {
+        "kind": "enum",
+        "options": ["off", "on"]
+      },
+      "share": { "kind": "number", "unit": "percent" },
+      "flag": { "kind": "flag" }
+    }
+  },
+  "result": {
+    "computed_by": "manager",
+    "warm": {
+      "without": {
+        "n": 1,
+        "median_ms": 41000,
+        "min_ms": 41000,
+        "max_ms": 41000,
+        "times_ms": [41000]
+      },
+      "with": {
+        "n": 0,
+        "median_ms": null,
+        "min_ms": null,
+        "max_ms": null,
+        "times_ms": []
+      }
+    },
+    "difference": null,
+    "cold": {
+      "starts": [
+        { "position": 4, "arm": "with", "time_ms": 61000, "kind": "open_cost" }
+      ],
+      "difference": null
+    },
+    "not_counted": [
+      { "position": 1, "reason": "crash" },
+      { "position": 2, "reason": "unclear" }
+    ],
+    "input_during_start": [],
+    "extra_starts_used": 2,
+    "not_measured": ["time_to_ready", "no_cold_without", "below_target", "stopped"]
+  },
+  "system": {
+    "cpu": "AMD Ryzen 9 7950X 16-Core Processor",
+    "logical_cores": 32,
+    "ram_gb": 64,
+    "drives": { "game": "nvme", "user": "nvme", "workshop": "unknown" },
+    "windows_build": 26200,
+    "antivirus": []
+  },
+  "mods": {
+    "enabled": 4,
+    "workshop_ids": null,
+    "local": 1,
+    "files": 11500,
+    "size_mb": 2300
+  },
+  "versions": {
+    "game": {
+      "sha256": "9ad3efe1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa771a"
+    },
+    "anvil": "1.5.0",
+    "plugins": [
+      {
+        "id": "anvil-game",
+        "version": "1.5.0",
+        "source": "local",
+        "workshop_item": null,
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "arms": ["without", "with"]
+      },
+      {
+        "id": "bellows",
+        "version": "0.10.0",
+        "source": "workshop",
+        "workshop_item": "1999999900",
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "arms": ["with"]
+      }
+    ]
+  }
+}

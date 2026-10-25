@@ -27,6 +27,7 @@ set_target_properties(anvil_miniz PROPERTIES COMPILE_WARNING_AS_ERROR OFF)
 set(ANVIL_MINIZ_LICENSE ${miniz_SOURCE_DIR}/LICENSE CACHE INTERNAL "")
 
 add_library(anvil_manager_core STATIC
+    src/benchmark_report.cpp
     src/benchmark_series.cpp
     src/game.cpp
     src/install.cpp

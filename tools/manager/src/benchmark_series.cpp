@@ -58,12 +58,14 @@ double median(std::vector<int64_t> times) {
     return times.size() % 2 ? static_cast<double>(times[mid]) : (static_cast<double>(times[mid - 1]) + times[mid]) / 2.0;
 }
 
-double round_to(double value, double step) { return std::round(value / step) * step; }
+// Decimal places: dividing by a power of ten gives the double nearest to the
+// decimal, so it is written without a tail of digits.
+double round_places(double value, double scale) { return std::round(value * scale) / scale; }
 
 Difference difference(double without, double with) {
     Difference d;
     d.ms = with - without;
-    d.percent = without > 0 ? round_to(d.ms / without * 100.0, 0.01) : 0.0;
+    d.percent = without > 0 ? round_places(d.ms / without * 100.0, 100.0) : 0.0;
     return d;
 }
 

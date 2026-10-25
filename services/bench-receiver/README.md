@@ -72,7 +72,10 @@ that changes the Manager, and the receiver is deployed again. After that:
 - A new format adds `schemas/report-format-<n>.schema.json`, an example, an
   entry in `FORMATS` in `src/report.js` with its plausibility checks, a
   migration with its `*_v<n>` views, and tests. The Manager's tests validate
-  their reports against the same schema file.
+  their reports against the same schema file: `anvil_manager_tests` builds
+  the example's document from its series and writes
+  `test/fixtures/manager-report-stopped.json`, which `test/report.test.js`
+  checks (`ANVIL_UPDATE_FIXTURES=1` writes it again after a change).
 - The receiver with the new format is deployed before the Manager that sends
   it is released (CONTRIBUTING.md, "A release that changes the report format").
 - Old formats stay accepted until one is retired by removing it from
