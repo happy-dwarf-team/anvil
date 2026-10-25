@@ -548,6 +548,8 @@ int main(int argc, char** argv) {
         CHECK(!fs::exists(game / "anvil" / "data" / "anvil" / "approved" / "probe"));
     });
 
+    manager_benchmark_tests();
+
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

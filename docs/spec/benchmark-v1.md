@@ -122,9 +122,10 @@ Before the series starts, the Manager checks:
 - Running on battery gives a warning only.
 
 It records locally the mod set (`dlc_load.json`) and the compared plugin's
-version and SHA-256. Before every start it checks that Steam still runs and
-that none of these changed; any change stops the series with
-`environment_changed` (anvil#131).
+version and SHA-256. Before and after every start it checks that Steam still
+runs and that none of these changed; any change stops the series with
+`environment_changed` (anvil#131), and a change found after a start also
+discards that start.
 
 ### Order and count
 
@@ -135,10 +136,12 @@ that none of these changed; any change stops the series with
 - **Target:** valid warm starts per arm, 5 by default, with a choice of 3 / 5 /
   10. A start that does not count (discarded, unclear or cold) leaves its arm
   short; the Manager appends starts at the end, alternating between the arms
-  that are short.
+  that are short. The first appended start goes on with the ABBA order when
+  both arms are short.
 - **At most 4 extra starts per series.** Discarded and unclear starts use this
   budget; cold starts do not. Over the budget the series stops with
-  `too_many_discarded`.
+  `too_many_discarded`. So that a computer where every start is cold still
+  ends, a fifth cold start stops the series with `too_many_discarded` too.
 - **Stop by the player:** the running start finishes cleanly (ready, `done()`,
   quit), then the series ends as `stopped` with reason `player`.
 
@@ -155,8 +158,9 @@ that none of these changed; any change stops the series with
 | `no_record` | the process exited without a start record and without a crash | replaces the start |
 | `environment_changed` | Steam, the mod set, or the plugin's version or hash changed | stops |
 
-- A crash after ready keeps the start's time; the row carries the crash and
-  its attribution level, and the series stops (`crashed`).
+- A crash after ready keeps the start's time (the row stays valid); the row
+  carries the crash and its attribution level, and the series stops
+  (`crashed`). So does a killed start, with `quit_failed`.
 - A participant with `done: false` does not invalidate the time.
 - `not_participant` (anvil#136) keeps v1 to plugins that join the benchmark: a
   plugin that does not call `done()` could have its after-ready work cut off
@@ -171,8 +175,10 @@ that none of these changed; any change stops the series with
 - The **open cost** decides: the time per file of the first opens of the
   game's existing files in that start. In the arm with the plugin, a
   participant's `open_cost(files, ms)` replaces it (for Bellows,
-  `open_warmup`); otherwise Anvil measures the game's own first opens. The
+  `open_warmup`; the compared plugin's when several participants report
+  one); otherwise Anvil measures the game's own first opens. The
   measurement is passive, since a probe would warm the start (anvil#129).
+  A start without an open cost (no first opens counted) is unclear.
 - Each signal has two thresholds with a band between them:
 
   | Signal | Warm | Cold |
