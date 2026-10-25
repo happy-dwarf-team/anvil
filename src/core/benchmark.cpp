@@ -394,12 +394,4 @@ std::vector<BenchmarkParticipant> Benchmark::participants() const {
     std::lock_guard lock(mutex_);
     return participants_;
 }
-
-bool Benchmark::try_participants(std::vector<BenchmarkParticipant>& out) const {
-    std::unique_lock lock(mutex_, std::try_to_lock);
-    if (!lock.owns_lock()) return false;
-    out = participants_;
-    return true;
-}
-
 }  // namespace anvil

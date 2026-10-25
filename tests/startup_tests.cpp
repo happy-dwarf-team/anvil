@@ -254,7 +254,7 @@ int main(int argc, char** argv) {
         CHECK(read(game.anvil / "anvil.toml") == toml);
     });
 
-    run("start-up: a benchmark start writes its record at ready and at exit", [&] {
+    run("start-up: a benchmark start writes its record at ready and when it quits", [&] {
         Game game(probe);
         fs::copy(probe, game.anvil / "plugins" / "mod-probe", fs::copy_options::recursive);
         // A stand-in for anvil-game: a copy of mod-probe whose id owns
@@ -280,7 +280,7 @@ int main(int argc, char** argv) {
         CHECK(contains(log, "benchmark: start record written at ready"));
         CHECK(contains(log, "benchmark: every participant is done ") && contains(log, " after ready; quitting"));
         std::string record = read(record_file);
-        CHECK(contains(record, "{\"format\":1,\"write\":\"exit\",\"anvil\":\""));
+        CHECK(contains(record, "{\"format\":1,\"write\":\"end\",\"anvil\":\""));
         CHECK(contains(record, "\"arm\":{\"with\":true,\"plugin\":\"mod-probe\"}"));
         CHECK(contains(record, "\"time_ms\":") && !contains(record, "\"ready_qpc\":null"));
         CHECK(contains(record, "{\"id\":\"anvil-game\",\"version\":\"1.0.0\",\"state\":\"loaded\",\"participant\":true"));
