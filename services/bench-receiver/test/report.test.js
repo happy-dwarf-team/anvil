@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import example from "../examples/report-format-1.json";
+import managerStopped from "./fixtures/manager-report-stopped.json";
 import { acceptedFormats, checkReport } from "../src/report.js";
 
 const limits = { minStartMs: 1000, maxStartMs: 600000 };
@@ -16,6 +17,13 @@ describe("checkReport", () => {
     expect(checkReport(example, limits)).toEqual({ ok: true, format: 1 });
     expect(checkReport([], limits).ok).toBe(false);
     expect(checkReport({ format: "1" }, limits).format).toBe(null);
+  });
+
+  // The Manager's own reports: anvil_manager_tests builds the example's
+  // document from its series, and writes this stopped series byte for byte
+  // (tests/manager_benchmark_tests.cpp).
+  it("accepts the Manager's report of a stopped series", () => {
+    expect(checkReport(managerStopped, limits)).toEqual({ ok: true, format: 1 });
   });
 
   it("ties the stop reason to the series state", () => {
