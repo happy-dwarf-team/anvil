@@ -2,12 +2,17 @@
 // §5): declaring fields, setting values, done(), learning() and open_cost(),
 // through the service table a plugin calls.
 #include "core/benchmark.hpp"
+#include "core/benchmark_record.hpp"
+#include "core/files.hpp"
+#include "core/first_opens.hpp"
 #include "core/host.hpp"
 #include "core/manifest.hpp"
 #include "core/resolver.hpp"
 #include "test_support.hpp"
 
 #include <cmath>
+#include <cstdio>
+#include <filesystem>
 #include <limits>
 #include <string>
 #include <vector>
@@ -15,6 +20,7 @@
 namespace {
 
 using namespace anvil;
+namespace fs = std::filesystem;
 
 struct Fixture {
     std::vector<std::string> warnings;
@@ -269,6 +275,84 @@ void benchmark_tests() {
         CHECK(f.s.set_int(&f.plugin, "open_warmup.opened", 3) == ANVIL_OK);
         CHECK(f.s.set_int(&f.plugin, "open_warmup.time", 3) == ANVIL_ERROR_WRONG_KIND);
         CHECK(f.s.done(&f.plugin) == ANVIL_OK);
+    });
+
+    run("benchmark: the game's first opens", [] {
+        CHECK(open_path_key(L"C:\\Game\\Common\\x.txt") == open_path_key(L"c:/game/common/X.TXT"));
+        CHECK(open_path_key(L"C:\\Game\\a.txt") != open_path_key(L"C:\\Game\\b.txt"));
+        CHECK(counts_as_file_open(GENERIC_READ, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL));
+        CHECK(counts_as_file_open(FILE_READ_DATA | SYNCHRONIZE, OPEN_EXISTING, 0));
+        CHECK(!counts_as_file_open(GENERIC_WRITE, OPEN_EXISTING, 0));
+        CHECK(!counts_as_file_open(GENERIC_READ, OPEN_ALWAYS, 0));
+        CHECK(!counts_as_file_open(GENERIC_READ, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS));  // a directory
+        FirstOpens opens;
+        opens.add(L"C:\\Game\\a.txt", 300);
+        opens.add(L"c:/game/A.TXT", 5000);  // opened again: not a first open
+        opens.add(L"C:\\Game\\b.txt", 700);
+        BenchmarkOpenCost total = opens.total(1'000'000);
+        CHECK(total.files == 2 && total.ms == 1.0);
+        opens.stop();
+        opens.add(L"C:\\Game\\c.txt", 1000);
+        CHECK(opens.total(1'000'000).files == 2 && !opens.counting());
+    });
+
+    run("benchmark: start history and the first start since boot", [] {
+        const uint64_t minute = 60ull * 1000 * 10'000;  // FILETIME units
+        const StartHistory earlier = current_start_history(1000 * minute, 30ull * 60 * 1000);  // 30 min after boot
+        CHECK(earlier.boot_filetime == 970 * minute);
+        const StartHistory later = current_start_history(1060 * minute, 90ull * 60 * 1000);
+        CHECK(!rebooted_since(earlier, later));
+        // A clock adjustment of one minute is no reboot; ten minutes are.
+        CHECK(!rebooted_since(earlier, current_start_history(1061 * minute, 90ull * 60 * 1000)));
+        CHECK(rebooted_since(earlier, current_start_history(1070 * minute, 90ull * 60 * 1000)));
+        CHECK(rebooted_since(earlier, current_start_history(1060 * minute, 5ull * 60 * 1000)));  // ticks went back
+
+        const fs::path dir = fs::temp_directory_path() / ("anvil_history_" + std::to_string(GetCurrentProcessId()));
+        fs::create_directories(dir);
+        std::string error;
+        CHECK(write_file_atomic(dir / "last-start.txt", start_history_text(later), error));
+        const auto back = read_start_history(dir / "last-start.txt");
+        CHECK(back && back->boot_filetime == later.boot_filetime && back->tick_ms == later.tick_ms &&
+              back->entry_filetime == later.entry_filetime);
+        CHECK(write_file_atomic(dir / "last-start.txt", "boot_filetime=1\n", error));
+        CHECK(!read_start_history(dir / "last-start.txt"));  // incomplete
+        CHECK(!read_start_history(dir / "missing.txt"));
+        fs::remove_all(dir);
+    });
+
+    run("benchmark: the start record as JSON", [] {
+        BenchmarkRecord r;
+        r.anvil_version = "1.4.0";
+        r.arm = BenchmarkArm{false, "bellows"};
+        r.process_id = 77;
+        r.qpc_frequency = 10'000'000;
+        r.entry_qpc = 5'000'000;
+        r.ready_qpc = 5'000'000 + 400'000'000;  // 40 s
+        r.creation_filetime = 1'000'000;
+        r.entry_filetime = 1'000'000 + 1'500'000;  // 150 ms
+        r.plugins.push_back({"anvil-game", "1.4.0", "loaded"});
+        r.plugins.push_back({"bellows", "", "disabled", true});
+        r.plugins.push_back({"broken", "", "skipped", false, "verification"});
+        r.game_first_opens = BenchmarkOpenCost{11502, 460.25};
+        r.first_start_since_boot = true;
+        r.input_during_start = false;
+        const std::string json = benchmark_record_json(r);
+        CHECK(json.starts_with("{\"format\":1,\"write\":\"ready\",\"anvil\":\"1.4.0\","
+                               "\"arm\":{\"with\":false,\"plugin\":\"bellows\"},\"process_id\":77,"));
+        CHECK(json.find("\"creation_to_entry_ms\":150,\"entry_to_ready_ms\":40000,\"time_ms\":40150}") != std::string::npos);
+        CHECK(json.find("{\"id\":\"anvil-game\",\"version\":\"1.4.0\",\"state\":\"loaded\",\"participant\":false}") !=
+              std::string::npos);
+        CHECK(json.find("{\"id\":\"bellows\",\"state\":\"disabled\",\"by\":\"arm\",\"participant\":false}") != std::string::npos);
+        CHECK(json.find("{\"id\":\"broken\",\"state\":\"skipped\",\"reason\":\"verification\",\"participant\":false}") !=
+              std::string::npos);
+        CHECK(json.find("\"game_first_opens\":{\"files\":11502,\"ms\":460.25}") != std::string::npos);
+        CHECK(json.find("\"labels\":{\"first_start_since_boot\":true,\"definitions_changed\":null},"
+                        "\"input_during_start\":false}") != std::string::npos);
+        r.ready_qpc = 0;
+        CHECK(benchmark_record_json(r).find("\"ready_qpc\":null") != std::string::npos);
+        // Defender's log: a time, 0 or unreadable, but never a crash.
+        const auto update = newest_definitions_update();
+        std::printf("  newest definitions update: %s\n", update ? std::to_string(*update).c_str() : "unreadable");
     });
 
     run("benchmark: a plugin that failed to load is forgotten", [] {

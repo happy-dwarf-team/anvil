@@ -57,6 +57,10 @@ int child(const fs::path& game_dir) {
     const fs::path log = game_dir / "anvil" / "anvil.log";
     const ULONGLONG deadline = GetTickCount64() + 30000;
     while (!contains(read(log), "[anvil] status: ") && GetTickCount64() < deadline) Sleep(5);
+    // A copy of mod-probe published anvil-game.ready: wait for the benchmark's ready record too.
+    if (GetEnvironmentVariableW(L"ANVIL_PROBE_PUBLISH", nullptr, 0) > 0 && GetEnvironmentVariableW(L"ANVIL_BENCHMARK", nullptr, 0) > 0) {
+        while (!contains(read(log), "benchmark: start record written at ready") && GetTickCount64() < deadline) Sleep(5);
+    }
     anvil::shutdown();  // not counted as an unfinished start (safe mode)
     return contains(read(log), "[anvil] status: ") ? 0 : 1;
 }
@@ -247,6 +251,61 @@ int main(int argc, char** argv) {
         log = game.start();
         CHECK(!contains(log, "ANVIL_BENCHMARK") && contains(log, kRunning));
         CHECK(read(game.anvil / "anvil.toml") == toml);
+    });
+
+    run("start-up: a benchmark start writes its record at ready and at exit", [&] {
+        Game game(probe);
+        fs::copy(probe, game.anvil / "plugins" / "mod-probe", fs::copy_options::recursive);
+        // A stand-in for anvil-game: a copy of mod-probe whose id owns
+        // anvil-game.ready, loaded after mod-probe has joined.
+        const fs::path stand_in = game.anvil / "plugins" / "anvil-game";
+        fs::copy(probe, stand_in, fs::copy_options::recursive);
+        std::string toml = read(stand_in / "plugin.toml");
+        toml.replace(toml.find("id = \"mod-probe\""), 16, "id = \"anvil-game\"");
+        write(stand_in / "plugin.toml", toml + "load_after = [\"mod-probe\"]\n");
+        const fs::path record_file = game.anvil / "data" / "anvil" / "benchmark-start.json";
+        SetEnvironmentVariableW(L"ANVIL_PROBE_BENCHMARK", L"1");
+        SetEnvironmentVariableW(L"ANVIL_PROBE_PUBLISH", L"anvil-game.ready");
+
+        // Not a benchmark start: the fields are taken and checked, no record.
+        std::string log = game.start();
+        CHECK(contains(log, "[mod-probe] benchmark fields set (inactive)"));
+        CHECK(contains(log, "game ready at ") && !fs::exists(record_file));
+        CHECK(fs::exists(game.anvil / "data" / "anvil" / "last-start.txt"));
+
+        SetEnvironmentVariableW(L"ANVIL_BENCHMARK", L"with:mod-probe");
+        log = game.start();
+        CHECK(contains(log, "[mod-probe] benchmark fields set (active)"));
+        CHECK(contains(log, "benchmark: start record written at ready"));
+        std::string record = read(record_file);
+        CHECK(contains(record, "{\"format\":1,\"write\":\"exit\",\"anvil\":\""));
+        CHECK(contains(record, "\"arm\":{\"with\":true,\"plugin\":\"mod-probe\"}"));
+        CHECK(contains(record, "\"time_ms\":") && !contains(record, "\"ready_qpc\":null"));
+        CHECK(contains(record, "{\"id\":\"anvil-game\",\"version\":\"1.0.0\",\"state\":\"loaded\",\"participant\":true"));
+        CHECK(contains(record, "{\"id\":\"mod-probe\",\"version\":\"1.0.0\",\"state\":\"loaded\",\"participant\":true,"
+                               "\"done\":true,\"learning\":null,\"open_cost\":{\"files\":42,\"ms\":2.25}"));
+        CHECK(contains(record, "{\"name\":\"probe.mode\",\"kind\":\"enum\",\"unit\":null,\"label\":\"Mode \\\"quoted\\\"\","
+                               "\"options\":[\"cold\",\"warm\"]}"));
+        CHECK(contains(record, "\"fields\":{\"probe.files\":42,\"probe.time\":1.5,\"probe.mode\":\"warm\",\"probe.ok\":true,"
+                               "\"unset\":null}"));
+        CHECK(contains(record, "\"game_first_opens\":{\"files\":"));
+        // The previous start left its history: this one is not the first since boot.
+        CHECK(contains(record, "\"labels\":{\"first_start_since_boot\":false,\"definitions_changed\":"));
+        CHECK(contains(record, "\"input_during_start\":"));
+
+        // Without the plugin: it is disabled by the arm.
+        SetEnvironmentVariableW(L"ANVIL_BENCHMARK", L"without:mod-probe");
+        log = game.start();
+        record = read(record_file);
+        CHECK(contains(record, "\"arm\":{\"with\":false,\"plugin\":\"mod-probe\"}"));
+        CHECK(contains(record, "{\"id\":\"mod-probe\",\"state\":\"disabled\",\"by\":\"arm\",\"participant\":false}"));
+
+        // No ready: the old record is gone and no new one is written.
+        SetEnvironmentVariableW(L"ANVIL_PROBE_PUBLISH", nullptr);
+        log = game.start();
+        CHECK(!fs::exists(record_file) && !contains(log, "start record written"));
+        SetEnvironmentVariableW(L"ANVIL_PROBE_BENCHMARK", nullptr);
+        SetEnvironmentVariableW(L"ANVIL_BENCHMARK", nullptr);
     });
 
     std::printf("%d checks, %d failed\n", g_checks, g_failures);

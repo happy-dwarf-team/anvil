@@ -23,6 +23,12 @@ struct ResolveInput {
     std::function<std::string(const Manifest&)> verify;
 };
 
+// Why a plugin is skipped, in words the start-up benchmark's record may carry
+// (docs/spec/benchmark-v1.md §6); the reason text never leaves the computer.
+enum class SkipKind { other, safe_mode, conflict, dependency, verification, approval };
+
+const char* skip_kind_name(SkipKind kind);  // "other", "safe_mode", ...
+
 struct Skipped {
     std::string id;     // may be a folder name when the manifest is broken
     std::string reason;
@@ -31,6 +37,7 @@ struct Skipped {
     bool benchmark_arm = false;    // disabled by the arm of a benchmark start (ResolveInput::benchmark_without)
     std::string mod;               // the mod's name for a plugin from a mod (design §14)
     bool awaiting_approval = false;  // a plugin from a mod that waits for the player's approval
+    SkipKind kind = SkipKind::other;   // not used while `disabled`
 };
 
 struct ResolveResult {
