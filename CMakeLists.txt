@@ -70,6 +70,7 @@ endif()
 # crash capture and safe mode).
 # Linked into version.dll and the tests, never into anvil.exe.
 add_library(anvil_loader STATIC
+    src/core/benchmark.cpp
     src/core/changes.cpp
     src/core/control.cpp
     src/core/crash.cpp
@@ -194,7 +195,8 @@ endif()
 if(ANVIL_BUILD_TESTS)
     enable_testing()
     add_executable(anvil_tests tests/test_main.cpp tests/manifest_tests.cpp tests/resolver_tests.cpp
-        tests/change_tests.cpp tests/gameplay_tests.cpp tests/settings_tests.cpp tests/control_tests.cpp)
+        tests/change_tests.cpp tests/gameplay_tests.cpp tests/settings_tests.cpp tests/control_tests.cpp
+        tests/benchmark_tests.cpp)
     target_link_libraries(anvil_tests PRIVATE anvil_loader)
     target_compile_definitions(anvil_tests PRIVATE ANVIL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_dependencies(anvil_tests version_dll)
@@ -392,7 +394,8 @@ include(CMakePackageConfigHelpers)
 write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/sdk/AnvilPluginConfigVersion.cmake
     VERSION ${PROJECT_VERSION} COMPATIBILITY SameMajorVersion ARCH_INDEPENDENT)
 install(FILES include/anvil/anvil_plugin.h include/anvil/anvil.hpp include/anvil/anvil_symbols.hpp
-    include/anvil/anvil_game.h DESTINATION include/anvil COMPONENT sdk)
+    include/anvil/anvil_game.h include/anvil/anvil_benchmark.h include/anvil/anvil_benchmark.hpp
+    DESTINATION include/anvil COMPONENT sdk)
 install(TARGETS anvil RUNTIME DESTINATION bin COMPONENT sdk)
 install(FILES sdk/cmake/AnvilPluginConfig.cmake ${CMAKE_CURRENT_BINARY_DIR}/sdk/AnvilPluginConfigVersion.cmake
     DESTINATION cmake COMPONENT sdk)

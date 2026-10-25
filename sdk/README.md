@@ -10,6 +10,8 @@ MSVC (Visual Studio 2022) and CMake 3.25 or newer.
 | `include/anvil/anvil.hpp` | the C++20 wrapper over it |
 | `include/anvil/anvil_symbols.hpp` | the types `symbols.gen.hpp` is made of |
 | `include/anvil/anvil_game.h` | the service and events of the standard plugin `anvil-game` (C11) |
+| `include/anvil/anvil_benchmark.h` | `anvil.benchmark` v1, the core's service for plugin fields in the start-up benchmark (C11, Anvil 1.4 and later) |
+| `include/anvil/anvil_benchmark.hpp` | the C++20 wrapper over it |
 | `bin/anvil.exe` | `anvil gen` and `anvil check` |
 | `cmake/AnvilPluginConfig.cmake` | the `AnvilPlugin` CMake package |
 | `third-party/` | licenses of the code compiled into `anvil.exe` |

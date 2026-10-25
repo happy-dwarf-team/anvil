@@ -214,10 +214,12 @@ report, marked as derived (anvil#131).
 
 ## 5. `anvil.benchmark` v1
 
-A public core service: its header and C++ wrapper ship in the SDK. A plugin
-looks it up with `get_service`; on an Anvil without it the lookup returns NULL
-and the plugin keeps working without fields. No manifest key is involved, so
-an older Anvil still loads the plugin (anvil#135).
+A public core service: its header
+[`anvil_benchmark.h`](../../include/anvil/anvil_benchmark.h) and C++ wrapper
+[`anvil_benchmark.hpp`](../../include/anvil/anvil_benchmark.hpp) ship in the
+SDK. A plugin looks it up with `get_service`; on an Anvil without it the lookup
+returns NULL and the plugin keeps working without fields. No manifest key is
+involved, so an older Anvil still loads the plugin (anvil#135).
 
 ### Joining and declaring fields
 
@@ -247,9 +249,10 @@ an older Anvil still loads the plugin (anvil#135).
 ### Calls during a start
 
 - `active()`: 1 in a benchmark start, 0 otherwise. Outside a benchmark start
-  the service accepts every call and records nothing, so a plugin may call it
-  always or skip work when it is inactive.
-- `set(field, value)`: from any thread; the last value wins. A field never set
+  the calls check their arguments the same way and nothing is recorded, so a
+  plugin may call it always or skip work when it is inactive.
+- `set(field, value)` (in C `set_int`, `set_number`, `set_enum` and
+  `set_flag`): from any thread; the last value wins. A field never set
   is `null` in the row. Values set after the plugin's `done()` are ignored.
 - `done()`: the participant's after-ready work is finished (for Bellows: the
   profiles are saved and the module reports are made). The quit waits for every

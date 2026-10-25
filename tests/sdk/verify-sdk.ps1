@@ -27,7 +27,8 @@ function Assert([bool]$condition, [string]$message) {
 $sdk = Join-Path $work 'sdk'
 Expand-Archive $archive -DestinationPath $sdk
 foreach ($file in 'include/anvil/anvil_plugin.h', 'include/anvil/anvil.hpp', 'include/anvil/anvil_symbols.hpp',
-                  'include/anvil/anvil_game.h',
+                  'include/anvil/anvil_game.h', 'include/anvil/anvil_benchmark.h',
+                  'include/anvil/anvil_benchmark.hpp',
                   'bin/anvil.exe', 'cmake/AnvilPluginConfig.cmake', 'cmake/AnvilPluginConfigVersion.cmake',
                   'CMakeLists.txt', 'README.md', 'LICENSE', 'version.txt') {
     Assert (Test-Path (Join-Path $sdk $file)) "the SDK archive lacks $file"
