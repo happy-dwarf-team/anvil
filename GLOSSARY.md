@@ -65,3 +65,77 @@ _Avoid_: crash log, blame, culprit
 **Safe mode**:
 A start that loads no plugins except the standard ones needed to explain it, because the two starts before it ended before the game was ready.
 _Avoid_: recovery mode, failsafe, disabled mode
+
+### Start-up benchmark
+
+**Start-up benchmark**:
+A measurement on the player's computer of how long the game takes to start without one plugin and with it.
+_Avoid_: benchmark (alone; that names Anvil's microbenchmarks), performance test
+
+**Benchmark series**:
+The starts run for one start-up benchmark, alternating between the two arms, which ends complete or stopped and gives one benchmark report.
+_Avoid_: run, session, test
+
+**Benchmark start**:
+One start of the game in a benchmark series, which quits by itself once the game is ready and the participants are done.
+_Avoid_: run, iteration, launch
+
+**Arm**:
+One side of a start-up benchmark: without the compared plugin, or with it.
+_Avoid_: variant, mode, A/B (for the side itself)
+
+**Compared plugin**:
+The plugin a benchmark series leaves out in one arm and loads in the other.
+_Avoid_: tested plugin, target
+
+**Start time**:
+The time from the creation of the game's process to the moment the game is ready for plugins, the value a benchmark start measures.
+_Avoid_: load time, time to menu
+
+**Open cost**:
+The time per file that the first opens of the game's files take in one start; it tells a warm start from a cold one.
+_Avoid_: disk speed, I/O time
+
+**Warm start**:
+A benchmark start whose open cost shows the files were already at hand, as in most starts after the first since boot.
+_Avoid_: hot start, cached start
+
+**Cold start**:
+A benchmark start whose open cost shows the files had to be reached anew, such as the first start after a boot or after an antivirus definitions update.
+_Avoid_: cold boot, first run
+
+**Unclear start**:
+A benchmark start whose open cost is neither clearly warm nor clearly cold; it counts in neither group.
+_Avoid_: lukewarm start, borderline start
+
+**Discarded start**:
+A benchmark start kept in the report with its reason but counted for neither arm.
+_Avoid_: failed start, invalid run
+
+**Learning start**:
+A benchmark start that a participant declares not representative for itself, such as a plugin's first start on a new mod set; it is a discarded start.
+_Avoid_: warm-up start, first run
+
+**Benchmark participant**:
+A plugin that joins a start-up benchmark when it loads and promises to say when its work after the game is ready is done.
+_Avoid_: benchmark plugin
+
+**Benchmark field**:
+A number, option or flag that a plugin adds to each benchmark start's row; never text.
+_Avoid_: metric, custom field, stat
+
+**Start record**:
+What Anvil writes about one benchmark start for the Manager to read after the game has quit.
+_Avoid_: timing file, start log
+
+**Benchmark report**:
+The one document a benchmark series gives, which the player sees, keeps and may send or copy, byte for byte the same.
+_Avoid_: result file, telemetry
+
+**Benchmark receiver**:
+The endpoint of the Anvil project that accepts sent benchmark reports.
+_Avoid_: telemetry server, backend, collector
+
+**Day of receipt**:
+The UTC date the benchmark receiver stores with a report, its only addition to it.
+_Avoid_: timestamp, received at
