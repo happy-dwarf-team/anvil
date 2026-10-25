@@ -1,0 +1,18 @@
+# Copied from Tongs (plugin/symbols.toml, "Input"): SDL 2.0.4 is linked into
+# eu4.exe with its dynamic API; slot 88 of the table is SDL_PushEvent.
+build = "eu4-1.37.5-steam-win64"
+
+[symbol.sdl_dynapi_init]
+rva = 0x17325DD
+bytes = "48 8D 0D AC 45 01 00 48 89 0D D5 DC 87 00"
+memory = "code"
+values.push_event = { at = 3, rip_relative = 7 }
+values.push_event_slot = { at = 10, rip_relative = 14 }
+note = "SDL 2.0.4 dynapi init: slot 88 = SDL_PushEvent"
+
+[symbol.sdl_push_event]
+rva = 0x1746B90
+bytes = "40 57 48 83 EC 20 48 8B F9 E8 82 B3 01 00 89 47 04"
+memory = "code"
+signature = "int (void* event)"
+note = "SDL_PushEvent: timestamp from SDL_GetTicks"

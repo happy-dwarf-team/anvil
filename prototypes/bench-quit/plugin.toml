@@ -1,0 +1,17 @@
+id = "bench-quit"
+name = "PROTOTYPE bench-quit"
+version = "0.0.1"
+authors = ["Happy Dwarf Team"]
+description = "PROTOTYPE, throwaway (anvil#134): quits the game by pushing SDL_QUIT on the main thread some time after anvil-game.ready."
+api = 2
+anvil = ">=1.0.0"
+entry = "bench_quit.dll"
+phase = "main"
+symbols = "symbols.toml"
+affects_gameplay = false
+issues = "https://github.com/happy-dwarf-team/anvil/issues/134"
+repository = "https://github.com/happy-dwarf-team/anvil"
+
+[[dependencies]]
+id = "anvil-game"
+version = "^1"
