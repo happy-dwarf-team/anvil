@@ -241,9 +241,10 @@ if(ANVIL_BUILD_TESTS)
     add_dependencies(anvil_startup_tests anvil_mod_probe)
     add_test(NAME anvil_startup_tests COMMAND anvil_startup_tests ${ANVIL_MOD_PROBE_DIR})
 
-    # The Manager's core: zips, Steam's files, install plans, plugin zips.
-    add_executable(anvil_manager_tests tests/manager_tests.cpp)
-    target_link_libraries(anvil_manager_tests PRIVATE anvil_manager_core)
+    # The Manager's core: zips, Steam's files, install plans, plugin zips, the
+    # start-up benchmark (anvil_loader: the core's own start record writer).
+    add_executable(anvil_manager_tests tests/manager_tests.cpp tests/manager_benchmark_tests.cpp)
+    target_link_libraries(anvil_manager_tests PRIVATE anvil_manager_core anvil_loader)
     add_dependencies(anvil_manager_tests version_dll)
     add_test(NAME anvil_manager_tests COMMAND anvil_manager_tests $<TARGET_FILE:version_dll>)
 

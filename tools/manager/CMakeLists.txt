@@ -1,8 +1,9 @@
 # AnvilManager.exe, the player's installer and management tool (design §15,
 # issue #59). anvil_manager_core holds what it does without a window: finding
 # the game, the install, repair and uninstall plans for the package it
-# carries, plugin zips (checked with anvil check's own code, anvil_tool) and
-# the release check. The tests link it directly.
+# carries, plugin zips (checked with anvil check's own code, anvil_tool), the
+# release check and the start-up benchmark's series and result. The tests
+# link it directly.
 
 # miniz, pinned to a release tag and compiled here from its sources (its own
 # CMakeLists.txt is not used): reads and, for the tests, writes zip archives.
@@ -26,8 +27,10 @@ set_target_properties(anvil_miniz PROPERTIES COMPILE_WARNING_AS_ERROR OFF)
 set(ANVIL_MINIZ_LICENSE ${miniz_SOURCE_DIR}/LICENSE CACHE INTERNAL "")
 
 add_library(anvil_manager_core STATIC
+    src/benchmark_series.cpp
     src/game.cpp
     src/install.cpp
+    src/json.cpp
     src/mods.cpp
     src/plugin_zip.cpp
     src/release_check.cpp
