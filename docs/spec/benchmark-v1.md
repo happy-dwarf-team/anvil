@@ -273,26 +273,45 @@ involved, so an older Anvil still loads the plugin (anvil#135).
 - The core writes one record per benchmark start and the Manager reads it
   after the process exits. Each write is atomic. Its location and encoding are
   implementation details; the per-plugin files, `anvil.status` and the log are
-  not used (the log rotates and contains paths).
+  not used (the log rotates and contains paths). In Anvil 1.4 it is
+  `anvil/data/anvil/benchmark-start.json`, one JSON object with `"format": 1`,
+  replaced by every benchmark start; a benchmark start removes the previous one
+  at its entry point, so a start that never reaches ready leaves none. The
+  record carries the process id and creation time, which the Manager compares
+  with the process it started.
 - **Two writes:** at `anvil-game.ready` (the time, the plugin states and the
-  fields set so far) and a final one at exit. A crash after ready leaves the
+  fields set so far; written on a thread of the core, off the game's main
+  thread) and a final one at exit (`"write": "ready"` or `"exit"`). The exit
+  write waits for no lock: when one is busy, the ready write stays. A crash after ready leaves the
   first write; a crash before ready leaves no record, so that row carries only
   the crash and its attribution level.
 - **Contents:**
   - the timing: QPC at the entry point (`AnvilEntry`) and at ready, the precise
     system time at entry and the process creation time, from which the Manager
     computes the time to ready (the creation → entry gap is not logged
-    otherwise; lab runs bound it at ≤ 0.1–0.3 s);
+    otherwise; lab runs bound it at ≤ 0.1–0.3 s); the record also gives the
+    three differences in ms (`creation_to_entry_ms`, `entry_to_ready_ms`,
+    `time_ms`), so no 64-bit counter has to pass through a JSON number;
   - the arm the core saw;
   - every discovered plugin's state: `loaded` (with `done` and its fields),
     `disabled` (the arm's switch or the player), `skipped` with a reason enum
     (`safe_mode`, `conflict`, `dependency`, `verification`, `approval`,
     `other`; Anvil's reason text never appears) or `failed`;
   - each participant's field schema and labels, and any `learning()` reason;
-  - the open cost: the participant's `open_cost`, or Anvil's measurement of the
-    game's first opens;
+  - the open cost: each participant's `open_cost`, and Anvil's measurement of
+    the game's first opens until ready (`game_first_opens`: the successful
+    `CreateFileW` calls of `eu4.exe` that read an existing file, the first time
+    each path is opened, timed by the core's own import replacement, the
+    innermost link of that chain, in benchmark starts only); the Manager picks
+    the one section 3 names;
   - the cold-start labels (first start since boot, definitions changed) and
-    `input_during_start`.
+    `input_during_start` (`GetLastInputInfo` later than the entry point), each
+    `null` when it cannot be known. Every start, a benchmark start or not,
+    leaves its boot time, tick count and entry time in
+    `anvil/data/anvil/last-start.txt`; "first start since boot" means the tick
+    count went back or the boot time moved by more than two minutes since that
+    start, and "definitions changed" means a Defender event 2000 is newer than
+    that start's entry point.
 
 ## 7. The benchmark report
 

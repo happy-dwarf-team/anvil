@@ -50,7 +50,8 @@ void prune_conflicts(std::map<std::string, Manifest>& candidates, std::vector<Sk
         return out;
     };
     const auto drop = [&](const std::string& id, const std::string& other) {
-        skipped.push_back({id, targets.at(id).at(other), candidates.at(id).folder});
+        skipped.push_back({.id = id, .reason = targets.at(id).at(other), .folder = candidates.at(id).folder,
+                           .kind = SkipKind::conflict});
         alive.erase(id);
     };
 
@@ -118,7 +119,7 @@ void prune_dependencies(std::map<std::string, Manifest>& candidates, std::vector
                 if (!reason.empty()) break;
             }
             if (!reason.empty()) {
-                skipped.push_back({m.id, reason, m.folder});
+                skipped.push_back({.id = m.id, .reason = reason, .folder = m.folder, .kind = SkipKind::dependency});
                 it = candidates.erase(it);
                 changed = true;
             } else {
@@ -171,6 +172,18 @@ std::vector<std::string> order_phase(const std::map<std::string, Manifest>& cand
 
 }  // namespace
 
+const char* skip_kind_name(SkipKind kind) {
+    switch (kind) {
+    case SkipKind::other: return "other";
+    case SkipKind::safe_mode: return "safe_mode";
+    case SkipKind::conflict: return "conflict";
+    case SkipKind::dependency: return "dependency";
+    case SkipKind::verification: return "verification";
+    case SkipKind::approval: return "approval";
+    }
+    return "other";
+}
+
 ResolveResult resolve(const ResolveInput& input) {
     ResolveResult result;
     std::map<std::string, Manifest> candidates;
@@ -179,8 +192,11 @@ ResolveResult resolve(const ResolveInput& input) {
     // 1. Per-plugin checks and duplicate ids (first one wins).
     for (const auto& m : input.manifests) {
         if (candidates.contains(m.id)) {
-            result.skipped.push_back(
-                {m.id, "duplicate id; already provided by " + narrow(candidates[m.id].folder.wstring()), m.folder});
+            result.skipped.push_back({.id = m.id,
+                                      .reason = "duplicate id; already provided by " +
+                                                narrow(candidates[m.id].folder.wstring()),
+                                      .folder = m.folder,
+                                      .kind = SkipKind::conflict});
             continue;
         }
         if (disabled.contains(m.id)) {
@@ -206,7 +222,8 @@ ResolveResult resolve(const ResolveInput& input) {
         if (input.verify) {
             std::string reason = input.verify(m);
             if (!reason.empty()) {
-                result.skipped.push_back({m.id, std::move(reason), m.folder});
+                result.skipped.push_back(
+                    {.id = m.id, .reason = std::move(reason), .folder = m.folder, .kind = SkipKind::verification});
                 continue;
             }
         }
@@ -239,8 +256,10 @@ ResolveResult resolve(const ResolveInput& input) {
         }
         if (stuck.empty()) break;
         for (const auto& id : stuck) {
-            result.skipped.push_back(
-                {id, "dependency/load_after cycle in " + phase_name(stuckPhase) + " phase", candidates.at(id).folder});
+            result.skipped.push_back({.id = id,
+                                      .reason = "dependency/load_after cycle in " + phase_name(stuckPhase) + " phase",
+                                      .folder = candidates.at(id).folder,
+                                      .kind = SkipKind::dependency});
             candidates.erase(id);
         }
     }

@@ -1,7 +1,10 @@
 #include "runtime.hpp"
 
 #include "benchmark.hpp"
+#include "benchmark_record.hpp"
 #include "discovery.hpp"
+#include "files.hpp"
+#include "first_opens.hpp"
 #include "mod_plugins.hpp"
 #include "plugin_hash.hpp"
 #include "game_build.hpp"
@@ -62,9 +65,31 @@ struct Runtime {
     std::unique_ptr<Benchmark> benchmark;  // anvil.benchmark (docs/spec/benchmark-v1.md §5)
     LARGE_INTEGER start{};
     LARGE_INTEGER frequency{};
+    uint64_t entry_filetime = 0;  // the system time at `start`
+    uint64_t entry_tick_ms = 0;   // GetTickCount64 at `start`
+    DWORD entry_tick = 0;         // GetTickCount at `start`, the clock of GetLastInputInfo
+
+    // The start-up benchmark (docs/spec/benchmark-v1.md §2, §6); `arm` is set
+    // only in a benchmark start.
+    std::optional<BenchmarkArm> arm;
+    FirstOpens first_opens;
+    bool first_opens_metered = false;
+    // The previous start's history, read and replaced by the main phase.
+    std::optional<StartHistory> previous_start;
+    std::atomic<bool> history_read{false};
+    LARGE_INTEGER ready{};             // anvil-game.ready
+    std::optional<bool> input_during_start;
+    std::optional<bool> first_start_since_boot, definitions_changed;  // computed for the ready record
+    std::atomic<bool> record_written{false};  // the ready record is on disk
 };
 
 Runtime* g_runtime = nullptr;
+
+// Whose change a registry message is about.
+std::string owner_name(OwnerId owner) {
+    const auto& plugins = g_runtime->plugins;
+    return owner < plugins.size() ? plugins[owner]->manifest.id : "anvil";
+}
 
 double elapsed_ms() {
     LARGE_INTEGER now{};
@@ -79,10 +104,117 @@ std::string fmt_ms(double ms) {
     return buffer;
 }
 
+// ---- the start-up benchmark's record (docs/spec/benchmark-v1.md §6) ------------
+
+std::filesystem::path benchmark_record_file() {
+    return g_runtime->anvil_dir / "data" / "anvil" / "benchmark-start.json";
+}
+
+// What the record says now. `exiting`: the process exits (DllMain), so
+// nothing may wait for a lock; nullopt when one is busy.
+std::optional<BenchmarkRecord> benchmark_record(const char* write, bool exiting) {
+    BenchmarkRecord r;
+    r.write = write;
+    r.anvil_version = kAnvilVersion;
+    r.arm = *g_runtime->arm;
+    r.process_id = GetCurrentProcessId();
+    r.qpc_frequency = g_runtime->frequency.QuadPart;
+    r.entry_qpc = g_runtime->start.QuadPart;
+    r.ready_qpc = g_runtime->ready.QuadPart;
+    r.entry_filetime = g_runtime->entry_filetime;
+    FILETIME created{}, exited{}, kernel{}, user{};
+    if (GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) {
+        r.creation_filetime = (static_cast<uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+    }
+    std::vector<BenchmarkParticipant> participants;
+    if (!exiting) {
+        participants = g_runtime->benchmark->participants();
+    } else if (!g_runtime->benchmark->try_participants(participants)) {
+        return std::nullopt;
+    }
+    for (const auto& p : g_runtime->plugins) {
+        BenchmarkRecordPlugin out;
+        out.id = p->manifest.id;
+        out.version = p->manifest.version.to_string();
+        out.state = p->state;
+        for (auto& joined : participants) {
+            if (joined.plugin == p.get()) out.participant = std::move(joined);
+        }
+        r.plugins.push_back(std::move(out));
+    }
+    for (const auto& s : g_runtime->skipped) {
+        BenchmarkRecordPlugin out;
+        out.id = s.id;
+        out.state = s.disabled ? "disabled" : "skipped";
+        out.disabled_by_arm = s.benchmark_arm;
+        out.skip_reason = skip_kind_name(s.kind);
+        r.plugins.push_back(std::move(out));
+    }
+    if (g_runtime->first_opens_metered) r.game_first_opens = g_runtime->first_opens.total(r.qpc_frequency);
+    r.first_start_since_boot = g_runtime->first_start_since_boot;
+    r.definitions_changed = g_runtime->definitions_changed;
+    r.input_during_start = g_runtime->input_during_start;
+    return r;
+}
+
+bool write_benchmark_record(const BenchmarkRecord& record, std::string& error) {
+    return write_file_atomic(benchmark_record_file(), benchmark_record_json(record), error);
+}
+
+// Keyboard or mouse input since the entry point (GetLastInputInfo, no
+// elevation); nullopt when it cannot be asked.
+std::optional<bool> input_since_entry() {
+    using Fn = BOOL(WINAPI*)(PLASTINPUTINFO);
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    const auto fn = user32 != nullptr ? reinterpret_cast<Fn>(GetProcAddress(user32, "GetLastInputInfo")) : nullptr;
+    LASTINPUTINFO info{sizeof(info), 0};
+    if (fn == nullptr || !fn(&info)) return std::nullopt;
+    return static_cast<int32_t>(info.dwTime - g_runtime->entry_tick) > 0;  // 32-bit ticks wrap
+}
+
+// The ready record, off the game's main thread: the labels need the event log.
+DWORD WINAPI write_ready_record(LPVOID) {
+    try {
+        if (g_runtime->history_read.load(std::memory_order_acquire) && g_runtime->previous_start) {
+            const StartHistory& previous = *g_runtime->previous_start;
+            const StartHistory now = current_start_history(g_runtime->entry_filetime, g_runtime->entry_tick_ms);
+            g_runtime->first_start_since_boot = rebooted_since(previous, now);
+            if (const auto update = newest_definitions_update()) {
+                g_runtime->definitions_changed = *update > previous.entry_filetime;
+            }
+        }
+        const auto record = benchmark_record("ready", false);
+        std::string error;
+        if (record && write_benchmark_record(*record, error)) {
+            g_runtime->record_written.store(true, std::memory_order_release);
+            log_info("benchmark: start record written at ready (" + fmt_ms(elapsed_ms()) + ")");
+        } else {
+            log_warning("benchmark: cannot write the start record: " + error);
+        }
+    } catch (const std::exception& e) {
+        log_warning(std::string("benchmark: cannot write the start record: ") + e.what());
+    }
+    return 0;
+}
+
+// anvil-game.ready in a benchmark start: the time, the end of the first
+// opens and of the input check, then the record.
+void benchmark_ready() {
+    QueryPerformanceCounter(&g_runtime->ready);
+    g_runtime->first_opens.stop();
+    g_runtime->input_during_start = input_since_entry();
+    if (HANDLE t = CreateThread(nullptr, 0, write_ready_record, nullptr, 0, nullptr)) {
+        CloseHandle(t);
+    } else {
+        log_warning("benchmark: cannot start the thread that writes the start record");
+    }
+}
+
 // The game is ready (anvil-game.ready): logged, and this start no longer
 // counts for safe mode, unless it already wrote a crash report. Without
 // anvil-game there is no such event.
 void on_game_ready(const char*, const void*, void*) {
+    if (g_runtime->arm) benchmark_ready();
     log_info("game ready at " + fmt_ms(elapsed_ms()));
     const bool reported = crash::reported();
     if (reported && g_runtime->start_marker.active()) {
@@ -204,6 +336,12 @@ void write_summary() {
 }
 
 DWORD WINAPI main_phase(LPVOID) {
+    // Every start replaces the previous start's history, so the first
+    // benchmark start after a normal one is not taken for the first since
+    // boot (docs/spec/benchmark-v1.md §3). Off the game's main thread.
+    const std::filesystem::path history = g_runtime->anvil_dir / "data" / "anvil" / "last-start.txt";
+    g_runtime->previous_start = read_start_history(history);
+    g_runtime->history_read.store(true, std::memory_order_release);
     for (auto& p : g_runtime->plugins) {
         if (p->manifest.phase == Phase::Main) load_plugin(*p);
     }
@@ -211,6 +349,11 @@ DWORD WINAPI main_phase(LPVOID) {
     log_info("plugins loaded at " + fmt_ms(elapsed_ms()));
     g_runtime->control->loading_done();
     g_runtime->bus.publish(ANVIL_EVENT_PLUGINS_LOADED, nullptr);
+    if (std::string error; !write_file_atomic(
+            history, start_history_text(current_start_history(g_runtime->entry_filetime, g_runtime->entry_tick_ms)),
+            error)) {
+        log_warning("cannot write " + narrow(history.wstring()) + ": " + error);
+    }
     write_summary();
     if (g_runtime->build != nullptr) {
         const double begin = elapsed_ms();
@@ -234,6 +377,13 @@ void startup_impl(const std::filesystem::path& game_dir) {
     // C runtime starts (the start-up budget of design §17 counts from here).
     QueryPerformanceFrequency(&runtime->frequency);
     QueryPerformanceCounter(&runtime->start);
+    // The same moment on the system clock and the tick counters, for the
+    // start-up benchmark's record and labels (docs/spec/benchmark-v1.md §6).
+    FILETIME entry{};
+    GetSystemTimePreciseAsFileTime(&entry);
+    runtime->entry_filetime = (static_cast<uint64_t>(entry.dwHighDateTime) << 32) | entry.dwLowDateTime;
+    runtime->entry_tick_ms = GetTickCount64();
+    runtime->entry_tick = GetTickCount();
     runtime->game_dir = game_dir;
     runtime->anvil_dir = game_dir / "anvil";
     g_runtime = runtime.release();  // lives for the process
@@ -258,7 +408,7 @@ void startup_impl(const std::filesystem::path& game_dir) {
     // A benchmark start (docs/spec/benchmark-v1.md §2): the arm is in the
     // environment the Manager started the game with; anvil.toml is never
     // written for it.
-    std::optional<BenchmarkArm> arm;
+    std::optional<BenchmarkArm>& arm = g_runtime->arm;
     {
         wchar_t text[96] = {};
         const DWORD n = GetEnvironmentVariableW(kBenchmarkVariable, text, static_cast<DWORD>(std::size(text)));
@@ -268,6 +418,9 @@ void startup_impl(const std::filesystem::path& game_dir) {
             arm = n < std::size(text) ? parse_benchmark_arm(value, error) : std::nullopt;
             if (arm) {
                 log_info("benchmark start: arm " + arm->text());
+                // A start that never reaches ready leaves no record, not the last one's.
+                std::error_code ignored;
+                std::filesystem::remove(benchmark_record_file(), ignored);
             } else {
                 log_warning("ANVIL_BENCHMARK=" + value + " ignored, so this is not a benchmark start: " +
                             (error.empty() ? std::string("too long") : error));
@@ -297,14 +450,13 @@ void startup_impl(const std::filesystem::path& game_dir) {
     }
     g_runtime->changes->set_refusal_sink([](OwnerId owner, const std::string& message) {
         // Names both owners of a conflict; the host call adds its own line.
-        // Owner ids are the indices of g_runtime->plugins (both in load order).
-        const auto& plugins = g_runtime->plugins;
-        Log::instance().write(ANVIL_LOG_WARNING, owner < plugins.size() ? plugins[owner]->manifest.id : "?", message);
+        // Owner ids are the indices of g_runtime->plugins (both in load order);
+        // the core's own owner comes after them.
+        Log::instance().write(ANVIL_LOG_WARNING, owner_name(owner), message);
     });
     g_runtime->changes->set_notice_sink([](OwnerId owner, const std::string& message) {
         // On the game's thread, e.g. the first mid hook per address that changes rip.
-        const auto& plugins = g_runtime->plugins;
-        Log::instance().write(ANVIL_LOG_INFO, owner < plugins.size() ? plugins[owner]->manifest.id : "?", message);
+        Log::instance().write(ANVIL_LOG_INFO, owner_name(owner), message);
     });
 
     // Safe mode (design §10): counted before anything can crash.
@@ -421,12 +573,14 @@ void startup_impl(const std::filesystem::path& game_dir) {
             continue;
         }
         if (record.safe_mode && !loads_in_safe_mode(parsed.manifest->id)) {
-            g_runtime->skipped.push_back({parsed.manifest->id, "safe mode", folder});
+            g_runtime->skipped.push_back(
+                {.id = parsed.manifest->id, .reason = "safe mode", .folder = folder, .kind = SkipKind::safe_mode});
             continue;
         }
         if (record.safe_mode) {
             if (std::string reason = safe_mode_exclusion(parsed.manifest->id, safe_mode_reports); !reason.empty()) {
-                g_runtime->skipped.push_back({parsed.manifest->id, std::move(reason), folder});
+                g_runtime->skipped.push_back(
+                    {.id = parsed.manifest->id, .reason = std::move(reason), .folder = folder, .kind = SkipKind::safe_mode});
                 continue;
             }
         }
@@ -448,10 +602,11 @@ void startup_impl(const std::filesystem::path& game_dir) {
         for (ModPlugin& p : mods.plugins) {
             const std::string label = p.id + " from mod '" + p.mod.name + "' (" +
                                       (p.mod.workshop_id.empty() ? std::string("local mod") : "Workshop " + p.mod.workshop_id) + ")";
-            const auto skip = [&](const std::string& reason) {
+            const auto skip = [&](const std::string& reason, SkipKind kind = SkipKind::other) {
                 Skipped s{p.id, label.substr(p.id.size() + 1) + ": " + reason, p.folder};
                 s.mod = p.mod.name;
                 s.awaiting_approval = !p.loads() && (p.state == ModPluginState::Pending || p.state == ModPluginState::Conflict);
+                s.kind = kind;
                 g_runtime->skipped.push_back(std::move(s));
             };
             if (p.state == ModPluginState::Shadowed) {
@@ -459,11 +614,13 @@ void startup_impl(const std::filesystem::path& game_dir) {
                 continue;
             }
             if (!p.loads()) {
-                skip(p.reason);
+                skip(p.reason, p.state == ModPluginState::Pending    ? SkipKind::approval
+                               : p.state == ModPluginState::Conflict ? SkipKind::conflict
+                                                                      : SkipKind::other);
                 continue;
             }
             if (record.safe_mode) {
-                skip("safe mode");
+                skip("safe mode", SkipKind::safe_mode);
                 continue;
             }
             if (p.copy_missing) {
@@ -524,6 +681,18 @@ void startup_impl(const std::filesystem::path& game_dir) {
         plugin->manifest = std::move(m);
         g_runtime->policy->add(plugin->manifest, plugin->owner);
         g_runtime->plugins.push_back(std::move(plugin));
+    }
+    // A benchmark start times the game's first opens of its files until
+    // ready, through the core's own change: its owner comes after every
+    // plugin's, so it is the innermost link and times the call itself.
+    if (arm) {
+        const OwnerId core = g_runtime->changes->add_owner("anvil");
+        const ChangeStatus s = install_first_open_meter(*g_runtime->changes, core, exe, g_runtime->first_opens);
+        g_runtime->first_opens_metered = s == ChangeStatus::Ok;
+        if (!g_runtime->first_opens_metered) {
+            log_warning(std::string("benchmark: cannot time the game's first opens (CreateFileW): ") +
+                        result_name(to_result(s)));
+        }
     }
 
     // anvil.control (src/control/anvil_control.h): what the overlay shows and
@@ -600,6 +769,12 @@ PluginSettings* plugin_settings(std::string_view plugin_id) {
 void shutdown() {
     try {
         if (g_runtime != nullptr && g_runtime->changes && g_runtime->profile) write_call_counts();
+        // The final record of a benchmark start, only after the ready one: a
+        // start that exits before ready leaves none (docs/spec/benchmark-v1.md §6).
+        if (g_runtime != nullptr && g_runtime->arm && g_runtime->record_written.load(std::memory_order_acquire)) {
+            std::string error;
+            if (const auto record = benchmark_record("exit", true)) write_benchmark_record(*record, error);
+        }
         // Closed before the game was ready, without a crash: not counted.
         if (g_runtime != nullptr && g_runtime->start_marker.active() && !crash::crashed()) {
             g_runtime->start_marker.clean_exit();

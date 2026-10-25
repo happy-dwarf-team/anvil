@@ -71,10 +71,12 @@ endif()
 # Linked into version.dll and the tests, never into anvil.exe.
 add_library(anvil_loader STATIC
     src/core/benchmark.cpp
+    src/core/benchmark_record.cpp
     src/core/changes.cpp
     src/core/control.cpp
     src/core/crash.cpp
     src/core/crash_report.cpp
+    src/core/first_opens.cpp
     src/core/gameplay_policy.cpp
     src/core/host.cpp
     src/core/plugin_settings.cpp

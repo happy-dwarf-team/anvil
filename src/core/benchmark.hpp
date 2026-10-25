@@ -83,6 +83,8 @@ public:
 
     // A copy of the participants, in the order they joined.
     std::vector<BenchmarkParticipant> participants() const;
+    // The same without waiting (the process exits): false when the lock is busy.
+    bool try_participants(std::vector<BenchmarkParticipant>& out) const;
 
 private:
     // Why a set_* call is refused, or ANVIL_OK with `index` of the field.
