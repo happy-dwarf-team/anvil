@@ -115,7 +115,10 @@ int main(int argc, char** argv) {
         Sleep(30000);
         return 0;
     }
-    if (argc >= 2 && std::string(argv[1]) == "--bench-game") return fake_benchmark_game();  // the runner tests' game
+    // The runner tests' game; also started as eu4.exe by a Manager (no arguments, the arm in its environment).
+    if ((argc >= 2 && std::string(argv[1]) == "--bench-game") || (argc == 1 && GetEnvironmentVariableW(L"ANVIL_BENCHMARK", nullptr, 0) != 0)) {
+        return fake_benchmark_game();
+    }
     if (argc < 2) {
         std::printf("usage: anvil_manager_tests <version.dll>\n");
         return 2;

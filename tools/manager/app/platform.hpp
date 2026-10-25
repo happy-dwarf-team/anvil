@@ -22,6 +22,9 @@ struct ManagerSettings {
     std::filesystem::path game_folder;  // the folder the player chose last
     bool check_releases = false;        // opt-in (design §15)
     bool asked_releases = false;        // the player answered the question once
+    // The arm the last start-up benchmark series began with ("with" or
+    // "without"; "" before the first): the next one begins with the other.
+    std::string benchmark_first_arm;
 };
 ManagerSettings load_manager_settings();
 bool save_manager_settings(const ManagerSettings& settings, std::string& error);

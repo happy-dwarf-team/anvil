@@ -6,6 +6,7 @@
 #include "core/playset.hpp"
 #include "core/semver.hpp"
 #include "mods.hpp"
+#include "ui.hpp"
 
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
@@ -16,31 +17,7 @@ namespace anvil::manager {
 namespace {
 
 namespace fs = std::filesystem;
-
-const ImVec4 kGood{0.40f, 0.78f, 0.45f, 1.0f};
-const ImVec4 kWarn{0.96f, 0.72f, 0.26f, 1.0f};
-const ImVec4 kBad{0.95f, 0.42f, 0.38f, 1.0f};
-
-std::string u8(const fs::path& path) {
-    const auto text = path.u8string();
-    return std::string(text.begin(), text.end());
-}
-
-void wrapped(const std::string& text) { ImGui::TextWrapped("%s", text.c_str()); }
-
-void colored_wrapped(const ImVec4& color, const std::string& text) {
-    ImGui::PushStyleColor(ImGuiCol_Text, color);
-    wrapped(text);
-    ImGui::PopStyleColor();
-}
-
-void weak(const std::string& text) { ImGui::TextDisabled("%s", text.c_str()); }
-
-void bullet(const std::string& text) {
-    ImGui::Bullet();
-    ImGui::SameLine();
-    wrapped(text);
-}
+using namespace ui;
 
 bool is_standard(const Package& package, const std::string& id) {
     return std::find(package.standard_plugins.begin(), package.standard_plugins.end(), id) != package.standard_plugins.end();
@@ -62,23 +39,11 @@ const char* step_text(Step::Kind kind) {
     return "";
 }
 
-// Modals: centred on every frame, a fixed width and the height of their contents.
-void next_modal(float width_in_fonts) {
-    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * width_in_fonts, 0), ImGuiCond_Always);
-}
-
-std::string join(const std::vector<std::string>& items) {
-    std::string out;
-    for (const std::string& item : items) out += (out.empty() ? "" : ", ") + item;
-    return out;
-}
-
 }  // namespace
 
 ManagerApp::ManagerApp(HWND window, std::optional<Package> package, std::string package_error, fs::path game)
-    : window_(window), package_(std::move(package)), package_error_(std::move(package_error)), exe_(own_exe_path()) {
-    settings_ = load_manager_settings();
+    : window_(window), package_(std::move(package)), package_error_(std::move(package_error)), exe_(own_exe_path()),
+      settings_(load_manager_settings()), benchmark_(window, settings_) {
     const fs::path steam = steam_root_from_registry();
     if (!steam.empty()) steam_games_ = find_steam_games(steam);
     if (game.empty() && runs_from(exe_, exe_.parent_path()) && inspect_game_folder(exe_.parent_path()).error.empty()) {
@@ -137,8 +102,12 @@ void ManagerApp::poll() {
         running_checked_ = now;
         const bool was = running_;
         running_ = game_running(game_);
-        if (was && !running_) refresh();  // the game may have written logs and crash reports
+        // The game may have written logs and crash reports; a benchmark series
+        // is read once it ends, not between its starts.
+        if (was && !running_ && !benchmark_.busy()) refresh();
     }
+    if (benchmark_busy_ && !benchmark_.busy()) refresh();
+    benchmark_busy_ = benchmark_.busy();
 }
 
 bool ManagerApp::read_only() const { return running_ || pending_.valid(); }
@@ -164,34 +133,27 @@ void ManagerApp::draw() {
     } else if (!snapshot_) {
         weak("Reading the game folder...");
     } else if (ImGui::BeginTabBar("tabs")) {
-        if (ImGui::BeginTabItem("Anvil")) {
-            draw_anvil_tab();
+        // While a benchmark series runs, the other tabs are dimmed and locked.
+        const bool locked = benchmark_.busy();
+        const auto tab = [&](const char* name, ImGuiTabItemFlags flags, void (ManagerApp::*body)()) {
+            ImGui::BeginDisabled(locked);
+            const bool open = ImGui::BeginTabItem(name, nullptr, locked ? 0 : flags);
+            ImGui::EndDisabled();
+            if (!open) return;
+            (this->*body)();
+            ImGui::EndTabItem();
+        };
+        tab("Anvil", 0, &ManagerApp::draw_anvil_tab);
+        tab("Plugins", 0, &ManagerApp::draw_plugins_tab);
+        tab("Mods", 0, &ManagerApp::draw_mods_tab);
+        tab("Settings", show_settings_tab_ ? ImGuiTabItemFlags_SetSelected : 0, &ManagerApp::draw_settings_tab);
+        if (ImGui::BeginTabItem("Benchmark", nullptr, locked ? ImGuiTabItemFlags_SetSelected : 0)) {
+            draw_benchmark_tab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Plugins")) {
-            draw_plugins_tab();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Mods")) {
-            draw_mods_tab();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Settings", nullptr, show_settings_tab_ ? ImGuiTabItemFlags_SetSelected : 0)) {
-            draw_settings_tab();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Crashes")) {
-            draw_crashes_tab();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Log")) {
-            draw_log_tab();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("About")) {
-            draw_about_tab();
-            ImGui::EndTabItem();
-        }
+        tab("Crashes", 0, &ManagerApp::draw_crashes_tab);
+        tab("Log", 0, &ManagerApp::draw_log_tab);
+        tab("About", 0, &ManagerApp::draw_about_tab);
         ImGui::EndTabBar();
         show_settings_tab_ = false;
     }
@@ -207,7 +169,7 @@ void ManagerApp::draw_game_bar() {
     ImGui::SameLine();
     ImGui::TextUnformatted(u8(game_).c_str());
     ImGui::SameLine();
-    ImGui::BeginDisabled(running_);
+    ImGui::BeginDisabled(running_ || benchmark_.busy());
     if (ImGui::SmallButton("Change...")) {
         if (const auto dir = pick_folder(window_, game_)) choose_game(*dir);
     }
@@ -216,7 +178,7 @@ void ManagerApp::draw_game_bar() {
     const float play_width = ImGui::CalcTextSize("Play EU4").x + ImGui::GetStyle().FramePadding.x * 4;
     ImGui::SameLine();
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - play_width));
-    ImGui::BeginDisabled(running_ || game_.empty());
+    ImGui::BeginDisabled(running_ || game_.empty() || benchmark_.busy());
     if (ImGui::Button("Play EU4", ImVec2(play_width, 0)) && !launch_game()) {
         show_message("Steam did not start", "Windows could not open steam://rungameid/236850. Is Steam installed?");
     }
@@ -231,7 +193,10 @@ void ManagerApp::draw_game_bar() {
             weak("eu4.exe: " + snapshot_->folder.build);
         }
     }
-    if (running_) {
+    if (benchmark_.busy()) {
+        colored_wrapped(kWarn, "A start-up benchmark series is running: EU4 starts and quits by itself. The other tabs "
+                               "are locked until the series ends.");
+    } else if (running_) {
         colored_wrapped(kWarn, "EU4 is running from this folder. Close the game to change Anvil, plugins or settings; "
                                "until then the Manager only shows them.");
     }
@@ -822,6 +787,18 @@ void ManagerApp::save_settings() {
     }
     editor.dirty = false;
     editor.warnings.clear();
+}
+
+void ManagerApp::draw_benchmark_tab() {
+    BenchmarkContext context;
+    context.game = game_;
+    if (snapshot_->report && snapshot_->report->cannot_check.empty()) context.report = &*snapshot_->report;
+    if (snapshot_->installation && snapshot_->installation->dll == Installation::Dll::Anvil) {
+        context.installed_anvil = snapshot_->installation->dll_version;
+    }
+    context.exe_build = snapshot_->folder.build;
+    context.exe_sha256 = snapshot_->folder.exe_sha256;
+    benchmark_.draw(context);
 }
 
 void ManagerApp::draw_crashes_tab() {

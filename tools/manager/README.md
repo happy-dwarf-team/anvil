@@ -32,3 +32,10 @@ without focus and without moving the cursor (issue #106):
   `#32770` window of the same process). Set the path with `WM_SETTEXT` on the
   `Edit` inside the file name box (control id `0x47C`) and post `WM_COMMAND`
   `IDOK` to the dialog.
+- The Benchmark tab without the game: copy `anvil_manager_tests.exe` as
+  `eu4.exe` into the folder. Started with `ANVIL_BENCHMARK` in its
+  environment, it plays a game that writes the core's start record with a
+  stub participant and quits after 2 s (`fake_benchmark_game` in
+  `tests/manager_benchmark_tests.cpp`). The folder's `eu4.exe` is then an
+  unknown build, so `anvil-game` does not load and the setup's checks fail:
+  a real series needs the game.

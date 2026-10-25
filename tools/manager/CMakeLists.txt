@@ -84,6 +84,7 @@ set_target_properties(anvil_manager_imgui PROPERTIES COMPILE_WARNING_AS_ERROR OF
 configure_file(app/manager.rc.in ${CMAKE_CURRENT_BINARY_DIR}/manager.rc @ONLY)
 set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/manager.rc PROPERTIES OBJECT_DEPENDS ${ANVIL_MANAGER_PACKAGE})
 add_executable(anvil_manager WIN32
+    app/benchmark_tab.cpp
     app/main.cpp
     app/manager_app.cpp
     app/platform.cpp
