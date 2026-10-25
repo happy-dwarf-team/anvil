@@ -2,8 +2,8 @@
 # issue #59). anvil_manager_core holds what it does without a window: finding
 # the game, the install, repair and uninstall plans for the package it
 # carries, plugin zips (checked with anvil check's own code, anvil_tool), the
-# release check and the start-up benchmark's series and result. The tests
-# link it directly.
+# release check and the start-up benchmark (its series, result, report, and
+# the runner that starts the game). The tests link it directly.
 
 # miniz, pinned to a release tag and compiled here from its sources (its own
 # CMakeLists.txt is not used): reads and, for the tests, writes zip archives.
@@ -28,7 +28,9 @@ set(ANVIL_MINIZ_LICENSE ${miniz_SOURCE_DIR}/LICENSE CACHE INTERNAL "")
 
 add_library(anvil_manager_core STATIC
     src/benchmark_report.cpp
+    src/benchmark_run.cpp
     src/benchmark_series.cpp
+    src/benchmark_setup.cpp
     src/game.cpp
     src/install.cpp
     src/json.cpp
@@ -37,7 +39,8 @@ add_library(anvil_manager_core STATIC
     src/release_check.cpp
     src/zip.cpp)
 target_include_directories(anvil_manager_core PUBLIC src)
-target_link_libraries(anvil_manager_core PUBLIC anvil_tool PRIVATE anvil_miniz advapi32)
+# wbemuuid, ole32, oleaut32: the antivirus names from Security Center (WMI).
+target_link_libraries(anvil_manager_core PUBLIC anvil_tool PRIVATE anvil_miniz advapi32 wbemuuid ole32 oleaut32)
 if(MSVC)
     target_compile_options(anvil_manager_core PRIVATE /W4 /WX)
 endif()

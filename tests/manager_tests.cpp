@@ -115,6 +115,7 @@ int main(int argc, char** argv) {
         Sleep(30000);
         return 0;
     }
+    if (argc >= 2 && std::string(argv[1]) == "--bench-game") return fake_benchmark_game();  // the runner tests' game
     if (argc < 2) {
         std::printf("usage: anvil_manager_tests <version.dll>\n");
         return 2;
@@ -549,6 +550,7 @@ int main(int argc, char** argv) {
     });
 
     manager_benchmark_tests();
+    manager_runner_tests();
 
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
