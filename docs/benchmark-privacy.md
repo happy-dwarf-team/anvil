@@ -64,8 +64,9 @@ of you or your installation that lasts beyond the series.
 - The receiver stores the report's bytes as sent and adds one thing: the day
   of receipt (a date in UTC, without the time). It does not store your IP
   address, country, browser or Manager identification, or the time of day.
-- Reports are kept in a Cloudflare D1 database of the Happy Dwarf account.
-  Only the account's members, the Anvil maintainers, can read them. There is
+- Reports are kept in a Cloudflare D1 database of the Happy Dwarf account,
+  stored in the European Union. Only the account's members, the Anvil
+  maintainers, can read them. There is
   no public page of reports or results.
 
 ## Why we collect it
