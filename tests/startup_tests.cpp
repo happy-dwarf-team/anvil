@@ -149,6 +149,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     SetEnvironmentVariableW(L"ANVIL_DISABLE", nullptr);  // the child inherits it; its start-up must load
+    SetEnvironmentVariableW(L"ANVIL_BENCHMARK", nullptr);
     const fs::path probe = fs::path(widen(argv[1]));
 
     run("start-up: a plugin in a mod waits for approval, then loads from its approved copy", [&] {
@@ -214,6 +215,38 @@ int main(int argc, char** argv) {
         log = game.start();
         CHECK(contains(log, "mod-probe: the local plugin in anvil/plugins wins over the same id in mod(s) 'Mod A', 'Mod B'"));
         CHECK(contains(log, kRunning) && !contains(log, "loads from"));
+    });
+
+    run("start-up: the benchmark arm leaves the compared plugin out without touching anvil.toml", [&] {
+        Game game(probe);
+        fs::copy(probe, game.anvil / "plugins" / "mod-probe", fs::copy_options::recursive);
+        const std::string toml = read(game.anvil / "anvil.toml");
+
+        SetEnvironmentVariableW(L"ANVIL_BENCHMARK", L"without:mod-probe");
+        std::string log = game.start();
+        CHECK(contains(log, "benchmark start: arm without:mod-probe"));
+        CHECK(contains(log, "mod-probe: skipped — left out by the start-up benchmark (ANVIL_BENCHMARK=without:mod-probe)"));
+        CHECK(!contains(log, kRunning));
+        CHECK(read(game.anvil / "anvil.toml") == toml);
+
+        SetEnvironmentVariableW(L"ANVIL_BENCHMARK", L"with:mod-probe");
+        log = game.start();
+        CHECK(contains(log, "benchmark start: arm with:mod-probe") && contains(log, kRunning));
+
+        // Another plugin's arm leaves this one alone.
+        SetEnvironmentVariableW(L"ANVIL_BENCHMARK", L"without:bellows");
+        log = game.start();
+        CHECK(contains(log, "benchmark start: arm without:bellows") && contains(log, kRunning));
+
+        SetEnvironmentVariableW(L"ANVIL_BENCHMARK", L"off:mod-probe");
+        log = game.start();
+        CHECK(contains(log, "ANVIL_BENCHMARK=off:mod-probe ignored, so this is not a benchmark start: expected "));
+        CHECK(contains(log, kRunning) && !contains(log, "benchmark start: arm"));
+
+        SetEnvironmentVariableW(L"ANVIL_BENCHMARK", nullptr);
+        log = game.start();
+        CHECK(!contains(log, "ANVIL_BENCHMARK") && contains(log, kRunning));
+        CHECK(read(game.anvil / "anvil.toml") == toml);
     });
 
     std::printf("%d checks, %d failed\n", g_checks, g_failures);

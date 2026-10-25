@@ -3,6 +3,8 @@
 // through the service table a plugin calls.
 #include "core/benchmark.hpp"
 #include "core/host.hpp"
+#include "core/manifest.hpp"
+#include "core/resolver.hpp"
 #include "test_support.hpp"
 
 #include <cmath>
@@ -64,6 +66,44 @@ void benchmark_tests() {
         CHECK(!is_valid_benchmark_name("a."));
         CHECK(!is_valid_benchmark_name("a-b"));
         CHECK(!is_valid_benchmark_name("C:\\x"));
+    });
+
+    run("benchmark: the arm", [] {
+        std::string error;
+        auto arm = parse_benchmark_arm("without:bellows", error);
+        CHECK(arm && !arm->with && arm->plugin == "bellows" && arm->text() == "without:bellows");
+        arm = parse_benchmark_arm("with:anvil-game", error);
+        CHECK(arm && arm->with && arm->plugin == "anvil-game");
+        for (const char* bad : {"", "with", "with:", "without:", "With:bellows", "on:bellows", "with:Bellows",
+                                "with: bellows", "without:bellows,other", "with:a/b"}) {
+            error.clear();
+            CHECK(!parse_benchmark_arm(bad, error) && !error.empty());
+        }
+    });
+
+    run("benchmark: the arm without the plugin disables it in the resolver", [] {
+        ResolveInput in;
+        in.host_api = kManifestApi;
+        in.manifests = {
+            manifest(plugin_toml("bellows")),
+            manifest(plugin_toml("ui", "[[dependencies]]\nid = \"bellows\"\n")),
+            manifest(plugin_toml("other")),
+        };
+        in.benchmark_without = "bellows";
+        ResolveResult r = resolve(in);
+        CHECK(r.order.size() == 1 && r.order[0].id == "other");
+        const Skipped* bellows = nullptr;
+        for (const auto& s : r.skipped) {
+            if (s.id == "bellows") bellows = &s;
+        }
+        CHECK(bellows != nullptr && bellows->disabled && bellows->benchmark_arm);
+        CHECK(bellows != nullptr && bellows->reason == "left out by the start-up benchmark (ANVIL_BENCHMARK=without:bellows)");
+        // The player's switch comes first.
+        in.disabled = {"bellows"};
+        r = resolve(in);
+        for (const auto& s : r.skipped) {
+            if (s.id == "bellows") CHECK(s.disabled && !s.benchmark_arm && s.reason == "disabled in anvil.toml");
+        }
     });
 
     run("benchmark: the table and active()", [] {

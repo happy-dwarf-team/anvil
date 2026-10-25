@@ -295,7 +295,7 @@ The C ABI is [`include/anvil/anvil_plugin.h`](../include/anvil/anvil_plugin.h) (
 ## 10. Load order and failure policy
 
 1. The proxy is set up (always); the entry-point hook is placed in `eu4.exe` only.
-2. At the entry point: no `anvil/` folder means nothing happens. `ANVIL_DISABLE=1` or `enabled = false` means the log only.
+2. At the entry point: no `anvil/` folder means nothing happens. `ANVIL_DISABLE=1` or `enabled = false` means the log only. `ANVIL_BENCHMARK=with:<id>` or `without:<id>` makes the start a benchmark start ([docs/spec/benchmark-v1.md](spec/benchmark-v1.md) §2); in the arm without, plugin `<id>` is disabled next to `disabled_plugins`, without writing `anvil.toml`.
 3. **Safe mode:** two consecutive crashes before the game is ready (`anvil-game.ready`, §12, §13.1) mean this start loads no plugins except the standard ones the overlay needs to explain it.
    - Each start counts itself in `anvil/data/anvil/unfinished-starts.txt` before anything can crash. `anvil-game.ready` removes the file, unless this start already wrote a crash report: EU4's handler may let the game go on to the menu after a crash on another thread, and such a start stays counted. An exit before readiness without a crash puts the previous count back (a crash: a report was written, or a fatal-looking exception came in the last 30 s, which the game's own handler may have caught). A start that crashed, hung or was killed before the game was ready stays counted, whatever caught the crash.
    - A count of 2 makes this start safe: the file is removed and the log says why. The plugins are listed as skipped ("safe mode"). The next start loads them again.

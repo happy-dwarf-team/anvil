@@ -1,6 +1,7 @@
 #include "benchmark.hpp"
 
 #include "host.hpp"
+#include "manifest.hpp"
 
 #include <cmath>
 #include <cstring>
@@ -155,6 +156,26 @@ constexpr AnvilBenchmarkService kService = {
 };
 
 }  // namespace
+
+std::optional<BenchmarkArm> parse_benchmark_arm(std::string_view text, std::string& error) {
+    BenchmarkArm arm;
+    std::string_view id;
+    if (text.starts_with("with:")) {
+        arm.with = true;
+        id = text.substr(5);
+    } else if (text.starts_with("without:")) {
+        id = text.substr(8);
+    } else {
+        error = "expected with:<plugin id> or without:<plugin id>";
+        return std::nullopt;
+    }
+    if (!is_valid_plugin_id(id)) {
+        error = "'" + std::string(id) + "' is not a plugin id ([a-z0-9-]+, at most 64 characters)";
+        return std::nullopt;
+    }
+    arm.plugin = id;
+    return arm;
+}
 
 bool is_valid_benchmark_name(std::string_view name) {
     if (name.empty() || name.size() > ANVIL_BENCHMARK_MAX_NAME) return false;
