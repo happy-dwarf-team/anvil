@@ -1,0 +1,318 @@
+{
+  "format": 1,
+  "series_id": "3f6c2a9e-8b1d-4c7a-9e2f-5a0b1c2d3e4f",
+  "series": {
+    "state": "complete",
+    "stop_reason": null,
+    "compared": { "id": "bellows", "version": "0.10.0" },
+    "target": 3
+  },
+  "starts": [
+    {
+      "position": 1,
+      "arm": "without",
+      "time_ms": 52300,
+      "valid": true,
+      "discard_reason": null,
+      "killed": false,
+      "cold_start": {
+        "first_since_boot": true,
+        "definitions_changed": false,
+        "open_cost": { "source": "game", "plugin": null, "files": 2400, "ms": 9600 },
+        "class": "cold"
+      },
+      "input_during_start": false,
+      "crash": null,
+      "plugins": {
+        "anvil-game": { "state": "loaded", "participant": false },
+        "anvil-overlay": { "state": "loaded", "participant": false },
+        "bellows": { "state": "disabled", "by": "arm" }
+      }
+    },
+    {
+      "position": 2,
+      "arm": "with",
+      "time_ms": 39000,
+      "valid": false,
+      "discard_reason": "plugin_learning",
+      "killed": false,
+      "cold_start": {
+        "first_since_boot": false,
+        "definitions_changed": false,
+        "open_cost": { "source": "plugin", "plugin": "bellows", "files": 11500, "ms": 2300 },
+        "class": null
+      },
+      "input_during_start": false,
+      "crash": null,
+      "plugins": {
+        "anvil-game": { "state": "loaded", "participant": false },
+        "anvil-overlay": { "state": "loaded", "participant": false },
+        "bellows": {
+          "state": "loaded",
+          "participant": true,
+          "done": true,
+          "learning": "new_mod_set",
+          "fields": {
+            "open_warmup.mode": "on",
+            "open_warmup.profile": "none",
+            "open_warmup.opened": 11500,
+            "open_warmup.finish_ms": 2300,
+            "ram_prefetch.mode": "on",
+            "ram_prefetch.profile": "none",
+            "ram_prefetch.bytes": null,
+            "attr_cache.mode": "on",
+            "attr_cache.hits": 0
+          }
+        }
+      }
+    },
+    {
+      "position": 3,
+      "arm": "with",
+      "time_ms": 33800,
+      "valid": true,
+      "discard_reason": null,
+      "killed": false,
+      "cold_start": {
+        "first_since_boot": false,
+        "definitions_changed": false,
+        "open_cost": { "source": "plugin", "plugin": "bellows", "files": 11500, "ms": 110 },
+        "class": "warm"
+      },
+      "input_during_start": false,
+      "crash": null,
+      "plugins": {
+        "anvil-game": { "state": "loaded", "participant": false },
+        "anvil-overlay": { "state": "loaded", "participant": false },
+        "bellows": {
+          "state": "loaded",
+          "participant": true,
+          "done": true,
+          "learning": null,
+          "fields": {
+            "open_warmup.mode": "on",
+            "open_warmup.profile": "saved",
+            "open_warmup.opened": 11500,
+            "open_warmup.finish_ms": 110,
+            "ram_prefetch.mode": "on",
+            "ram_prefetch.profile": "saved",
+            "ram_prefetch.bytes": 1610612736,
+            "attr_cache.mode": "on",
+            "attr_cache.hits": 48210
+          }
+        }
+      }
+    },
+    {
+      "position": 4,
+      "arm": "without",
+      "time_ms": 40900,
+      "valid": true,
+      "discard_reason": null,
+      "killed": false,
+      "cold_start": {
+        "first_since_boot": false,
+        "definitions_changed": false,
+        "open_cost": { "source": "game", "plugin": null, "files": 2400, "ms": 96 },
+        "class": "warm"
+      },
+      "input_during_start": false,
+      "crash": null,
+      "plugins": {
+        "anvil-game": { "state": "loaded", "participant": false },
+        "anvil-overlay": { "state": "loaded", "participant": false },
+        "bellows": { "state": "disabled", "by": "arm" }
+      }
+    },
+    {
+      "position": 5,
+      "arm": "without",
+      "time_ms": 41500,
+      "valid": true,
+      "discard_reason": null,
+      "killed": false,
+      "cold_start": {
+        "first_since_boot": false,
+        "definitions_changed": false,
+        "open_cost": { "source": "game", "plugin": null, "files": 2400, "ms": 101 },
+        "class": "warm"
+      },
+      "input_during_start": false,
+      "crash": null,
+      "plugins": {
+        "anvil-game": { "state": "loaded", "participant": false },
+        "anvil-overlay": { "state": "loaded", "participant": false },
+        "bellows": { "state": "disabled", "by": "arm" }
+      }
+    },
+    {
+      "position": 6,
+      "arm": "with",
+      "time_ms": 33500,
+      "valid": true,
+      "discard_reason": null,
+      "killed": false,
+      "cold_start": {
+        "first_since_boot": false,
+        "definitions_changed": false,
+        "open_cost": { "source": "plugin", "plugin": "bellows", "files": 11500, "ms": 104 },
+        "class": "warm"
+      },
+      "input_during_start": false,
+      "crash": null,
+      "plugins": {
+        "anvil-game": { "state": "loaded", "participant": false },
+        "anvil-overlay": { "state": "loaded", "participant": false },
+        "bellows": {
+          "state": "loaded",
+          "participant": true,
+          "done": true,
+          "learning": null,
+          "fields": {
+            "open_warmup.mode": "on",
+            "open_warmup.profile": "saved",
+            "open_warmup.opened": 11500,
+            "open_warmup.finish_ms": 104,
+            "ram_prefetch.mode": "on",
+            "ram_prefetch.profile": "saved",
+            "ram_prefetch.bytes": 1610612736,
+            "attr_cache.mode": "on",
+            "attr_cache.hits": 48207
+          }
+        }
+      }
+    },
+    {
+      "position": 7,
+      "arm": "with",
+      "time_ms": 34100,
+      "valid": true,
+      "discard_reason": null,
+      "killed": false,
+      "cold_start": {
+        "first_since_boot": false,
+        "definitions_changed": false,
+        "open_cost": { "source": "plugin", "plugin": "bellows", "files": 11500, "ms": 121 },
+        "class": "warm"
+      },
+      "input_during_start": true,
+      "crash": null,
+      "plugins": {
+        "anvil-game": { "state": "loaded", "participant": false },
+        "anvil-overlay": { "state": "loaded", "participant": false },
+        "bellows": {
+          "state": "loaded",
+          "participant": true,
+          "done": false,
+          "learning": null,
+          "fields": {
+            "open_warmup.mode": "on",
+            "open_warmup.profile": "saved",
+            "open_warmup.opened": 11500,
+            "open_warmup.finish_ms": 121,
+            "ram_prefetch.mode": "on",
+            "ram_prefetch.profile": "saved",
+            "ram_prefetch.bytes": 1610612736,
+            "attr_cache.mode": "on",
+            "attr_cache.hits": null
+          }
+        }
+      }
+    },
+    {
+      "position": 8,
+      "arm": "without",
+      "time_ms": 41000,
+      "valid": true,
+      "discard_reason": null,
+      "killed": false,
+      "cold_start": {
+        "first_since_boot": false,
+        "definitions_changed": false,
+        "open_cost": { "source": "game", "plugin": null, "files": 2400, "ms": 98 },
+        "class": "warm"
+      },
+      "input_during_start": false,
+      "crash": null,
+      "plugins": {
+        "anvil-game": { "state": "loaded", "participant": false },
+        "anvil-overlay": { "state": "loaded", "participant": false },
+        "bellows": { "state": "disabled", "by": "arm" }
+      }
+    }
+  ],
+  "plugin_schemas": {
+    "bellows": {
+      "open_warmup.mode": { "kind": "enum", "options": ["off", "on", "verify", "failed"] },
+      "open_warmup.profile": { "kind": "enum", "options": ["none", "saved", "rebuilt"] },
+      "open_warmup.opened": { "kind": "int", "unit": "count" },
+      "open_warmup.finish_ms": { "kind": "int", "unit": "ms" },
+      "ram_prefetch.mode": { "kind": "enum", "options": ["off", "on", "verify", "failed"] },
+      "ram_prefetch.profile": { "kind": "enum", "options": ["none", "saved", "rebuilt"] },
+      "ram_prefetch.bytes": { "kind": "int", "unit": "bytes" },
+      "attr_cache.mode": { "kind": "enum", "options": ["off", "on", "verify", "failed"] },
+      "attr_cache.hits": { "kind": "int", "unit": "count" }
+    }
+  },
+  "result": {
+    "computed_by": "manager",
+    "warm": {
+      "without": { "n": 3, "median_ms": 41000, "min_ms": 40900, "max_ms": 41500, "times_ms": [40900, 41500, 41000] },
+      "with": { "n": 3, "median_ms": 33800, "min_ms": 33500, "max_ms": 34100, "times_ms": [33800, 33500, 34100] }
+    },
+    "difference": { "ms": -7200, "percent": -17.56, "ranges_overlap": false },
+    "cold": {
+      "starts": [{ "position": 1, "arm": "without", "time_ms": 52300, "kind": "after_boot" }],
+      "difference": null
+    },
+    "not_counted": [{ "position": 2, "reason": "plugin_learning" }],
+    "input_during_start": [7],
+    "extra_starts_used": 1,
+    "not_measured": ["time_to_ready", "no_cold_with"]
+  },
+  "system": {
+    "cpu": "AMD Ryzen 9 7950X 16-Core Processor",
+    "logical_cores": 32,
+    "ram_gb": 64,
+    "drives": { "game": "nvme", "user": "nvme", "workshop": "nvme" },
+    "windows_build": 26200,
+    "antivirus": ["Microsoft Defender Antivirus"]
+  },
+  "mods": {
+    "enabled": 4,
+    "workshop_ids": ["1999999901", "1999999902", "1999999903"],
+    "local": 1,
+    "files": 11500,
+    "size_mb": 2300
+  },
+  "versions": {
+    "game": { "build": "eu4-1.37.5-steam-win64" },
+    "anvil": "1.5.0",
+    "plugins": [
+      {
+        "id": "anvil-game",
+        "version": "1.5.0",
+        "source": "local",
+        "workshop_item": null,
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "arms": ["without", "with"]
+      },
+      {
+        "id": "anvil-overlay",
+        "version": "1.5.0",
+        "source": "local",
+        "workshop_item": null,
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "arms": ["without", "with"]
+      },
+      {
+        "id": "bellows",
+        "version": "0.10.0",
+        "source": "workshop",
+        "workshop_item": "1999999900",
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "arms": ["with"]
+      }
+    ]
+  }
+}

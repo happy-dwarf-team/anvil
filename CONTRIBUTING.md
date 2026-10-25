@@ -35,8 +35,13 @@ next release.
 
 Scopes in use: `api` (plugin SDK / `AnvilHost`), `manifest`, `core` (loader,
 resolver, change registry), `proxy` (`version.dll` exports, entry hook), `log`,
-`cli` (`anvil.exe`).
+`cli` (`anvil.exe`), `bench-receiver` (the start-up benchmark receiver in
+`services/bench-receiver/`).
 A scope is optional; leave it out when a change spans several.
+
+release-please ships nothing from `services/`: a change there alone uses a
+hidden type (`chore(bench-receiver): …`), unless it comes with the Manager
+change it belongs to.
 
 Breaking changes: add `!` after the type or scope (`feat(api)!: …`) and a
 `BREAKING CHANGE: <what breaks and how to migrate>` paragraph in the pull
@@ -109,3 +114,40 @@ memory budgets (design §17). CI only runs this; it does not gate on the bytes:
 build/Release/anvil_bench.exe --memory --out bench-memory.json
 bench/run-lab.ps1 -Memory   # exit 1 over a budget
 ```
+
+## Benchmark receiver
+
+`services/bench-receiver/` is the Cloudflare Worker that takes the start-up
+benchmark reports (spec section 9). Its README covers the code, deployment and
+reading reports. CI runs its tests in the `bench-receiver` workflow, without a
+Cloudflare secret; locally, with Node.js 22 or newer:
+
+```powershell
+cd services/bench-receiver
+npm ci
+npm test
+npm run check
+```
+
+The report format's JSON Schema in `services/bench-receiver/schemas/` is the
+contract between the Manager and the receiver: one pull request changes both,
+and the Manager's tests validate their reports against it.
+
+### A release that changes the report format
+
+A release whose Manager sends a new report format, or the release that first
+sends format 1 (Anvil 1.5), is merged only after these steps:
+
+1. The pull request that changes the Manager's report also adds the format's
+   schema, example, checks, views and tests to `services/bench-receiver/`
+   (its README, "Report formats"), and is merged on `main`.
+2. A maintainer applies the new migrations and deploys the receiver from
+   `main` (README, "Deployment").
+3. A test report of the new format is sent to
+   `https://bench.happydwarf.dev/reports` and answered 201, then deleted by
+   hand.
+4. `docs/benchmark-privacy.md` says what the new format adds, and
+   `privacy@happydwarf.dev` still forwards mail.
+5. The release pull request is merged.
+
+Old formats stay accepted; retiring one is a change of its own.

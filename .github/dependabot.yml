@@ -10,3 +10,13 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: ci
+  # The benchmark receiver's npm packages; not shipped in an Anvil release.
+  - package-ecosystem: npm
+    directory: /services/bench-receiver
+    schedule:
+      interval: monthly
+    groups:
+      bench-receiver:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore

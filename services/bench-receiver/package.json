@@ -1,0 +1,24 @@
+{
+  "name": "bench-receiver",
+  "private": true,
+  "description": "Receiver of Anvil start-up benchmark reports (docs/spec/benchmark-v1.md, section 9)",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "compile": "node scripts/compile-schemas.js",
+    "pretest": "npm run compile",
+    "test": "vitest run",
+    "check": "wrangler deploy --dry-run --outdir dist",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.0",
+    "vitest": "4.1.12",
+    "wrangler": "4.149.0"
+  },
+  "dependencies": {
+    "ajv": "8.20.0"
+  }
+}

@@ -1,0 +1,39 @@
+name: bench-receiver
+
+# The start-up benchmark receiver (services/bench-receiver/): its tests in the
+# Workers runtime and a dry-run deploy. Deployment itself is manual, so this
+# workflow holds no Cloudflare secret. It runs on every pull request because
+# its job is a required check.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  bench-receiver:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: services/bench-receiver
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: services/bench-receiver/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Dry-run deploy
+        run: npm run check
