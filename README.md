@@ -129,5 +129,5 @@ Contributions, the commit convention and the release process: see
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Unofficial community project, not affiliated with
-Paradox Interactive.
+MIT — see [LICENSE](LICENSE). Anvil is an unofficial community project, not affiliated
+with or endorsed by Paradox Interactive.
