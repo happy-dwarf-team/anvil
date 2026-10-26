@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/happy-dwarf-team/anvil/compare/v1.5.0...v1.5.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **manager:** open the privacy note on anvil.happydwarf.dev ([#156](https://github.com/happy-dwarf-team/anvil/issues/156)) ([a93a07e](https://github.com/happy-dwarf-team/anvil/commit/a93a07e97a00b651dec0f68200e707b8f11af951))
+
 ## [1.5.0](https://github.com/happy-dwarf-team/anvil/compare/v1.4.0...v1.5.0) (2026-10-26)
 
 
