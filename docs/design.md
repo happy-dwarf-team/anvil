@@ -711,7 +711,7 @@ The fog of the map ([#12](https://github.com/happy-dwarf-team/anvil/issues/12)) 
 
 **Not planned**
 - Hot reload: nothing is unloaded in API 2 ([ADR 0001](adr/0001-plugin-api-2-compatibility.md)), so a publisher of services never disappears under its consumers; a restart and `anvil check` without the game are the authoring loop.
-- A shared address library: 1.37.5 is the last build and every plugin verifies its own bytes, so plugins share knowledge of the game through the services of library plugins (`anvil-game` today) instead of shared addresses. Several builds would reopen it ([#160](https://github.com/happy-dwarf-team/anvil/issues/160)).
+- A shared address library: Anvil supports one build, whose addresses no longer change, and every plugin verifies its own bytes, so plugins share knowledge of the game through the services of library plugins (`anvil-game` today) instead of shared addresses. Several builds would reopen it ([#160](https://github.com/happy-dwarf-team/anvil/issues/160)).
 - A vcpkg port: the SDK is headers and a host tool that `FetchContent` with a hash already delivers, and a port would build `anvil.exe` from source instead of the attested release binary ([research](https://github.com/happy-dwarf-team/anvil/blob/research/vcpkg-port/docs/research/vcpkg-port.md)). It comes back as an issue when an author asks.
 - OpenGL in the overlay: Direct3D 9 is EU4's default renderer on Windows, and everything the overlay shows is also in the Manager.
 - Setting profiles per playset or save: nobody has asked, and `restart = false` settings change in the overlay while the game runs.
