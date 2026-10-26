@@ -69,7 +69,7 @@ bool install_entry_hook() {
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_DETACH) {
-        anvil::shutdown();  // the call counters, if profile = true
+        anvil::shutdown();  // unless the game's ExitProcess ran it already
         return TRUE;
     }
     if (reason == DLL_THREAD_ATTACH) {

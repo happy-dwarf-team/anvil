@@ -679,7 +679,8 @@ Exceeding a budget blocks the release and any change to stubs, chains or core st
 - Pointer swaps, byte patches and import replacements are not counted: their cost is 0 (see the table above).
 - **Report:** when the process exits, `anvil.log` gets one line per counted change under its plugin's id (at info level), e.g. `calls: function hook rva 0x8024D0 [speed_object]: 1234 calls`.
   - Removed changes that saw calls are included.
-  - The report is written from `DLL_PROCESS_DETACH` and never waits for a lock: if a killed thread holds one, the report is skipped with a warning.
+  - The report is written when the game calls `ExitProcess` (its C runtime does when `main` returns: the menu's Exit, `SDL_QUIT`), through the core's own replacement of that import of `eu4.exe`, before Windows stops the other threads and detaches the DLLs. `DLL_PROCESS_DETACH` is only the fallback: in the lab a DLL that detaches before Anvil ended the process there (a graphics driver behind the Epic overlay's detach, [#164](https://github.com/happy-dwarf-team/anvil/issues/164)). The same exit work puts the safe-mode count back for an exit before readiness (§10).
+  - The report never waits for a lock: if another thread holds one, the report is skipped with a warning.
   - A process that is terminated (rather than exiting) writes no report.
 
 ## 18. Logging and status

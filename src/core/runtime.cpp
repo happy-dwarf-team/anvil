@@ -409,6 +409,19 @@ DWORD WINAPI main_phase(LPVOID) {
     return 0;
 }
 
+using ExitProcessFn = void(WINAPI*)(UINT);
+void* g_exit_next = nullptr;  // the rest of the chain, written by the registry
+
+// The game's import of ExitProcess: its C runtime calls it when main returns
+// (the menu's Exit, SDL_QUIT). The exit work runs here, while every thread
+// still runs: ExitProcess then stops the other threads and detaches the DLLs,
+// and a DLL that detaches before Anvil can end the process there (in the lab,
+// a graphics driver behind the Epic overlay's detach; anvil#164).
+void WINAPI exit_process(UINT code) {
+    shutdown();
+    reinterpret_cast<ExitProcessFn>(g_exit_next)(code);
+}
+
 void startup_impl(const std::filesystem::path& game_dir) {
     auto runtime = std::make_unique<Runtime>();
     // Time 0 of every "at ... ms" in the log: AnvilEntry, before the game's
@@ -720,11 +733,18 @@ void startup_impl(const std::filesystem::path& game_dir) {
         g_runtime->policy->add(plugin->manifest, plugin->owner);
         g_runtime->plugins.push_back(std::move(plugin));
     }
+    // The core's own changes: its owner comes after every plugin's, so each
+    // is the innermost link of its chain.
+    const OwnerId core = g_runtime->changes->add_owner("anvil");
+    if (const ChangeStatus s = g_runtime->changes->replace_import(core, exe, "KERNEL32.dll", "ExitProcess",
+                                                                  reinterpret_cast<void*>(&exit_process), &g_exit_next);
+        s != ChangeStatus::Ok) {
+        log_warning(std::string("cannot replace the game's ExitProcess (") + result_name(to_result(s)) +
+                    "); the exit work waits for DLL_PROCESS_DETACH, which a normal exit may skip");
+    }
     // A benchmark start times the game's first opens of its files until
-    // ready, through the core's own change: its owner comes after every
-    // plugin's, so it is the innermost link and times the call itself.
+    // ready; the innermost link times the call itself.
     if (arm) {
-        const OwnerId core = g_runtime->changes->add_owner("anvil");
         const ChangeStatus s = install_first_open_meter(*g_runtime->changes, core, exe, g_runtime->first_opens);
         g_runtime->first_opens_metered = s == ChangeStatus::Ok;
         if (!g_runtime->first_opens_metered) {
@@ -805,6 +825,9 @@ PluginSettings* plugin_settings(std::string_view plugin_id) {
 }
 
 void shutdown() {
+    // Once: from the game's ExitProcess, and again from DLL_PROCESS_DETACH if it comes.
+    static std::atomic<bool> done{false};
+    if (done.exchange(true)) return;
     try {
         if (g_runtime != nullptr && g_runtime->changes && g_runtime->profile) write_call_counts();
         // Closed before the game was ready, without a crash: not counted.
@@ -812,7 +835,7 @@ void shutdown() {
             g_runtime->start_marker.clean_exit();
         }
     } catch (...) {
-        // Never throw out of DllMain.
+        // Never throw out of ExitProcess or DllMain.
     }
 }
 

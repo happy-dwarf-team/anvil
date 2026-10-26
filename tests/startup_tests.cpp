@@ -51,7 +51,8 @@ std::string generic(const fs::path& path) {
 }
 
 // The child: start-up as at the game's entry point, until the main phase has
-// written its summary; then the exit the game makes.
+// written its summary; then the exit the game makes: ExitProcess through this
+// image's import, which start-up replaced as it does eu4.exe's.
 int child(const fs::path& game_dir) {
     anvil::startup(game_dir);
     const fs::path log = game_dir / "anvil" / "anvil.log";
@@ -62,8 +63,10 @@ int child(const fs::path& game_dir) {
         GetEnvironmentVariableW(L"ANVIL_BENCHMARK", nullptr, 0) > 0) {
         while (!contains(read(log), " after ready; quitting") && GetTickCount64() < deadline) Sleep(5);
     }
-    anvil::shutdown();  // not counted as an unfinished start (safe mode)
-    return contains(read(log), "[anvil] status: ") ? 0 : 1;
+    if (GetEnvironmentVariableW(L"ANVIL_PROBE_HOOK", nullptr, 0) > 0) {
+        while (!contains(read(log), "probe target called") && GetTickCount64() < deadline) Sleep(5);
+    }
+    ExitProcess(contains(read(log), "[anvil] status: ") ? 0 : 1);
 }
 
 struct Game {
@@ -308,6 +311,25 @@ int main(int argc, char** argv) {
         CHECK(!fs::exists(record_file) && !contains(log, "start record written"));
         SetEnvironmentVariableW(L"ANVIL_PROBE_BENCHMARK", nullptr);
         SetEnvironmentVariableW(L"ANVIL_BENCHMARK", nullptr);
+    });
+
+    // The game quits through the C runtime's ExitProcess; in the lab a driver's
+    // DLL_PROCESS_DETACH then ended the process before Anvil's (anvil#164), so
+    // the exit work runs from the import replacement, before any DLL detaches.
+    run("start-up: the exit through ExitProcess writes the call counters and ends the start", [&] {
+        Game game(probe);
+        fs::copy(probe, game.anvil / "plugins" / "mod-probe", fs::copy_options::recursive);
+        write(game.anvil / "anvil.toml", "enabled = true\nprofile = true\n");
+        SetEnvironmentVariableW(L"ANVIL_PROBE_HOOK", L"1");
+        std::string log = game.start();
+        SetEnvironmentVariableW(L"ANVIL_PROBE_HOOK", nullptr);
+        CHECK(contains(log, "[mod-probe] probe target called 3 times"));
+        CHECK(contains(log, "[anvil] call counters at exit (profile = true): 1 counted change(s)"));
+        CHECK(contains(log, "[mod-probe] calls: function hook ") && contains(log, ": 3 calls"));
+        // Closed before the game was ready, without a crash: not an unfinished start.
+        CHECK(!fs::exists(game.anvil / "data" / "anvil" / "unfinished-starts.txt"));
+        log = game.start();
+        CHECK(contains(log, kRunning) && !contains(log, "ended before the game was ready"));
     });
 
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
