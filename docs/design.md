@@ -395,7 +395,7 @@ A standard plugin (`plugins/anvil-game`, released in `anvil/plugins/anvil-game/`
 3. **Work:** what `run_on_main_thread` queued before this frame, in order.
 4. **Frame:** `anvil-game.frame` with the game's frame counter (`app+0x320`).
 
-Frames drawn inside a game update or a save load (`outer = 0`) and frames on other threads are passed on untouched. Saves load inside one frame of the main loop, so a session starts at the end of the frame that loaded it, before the next game update. Checked in the game (anvil#168): while a save loaded from the game menu, no frame of the main loop and no nested frame ran; the root's session was null for about 2 s and then held the same object as before, and the load list of a game that is not ironman offers no ironman saves.
+Frames drawn inside a game update or a save load (`outer = 0`) and frames on other threads are passed on untouched. Saves load inside one frame of the main loop, so a session starts at the end of the frame that loaded it, before the next game update. Checked in the game (anvil#168): while a save loaded from the game menu, no frame of the main loop and no nested frame ran; the root's session was null for about 2 s and then held the same object as before, and the game menu never switches between ironman and not: its load list offers no ironman saves, and in an ironman game its Load Game is disabled.
 
 Service `anvil-game.game` version 1: `ready()`, `main_thread_id()`, `frame_number()`, `run_on_main_thread(work, context)` and `session(&out)`. Queued work never runs once the game quits, and frames stop while a save loads, so callers wait with a limit.
 
