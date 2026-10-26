@@ -2,8 +2,9 @@ name: release
 
 # release-please keeps a "chore: release x.y.z" pull request up to date from the
 # Conventional Commits on main (version.txt + CHANGELOG.md). Merging it tags
-# vX.Y.Z and creates the GitHub release; the jobs below then build that commit
-# and attach the package, AnvilManager.exe and the SDK archive.
+# vX.Y.Z and creates a DRAFT GitHub release; the jobs below then build that
+# commit, attach the package, AnvilManager.exe and the SDK archive to the draft
+# and publish it, so the release is never public without its files.
 on:
   push:
     branches: [main]
@@ -87,9 +88,13 @@ jobs:
             dist/AnvilManager.exe
             dist/anvil-sdk-windows-x64.zip
 
+      # gh finds a draft release by its tag too (contents: write can see drafts).
       - name: Upload release assets
         working-directory: dist
         run: gh release upload "$TAG" anvil-windows-x64.zip AnvilManager.exe anvil-sdk-windows-x64.zip SHA256SUMS.txt --clobber
+
+      - name: Publish the release
+        run: gh release edit "$TAG" --draft=false --latest
 
   # anvil-sys goes to crates.io once the package is built (the tests have passed).
   # Without a CARGO_REGISTRY_TOKEN secret the job only warns: add the secret (a

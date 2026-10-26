@@ -71,13 +71,17 @@ Releases are automated with
    `chore(main): release x.y.z`. It bumps `version.txt` and adds the
    `CHANGELOG.md` section, both computed from the Conventional Commits since
    the last release.
-2. Merging that pull request tags `vX.Y.Z` and creates the GitHub release with
-   the changelog section as release notes.
+2. Merging that pull request tags `vX.Y.Z` and creates a **draft** GitHub
+   release with the changelog section as release notes.
 3. The release workflow then builds the tagged commit, attaches
-   `anvil-windows-x64.zip` and `SHA256SUMS.txt` with a build provenance
-   attestation, publishes the `anvil-sys` crate to crates.io (only when the
+   `anvil-windows-x64.zip`, `AnvilManager.exe`, `anvil-sdk-windows-x64.zip` and
+   `SHA256SUMS.txt` with a build provenance attestation to the draft, and
+   publishes it: the release is never public without its files, and nobody has
+   to click. It also publishes the `anvil-sys` crate to crates.io (only when the
    `CARGO_REGISTRY_TOKEN` repository secret exists; otherwise it warns), and asks
-   the website to rebuild.
+   the website to rebuild once the release is public. If the build or the upload
+   fails, the draft stays a draft: rerun the failed jobs, or publish it by hand
+   once its files are attached.
 
 `version.txt` is the only place the version is written by hand. CMake, the
 `anvil.log` line and the DLL version resource all read it, and release-please
