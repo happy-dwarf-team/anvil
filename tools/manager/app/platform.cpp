@@ -104,6 +104,7 @@ ManagerSettings load_manager_settings() {
         }
         settings.check_releases = table["check_releases"].value_or(false);
         settings.asked_releases = table["asked_releases"].value_or(false);
+        settings.benchmark_first_arm = table["benchmark_first_arm"].value_or(std::string());
     } catch (const toml::parse_error&) {
         // A broken file gives the defaults; the next save writes a good one.
     }
@@ -120,8 +121,10 @@ bool save_manager_settings(const ManagerSettings& settings, std::string& error) 
     table.insert("game_folder", utf8(settings.game_folder));
     table.insert("check_releases", settings.check_releases);
     table.insert("asked_releases", settings.asked_releases);
+    if (!settings.benchmark_first_arm.empty()) table.insert("benchmark_first_arm", settings.benchmark_first_arm);
     std::ostringstream text;
-    text << "# Anvil Manager's settings. The game folder it manages and whether it asks GitHub for new releases.\n"
+    text << "# Anvil Manager's settings. The game folder it manages, whether it asks GitHub for new releases and\n"
+            "# the first arm of the last start-up benchmark series.\n"
          << table << "\n";
     return write_file_atomic(file, text.str(), error);
 }

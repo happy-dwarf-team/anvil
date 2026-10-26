@@ -1,5 +1,6 @@
 #pragma once
 
+#include "benchmark_tab.hpp"
 #include "cli/game.hpp"
 #include "core/discovery.hpp"
 #include "core/settings.hpp"
@@ -66,6 +67,7 @@ private:
     void draw_plugins_tab();
     void draw_mods_tab();
     void draw_settings_tab();
+    void draw_benchmark_tab();
     void draw_crashes_tab();
     void draw_log_tab();
     void draw_about_tab();
@@ -90,6 +92,8 @@ private:
     std::string package_error_;
     std::filesystem::path exe_;
     ManagerSettings settings_;
+    BenchmarkTab benchmark_;
+    bool benchmark_busy_ = false;  // in the last frame: the game folder is read again once a series ends
     std::vector<std::filesystem::path> steam_games_;
 
     std::filesystem::path game_;

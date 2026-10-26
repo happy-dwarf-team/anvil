@@ -92,7 +92,7 @@ void load_fonts(float scale) {
     io.Fonts->Clear();
     // Basic Latin, Latin-1 and Latin Extended-A (folder names such as "Gry" or "Spiele" with
     // their accents), plus the punctuation the texts use.
-    static const ImWchar ranges[] = {0x0020, 0x00FF, 0x0100, 0x017F, 0x2013, 0x2014, 0x2018, 0x201E, 0x2022, 0x2026, 0};
+    static const ImWchar ranges[] = {0x0020, 0x00FF, 0x0100, 0x017F, 0x2013, 0x2014, 0x2018, 0x201E, 0x2022, 0x2026, 0x2212, 0x2212, 0};
     wchar_t windows[MAX_PATH] = {};
     GetWindowsDirectoryW(windows, MAX_PATH);
     const fs::path font = fs::path(windows) / "Fonts" / "segoeui.ttf";
