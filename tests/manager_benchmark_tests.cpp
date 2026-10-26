@@ -10,6 +10,7 @@
 // again after a deliberate change.
 #include "benchmark_report.hpp"
 #include "benchmark_run.hpp"
+#include "benchmark_send.hpp"
 #include "benchmark_series.hpp"
 #include "core/benchmark_record.hpp"
 #include "core/crash_history.hpp"
@@ -802,6 +803,23 @@ int fake_benchmark_game() {
 }
 
 void manager_runner_tests() {
+    run("send: the line under Send for each answer of the receiver", [] {
+        CHECK(send_outcome_text(SendOutcome{201, "{\"message\":\"Received. Thank you.\"}", ""}) == "Sent. Thank you.");
+        CHECK(send_outcome_text(SendOutcome{200, "", ""}) == "This report has already arrived.");
+        CHECK(send_accepted(SendOutcome{201, "", ""}) && send_accepted(SendOutcome{200, "", ""}));
+        CHECK(!send_accepted(SendOutcome{422, "", ""}) && !send_accepted(SendOutcome{0, "", "x"}));
+        // 413 and 422: the server's message.
+        CHECK(send_outcome_text(SendOutcome{422, "{\"message\":\"The report does not match format 1: / bad\"}", ""}) ==
+              "The report does not match format 1: / bad");
+        CHECK(send_outcome_text(SendOutcome{413, "not json", ""}) == "The receiver refused the report.");
+        CHECK(send_outcome_text(SendOutcome{429, "{\"message\":\"Too many\"}", ""}) == "The receiver is busy. Try again later.");
+        CHECK(send_outcome_text(SendOutcome{503, "", ""}) == "The receiver is busy. Try again later.");
+        CHECK(send_outcome_text(SendOutcome{0, "", "cannot reach bench.happydwarf.dev (error 12007)"}) ==
+              "The report was not sent: cannot reach bench.happydwarf.dev (error 12007). You can copy it instead.");
+        CHECK(send_outcome_text(SendOutcome{404, "{\"message\":\"Not found.\"}", ""}) == "The receiver answered 404: Not found.");
+        CHECK(receiver_message("{\"message\":" + std::string("\"") + std::string(400, 'x') + "\"}").size() == 300);
+    });
+
     run("runner: the child's environment carries the arm and SteamAppId", [] {
         const std::wstring current = block({L"=C:=C:\\x", L"Path=C:\\Windows", L"steamappid=1", L"ANVIL_BENCHMARK=old", L"Zed=1"});
         CHECK(benchmark_environment(current, Arm::With, "bellows") ==

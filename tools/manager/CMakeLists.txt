@@ -29,6 +29,7 @@ set(ANVIL_MINIZ_LICENSE ${miniz_SOURCE_DIR}/LICENSE CACHE INTERNAL "")
 add_library(anvil_manager_core STATIC
     src/benchmark_report.cpp
     src/benchmark_run.cpp
+    src/benchmark_send.cpp
     src/benchmark_series.cpp
     src/benchmark_setup.cpp
     src/game.cpp

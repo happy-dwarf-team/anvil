@@ -38,7 +38,7 @@ public:
     void draw(const BenchmarkContext& context);
     // A series runs or its report is being made: the other tabs, Play EU4 and
     // Change... are locked until it ends.
-    bool busy() const { return runner_ != nullptr || prepared_.valid(); }
+    bool busy() const { return runner_ != nullptr || prepared_.valid() || sending_.valid(); }
     // The game folder changed: back to the setup screen.
     void reset();
 
@@ -100,6 +100,10 @@ private:
     std::map<std::string, std::map<std::string, std::string>> labels_;  // plugin -> field -> label, this series only
     std::map<std::string, int> fields_start_;  // plugin -> the start whose fields the preview shows
     std::string copy_outcome_;
+    bool sent_ = false;  // a .sent marker, or a Send accepted in this session
+    std::future<SendOutcome> sending_;
+    std::string send_outcome_;
+    bool send_failed_ = false;
 };
 
 }  // namespace anvil::manager
