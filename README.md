@@ -101,7 +101,9 @@ plugins with their install guides:
   simulation, without changing game files or game behaviour; also on the
   [Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3823747170).
 - [Tongs](https://github.com/happy-dwarf-team/tongs): lets scripts and agents
-  control a running game through a local pipe, with an MCP server.
+  control a running game through a local pipe, with an MCP server; also on the
+  [Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3826695093)
+  (unlisted).
 
 [Etch](https://etch.happydwarf.dev/), a preview for EU4 interface mods in
 Visual Studio Code, is built on Anvil too: its game host runs a private copy
