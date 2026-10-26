@@ -97,5 +97,7 @@ you. You can also ask the same address any question about this page.
 ## Changes
 
 This page lives in the Anvil repository, `docs/benchmark-privacy.md`, and its
-history shows every change. A change to what a report contains is a new report
+history shows every change. The Manager links its copy on
+[anvil.happydwarf.dev](https://anvil.happydwarf.dev/docs/benchmark-privacy/),
+which follows this file. A change to what a report contains is a new report
 format, which the Manager's preview shows before you send it.

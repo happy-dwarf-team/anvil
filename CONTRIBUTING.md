@@ -151,8 +151,11 @@ sends format 1 (Anvil 1.5), is merged only after these steps:
 3. A test report of the new format is sent to
    `https://bench.happydwarf.dev/reports` and answered 201, then deleted by
    hand.
-4. `docs/benchmark-privacy.md` says what the new format adds, and
-   `privacy@happydwarf.dev` still forwards mail.
+4. `docs/benchmark-privacy.md` says what the new format adds, its copy on
+   the website (the Manager's privacy link,
+   `https://anvil.happydwarf.dev/docs/benchmark-privacy/`, from
+   `anvil-website`) says the same, and `privacy@happydwarf.dev` still
+   forwards mail.
 5. The release pull request is merged.
 
 Old formats stay accepted; retiring one is a change of its own.

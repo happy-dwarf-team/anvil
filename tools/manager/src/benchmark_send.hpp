@@ -10,7 +10,9 @@ namespace anvil::manager {
 // retries: the player clicks again.
 inline constexpr const wchar_t* kReceiverHost = L"bench.happydwarf.dev";
 inline constexpr const wchar_t* kReceiverPath = L"/reports";
-inline constexpr const char* kPrivacyUrl = "https://github.com/happy-dwarf-team/anvil/blob/main/docs/benchmark-privacy.md";
+// The player-facing copy of docs/benchmark-privacy.md on the website (anvil-website,
+// src/content/docs/docs/benchmark-privacy.md); the file in this repository stays the source.
+inline constexpr const char* kPrivacyUrl = "https://anvil.happydwarf.dev/docs/benchmark-privacy/";
 inline constexpr const char* kPrivacyAddress = "privacy@happydwarf.dev";
 
 // How a Send ended.
