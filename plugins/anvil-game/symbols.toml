@@ -76,6 +76,14 @@ memory = "code"
 values.speed = { at = 3, size = 4 }
 note = "session vtable slot 0x100: the game-speed object at session+0x418"
 
+[symbol.set_session]
+rva = 0x756A30
+# mov [rsp+10h],rbp; mov [rsp+18h],rsi; push rdi; sub rsp,20h; mov [rcx+1E00h],rdx
+bytes = "48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 89 91 00 1E 00 00"
+memory = "code"
+signature = "void (void* root, void* session)"
+note = "puts a session into the root (root+0x1E00) and hands it to every country; called while a save or a new game loads, also from the game menu, where the same session object comes back"
+
 [symbol.ironman_gate]
 rva = 0x6E9128
 bytes = "48 8B 0D 49 6D C5 01 C6 40 18 01 48 8B 89 00 1E 00 00 E8 D1 18 00 00 48 8B 0D 32 6D C5 01 0F B6 D8 0F B6 B9 D0 24 00 00"
