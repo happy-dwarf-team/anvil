@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.5.0](https://github.com/happy-dwarf-team/anvil/compare/v1.4.0...v1.5.0) (2026-10-26)
+
+
+### Features
+
+* **manager:** add the Benchmark tab ([#151](https://github.com/happy-dwarf-team/anvil/issues/151)) ([b0f2dae](https://github.com/happy-dwarf-team/anvil/commit/b0f2daef32f401f5f7792bb2276618c5220ceaa7))
+* **manager:** run a benchmark series of game starts ([#149](https://github.com/happy-dwarf-team/anvil/issues/149)) ([aa867f3](https://github.com/happy-dwarf-team/anvil/commit/aa867f34d7a7d8c4b2dc7bf9efd66c9e5a28cedb))
+* **manager:** send a benchmark report to the receiver ([#152](https://github.com/happy-dwarf-team/anvil/issues/152)) ([bc8ce69](https://github.com/happy-dwarf-team/anvil/commit/bc8ce693c5253afef5b567ce336180bd5f2b44d8))
+* **manager:** write and keep the benchmark report format 1 ([#148](https://github.com/happy-dwarf-team/anvil/issues/148)) ([168744b](https://github.com/happy-dwarf-team/anvil/commit/168744b7c8f8c2f862e28336190bd03c338c7a6d))
+
 ## [1.4.0](https://github.com/happy-dwarf-team/anvil/compare/v1.3.0...v1.4.0) (2026-10-25)
 
 
