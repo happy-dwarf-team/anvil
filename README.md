@@ -68,6 +68,14 @@ into that folder; from then on, start the Manager there.
 - It shows which plugins will load and why, and turns plugins on and off.
 - It installs a plugin from its release zip after checking it against your
   `eu4.exe`, and edits plugin settings.
+- On its Mods tab it approves and revokes plugins that come with enabled mods
+  (Anvil 1.3 and later), checking that the mod still has the version shown.
+- On its Benchmark tab (Anvil 1.5 and later) it measures how long the game
+  takes to start without a plugin and with it, in a series of starts that quit
+  by themselves, and shows the result with cold starts apart. The report is
+  sent to the maintainers only when you click "Send" after seeing it, or
+  copied; see [docs/benchmark-privacy.md](docs/benchmark-privacy.md) and the
+  [specification](docs/spec/benchmark-v1.md).
 - It shows crash reports and the log, and starts the game through Steam.
 - "Repair" puts back Anvil's own files.
 - "Uninstall Anvil" removes `version.dll`, the standard plugins and the
@@ -83,6 +91,24 @@ delete `version.dll`, `AnvilManager.exe` and the `anvil` folder.
 
 `eu4.exe` is never changed, so Steam updates and "Verify integrity of game
 files" keep working. Without `version.dll` the game starts vanilla.
+
+## Plugins
+
+The [plugin catalog](https://anvil.happydwarf.dev/plugins/) lists released
+plugins with their install guides:
+
+- [Bellows](https://github.com/happy-dwarf-team/bellows): faster start-up and
+  simulation, without changing game files or game behaviour; also on the
+  [Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3823747170).
+- [Tongs](https://github.com/happy-dwarf-team/tongs): lets scripts and agents
+  control a running game through a local pipe, with an MCP server.
+
+[Etch](https://etch.happydwarf.dev/), a preview for EU4 interface mods in
+Visual Studio Code, is built on Anvil too: its game host runs a private copy
+of the game with pinned builds of Anvil, `anvil-game`, Bellows and Etch's own
+plugin. It is not a catalog plugin. To write a plugin, start from the
+[plugin template](https://github.com/happy-dwarf-team/anvil-plugin-template)
+and the [author docs](https://anvil.happydwarf.dev/docs/plugins/overview/).
 
 ## Building
 
