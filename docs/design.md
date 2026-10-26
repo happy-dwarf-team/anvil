@@ -149,7 +149,6 @@ signature = "const char* ()"
 - **Kinds:** a symbol is a function (`signature`), a pointer slot (`points_to`), data (`type`) or a site (anything else).
 - **Values:** they must lie on fixed bytes.
 - **Exports:** an `export` symbol is resolved through the export table; `bytes`, if given, check the prologue.
-- **Imports:** the format accepts symbols imported from a shared address library (the library itself is fog, §21).
 - **Schema:** unknown keys are errors. Names match `[a-z][a-z0-9_]*` (they become identifiers in generated headers), and a symbol's id is its position in the file. A symbol has exactly one of `rva` and `export`; one at an `rva` needs `memory` and `bytes` or `points_to` (a data symbol may have neither). `signature`, `points_to` and `type` exclude each other. A value has `at` and either `size` (1, 2, 4 or 8, little-endian) or `rip_relative`, the offset of the instruction's end, at least `at + 4`: it yields the RVA `rva + rip_relative + disp32`. `resume` names another symbol and needs `bytes`, the block it ends.
 
 ### 5.3 `settings.toml`
@@ -186,7 +185,7 @@ label = "Panel key"
 
 ## 6. Game build identity
 
-Anvil reads the PE header of the running image (TimeDateStamp, SizeOfImage, CheckSum, entry point) and maps it to a build id from a compiled-in table. The full SHA-256 is checked off the critical path and cached. With an unknown build, plugins with `symbols` are skipped with "game build unknown (EU4 updated?)", and the overlay says so: it runs on every build. Other storefront builds are not supported yet ([Other distributions of EU4 1.37.5](https://github.com/happy-dwarf-team/anvil/issues/36), §21).
+Anvil reads the PE header of the running image (TimeDateStamp, SizeOfImage, CheckSum, entry point) and maps it to a build id from a compiled-in table. The full SHA-256 is checked off the critical path and cached. With an unknown build, plugins with `symbols` are skipped with "game build unknown (EU4 updated?)", and the overlay says so: it runs on every build. Other storefront builds are not supported yet ([Other distributions of EU4 1.37.5](https://github.com/happy-dwarf-team/anvil/issues/36)): the GOG builds wait for a GOG binary ([#160](https://github.com/happy-dwarf-team/anvil/issues/160)), and the Microsoft Store and Epic builds are not planned (§21).
 
 ## 7. Verification before loading
 
@@ -261,7 +260,7 @@ Every call that touches `eu4.exe` takes a declared symbol, never a raw RVA. Raw 
 - The layout is identical to SafetyHook's `Context64` (408 bytes): XMM0–15, RFLAGS, the GPRs, `rsp` (read-only), a reserved slot (`trampoline_rsp`) and `rip` (writable). It is pinned with `static_assert`s.
 - YMM upper halves, x87 and MXCSR are not saved.
 - Anvil runs a copy of SafetyHook 0.7's stub, so a later SafetyHook cannot change the ABI: one context save for all mid hooks at an address and the block replacement. One copy serves every address; each address enters it through its own 24-byte thunk that pushes the address's state as `rip`, which the dispatch loop replaces with the resume address before any callback runs.
-- A lighter, volatile-only context is not offered in 1.0 (§17).
+- A lighter, volatile-only context is not offered (§17); the Unicode Patch port counts its text blocks' calls per frame to decide whether one is needed ([#104](https://github.com/happy-dwarf-team/anvil/issues/104#issuecomment-6407336807)).
 
 ## 9. Plugin API 2
 
@@ -271,7 +270,7 @@ The C ABI is [`include/anvil/anvil_plugin.h`](../include/anvil/anvil_plugin.h) (
   - Inside `anvil_plugin_load` the load is the plugin's group: `begin_group`/`commit_group` return `ANVIL_ERROR_WRONG_PHASE` there.
   - Results map the registry's one to one; `NOT_FOUND` and `ALREADY_EXISTS` (services) are the last two codes.
   - Events are named like services: a plugin publishes only `<its id>.<name>`, so no plugin can forge another's events (the core acts on `anvil-game.session`, §13); `anvil.` names are Anvil's. Any plugin may subscribe to any name.
-- **Versioning:** the `size` and `api_version` fields keep it extensible; within API 2 functions are only appended (`ANVIL_HOST_HAS`) after the "end of API 2.0" line.
+- **Versioning:** the `size` and `api_version` fields keep it extensible; within API 2 functions are only appended (`ANVIL_HOST_HAS`) after the "end of API 2.0" line. The same contract covers every service (one **service version** only grows), nothing is unloaded in API 2, documented behaviour counts like layout, and the C++ and Rust layers stay source-compatible within an Anvil major version; an API 3 comes with a new Anvil major version that still loads `api = 2` plugins ([ADR 0001](adr/0001-plugin-api-2-compatibility.md)).
 - **Generated headers:** `anvil gen` produces `symbols.gen.h/.hpp` (symbol ids, typed function symbols, values) and `settings.gen.h/.hpp` (typed accessors).
 - **C++ wrapper** ([`anvil.hpp`](../include/anvil/anvil.hpp), header-only, C++20):
   - `ANVIL_PLUGIN(Type)` with `Type : anvil::Plugin`; a failing call in `load()` throws `anvil::Error` (the host's result and a message), the macro turns any exception into a result, and Anvil rolls back;
@@ -280,7 +279,7 @@ The C ABI is [`include/anvil/anvil_plugin.h`](../include/anvil/anvil_plugin.h) (
   - a signature mismatch (detour, call arguments, hook object) fails with a `static_assert`; each symbol has its own generated type (`sym::Types::<name>`), so the compiler's note names it;
   - `Host` is a stateless value (`anvil::Host{}` works anywhere once the plugin is loading); typed `call`, `function`, `data` (`Data<T>`, also typed `rip_relative` values) and `value`;
   - `Change` is a move-only handle: destroying it removes the change, `release()` keeps it.
-- **Rust** ([Rust SDK tier and timing](https://github.com/happy-dwarf-team/anvil/issues/22)): `anvil-sys`, `anvil gen --lang rust` and a Rust hello in CI. The safe `anvil` crate comes later, with recorded principles: `#[anvil::plugin]` returning `Result`, `catch_unwind` adapters, typed symbols, `Drop` handles, a `#[repr(C)]` context.
+- **Rust** ([Rust SDK tier and timing](https://github.com/happy-dwarf-team/anvil/issues/22)): `anvil-sys`, `anvil gen --lang rust` and a Rust hello in CI. The safe `anvil` crate comes with the first Rust plugin ([#159](https://github.com/happy-dwarf-team/anvil/issues/159)), with recorded principles: `#[anvil::plugin]` returning `Result`, `catch_unwind` adapters, typed symbols, `Drop` handles, a `#[repr(C)]` context.
   - **`anvil-sys`** (`sdk/rust/anvil-sys`, `no_std`, no dependencies, `rust-version` 1.82, which CI does not test: it builds with 1.99.1):
     - `src/bindings.rs` is bindgen's output for [`anvil_plugin.h`](../include/anvil/anvil_plugin.h), committed. `sdk/rust/regen-bindings.ps1` writes it (pinned bindgen, target `x86_64-pc-windows-msvc`, bindgen's own formatter, so the output does not depend on the machine); CI runs it with `-Check` and fails when the file differs, so a change of the header comes with its bindings.
     - C enums are integer constants (`AnvilResult`, `ANVIL_OK`), not Rust enums: a value the host sends is never invalid. Host table fields are `Option<unsafe extern "C" fn>`; `ANVIL_HOST_HAS` is a C macro, so a Rust plugin that needs a field added after API 2.0 compares `size` with `offset_of!` itself.
@@ -336,7 +335,7 @@ The C ABI is [`include/anvil/anvil_plugin.h`](../include/anvil/anvil_plugin.h) (
 - For `restart = false` settings plugins can subscribe to changes (`subscribe_setting`, or `anvil::Host::subscribe_setting(cfg::<name>, handler)`, which does not compile for a `restart = true` setting). The host refuses an unknown setting with `ANVIL_ERROR_NOT_DECLARED` and a `restart = true` one with `ANVIL_ERROR_WRONG_KIND`. Callbacks run synchronously on the thread that made the change, after the new value is in place; a plugin whose load fails loses its subscriptions.
 - **Changing a value while the game runs** (the overlay, 1.1): the core holds each resolved plugin's settings in a `PluginSettings` (`src/core/plugin_settings.hpp`), found by `anvil::plugin_settings(id)` (`runtime.hpp`). `set(id, value)` (or `set_text`, `reset`) checks the value, saves the player's file (atomically, through a temporary file; with only defaults it is removed), and for a `restart = false` setting makes it the current value and runs the callbacks; a `restart = true` setting keeps its current value until the next start (`current` and `saved` tell the editor whether to show "applies at the next start"). A change replaces an environment override for the rest of the session. The overlay, a plugin itself, reaches these calls through the core's private service `anvil.control` (§15); the warnings of the start-up are in `warnings()`.
 - **Outside the game** (the Manager, 1.2): `anvil_core` has the same rules without the running game: `load_settings`, `load_player_settings` and `write_player_settings` (`src/core/settings.hpp`), `parse_setting_text` and `setting_toml` for text, `check_setting_value`. Edits are safe only while the game is closed: a running game rewrites the file on the next change in the overlay.
-- Settings are global per plugin; profiles are fog.
+- Settings are global per plugin; there are no per-playset or per-save profiles (§21).
 
 ## 12. Crash capture and attribution
 
@@ -409,6 +408,7 @@ Decided in [Workshop distribution and trust model](https://github.com/happy-dwar
 [Run the Workshop experiments E1 and E2](https://github.com/happy-dwarf-team/anvil/issues/34) found:
 - **E1:** a mod with only `descriptor.mod` + `anvil/**` keeps the 1.37.5 checksum and allows ironman achievements.
 - **E2:** a private upload through the Paradox launcher delivered the DLL byte-identical, with no warnings; the launcher only adds `remote_file_id` to `descriptor.mod`.
+- **E3:** the Paradox forum's mod rules sit behind a verification for automated readers and were not read. The binding rules are Valve's and Paradox's agreements, which forbid malware and cheats but not native code ([#16](https://github.com/happy-dwarf-team/anvil/issues/16)); Bellows has been public on the Workshop since 0.9.
 
 - **Discovery:** only mods enabled in the current playset (`dlc_load.json` → `.mod` → `path`), in `anvil/<plugin-id>/` folders, several per mod. This also gates a plugin on its mod being enabled.
 - **Trust:**
@@ -489,7 +489,7 @@ Decided in [Workshop discovery and trust](https://github.com/happy-dwarf-team/an
 Decided in [Player UI: in-game overlay and Anvil Manager](https://github.com/happy-dwarf-team/anvil/issues/26).
 
 - **`anvil-overlay`**
-  - Drawing: Dear ImGui on D3D9 (`EndScene`/`Reset` via `hook_function_at`, chained with other D3D9 hooks); input by subclassing the game window's WndProc. It turns itself off on the OpenGL backend (fog).
+  - Drawing: Dear ImGui on D3D9 (`EndScene`/`Reset` via `hook_function_at`, chained with other D3D9 hooks); input by subclassing the game window's WndProc. It turns itself off on the OpenGL backend, and the Manager shows the same information outside the game (§21).
   - Notifications: non-blocking, for skipped plugins, the previous crash, pending approvals/updates and safe mode.
   - Panel on `Ctrl+Shift+F12`:
     - status and reasons;
@@ -686,7 +686,7 @@ Exceeding a budget blocks the release and any change to stubs, chains or core st
 Plugins are native code with the game's permissions:
 - local plugins are trusted by placement, and plugins from mods (Workshop or local) need per-version approval;
 - Anvil and its standard plugins never download anything; the Manager's release check is opt-in and only links;
-- releases are built by GitHub Actions with SHA-256 sums and provenance attestation. Code signing is fog.
+- releases are built by GitHub Actions with SHA-256 sums and provenance attestation. They are not signed yet: signing the executables and DLLs is [#157](https://github.com/happy-dwarf-team/anvil/issues/157).
 
 ## 20. Build, test, release
 
@@ -697,20 +697,27 @@ Plugins are native code with the game's permissions:
 
 ## 21. Open items and fog
 
-- **Other storefront builds** ([#36](https://github.com/happy-dwarf-team/anvil/issues/36)): GOG ships two different `eu4.exe` builds (1.37.5.0 and 1.37.5.2), and the Microsoft Store exe is encrypted on disk. Unknown builds are skipped safely; GOG support needs a GOG binary (fog).
-- **Workshop rules:** the Paradox forum's mod rules were not readable (E3).
-- **Fog** (from the map):
-  - hot reload;
-  - code signing;
-  - the ABI stability policy for API 2;
-  - localization of player messages;
-  - the shared address library;
-  - a vcpkg port;
-  - call counts of text hooks (lighter context);
-  - OpenGL in the overlay;
-  - setting profiles;
-  - automatic multiplayer plugin-set exchange;
-  - the safe Rust crate.
+The fog of the map ([#12](https://github.com/happy-dwarf-team/anvil/issues/12)) was reviewed on 2026-10-26. Each item ended as a decision, an issue, or not planned.
+
+**Decided**
+- The ABI stability policy for API 2: [ADR 0001](adr/0001-plugin-api-2-compatibility.md), summarized in §9 and in `CONTRIBUTING.md`.
+
+**Issues**
+- Code signing: [#157](https://github.com/happy-dwarf-team/anvil/issues/157) (SignPath Foundation first, Certum's open-source certificate if refused; the executables and the DLLs).
+- Localization of player messages in the overlay and the Manager: [#158](https://github.com/happy-dwarf-team/anvil/issues/158), after the Unicode Patch port.
+- The safe Rust `anvil` crate: [#159](https://github.com/happy-dwarf-team/anvil/issues/159), when the first Rust plugin is written.
+- Other storefront builds ([#36](https://github.com/happy-dwarf-team/anvil/issues/36)): the GOG builds in [#160](https://github.com/happy-dwarf-team/anvil/issues/160), waiting for a GOG binary.
+- Call counts of text hooks (a lighter context): a step of the Unicode Patch port, [#104](https://github.com/happy-dwarf-team/anvil/issues/104#issuecomment-6407336807).
+
+**Not planned**
+- Hot reload: nothing is unloaded in API 2 ([ADR 0001](adr/0001-plugin-api-2-compatibility.md)), so a publisher of services never disappears under its consumers; a restart and `anvil check` without the game are the authoring loop.
+- A shared address library: 1.37.5 is the last build and every plugin verifies its own bytes, so plugins share knowledge of the game through the services of library plugins (`anvil-game` today) instead of shared addresses. Several builds would reopen it ([#160](https://github.com/happy-dwarf-team/anvil/issues/160)).
+- A vcpkg port: the SDK is headers and a host tool that `FetchContent` with a hash already delivers, and a port would build `anvil.exe` from source instead of the attested release binary ([research](https://github.com/happy-dwarf-team/anvil/blob/research/vcpkg-port/docs/research/vcpkg-port.md)). It comes back as an issue when an author asks.
+- OpenGL in the overlay: Direct3D 9 is EU4's default renderer on Windows, and everything the overlay shows is also in the Manager.
+- Setting profiles per playset or save: nobody has asked, and `restart = false` settings change in the overlay while the game runs.
+- Automatic exchange of the gameplay plugin-set hash between multiplayer peers: gameplay plugins are suspended in multiplayer unless the player opts in, the hash compared by hand covers that, and a channel in the game's netcode risks desyncs.
+- The Microsoft Store and Epic builds: the Store's `eu4.exe` is encrypted on disk, so its bytes cannot be verified, and nothing is known about Epic's.
+- The Paradox forum's Workshop rules (E3): see §14.
 
 ## 22. Delivery
 
