@@ -79,7 +79,8 @@ Releases are automated with
    publishes it: the release is never public without its files, and nobody has
    to click. It also publishes the `anvil-sys` crate to crates.io (only when the
    `CARGO_REGISTRY_TOKEN` repository secret exists; otherwise it warns), and asks
-   the website to rebuild once the release is public. If the build or the upload
+   anvil.happydwarf.dev and happydwarf.dev to rebuild once the release is public
+   (`website.yml`, which can also be run by hand). If the build or the upload
    fails, the draft stays a draft: rerun the failed jobs, or publish it by hand
    once its files are attached.
 
