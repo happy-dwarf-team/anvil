@@ -296,7 +296,12 @@ involved, so an older Anvil still loads the plugin (anvil#135).
   `done` and the values set by then (`"write": "ready"` or `"end"`). The final
   write is not at exit: in two lab starts that quit through `SDL_QUIT`, the
   game ended its process without Anvil's `DLL_PROCESS_DETACH` handler running
-  (it wrote no log line), so a write there would never happen. Values a late
+  (it wrote no log line), so a write there would never happen. The cause
+  (anvil#164): the game's C runtime calls `ExitProcess`, and a DLL that
+  detaches before Anvil (a graphics driver behind the Epic overlay's detach)
+  ends the process there. The core now runs its exit work (the
+  call counters, safe mode) from its replacement of that import instead, but
+  the record keeps its final write at the quit decision. Values a late
   participant sets after the final write are lost; its entry has
   `done: false`. A crash after ready leaves the
   first write; a crash before ready leaves no record, so that row carries only
@@ -663,11 +668,6 @@ These are hypotheses or untested paths, not decisions:
 - `input_during_start` was true in both lab starts with Bellows and false in
   the one without (n = 1 each). Bellows sends no input, so it was most likely
   real use of the computer during those starts, but that was not checked.
-- The game ends its process after `SDL_QUIT` without Anvil's
-  `DLL_PROCESS_DETACH` handler running (no log line from it in two starts), so
-  the start record has no write at exit (section 6). Whatever else Anvil does
-  in that handler (the call counters of `profile = true`) is worth checking
-  in a normal quit too.
 - Whether the cause of the reboot's ~4.45 ms first-open cost is Defender's
   filter or cold NTFS metadata (needs an elevated trace; it does not change
   the classification).
