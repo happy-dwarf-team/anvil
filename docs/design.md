@@ -408,7 +408,12 @@ Decided in [Workshop distribution and trust model](https://github.com/happy-dwar
 [Run the Workshop experiments E1 and E2](https://github.com/happy-dwarf-team/anvil/issues/34) found:
 - **E1:** a mod with only `descriptor.mod` + `anvil/**` keeps the 1.37.5 checksum and allows ironman achievements.
 - **E2:** a private upload through the Paradox launcher delivered the DLL byte-identical, with no warnings; the launcher only adds `remote_file_id` to `descriptor.mod`.
-- **E3:** the Paradox forum's mod rules sit behind a verification for automated readers and were not read. The binding rules are Valve's and Paradox's agreements, which forbid malware and cheats but not native code ([#16](https://github.com/happy-dwarf-team/anvil/issues/16)); Bellows has been public on the Workshop since 0.9.
+- **E3:** the Paradox forum's [rules for user mods](https://forum.paradoxplaza.com/forum/threads/updated-14-06-18-rules-for-user-made-mods-and-edits-of-pds-games.708039/) (last updated 2018-06-14, read 2026-10-26) govern mods listed on the forum or the Workshop and say nothing about native code. What concerns plugins:
+  - a mod does not distribute the EXE file (rule 3): plugins are DLLs, and Anvil itself is not on the Workshop;
+  - a mod includes no license or claim of copyright, only credits (rule 4), and no third-party material without its holder's permission (rule 6). This conflicts with open-source licenses such as MIT, whose notice must ship with every copy: Bellows' Workshop item carries its own `LICENSE` and the notices of mimalloc and toml++. The notices stay, as the known risk of a moderator removing an item, and the question is put to Paradox;
+  - no fees (rule 8);
+  - a mod "should be exclusive" to the forum and the Workshop (rule 9): plugins are also released on GitHub on purpose, because the Manager installs them from zips and the Workshop cannot install Anvil.
+  The binding terms are Paradox's and Valve's agreements, which forbid malware and cheats but not native code ([#16](https://github.com/happy-dwarf-team/anvil/issues/16)); Bellows has been public on the Workshop since 0.9.
 
 - **Discovery:** only mods enabled in the current playset (`dlc_load.json` → `.mod` → `path`), in `anvil/<plugin-id>/` folders, several per mod. This also gates a plugin on its mod being enabled.
 - **Trust:**
@@ -717,7 +722,7 @@ The fog of the map ([#12](https://github.com/happy-dwarf-team/anvil/issues/12)) 
 - Setting profiles per playset or save: nobody has asked, and `restart = false` settings change in the overlay while the game runs.
 - Automatic exchange of the gameplay plugin-set hash between multiplayer peers: gameplay plugins are suspended in multiplayer unless the player opts in, the hash compared by hand covers that, and a channel in the game's netcode risks desyncs.
 - The Microsoft Store and Epic builds: the Store's `eu4.exe` is encrypted on disk, so its bytes cannot be verified, and nothing is known about Epic's.
-- The Paradox forum's Workshop rules (E3): see §14.
+- The Paradox forum's Workshop rules (E3): read, and recorded in §14 with the conflict between their rule 4 and open-source license notices.
 
 ## 22. Delivery
 
