@@ -22,6 +22,10 @@ _Avoid_: built-in plugin, core plugin, official module
 A named set of functions with a major version that one plugin publishes under its own id and other plugins look up.
 _Avoid_: interface, API (for one plugin's offer), export
 
+**Service version**:
+The major version under which a service is published; within it the service only grows, and a breaking change is a new service version that may be offered next to the old one.
+_Avoid_: service API version, interface version
+
 **Gameplay plugin**:
 A plugin that declares it can change the simulation's state or results. Anvil takes its changes out of ironman and multiplayer games unless both the plugin's author and the player allow it there.
 _Avoid_: cheat plugin, unsafe plugin

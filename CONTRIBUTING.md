@@ -47,7 +47,8 @@ Breaking changes: add `!` after the type or scope (`feat(api)!: …`) and a
 `BREAKING CHANGE: <what breaks and how to migrate>` paragraph in the pull
 request description. Before 1.0.0 a breaking change bumps the minor version.
 
-The plugin API is a separate contract from the Anvil version:
+The plugin API is a separate contract from the Anvil version, and it covers
+everything a plugin can see:
 
 - Within plugin API 2, host functions and fields are only **appended** after
   the "end of API 2.0" line of `anvil_plugin.h` (plugins detect them with
@@ -57,6 +58,19 @@ The plugin API is a separate contract from the Anvil version:
   key.
 - Removing or changing anything a plugin can see increments
   `ANVIL_API_VERSION` and is a breaking change (`feat(api)!`).
+- A service, Anvil's or a plugin's, is a name and a major version. Its
+  table starts with `uint32_t size` and only grows at the end within that
+  version; a breaking change is a new version, which the publisher may
+  register next to the old one.
+- Nothing is unloaded in API 2: plugins, services, callbacks and every
+  pointer the host or a service returns stay valid until the process ends.
+- Behaviour a header documents (threads, event order, result codes) is part
+  of the contract like the layout; changing it needs a new version.
+- `anvil.hpp`, `anvil_symbols.hpp`, `anvil gen` output and `anvil-sys` keep
+  source compatibility within an Anvil major version.
+- An API 3 comes only with a new Anvil major version, which still loads
+  `api = 2` plugins. The reasons are in
+  [ADR 0001](docs/adr/0001-plugin-api-2-compatibility.md).
 - `sdk/rust/anvil-sys/src/bindings.rs` is generated from `anvil_plugin.h` and
   committed. After a change to the header run `sdk/rust/regen-bindings.ps1`
   (bindgen and libclang, see the script) and commit the result; CI fails when
