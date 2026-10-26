@@ -5,7 +5,9 @@
 // Everything runs in the frame hook on the game's main thread, after an outer
 // frame of the main loop (outer = 1) while the game is not quitting:
 //   1. readiness: the byte the game sets at the end of its start-up;
-//   2. the session: read from the game root, published when it changes;
+//   2. the session: read from the game root, published when it changes (a
+//      hook of the root's session setter counts the sessions the game puts
+//      in, since a save loaded from the game menu brings the same object back);
 //   3. the work queued with run_on_main_thread;
 //   4. the frame event.
 // Frames drawn inside a game update or a save load (outer = 0) and frames on
@@ -59,6 +61,10 @@ constexpr std::int32_t kUnsetDate = 43'800'000 + 365 * 24;
 
 Layout g_layout;
 anvil::HookOf<sym::frame> g_frame;
+anvil::HookOf<sym::set_session> g_set_session;
+// Sessions the game has put into the root so far, from any thread (the first
+// load at start-up runs on another one).
+std::atomic<std::uint64_t> g_installs{0};
 std::atomic<std::uint32_t> g_main_thread{0};
 std::atomic<bool> g_ready{false};
 std::atomic<std::uint64_t> g_frame_number{0};
@@ -93,6 +99,7 @@ void read_session_unguarded(SessionView& view) {
 
 SessionView read_session() {
     SessionView view;
+    view.installs = g_installs.load(std::memory_order_acquire);
     __try {
         read_session_unguarded(view);
     } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER
@@ -135,6 +142,14 @@ void after_frame(std::uint64_t number) {
     frame.size = sizeof(frame);
     frame.number = number;
     publish(ANVIL_GAME_EVENT_FRAME, &frame);
+}
+
+// A save loaded from the game menu puts the same session object back into
+// the root, inside one frame of the main loop: the frames alone never see the
+// change, the setter does (5 calls per load; none while a game runs).
+void on_set_session(void* root, void* session) noexcept {
+    g_set_session.next(root, session);
+    g_installs.fetch_add(1, std::memory_order_release);
 }
 
 std::uintptr_t on_frame(void* app, std::uint8_t outer) noexcept {
@@ -231,6 +246,7 @@ struct AnvilGame : anvil::Plugin {
 
         host.register_service(ANVIL_GAME_SERVICE, ANVIL_GAME_SERVICE_VERSION, kService);
         host.hook(g_frame, sym::frame, on_frame);
+        host.hook(g_set_session, sym::set_session, on_set_session);
         host.info("frame hook staged; events {}, {}, {}; service {} v{}", ANVIL_GAME_EVENT_READY, ANVIL_GAME_EVENT_FRAME,
                   ANVIL_GAME_EVENT_SESSION, ANVIL_GAME_SERVICE, ANVIL_GAME_SERVICE_VERSION);
         // The core decides when (every participant done, or the limit); the

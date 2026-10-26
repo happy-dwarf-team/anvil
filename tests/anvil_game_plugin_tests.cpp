@@ -62,8 +62,8 @@ struct FakeEu4 {
     FakeEu4() {
         base = static_cast<uint8_t*>(VirtualAlloc(nullptr, kSize, MEM_RESERVE, PAGE_NOACCESS));
         commit(0x0, PAGE_READWRITE);
-        for (uint32_t page : {0x205000u, 0x6E9000u, 0x6EA000u, 0x802000u, 0x848000u, 0x1432000u, 0x14C2000u,
-                              0x1732000u, 0x1746000u, 0x1761000u}) {
+        for (uint32_t page : {0x205000u, 0x6E9000u, 0x6EA000u, 0x756000u, 0x802000u, 0x848000u, 0x1432000u,
+                              0x14C2000u, 0x1732000u, 0x1746000u, 0x1761000u}) {
             commit(page, PAGE_EXECUTE_READWRITE);
         }
         commit(0x1CB8000, PAGE_READWRITE);
@@ -87,6 +87,11 @@ struct FakeEu4 {
         put(0x848976, {0x48, 0x8B, 0x05, 0xFB, 0x74, 0xAF, 0x01, 0x48, 0x8B, 0xD9, 0x48, 0x8B, 0x88, 0x00, 0x1E,
                        0x00, 0x00, 0x48, 0x8B, 0x01, 0xFF, 0x90, 0x00, 0x01, 0x00, 0x00});
         put(0x8024D0, {0x48, 0x8B, 0x81, 0x18, 0x04, 0x00, 0x00, 0xC3});
+        // set_session: the declared bytes (it stores the session at root+0x1E00), then
+        // add rsp,20h; pop rdi; mov rbp,[rsp+10h]; mov rsi,[rsp+18h]; ret.
+        put(0x756A30, {0x48, 0x89, 0x6C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57, 0x48, 0x83, 0xEC, 0x20,
+                       0x48, 0x89, 0x91, 0x00, 0x1E, 0x00, 0x00, 0x48, 0x83, 0xC4, 0x20, 0x5F, 0x48, 0x8B, 0x6C,
+                       0x24, 0x10, 0x48, 0x8B, 0x74, 0x24, 0x18, 0xC3});
         put(0x6E9128, {0x48, 0x8B, 0x0D, 0x49, 0x6D, 0xC5, 0x01, 0xC6, 0x40, 0x18, 0x01, 0x48, 0x8B, 0x89,
                        0x00, 0x1E, 0x00, 0x00, 0xE8, 0xD1, 0x18, 0x00, 0x00, 0x48, 0x8B, 0x0D, 0x32, 0x6D,
                        0xC5, 0x01, 0x0F, 0xB6, 0xD8, 0x0F, 0xB6, 0xB9, 0xD0, 0x24, 0x00, 0x00});
@@ -246,6 +251,15 @@ int main(int argc, char** argv) {
         b_mp.multiplayer = true;
         c = t.update(b_mp);
         CHECK(c.count == 2 && c.items[1].multiplayer == 1 && c.items[1].number == 3);
+        // A save loaded from the game menu: the game puts the same session object
+        // back into the root, with the same flags; only the install count tells.
+        anvil_game::SessionView reloaded = b_mp;
+        reloaded.installs = b_mp.installs + 1;
+        c = t.update(reloaded);
+        CHECK(c.count == 2 && c.items[0].change == ANVIL_GAME_SESSION_ENDED && c.items[0].number == 3 &&
+              c.items[1].change == ANVIL_GAME_SESSION_STARTED && c.items[1].number == 4 && c.items[1].ironman == 1 &&
+              c.items[1].multiplayer == 1);
+        CHECK(t.update(reloaded).count == 0);
         c = t.update(none);
         CHECK(c.count == 1 && c.items[0].change == ANVIL_GAME_SESSION_ENDED && c.items[0].ironman == 1 &&
               c.items[0].multiplayer == 1 && !t.active());
@@ -313,7 +327,7 @@ int main(int argc, char** argv) {
         const std::string reason = check_plugin_symbols(dir / parsed.manifest->symbols, kBuild, changes, image.address(0),
                                                         &verified, &declared);
         if (!reason.empty()) std::printf("  %s\n", reason.c_str());
-        CHECK(reason.empty() && verified.symbols.size() == 13);
+        CHECK(reason.empty() && verified.symbols.size() == 14);
         if (!reason.empty()) return;
         auto* p = new AnvilPlugin;
         p->context = &context;
@@ -327,8 +341,9 @@ int main(int argc, char** argv) {
         if (p->module == nullptr) return;
         const auto fn = reinterpret_cast<PluginLoadFn>(GetProcAddress(p->module, "anvil_plugin_load"));
         const LoadOutcome outcome = run_plugin_load(*p, host, fn);
-        CHECK(outcome.result == ANVIL_OK && outcome.staged == 1 && changes.count(p->owner) == 1);
+        CHECK(outcome.result == ANVIL_OK && outcome.staged == 2 && changes.count(p->owner) == 2);
         CHECK(changes.chain_at(image.address(0x14C25A0)) == std::vector<OwnerId>{p->owner});
+        CHECK(changes.chain_at(image.address(0x756A30)) == std::vector<OwnerId>{p->owner});
         plugin = p;
         service = static_cast<const AnvilGameService*>(bus.get_service(ANVIL_GAME_SERVICE, ANVIL_GAME_SERVICE_VERSION));
         CHECK(service != nullptr && service->size == sizeof(AnvilGameService));
@@ -470,6 +485,62 @@ int main(int argc, char** argv) {
         frame(game.app, 1);
         CHECK(service->session(nullptr) == 1 && (heard.events == std::vector<std::string>{"frame 18"}));
         game.set_session(game.session);
+    });
+
+    run("anvil-game: a save loaded from the game menu ends the session and starts the next", [&] {
+        const auto set_session = reinterpret_cast<void (*)(void*, void*)>(image.address(0x756A30));
+        // As in the game: inside one frame of the main loop the root's session is
+        // taken out, the save is read and the same session object is put back
+        // through the setter, five times.
+        const auto load_in_game = [&] {
+            game.set_session(nullptr);
+            for (int i = 0; i < 5; ++i) set_session(game.root, game.session);
+        };
+        const auto session_events = [&](uint64_t ended, int ironman_before, int ironman_after) {
+            return std::vector<std::string>{
+                "session ended " + std::to_string(ended) + " im=" + std::to_string(ironman_before) + " mp=0",
+                "session started " + std::to_string(ended + 1) + " im=" + std::to_string(ironman_after) + " mp=0"};
+        };
+        AnvilGameSession s{};
+        CHECK(service->session(&s) == 1 && s.ironman == 0 && !changes.suspended(gp));
+
+        // A save of the same mode: the session events come, nothing to suspend.
+        heard.events.clear();
+        load_in_game();
+        frame(game.app, 1);
+        CHECK(heard.events.size() == 3 && std::equal(heard.events.begin(), heard.events.begin() + 2,
+                                                     session_events(s.number, 0, 0).begin()));
+        CHECK(service->session(&s) == 1 && !changes.suspended(gp) && image.base[0x205000] == 0x90);
+        heard.events.clear();
+        frame(game.app, 1);
+        CHECK(heard.events.size() == 1);  // the next frame: no session event
+
+        // An ironman save: gp is suspended.
+        heard.events.clear();
+        load_in_game();
+        game.root[0x24D0] = 1;
+        frame(game.app, 1);
+        CHECK(heard.events.size() == 3 && std::equal(heard.events.begin(), heard.events.begin() + 2,
+                                                     session_events(s.number, 0, 1).begin()));
+        CHECK(service->session(&s) == 1 && changes.suspended(gp) && image.base[0x205000] != 0x90);
+
+        // Another ironman save: gp stays suspended once both events are out.
+        heard.events.clear();
+        load_in_game();
+        frame(game.app, 1);
+        CHECK(heard.events.size() == 3 && std::equal(heard.events.begin(), heard.events.begin() + 2,
+                                                     session_events(s.number, 1, 1).begin()));
+        CHECK(service->session(&s) == 1 && changes.suspended(gp) && policy.suspended(gp) &&
+              image.base[0x205000] != 0x90);
+
+        // Back to a normal save: gp comes back.
+        heard.events.clear();
+        load_in_game();
+        game.root[0x24D0] = 0;
+        frame(game.app, 1);
+        CHECK(heard.events.size() == 3 && std::equal(heard.events.begin(), heard.events.begin() + 2,
+                                                     session_events(s.number, 1, 0).begin()));
+        CHECK(service->session(&s) == 1 && !changes.suspended(gp) && image.base[0x205000] == 0x90);
     });
 
     run("anvil-game: only anvil-game publishes its events", [&] {

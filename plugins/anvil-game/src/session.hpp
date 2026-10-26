@@ -14,6 +14,10 @@ struct SessionView {
     std::uintptr_t session = 0;
     bool ironman = false;
     bool multiplayer = false;
+    // How many times the game has put a session into the root so far. A save
+    // loaded from the game menu puts the same session object back, inside one
+    // frame of the main loop, so only this count tells the two sessions apart.
+    std::uint64_t installs = 0;
 };
 
 // The session events one view causes, in order: at most an ENDED and a STARTED.
@@ -23,9 +27,9 @@ struct SessionChanges {
 };
 
 // Turns views into session events. A session ends when the view stops
-// running, shows another session object, or changes ironman or multiplayer;
-// the next running view starts a new one. A view that is not readable changes
-// nothing. Main thread only.
+// running, shows another session object or another install of it, or changes
+// ironman or multiplayer; the next running view starts a new one. A view that
+// is not readable changes nothing. Main thread only.
 class SessionTracker {
 public:
     SessionChanges update(const SessionView& view);
@@ -36,6 +40,7 @@ public:
 private:
     bool active_ = false;
     std::uintptr_t session_ = 0;
+    std::uint64_t installs_ = 0;
     AnvilGameSession current_{};
     std::uint64_t started_ = 0;
 };
