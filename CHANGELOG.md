@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.2](https://github.com/happy-dwarf-team/anvil/compare/v1.5.1...v1.5.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **core:** write the exit work from the game's ExitProcess ([#165](https://github.com/happy-dwarf-team/anvil/issues/165)) ([4155d4f](https://github.com/happy-dwarf-team/anvil/commit/4155d4f7614872b13a3c4af0d34ed61dc754d814)), closes [#164](https://github.com/happy-dwarf-team/anvil/issues/164)
+* **game:** publish the session events of a save loaded from the game menu ([#169](https://github.com/happy-dwarf-team/anvil/issues/169)) ([13e5a4b](https://github.com/happy-dwarf-team/anvil/commit/13e5a4b7b0f1ab0e2517a8e7d5a7643f516eb365))
+
 ## [1.5.1](https://github.com/happy-dwarf-team/anvil/compare/v1.5.0...v1.5.1) (2026-10-26)
 
 
