@@ -1,0 +1,48 @@
+name: website
+
+# Rebuilds the sites that show the new Anvil version: anvil.happydwarf.dev and
+# happydwarf.dev (the hub). release.yml calls this once the release has its files; a
+# release published with GITHUB_TOKEN starts no `release` workflow, so there is no
+# `release` trigger here. Run it by hand to resend the dispatch. Needs a
+# WEBSITE_DISPATCH_TOKEN secret with Contents: write on happy-dwarf-team/anvil-website
+# and happy-dwarf-team/happydwarf-website.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The published release tag
+        type: string
+        required: true
+    secrets:
+      WEBSITE_DISPATCH_TOKEN:
+        required: false
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  notify-website:
+    strategy:
+      fail-fast: false
+      matrix:
+        website: [anvil-website, happydwarf-website]
+    runs-on: ubuntu-24.04
+    permissions: {}
+    env:
+      DISPATCH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
+      WEBSITE: ${{ matrix.website }}
+    steps:
+      - name: Trigger website rebuild
+        if: env.DISPATCH_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ env.DISPATCH_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          gh api "repos/happy-dwarf-team/${WEBSITE}/dispatches" \
+            -f event_type=anvil-release \
+            -f "client_payload[repository]=${GITHUB_REPOSITORY}" \
+            -f "client_payload[tag]=${TAG}"
+
+      - name: Skip website rebuild (no WEBSITE_DISPATCH_TOKEN)
+        if: env.DISPATCH_TOKEN == ''
+        run: echo "::notice::WEBSITE_DISPATCH_TOKEN is not set; ${WEBSITE} rebuild not triggered"

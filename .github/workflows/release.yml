@@ -129,23 +129,12 @@ jobs:
         if: env.CARGO_REGISTRY_TOKEN == ''
         run: echo "::warning::CARGO_REGISTRY_TOKEN is not set; anvil-sys ${TAG} was not published to crates.io"
 
+  # Rebuilds anvil.happydwarf.dev and happydwarf.dev once the release is public.
   notify-website:
     needs: [release-please, publish]
-    runs-on: ubuntu-24.04
+    uses: ./.github/workflows/website.yml
     permissions: {}
-    env:
-      DISPATCH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
-    steps:
-      - name: Trigger website rebuild
-        if: env.DISPATCH_TOKEN != ''
-        env:
-          GH_TOKEN: ${{ env.DISPATCH_TOKEN }}
-          TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: |
-          gh api repos/happy-dwarf-team/anvil-website/dispatches \
-            -f event_type=anvil-release \
-            -f "client_payload[tag]=${TAG}"
-
-      - name: Skip website rebuild (no WEBSITE_DISPATCH_TOKEN)
-        if: env.DISPATCH_TOKEN == ''
-        run: echo "::notice::WEBSITE_DISPATCH_TOKEN is not set; website rebuild not triggered"
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+    secrets:
+      WEBSITE_DISPATCH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
