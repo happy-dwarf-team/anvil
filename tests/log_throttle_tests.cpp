@@ -470,6 +470,10 @@ int main(int argc, char** argv) {
               g_written[3].channel == 0x10003 && g_written[4].line == 12);
         CHECK(contains(log, "anvil-log-throttle: error.log: counting the repeats of [triggerimplementation.cpp:7256]: " +
                                 spam));
+        // CALL_STACK, which the game's writer drops, passes untouched however often it comes.
+        g_written.clear();
+        for (int i = 0; i < 5; ++i) write(error_log, "CALL_STACK");
+        CHECK((texts() == std::vector<std::string>(5, "CALL_STACK")));
     });
 
     run("log throttle plugin: full_log writes every line", [&] {

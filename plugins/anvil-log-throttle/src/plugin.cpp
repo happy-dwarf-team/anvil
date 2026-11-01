@@ -64,8 +64,9 @@ using DestroyFn = void*(void* sink, unsigned flags);
 
 anvil::PointerSwap<WriteFn> g_write;
 anvil::PointerSwap<DestroyFn> g_destroy;
-log_throttle::Throttle g_throttle;
-log_throttle::LogNames g_logs;  // set before the swaps, then read only
+// Kept for the process: the game may still write a line while the DLLs detach.
+log_throttle::Throttle& g_throttle = *new log_throttle::Throttle;
+const log_throttle::LogNames* g_logs = nullptr;  // set before the swaps
 std::uint32_t g_file_offset = 0;  // sink+: the file object
 std::uint32_t g_path_offset = 0;  // file object+: its path
 
@@ -79,7 +80,8 @@ std::atomic<int> g_named{0};
 
 // The path of a sink's log, as the game's router reads it.
 std::string_view log_path(const void* sink) {
-    const auto* file = *reinterpret_cast<const std::uint8_t* const*>(static_cast<const std::uint8_t*>(sink) + g_file_offset);
+    const auto* bytes = static_cast<const std::uint8_t*>(sink);
+    const auto* file = *reinterpret_cast<const std::uint8_t* const*>(bytes + g_file_offset);
     if (file == nullptr) return {};
     return reinterpret_cast<const GameString*>(file + g_path_offset)->view();
 }
@@ -114,7 +116,8 @@ void write_lines(const std::vector<log_throttle::Line>& lines) {
 
 void on_write(void* sink, int channel, const GameString* file, int line, const GameString* message) noexcept {
     WriteFn* const next = g_write.previous();
-    if (file == nullptr || message == nullptr || !g_logs.matches(log_path(sink))) {
+    // The game's writer drops the message CALL_STACK; it is not counted either.
+    if (file == nullptr || message == nullptr || message->view() == "CALL_STACK" || !g_logs->matches(log_path(sink))) {
         next(sink, channel, file, line, message);
         return;
     }
@@ -136,7 +139,7 @@ void on_write(void* sink, int channel, const GameString* file, int line, const G
 
 void* on_destroy(void* sink, unsigned flags) noexcept {
     const std::string_view path = log_path(sink);
-    if (g_logs.matches(path)) {
+    if (g_logs->matches(path)) {
         try {
             std::vector<log_throttle::Line> out;
             const log_throttle::SinkStats stats = g_throttle.close(sink, GetTickCount64(), out);
@@ -158,20 +161,20 @@ struct LogThrottle : anvil::Plugin {
         g_file_offset = sym::channel_log_path.file;
         g_path_offset = sym::channel_log_path.path;
         const std::string logs = cfg::logs.get();
-        g_logs = log_throttle::LogNames::parse(logs);
+        g_logs = new log_throttle::LogNames(log_throttle::LogNames::parse(logs));
         g_repeats.store(cfg::repeats.get());
         g_report_seconds.store(cfg::report_seconds.get());
         g_full_log.store(cfg::full_log.get());
         host.subscribe_setting(cfg::repeats, [](std::int64_t v) { g_repeats.store(v); });
         host.subscribe_setting(cfg::report_seconds, [](std::int64_t v) { g_report_seconds.store(v); });
         host.subscribe_setting(cfg::full_log, [](bool on) { g_full_log.store(on); });
-        if (!g_logs.all && g_logs.names.empty()) {
+        if (!g_logs->all && g_logs->names.empty()) {
             host.info("no logs to throttle (logs = \"{}\"); nothing changed", logs);
             return;
         }
         host.swap(g_write, sym::file_sink_write_slot, &on_write);
         host.swap(g_destroy, sym::file_sink_destroy_slot, &on_destroy);
-        host.info("throttling {} after {} lines per message, reports every {} s{}", g_logs.all ? "every log" : logs,
+        host.info("throttling {} after {} lines per message, reports every {} s{}", g_logs->all ? "every log" : logs,
                   g_repeats.load(), g_report_seconds.load(), g_full_log.load() ? " (off: full_log)" : "");
     }
 };
