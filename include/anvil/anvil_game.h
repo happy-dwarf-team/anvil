@@ -103,10 +103,11 @@ typedef struct AnvilGameService {
     /* Since anvil-game 1.6.0; check with ANVIL_GAME_HAS(service, date). */
 
     /* The current date: nonzero and *out filled while a session runs, 0 when
-     * no game is loaded (the main menu, a save still loading). Callable from
-     * any thread; `out` may be NULL. Like session(), its view is as of the
-     * last frame of the main loop, and out->session is the number session()
-     * reports. */
+     * no game is loaded (the main menu, a save loading from it). Callable
+     * from any thread; `out` may be NULL. Like session(), its view is as of
+     * the last frame of the main loop, and out->session is the number
+     * session() reports: while a save loads from a running game no frame
+     * runs, so the old session and its last date stay until the load ends. */
     int (*date)(AnvilGameDate *out);
 } AnvilGameService;
 
