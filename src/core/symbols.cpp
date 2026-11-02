@@ -377,6 +377,7 @@ bool select_build(SymbolFile& file, std::string_view build_id) {
     if (at == file.builds.end()) return false;
     const size_t index = static_cast<size_t>(at - file.builds.begin());
     for (auto& s : file.symbols) {
+        if (index >= s.placements.size()) continue;  // a symbol not from the parser keeps its own fields
         const SymbolPlacement& p = s.placements[index];
         s.rva = p.rva;
         s.bytes = p.bytes;
