@@ -104,6 +104,11 @@ void line(const std::string& text) { ImGui::TextUnformatted(text.c_str()); }
 void wrapped(const std::string& text) { ImGui::TextWrapped("%s", text.c_str()); }
 void colored(const ImVec4& color, const std::string& text) { ImGui::TextColored(color, "%s", text.c_str()); }
 void weak(const std::string& text) { ImGui::TextDisabled("%s", text.c_str()); }
+void weak_wrapped(const std::string& text) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    wrapped(text);
+    ImGui::PopStyleColor();
+}
 
 void copy_to_clipboard(const std::string& text) {
     Ui& u = ui();
@@ -427,7 +432,10 @@ void draw_status() {
         ImGui::TableSetupColumn(tr("Version"), ImGuiTableColumnFlags_WidthStretch, 0.6f);
         ImGui::TableSetupColumn(tr("State"), ImGuiTableColumnFlags_WidthStretch, 0.6f);
         ImGui::TableSetupColumn(tr("Details"), ImGuiTableColumnFlags_WidthStretch, 2.4f);
-        ImGui::TableSetupColumn(tr("Next start"), ImGuiTableColumnFlags_WidthStretch, 1.2f);
+        // As wide as its button, which runs longer in some languages than in English.
+        const float button = ImGui::CalcTextSize(tr("Disable at next start")).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        ImGui::TableSetupColumn(tr("Next start"), ImGuiTableColumnFlags_WidthFixed,
+                                std::max(button, ImGui::CalcTextSize(tr("Next start")).x));
         ImGui::TableHeadersRow();
         for (const PluginRow& p : u.plugins) {
             ImGui::PushID(p.id.c_str());
@@ -710,7 +718,7 @@ void draw_setting(const std::string& plugin, AnvilSetting id, const AnvilControl
         // restart = true: the saved value waits for the next start. Otherwise
         // an ANVIL_<ID>_<NAME> variable overrides it until the next change.
         ImGui::SameLine();
-        weak(trf(info.restart ? N_("(now {0}; applies at the next start)") : N_("(now {0}, from the environment)"), {current}));
+        weak_wrapped(trf(info.restart ? N_("(now {0}; applies at the next start)") : N_("(now {0}, from the environment)"), {current}));
     }
     if (saved != fallback) {
         ImGui::SameLine();
