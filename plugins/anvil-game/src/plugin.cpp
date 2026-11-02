@@ -189,7 +189,8 @@ void after_frame(std::uint64_t number) {
         if (main_menu) {
             host.info("main menu shown");
         } else {
-            host.info("main menu left ({})", front_end >= 0 ? "front end state " + std::to_string(front_end) : std::string("no front end"));
+            host.info("main menu left ({})",
+                      front_end >= 0 ? "front end state " + std::to_string(front_end) : std::string("no front end"));
         }
         publish(ANVIL_GAME_EVENT_MAIN_MENU, nullptr);
     }
