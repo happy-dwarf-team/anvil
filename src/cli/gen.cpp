@@ -120,8 +120,9 @@ std::string unknown_why(const Symbol& s, const SymbolValue& v) {
 
 std::string where_of(const Symbol& s) {
     std::string out = std::string(symbol_kind_name(s.kind)) + ", ";
-    if (!s.export_name.empty()) return out + "export " + s.export_name;
-    if (s.placements.size() <= 1) return out + "rva " + hex(*s.rva);
+    if (!s.export_name.empty() || s.placements.size() <= 1) {
+        return out + (s.rva ? "rva " + hex(*s.rva) : "export " + s.export_name);
+    }
     out += "rva";
     for (size_t i = 0; i < s.placements.size(); ++i) {
         out += std::string(i == 0 ? " " : ", ") + hex(*s.placements[i].rva) + " in " + s.placements[i].build;
