@@ -312,7 +312,7 @@ Control::~Control() {
 const AnvilControlService* Control::service() const { return &kService; }
 
 void Control::loading_done() {
-    if (sources_.plugins != nullptr) {
+    if (sources_.plugins != nullptr && resolved_messages_.empty()) {
         for (const auto& p : *sources_.plugins) resolved_messages_.push_back(i18n::serialize(p->why.empty() ? p->reason : p->why));
     }
     loading_done_.store(true, std::memory_order_release);

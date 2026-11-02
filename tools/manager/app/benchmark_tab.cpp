@@ -262,7 +262,7 @@ void BenchmarkTab::draw_kept(const BenchmarkContext& context) {
     if (!ImGui::CollapsingHeader((trf("Kept reports ({0})", {std::to_string(kept_->size())}) + "###kept").c_str())) return;
     if (ImGui::Button(tr("Open the folder"))) open_folder(benchmarks_dir(context.game));
     if (kept_->empty()) {
-        weak(tr("No reports yet. Each series keeps its report here; the last 10 are kept."));
+        weak_wrapped(tr("No reports yet. Each series keeps its report here; the last 10 are kept."));
         return;
     }
     const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp;
@@ -510,7 +510,7 @@ void BenchmarkTab::draw_result() {
         colored_wrapped(kWarn, trf("Series stopped: {0}", {stop_reason_text(series["stop_reason"].as_string())}));
         if (from_series_ && !series_note_.empty()) weak(series_note_);
     }
-    weak(trf("{0}, {1} of {2} extra starts used, target {3} valid warm starts per arm.",
+    weak_wrapped(trf("{0}, {1} of {2} extra starts used, target {3} valid warm starts per arm.",
              {plural(static_cast<int64_t>(r["starts"].items().size()), N_("{0} start"), N_("{0} starts")),
               std::to_string(result["extra_starts_used"].as_integer()), std::to_string(kMaxExtraStarts),
               std::to_string(series["target"].as_integer())}));
@@ -801,7 +801,7 @@ void BenchmarkTab::draw_preview() {
     ImGui::Spacing();
     if (ImGui::CollapsingHeader((std::string(tr("Show the JSON")) + "###json-header").c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::InputTextMultiline("##json", &report_text_, ImVec2(-1, ImGui::GetTextLineHeight() * 18), ImGuiInputTextFlags_ReadOnly);
-        weak(tr("These are exactly the bytes kept on this computer, sent and copied."));
+        weak_wrapped(tr("These are exactly the bytes kept on this computer, sent and copied."));
     }
     draw_send();
 }

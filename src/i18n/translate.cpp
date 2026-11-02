@@ -19,22 +19,21 @@ std::atomic<Language> g_language{Language::English};
 
 using Index = std::unordered_map<std::string_view, const char*>;
 
+Index build(Language language) {
+    Index index;
+    const Catalog c = catalog(language);
+    index.reserve(c.size);
+    for (size_t i = 0; i < c.size; ++i) index.emplace(c.entries[i].english, c.entries[i].translated);
+    return index;
+}
+
+// Built on the first lookup of a language: only the player's is ever built.
 const Index& index_of(Language language) {
-    // Built once, on the first lookup of each language.
-    static const auto build = [](Language l) {
-        Index index;
-        const Catalog c = catalog(l);
-        for (size_t i = 0; i < c.size; ++i) index.emplace(c.entries[i].english, c.entries[i].translated);
-        return index;
-    };
     static const Index none;
-    static const Index french = build(Language::French);
-    static const Index german = build(Language::German);
-    static const Index spanish = build(Language::Spanish);
     switch (language) {
-    case Language::French: return french;
-    case Language::German: return german;
-    case Language::Spanish: return spanish;
+    case Language::French: { static const Index french = build(Language::French); return french; }
+    case Language::German: { static const Index german = build(Language::German); return german; }
+    case Language::Spanish: { static const Index spanish = build(Language::Spanish); return spanish; }
     case Language::English: break;
     }
     return none;

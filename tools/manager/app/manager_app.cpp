@@ -272,7 +272,7 @@ void ManagerApp::draw_anvil_tab() {
         break;
     }
     if (inst.manager_copy && !inst.manager_current && !runs_from(exe_, game_)) {
-        weak(tr("AnvilManager.exe in the game folder is another version than this one: installing replaces it."));
+        weak_wrapped(tr("AnvilManager.exe in the game folder is another version than this one: installing replaces it."));
     }
     if (inst.dll == Installation::Dll::Anvil && inst.dll_version == version && !inst.intact()) {
         for (const auto& path : inst.missing) {
@@ -299,7 +299,7 @@ void ManagerApp::draw_anvil_tab() {
         weak(tr("nothing to repair"));
     }
     ImGui::EndDisabled();
-    weak(trf("Copies version.dll, the standard plugins ({0}) and this Manager into the game folder. Your anvil.toml, "
+    weak_wrapped(trf("Copies version.dll, the standard plugins ({0}) and this Manager into the game folder. Your anvil.toml, "
              "plugins and their settings stay.",
              {join(package_->standard_plugins)}));
 
@@ -438,7 +438,7 @@ void ManagerApp::draw_plugins_tab() {
                 ImGui::PopStyleColor();
             }
             if (manifest && manifest->affects_gameplay) {
-                weak(tr("Changes the game: kept out of ironman and multiplayer unless allowed."));
+                weak_wrapped(tr("Changes the game: kept out of ironman and multiplayer unless allowed."));
                 ImGui::BeginDisabled(read_only());
                 if (manifest->allow_ironman == Allow::OptIn) {
                     bool allow = listed(snapshot_->anvil_toml.allow_ironman, id);
@@ -528,7 +528,7 @@ void ManagerApp::draw_mods_tab() {
                 "playset). A plugin from a mod loads only after you approve its exact files; an update waits for a "
                 "new approval while the approved version keeps loading.",
                 {std::to_string(report->enabled_mods)}));
-    if (!report->playset_found) weak(trf("No dlc_load.json in {0}: no mods are enabled.", {report->user_dir}));
+    if (!report->playset_found) weak_wrapped(trf("No dlc_load.json in {0}: no mods are enabled.", {report->user_dir}));
     for (const std::string& w : report->mod_warnings) colored_wrapped(kWarn, w);
     for (const cli::Problem& problem : report->problems) {
         const std::string file = u8(fs::path(widen(problem.file)).filename());
@@ -676,7 +676,7 @@ void ManagerApp::draw_settings_tab() {
         ImGui::EndCombo();
     }
     if (!editor_) {
-        weak(tr("Plugins with a settings.toml can be set up here. The values go to anvil/data/<plugin>/settings.toml "
+        weak_wrapped(tr("Plugins with a settings.toml can be set up here. The values go to anvil/data/<plugin>/settings.toml "
                 "and apply when the game starts."));
         return;
     }
@@ -784,7 +784,7 @@ void ManagerApp::draw_settings_tab() {
     }
     ImGui::EndDisabled();
     ImGui::EndDisabled();
-    weak(trf("Saved to {0}; values apply when the game starts.", {u8(editor_ ? editor_->player_file : fs::path())}));
+    weak_wrapped(trf("Saved to {0}; values apply when the game starts.", {u8(editor_ ? editor_->player_file : fs::path())}));
 }
 
 void ManagerApp::save_settings() {
@@ -892,7 +892,7 @@ void ManagerApp::draw_about_tab() {
     wrapped(trf("Anvil Manager {0} installs Anvil {1}, the native plugin loader for Europa Universalis IV 1.37.5, and "
                 "manages its plugins.",
                 {ANVIL_VERSION, package_->version}));
-    weak(tr("Unofficial community project, not affiliated with Paradox Interactive. MIT License."));
+    weak_wrapped(tr("Unofficial community project, not affiliated with Paradox Interactive. MIT License."));
     if (ImGui::Button(tr("Anvil on GitHub"))) open_url("https://github.com/happy-dwarf-team/anvil");
     ImGui::Spacing();
     ImGui::SeparatorText(tr("New releases"));
@@ -903,7 +903,7 @@ void ManagerApp::draw_about_tab() {
         std::string error;
         save_manager_settings(settings_, error);
     }
-    weak(tr("Only a link is shown; nothing is downloaded. To update Anvil, run the Manager of the new release."));
+    weak_wrapped(tr("Only a link is shown; nothing is downloaded. To update Anvil, run the Manager of the new release."));
     ImGui::BeginDisabled(release_pending_.valid());
     if (ImGui::Button(tr("Check now"))) release_pending_ = std::async(std::launch::async, fetch_latest_release);
     ImGui::EndDisabled();
@@ -924,7 +924,7 @@ void ManagerApp::draw_about_tab() {
     }
     ImGui::Spacing();
     ImGui::SeparatorText(tr("Third-party code"));
-    weak(tr("Dear ImGui, miniz, toml++ and Zydis (MIT License). Their license texts are in anvil/docs/third-party "
+    weak_wrapped(tr("Dear ImGui, miniz, toml++ and Zydis (MIT License). Their license texts are in anvil/docs/third-party "
             "after installing."));
 }
 
@@ -1142,7 +1142,7 @@ void ManagerApp::draw_zip_modal() {
                        ? trf("It replaces the installed copy in {0}. Its settings and data stay.", {folder})
                        : trf("It replaces version {0} in {1}. Its settings and data stay.", {check.installed_version, folder}));
         }
-        if (!check.ignored.empty()) weak(trf("Not installed (outside the plugin's folder in the zip): {0}", {join(check.ignored)}));
+        if (!check.ignored.empty()) weak_wrapped(trf("Not installed (outside the plugin's folder in the zip): {0}", {join(check.ignored)}));
         for (const cli::Problem& problem : check.report.problems) {
             colored_wrapped(kWarn, problem.file + (problem.line > 0 ? ":" + std::to_string(problem.line) : std::string()) +
                                        ": " + problem.message);

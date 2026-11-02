@@ -170,7 +170,7 @@ GameReport check_game(const GameOptions& options) {
         gm.folder = shown(p.folder);
         gm.state = state_name(p.state);
         gm.reason = p.reason;
-        gm.why = p.why;
+        gm.why = p.why.empty() ? i18n::Message(p.reason) : p.why;
         gm.hash = p.hash;
         if (p.manifest) gm.version = p.manifest->version.to_string();
         if (p.approval && p.bound) {
@@ -257,15 +257,17 @@ GameReport check_game(const GameOptions& options) {
     }
     for (const Skipped& s : skipped) {
         const auto mod = mod_by_folder.find(s.folder);
+        // A reason without a code is shown in its English words.
+        const i18n::Message why = s.why.empty() ? i18n::Message(s.reason) : s.why;
         if (mod == mod_by_folder.end()) {
-            report.skipped.push_back({s.id, name_of(s.folder), s.reason, s.disabled, {}, s.why});
+            report.skipped.push_back({s.id, name_of(s.folder), s.reason, s.disabled, {}, why});
             continue;
         }
         GameModPlugin& gm = report.mod_plugins[mod->second];
         gm.skip_reason = s.reason;
-        gm.skip_why = s.why;
+        gm.skip_why = why;
         if (s.disabled) gm.status = "disabled";
-        report.skipped.push_back({s.id, {}, s.reason, s.disabled, gm.mod, s.why});
+        report.skipped.push_back({s.id, {}, s.reason, s.disabled, gm.mod, why});
     }
     for (size_t i = 0; i < report.plugins.size(); ++i) {
         GamePlugin& plugin = report.plugins[i];
