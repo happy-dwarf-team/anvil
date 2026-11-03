@@ -14,7 +14,7 @@ atlas, merged into the Latin font.
 | `anvil-cjk-kr.otf` | Korean (`catalog_ko.cpp`) | K Regular |
 
 Each is a subset with the characters of its catalog beyond Latin Extended-A (a few hundred,
-40–115 KB), without hinting and OpenType layout, which ImGui does not use. A region's own
+35–115 KB), without hinting and OpenType layout, which ImGui does not use. A region's own
 face gives each language its own forms of the ideographs it shares with the others.
 
 ## Source and licence
