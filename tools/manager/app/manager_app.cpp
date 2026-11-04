@@ -285,11 +285,11 @@ void ManagerApp::draw_game_bar() {
     ImGui::BeginDisabled(running_ || no_game || benchmark_.busy());
     const fs::path gog_start = gog_ ? gog_program(game_) : fs::path();
     if (ImGui::Button((std::string(play) + "###play").c_str(), ImVec2(play_width, 0))) {
-        if (launch_game(gog_start)) {
-            launcher_opened_ = gog_;
-        } else if (gog_) {
+        const bool started = launch_game(gog_start);
+        launcher_opened_ = started && gog_;
+        if (!started && gog_) {
             show_message(tr("The Paradox launcher did not start"), trf("Windows could not open {0}.", {u8(gog_start)}));
-        } else {
+        } else if (!started) {
             show_message(tr("Steam did not start"), tr("Windows could not open steam://rungameid/236850. Is Steam installed?"));
         }
     }
