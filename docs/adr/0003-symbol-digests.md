@@ -1,6 +1,6 @@
 # Verify symbols by digest instead of publishing game bytes
 
-Status: **proposed**, not accepted. The maintainer decides.
+Status: **accepted** (2026-11-04). `bytes` stays valid for all of API 2; the team's plugins move one by one (Migration).
 
 `symbols.toml` states the expected bytes of each symbol in the open, so every public plugin repository, release zip and Workshop item carries short fragments of `eu4.exe`: about 13,400 bytes across the team's plugins. A plugin only needs to know that the bytes at an address are the right ones, which a digest can state without repeating them. This ADR adds a digest form next to `bytes` and keeps everything else about verification.
 
