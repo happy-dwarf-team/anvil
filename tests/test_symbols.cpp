@@ -568,6 +568,12 @@ signature = "const char* ()"
         CHECK(check_plugin_symbols(file, "test-build", patches, mapped.address(), &verified).empty());
         CHECK(verified.symbols.size() == 6 && value_of(verified.symbols[1], "root") == 0x3008);
         CHECK(contains(english(check_plugin_symbols(file, nullptr, patches, mapped.address())), "game build unknown"));
+        CHECK(contains(english(check_plugin_symbols(file, nullptr, patches, mapped.address(), nullptr, nullptr,
+                                                    i18n::Message("build_unknown_gog", {}))),
+                       "update it to 1.37.5.2 in GOG Galaxy"));
+        CHECK(unknown_build_reason(folder).code == "build_unknown");
+        std::ofstream(folder / "goggame-2057001589.info") << "{}";
+        CHECK(unknown_build_reason(folder).code == "build_unknown_gog");
         CHECK(contains(english(check_plugin_symbols(file, "eu4-9.9.9", patches, mapped.address())),
                        "symbols.toml is for build test-build, the game is eu4-9.9.9"));
         {

@@ -269,7 +269,11 @@ void ManagerApp::draw_game_bar() {
     }
 
     if (snapshot_ && snapshot_->folder.error.empty()) {
-        if (snapshot_->folder.build.empty()) {
+        if (snapshot_->folder.build.empty() && snapshot_->folder.gog) {
+            colored_wrapped(kWarn, tr("eu4.exe is a GOG build Anvil does not know: plugins that need game addresses are "
+                                      "skipped, the others load. Update the game to 1.37.5.2 in GOG Galaxy."));
+            if (!snapshot_->folder.gog_version.empty()) weak(trf("GOG calls this version {0}.", {snapshot_->folder.gog_version}));
+        } else if (snapshot_->folder.build.empty()) {
             colored_wrapped(kWarn, tr("eu4.exe is not a build Anvil knows (EU4 updated?): plugins that need game "
                                       "addresses are skipped, the others load."));
         } else {
@@ -1073,6 +1077,8 @@ std::string ManagerApp::make_problem_report() const {
     input.installation = snapshot_->installation;
     input.exe_sha256 = snapshot_->folder.exe_sha256;
     input.build = snapshot_->folder.build;
+    input.gog = snapshot_->folder.gog;
+    input.gog_version = snapshot_->folder.gog_version;
     if (snapshot_->report) input.game = &*snapshot_->report;
     if (!snapshot_->crashes.empty()) input.newest_crash = load_crash_summary(game_ / "anvil" / "crashes", snapshot_->crashes.front());
     input.log_name = "anvil.log";
