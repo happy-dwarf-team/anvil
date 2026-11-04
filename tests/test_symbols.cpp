@@ -1,6 +1,7 @@
 // Unit tests for symbols.toml: parsing, and verification against a small
 // synthetic PE image, both as a file and mapped in memory. Usage: anvil_symbols_tests
 #include "core/changes.hpp"
+#include "core/game_build.hpp"
 #include "core/plugin_symbols.hpp"
 #include "core/pe_image.hpp"
 #include "core/symbol_check.hpp"

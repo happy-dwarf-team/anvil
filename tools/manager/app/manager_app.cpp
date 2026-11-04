@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <span>
 
 namespace anvil::manager {
 namespace {
@@ -55,6 +56,13 @@ void follow_language(const fs::path& game, const cli::GameReport* report = nullp
     const bool cjk_text = report != nullptr && std::any_of(report->load_order.begin(), report->load_order.end(),
                                                            [](const auto& p) { return p.id == i18n::kCjkTextPlugin; });
     i18n::set_language(i18n::choose_language(eu4_user_dir(game), cjk_text).language);
+}
+
+// The problems of a check to show a player. On a build Anvil does not know,
+// every symbol differs and says nothing the first line and the reason do not.
+std::span<const cli::Problem> shown_problems(const cli::CheckReport& report) {
+    const std::span<const cli::Problem> all(report.problems);
+    return report.exe_build.empty() ? all.first(std::min<size_t>(all.size(), 1)) : all;
 }
 
 bool is_standard(const Package& package, const std::string& id) {
@@ -595,7 +603,7 @@ void ManagerApp::draw_plugins_tab() {
                 colored_wrapped(kBad, skipped != report->skipped.end() ? trf("skipped: {0}", {i18n::text(skipped->why)})
                                                                        : std::string(tr("skipped")));
             }
-            for (const cli::Problem& problem : plugin.report.problems) {
+            for (const cli::Problem& problem : shown_problems(plugin.report)) {
                 ImGui::PushStyleColor(ImGuiCol_Text, plugin.disabled ? ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled) : kWarn);
                 wrapped(problem.message);
                 ImGui::PopStyleColor();
@@ -717,7 +725,7 @@ void ManagerApp::draw_mods_tab() {
                         mod_state_text(p));
         weak(p.why.empty() ? p.reason : i18n::text(p.why));
         if (!p.others.empty()) weak(trf("Other mods with this id: {0}", {join(p.others)}));
-        for (const cli::Problem& problem : p.report.problems) colored_wrapped(kWarn, problem.message);
+        for (const cli::Problem& problem : shown_problems(p.report)) colored_wrapped(kWarn, problem.message);
         const bool approved_here = !p.approved_hash.empty() && p.approved_hash == p.hash;
         const bool can_approve = p.state != "invalid" && p.state != "shadowed" && !p.hash.empty() && m && !approved_here;
         ImGui::BeginDisabled(read_only());
@@ -1411,7 +1419,7 @@ void ManagerApp::draw_zip_modal() {
                        : trf("It replaces version {0} in {1}. Its settings and data stay.", {check.installed_version, folder}));
         }
         if (!check.ignored.empty()) weak_wrapped(trf("Not installed (outside the plugin's folder in the zip): {0}", {join(check.ignored)}));
-        for (const cli::Problem& problem : check.report.problems) {
+        for (const cli::Problem& problem : shown_problems(check.report)) {
             colored_wrapped(kWarn, problem.file + (problem.line > 0 ? ":" + std::to_string(problem.line) : std::string()) +
                                        ": " + problem.message);
         }
