@@ -212,8 +212,9 @@ typedef struct AnvilGameCountry {
     int32_t treasury;       /* x 1000, ducats */
     int32_t stability;      /* x 1000 */
     int32_t prestige;       /* x 1000 */
-    int32_t manpower;       /* x 1000: 25000 is 25.000, so 25 000 men */
-    int32_t monthly_income; /* x 1000: the game's own estimate, as of its last monthly update */
+    int32_t manpower;       /* x 1000 of the game's thousands: 25000 is 25 000 men */
+    int32_t monthly_income; /* x 1000: the income total of the economy view, before expenses, as of the last
+                             * monthly update */
 } AnvilGameCountry;
 
 #define ANVIL_GAME_WORLD_SERVICE "anvil-game.world"
@@ -237,9 +238,9 @@ typedef struct AnvilGameCountry {
  * Buffers are the caller's. A list or a name is filled as far as it fits and
  * *count or *length gets the whole size, so a call with capacity 0 asks for it.
  *
- * Cost. A province read is under a microsecond, and nothing is kept between
- * calls. Do not read the whole map every day: a game day takes about 35 ms, and
- * that pass would add a few percent to it.
+ * Cost. A province read takes about 100 ns, and nothing is kept between calls.
+ * A pass over the whole map takes about 0.6 ms: fine once a month, not for a
+ * plugin that does it every day of a 35 ms game day without a reason.
  *
  * What it shows. Everything: provinces under terra incognita and any country,
  * also in multiplayer, where that is more than the player sees. Anvil cannot

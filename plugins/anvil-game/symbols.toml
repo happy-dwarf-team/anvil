@@ -412,7 +412,7 @@ build."eu4-1.37.5.2-gog-win64" = { rva = 0x9A360 }
 bytes = "48 83 EC 28 8B 12 44 8B 81 B8 0D 00 00 44 03 C2"
 memory = "code"
 values.manpower = { at = 9, size = 4 }
-note = "CCountry::AddManpower: a fixed point at +0xDB8, in thousands of men"
+note = "CCountry::AddManpower: a fixed point at +0xDB8, in thousands of men, so the raw value is men"
 build."eu4-1.37.5-steam-win64" = { rva = 0x34CF10 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x34CDE0 }
 
@@ -420,6 +420,6 @@ build."eu4-1.37.5.2-gog-win64" = { rva = 0x34CDE0 }
 bytes = "49 8D BC 24 38 0E 00 00 8B 44 24 50 89 07 41 8B DE 49 8B CC"
 memory = "code"
 values.monthly_income = { at = 4, size = 4 }
-note = "CCountry::MonthlyUpdateSerial: _vEstimatedMonthlyIncome at +0xE38 is set to 0, summed and clamped there, once a month"
+note = "CCountry::MonthlyUpdateSerial: _vEstimatedMonthlyIncome at +0xE38 is set to 0, summed and clamped there, once a month: the economy view's income total"
 build."eu4-1.37.5-steam-win64" = { rva = 0x2F75F7 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x2F75A7 }
