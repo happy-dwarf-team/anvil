@@ -343,7 +343,7 @@ extern const Translation kKorean[] = {
     {"It needs Anvil {0}: run the Manager of a newer Anvil first.",
      "Anvil {0}이(가) 필요합니다. 먼저 더 새로운 Anvil의 매니저를 실행하세요."},
     {"It presents itself as {0}, but it is not the Workshop item the catalog lists for {0}. Its name, authors and repository are what the mod says: Anvil cannot check them.",
-     "{0}(으)로 표시되지만 카탈로그가 {0}(으)로 나열한 Workshop 항목이 아닙니다. 이름, 제작자, 저장소는 모드가 스스로 밝힌 것이며 Anvil은 확인할 수 없습니다."},
+     "{0}의 이름을 사용하지만 카탈로그의 {0} Workshop 항목이 아닙니다. 이름, 제작자, 저장소는 모드의 정보이며 Anvil이 확인할 수 없습니다."},
     {"It replaces the approved {0} from the next start.",
      "다음 시작부터 승인된 {0}을(를) 대체합니다."},
     {"It replaces the installed copy in {0}. Its settings and data stay.",

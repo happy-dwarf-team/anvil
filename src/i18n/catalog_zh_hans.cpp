@@ -343,7 +343,7 @@ extern const Translation kSimplifiedChinese[] = {
     {"It needs Anvil {0}: run the Manager of a newer Anvil first.",
      "它需要 Anvil {0}：请先运行更新版本 Anvil 的管理器。"},
     {"It presents itself as {0}, but it is not the Workshop item the catalog lists for {0}. Its name, authors and repository are what the mod says: Anvil cannot check them.",
-     "它自称是 {0}，但不是目录为 {0} 列出的创意工坊项目。名称、作者和仓库都由该 Mod 自行声明，Anvil 无法核实。"},
+     "它使用 {0} 的名称，但不是目录中 {0} 的创意工坊项目。名称、作者和仓库由 Mod 提供，Anvil 无法检查。"},
     {"It replaces the approved {0} from the next start.",
      "从下次启动起，它会替换已批准的 {0}。"},
     {"It replaces the installed copy in {0}. Its settings and data stay.",

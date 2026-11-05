@@ -343,7 +343,7 @@ extern const Translation kJapanese[] = {
     {"It needs Anvil {0}: run the Manager of a newer Anvil first.",
      "Anvil {0} が必要です。先に新しい Anvil のマネージャーを実行してください。"},
     {"It presents itself as {0}, but it is not the Workshop item the catalog lists for {0}. Its name, authors and repository are what the mod says: Anvil cannot check them.",
-     "{0} を名乗っていますが、カタログが {0} として挙げる Workshop アイテムではありません。名前、作者、リポジトリは Mod の自己申告で、Anvil は確認できません。"},
+     "{0} の名前を使っていますが、カタログの {0} の Workshop アイテムではありません。名前、作者、リポジトリは Mod の情報で、Anvil は確認できません。"},
     {"It replaces the approved {0} from the next start.",
      "次回起動から、承認済みの {0} を置き換えます。"},
     {"It replaces the installed copy in {0}. Its settings and data stay.",
