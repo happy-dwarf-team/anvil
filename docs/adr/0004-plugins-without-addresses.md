@@ -129,6 +129,7 @@ The maintainer's assumption was that this is mainly interface work. **For provin
 
 typedef struct AnvilPanelRow {
     uint32_t kind;       /* ANVIL_PANEL_TEXT, ANVIL_PANEL_BUTTON, ANVIL_PANEL_SEPARATOR */
+    uint32_t reserved;
     const char *label;   /* UTF-8 */
     const char *value;   /* UTF-8, may be NULL */
     uint64_t id;         /* given back on a click */
@@ -136,10 +137,11 @@ typedef struct AnvilPanelRow {
 
 typedef struct AnvilPanelService {
     uint32_t size;
-    AnvilResult (*create)(AnvilPlugin *self, const char *title, AnvilPanel **out);
-    AnvilResult (*set_rows)(AnvilPanel *panel, const AnvilPanelRow *rows, uint32_t count);  /* copies; any thread */
+    AnvilResult (*create)(const char *title, AnvilPanel **out);
+    AnvilResult (*set_rows)(AnvilPanel *panel, const AnvilPanelRow *rows, uint32_t count, uint32_t row_size);  /* copies; any thread */
     AnvilResult (*on_click)(AnvilPanel *panel, void (*click)(void *context, uint64_t id), void *context);
     AnvilResult (*show)(AnvilPanel *panel, int shown);
+    int (*shown)(const AnvilPanel *panel);
     const char *(*language)(void);  /* the player's language: "en", "zh-Hans", ... */
 } AnvilPanelService;
 ```
@@ -151,16 +153,16 @@ void on_month(const char*, const void*, void*) noexcept {
     AnvilGameCountry c{.size = sizeof c};
     if (world->player(&me) != ANVIL_OK || world->country(me.text, &c) != ANVIL_OK) return;
     const std::string provinces = std::to_string(c.province_count);
-    const AnvilPanelRow rows[] = {{ANVIL_PANEL_TEXT, "Country", me.text, 0},
-                                  {ANVIL_PANEL_TEXT, "Provinces", provinces.c_str(), 0}};
-    panels->set_rows(panel, rows, 2);
+    const AnvilPanelRow rows[] = {{ANVIL_PANEL_TEXT, 0, "Country", me.text, 0},
+                                  {ANVIL_PANEL_TEXT, 0, "Provinces", provinces.c_str(), 0}};
+    panels->set_rows(panel, rows, 2, sizeof(AnvilPanelRow));
 }
 ```
 
 - **A click runs after an outer frame.** The overlay draws in `EndScene`, and frames are also drawn inside the tick (`outer = 0`). So a click is queued through `run_on_main_thread` and the handler may use `anvil-game.world`. Without `anvil-game` there are no clicks.
 - **Cost.** `EndScene` only passes on while nothing is shown (§15); a shown panel costs an ImGui frame, which the release measures, and it adds a budget line to §17.
 - **Chinese, Japanese and Korean draw.** The overlay's own fonts hold only the characters of Anvil's catalogs (§15), so a plugin's text needs more than they have. Shipping full fonts is not needed: Windows 10 and 11 list Microsoft YaHei, Microsoft JhengHei, Yu Gothic and Malgun Gothic in their base fonts, outside the optional language features [Microsoft's font lists, and present on the lab's pl-PL machine], and the overlay already loads Segoe UI from that folder [code].
-  - The panel merges the font of the player's language after Latin; with a Latin language, Hangul takes Malgun Gothic, kana Yu Gothic and Han YaHei.
+  - The panel merges the four fonts after Latin, the player's language's first, and Dear ImGui takes each glyph from the first that has it. With a Latin language that is YaHei first, which has kana but no Hangul, so Hangul comes from Malgun Gothic. They are mapped, not read: 66 MB of address space, and only the pages used.
   - It needs Dear ImGui 1.92 or later, which draws glyphs on demand and grows the atlas, with no list of ranges, and whose Direct3D 9 backend supports it [ImGui's `FONTS.md` and `imgui_impl_dx9.cpp` at v1.93.0]. Anvil pins v1.91.8, so the upgrade is a pull request of its own, for the overlay and the Manager, which also drops `ClearTexData` after the upload. Without it, each new character means a full atlas rebuild in `EndScene`.
   - A font that is missing (a stripped Windows image) shows `?` for those characters and writes one log line. Nothing is downloaded, and no font ships, so the package and the licences do not change.
   - The texts stay the author's: Anvil translates none of them. The service gives the player's language, as `anvil.control` gives the overlay.
