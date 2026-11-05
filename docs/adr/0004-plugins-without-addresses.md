@@ -1,6 +1,6 @@
 # Plugins without addresses: world reads and events, then a panel, changes last
 
-Status: **proposed** (2026-11-05). Nothing here is built. The maintainer decided its four questions on 2026-11-05; they are recorded at the end.
+Status: **accepted** (2026-11-05). Nothing here is built yet. The maintainer's four decisions are at the end.
 
 A plugin author without a `symbols.toml` has the host API, `anvil-game` (ready, frame, session, main menu, date, `run_on_main_thread`) and, when the player has Tongs, `tongs.ui` and `tongs.navigation`. They cannot read the world, react to what happens in a campaign, open a window of their own or change the game. This ADR takes those in the order the maintainer set, reads and events first, a window second, changes on the long view, and gives each stage a decision.
 
