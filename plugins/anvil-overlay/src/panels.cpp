@@ -14,6 +14,12 @@ bool cjk_code_point(std::uint32_t c) {
            (c >= 0xFE30 && c <= 0xFE4F) || (c >= 0xFF00 && c <= 0xFFEF) || (c >= 0x20000 && c <= 0x3FFFF);
 }
 
+// ImGui ends a label at "##" and reads the rest as an id.
+std::string shown_label(std::string text) {
+    for (std::size_t at = text.find("##"); at != std::string::npos; at = text.find("##", at + 2)) text.insert(at + 1, " ");
+    return text;
+}
+
 }  // namespace
 
 bool has_cjk(std::string_view utf8) {
@@ -51,7 +57,7 @@ AnvilResult PanelStore::create(const char* title, AnvilPanel** out) {
     if (panels_.size() >= kMaxPanels) return ANVIL_ERROR_OUT_OF_MEMORY;
     AnvilPanel& panel = panels_.emplace_back();
     panel.index = static_cast<std::uint32_t>(panels_.size() - 1);
-    panel.title = title;
+    panel.title = shown_label(title);
     if (has_cjk(panel.title)) wants_cjk_.store(true, std::memory_order_release);
     *out = &panel;
     return ANVIL_OK;
@@ -77,6 +83,7 @@ AnvilResult PanelStore::set_rows(AnvilPanel* panel, const AnvilPanelRow* rows, s
         const std::size_t value = row->value != nullptr ? strnlen_s(row->value, kMaxText + 1) : 0;
         if (label > kMaxText || value > kMaxText) return ANVIL_ERROR_INVALID_ARGUMENT;
         to.label.assign(row->label, label);
+        if (row->kind == ANVIL_PANEL_BUTTON) to.label = shown_label(std::move(to.label));
         if (row->value != nullptr) {
             to.value.assign(row->value, value);
             to.has_value = true;

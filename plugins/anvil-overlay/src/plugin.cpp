@@ -338,7 +338,13 @@ void on_game_ready() {
 
 // ---- anvil-overlay.panel ----------------------------------------------------
 
-AnvilResult panel_create(const char* title, AnvilPanel** out) { return shared().panels.create(title, out); }
+AnvilResult panel_create(const char* title, AnvilPanel** out) {
+    try {
+        return shared().panels.create(title, out);
+    } catch (const std::bad_alloc&) {
+        return ANVIL_ERROR_OUT_OF_MEMORY;
+    }
+}
 AnvilResult panel_set_rows(AnvilPanel* panel, const AnvilPanelRow* rows, std::uint32_t count, std::uint32_t row_size) {
     try {
         return shared().panels.set_rows(panel, rows, count, row_size);

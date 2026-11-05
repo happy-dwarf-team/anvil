@@ -11,9 +11,12 @@
  * and it keeps the game's checksum. The overlay runs on Direct3D 9: on the
  * OpenGL renderer the calls work and nothing is drawn.
  *
- * Text is UTF-8, in any language. Anvil translates none of it: ask language()
- * and choose your own words. Chinese, Japanese and Korean are drawn from the
- * fonts Windows ships; on a Windows without them those characters show as `?`.
+ * Text is UTF-8. Anvil translates none of it: ask language() and choose your
+ * own words. Latin, Greek and Cyrillic draw from Segoe UI, Chinese, Japanese
+ * and Korean from the fonts Windows ships; a Windows without those shows `?`
+ * for them, and so does any other script Segoe UI lacks, such as Thai or
+ * Devanagari. A row wraps at about 40 characters' width. "##" in a title or a
+ * button shows as "# #", since ImGui reads it as an id.
  *
  * Threads. Every call may come from any thread, and rows are copied. A panel
  * lives until the process ends. Clicks run on the game's main thread after an
@@ -64,7 +67,8 @@ typedef struct AnvilPanelService {
     uint32_t size; /* sizeof(AnvilPanelService) as known by the overlay */
 
     /* A hidden panel with a title, which also names it in the overlay's status
-     * tab, where the player can show and hide it. */
+     * tab, where the player can show and hide it. At most 64 panels in a
+     * process: ANVIL_ERROR_OUT_OF_MEMORY after that. */
     AnvilResult (*create)(const char *title, AnvilPanel **out);
     /* Replaces the rows; at most 1024, each text at most 4096 bytes, else
      * ANVIL_ERROR_INVALID_ARGUMENT. Pass row_size = sizeof(AnvilPanelRow). */

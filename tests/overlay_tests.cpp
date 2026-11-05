@@ -71,6 +71,13 @@ int main() {
         CHECK(store.set_rows(panel, rows, 0, sizeof(AnvilPanelRow)) == ANVIL_OK);
         store.each([](AnvilPanel& p) { CHECK(p.rows.empty()); });
 
+        // ImGui would end a label at "##".
+        AnvilPanel* hashes = nullptr;
+        CHECK(store.create("a##b###c", &hashes) == ANVIL_OK && hashes->title == "a# #b# # #c");
+        const AnvilPanelRow button[] = {{ANVIL_PANEL_BUTTON, 0, "Go##1", nullptr, 0}, {ANVIL_PANEL_TEXT, 0, "a##b", nullptr, 0}};
+        CHECK(store.set_rows(hashes, button, 2, sizeof(AnvilPanelRow)) == ANVIL_OK);
+        CHECK(hashes->rows[0].label == "Go# #1" && hashes->rows[1].label == "a##b");
+
         // Bad rows change nothing.
         CHECK(store.set_rows(panel, rows, 4, sizeof(AnvilPanelRow)) == ANVIL_OK);
         const AnvilPanelRow bad_kind[] = {{9, 0, "x", nullptr, 0}};
