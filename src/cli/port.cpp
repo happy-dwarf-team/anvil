@@ -308,20 +308,19 @@ bool valid_build_id(std::string_view id) {
 }  // namespace
 
 std::string port_build_problem(const PortOptions& options) {
+    if (options.unknown_build) {
+        if (valid_build_id(options.build)) return {};
+        return "--build must have the form eu4-<version>-<store>-win64, as eu4-1.37.5.2-gog-win64 has";
+    }
     const std::string sha256 = sha256_file(options.to);
     if (sha256.empty()) return {};  // port_symbols says why it cannot read the file
-    if (const KnownBuild* known = find_known_build_by_sha256(sha256)) {
-        if (options.build == known->id) return {};
-        return "--to is " + std::string(known->id) + ", not " + options.build;
-    }
-    if (!options.unknown_build) {
+    const KnownBuild* known = find_known_build_by_sha256(sha256);
+    if (known == nullptr) {
         return "--to is not a build this Anvil knows, so a plugin ported to it cannot load: add its row to the table of "
                "builds and use that anvil.exe, or pass --unknown-build to port it before that";
     }
-    if (!valid_build_id(options.build)) {
-        return "--build must have the form eu4-<version>-<store>-win64, as eu4-1.37.5.2-gog-win64 has";
-    }
-    return {};
+    if (options.build == known->id) return {};
+    return "--to is " + std::string(known->id) + ", not " + options.build;
 }
 
 PortReport port_symbols(const PortOptions& options) {

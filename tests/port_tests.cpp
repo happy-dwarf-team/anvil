@@ -395,6 +395,7 @@ void port_tests() {
         }
         // A file it cannot read is for the port to report.
         options.to = fx.root / "nothing.exe";
+        options.unknown_build = false;
         CHECK(port_build_problem(options).empty());
     });
 
