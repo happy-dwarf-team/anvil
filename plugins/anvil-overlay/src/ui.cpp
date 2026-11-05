@@ -450,7 +450,9 @@ void draw_plugin_panel(AnvilPanel& panel) {
     bool open = true;
     const std::string name = panel.title + "###anvil-panel-" + std::to_string(panel.index);
     const ImGuiWindowFlags flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings;
-    ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(FLT_MAX, ImGui::GetIO().DisplaySize.y * 0.8f));
+    // As wide as its title, also before it has rows.
+    const float title_width = ImGui::CalcTextSize(panel.title.c_str()).x + ImGui::GetFontSize() * 3.0f;
+    ImGui::SetNextWindowSizeConstraints(ImVec2(title_width, 0.0f), ImVec2(FLT_MAX, ImGui::GetIO().DisplaySize.y * 0.8f));
     if (ImGui::Begin(name.c_str(), &open, flags)) {
         ImGui::PushTextWrapPos(ImGui::GetFontSize() * 40.0f);
         const auto& rows = panel.rows;

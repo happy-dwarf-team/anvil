@@ -365,6 +365,14 @@ int main(int argc, char** argv) {
         CHECK(panels->create("Test panel", &panel) == ANVIL_OK);
         const RECT area{0, 100, 500, 500};
         const size_t empty = frame(device, area);
+        // A panel with no rows yet still shows its title.
+        CHECK(panels->show(panel, 1) == ANVIL_OK);
+        size_t bare = 0;
+        for (int i = 0; i < 3; ++i) bare = frame(device, area);
+        CHECK(bare > 1500);
+        CHECK(panels->show(panel, 0) == ANVIL_OK);
+        frame(device, area);
+
         const AnvilPanelRow rows[] = {{ANVIL_PANEL_TEXT, 0, "Treasury", "100", 0},
                                       {ANVIL_PANEL_TEXT, 0, "Stability", "3", 0},
                                       {ANVIL_PANEL_SEPARATOR, 0, nullptr, nullptr, 0},
