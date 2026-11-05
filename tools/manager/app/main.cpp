@@ -351,8 +351,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
             graphics.create_target();
         }
         if (g_fonts_dirty || g_fonts_language != anvil::i18n::language()) {
-            load_fonts(g_scale);
             ImGui_ImplDX11_InvalidateDeviceObjects();
+            load_fonts(g_scale);
             g_fonts_dirty = false;
         }
 

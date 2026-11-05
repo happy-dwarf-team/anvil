@@ -249,6 +249,28 @@ int main(int argc, char** argv) {
         CHECK(drawn > 1000);
     });
 
+    run("overlay: a change of scale or language while something is shown keeps drawing", [&] {
+        AnvilControlResult result{};
+        const auto drawn_after = [&] {
+            size_t drawn = 0;
+            for (int i = 0; i < 4; ++i) drawn = frame(device, top_right);
+            return drawn;
+        };
+        for (const char* scale : {"1.5", "2.5", "0.75"}) {
+            CHECK(control.service()->setting_set_text("anvil-overlay", 3, scale, &result) == ANVIL_OK && result.applied == 1);
+            CHECK(drawn_after() > 300);
+        }
+        CHECK(control.service()->setting_reset("anvil-overlay", 3, &result) == ANVIL_OK);
+        CHECK(drawn_after() > 300);
+        CHECK(control.service()->setting_set_text("anvil-overlay", 5, "ko", &result) == ANVIL_OK && result.applied == 1);
+        CHECK(drawn_after() > 300);
+        D3DPRESENT_PARAMETERS again = parameters(window);
+        CHECK(SUCCEEDED(device->Reset(&again)));
+        CHECK(drawn_after() > 300);
+        CHECK(control.service()->setting_reset("anvil-overlay", 5, &result) == ANVIL_OK);
+        CHECK(drawn_after() > 300);
+    });
+
     run("overlay: notices close after their time; then no ImGui frame", [&] {
         AnvilControlResult result{};
         CHECK(control.service()->setting_set_text("anvil-overlay", 1, "false", &result) == ANVIL_OK);  // notifications off
