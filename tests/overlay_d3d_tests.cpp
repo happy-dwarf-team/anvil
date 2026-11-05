@@ -385,7 +385,7 @@ int main(int argc, char** argv) {
         const auto x = [&](int v) { return v * client.right / static_cast<int>(kWidth); };
         const auto y = [&](int v) { return v * client.bottom / static_cast<int>(kHeight); };
         const int presses = g_game_button_downs;
-        for (int row = 230; row < 300 && clicked == 0; row += 6) {
+        for (int row = 290; row < 370 && clicked == 0; row += 6) {
             const LPARAM at = point(x(100), y(row));
             SendMessageW(window, WM_MOUSEMOVE, 0, at);
             for (int i = 0; i < 2; ++i) frame(device, area);

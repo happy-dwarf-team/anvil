@@ -443,8 +443,10 @@ void queue_click(const AnvilPanel& panel, uint64_t id) {
 
 void draw_plugin_panel(AnvilPanel& panel) {
     const float s = scale();
-    const float step = 28.0f * s * static_cast<float>(panel.index);
-    ImGui::SetNextWindowPos(ImVec2(48.0f * s + step, 160.0f * s + step), ImGuiCond_FirstUseEver);
+    // Side by side first: a window's size is not known before it is drawn.
+    const float index = static_cast<float>(panel.index % 4);
+    const float row = static_cast<float>(panel.index / 4);
+    ImGui::SetNextWindowPos(ImVec2((48.0f + 330.0f * index + 28.0f * row) * s, (220.0f + 28.0f * row) * s), ImGuiCond_FirstUseEver);
     bool open = true;
     const std::string name = panel.title + "###anvil-panel-" + std::to_string(panel.index);
     const ImGuiWindowFlags flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings;

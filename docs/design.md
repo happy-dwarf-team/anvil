@@ -769,6 +769,7 @@ Decided in [Performance budgets and how the lab measures them](https://github.co
 | Pointer swap, byte patch, import replacement | 0 |
 | All changes of the standard plugins in a SIMULATION year | ≤ 0.5% |
 | Memory: core / per change | ≤ 2 MB / ≤ 1 KB |
+| An ImGui frame with plugin windows shown, per frame | ≤ 200 µs (two windows took 54–62 µs on the lab machine at 3440×1440, 8.6 ms in the frame that first draws CJK text) |
 
 **Method**
 - In-game impact is per-call cost × counted calls; the optional counters are enabled with `profile = true`.
