@@ -167,6 +167,13 @@ typedef struct AnvilGameDateChange {
  * country of a session. Payload const AnvilGamePlayerChange*. */
 #define ANVIL_GAME_EVENT_PLAYER "anvil-game.player"
 
+typedef struct AnvilGamePlayerChange {
+    uint32_t size; /* sizeof(AnvilGamePlayerChange) as known by anvil-game */
+    AnvilGameTag tag;
+    AnvilGameTag previous;
+    uint64_t session; /* AnvilGameSession.number */
+} AnvilGamePlayerChange;
+
 /* A war started or ended, after the outer frame of the day it happened. The
  * wars are compared once a game day, so a war that starts and ends within one
  * day is not reported. Not for the wars a session starts with, and no ENDED
@@ -178,13 +185,6 @@ typedef enum AnvilGameWarChangeKind {
     ANVIL_GAME_WAR_STARTED = 1,
     ANVIL_GAME_WAR_ENDED = 2
 } AnvilGameWarChangeKind;
-
-typedef struct AnvilGamePlayerChange {
-    uint32_t size; /* sizeof(AnvilGamePlayerChange) as known by anvil-game */
-    AnvilGameTag tag;
-    AnvilGameTag previous;
-    uint64_t session; /* AnvilGameSession.number */
-} AnvilGamePlayerChange;
 
 typedef struct AnvilGameWarChange {
     uint32_t size;   /* sizeof(AnvilGameWarChange) as known by anvil-game */

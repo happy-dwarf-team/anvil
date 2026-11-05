@@ -12,6 +12,7 @@ constexpr std::size_t kMaxCores = 1024;        // a longer core vector is taken 
 constexpr std::int32_t kMaxBucketTags = 4096;  // likewise a bucket
 constexpr std::size_t kMaxText = 65536;        // likewise a string
 constexpr std::int32_t kMaxWars = 4096;        // likewise the running wars
+constexpr std::size_t kMaxWarSide = 1024;      // likewise one side of a war
 
 bool read_raw(std::uintptr_t address, void* out, std::size_t size) {
     __try {
@@ -360,7 +361,7 @@ AnvilResult read_war_side(const WorldLayout& l, std::uint64_t id, std::uint32_t 
         !read(id + (attackers ? l.war_attackers_end : l.war_defenders_end), end)) {
         return ANVIL_ERROR_INTERNAL;
     }
-    if (end < begin || (end - begin) % 8 != 0 || (end - begin) / 8 > kMaxCores) return ANVIL_ERROR_INTERNAL;
+    if (end < begin || (end - begin) % 8 != 0 || (end - begin) / 8 > kMaxWarSide) return ANVIL_ERROR_INTERNAL;
     out.clear();
     for (std::uintptr_t at = begin; at < end; at += 8) {
         std::uint64_t tag = 0;
