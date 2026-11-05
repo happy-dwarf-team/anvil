@@ -51,6 +51,10 @@ struct Layout {
     uint32_t data = 0;
     uint32_t table = 0;
     uint32_t speed_offset = 0x418;
+    uint32_t big = 0;           // code with a struct offset past 64 KB
+    uint32_t big_offset = 0;
+    uint32_t switcher = 0;      // a jump table through __ImageBase
+    uint32_t switch_table = 0;
 };
 
 const std::initializer_list<uint8_t> kFar = {0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x83, 0xEC, 0x20, 0x8B,
@@ -71,6 +75,13 @@ std::vector<uint8_t> build_exe(const Layout& l) {
     image.put(l.caller, {0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0xE8, 0, 0, 0, 0, 0x48, 0x8D, 0x0D, 0, 0, 0, 0, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xC3});
     image.put_value<int32_t>(l.caller + 7, static_cast<int32_t>(l.speed - (l.caller + 11)));
     image.put_value<int32_t>(l.caller + 14, static_cast<int32_t>(l.data - (l.caller + 18)));
+    // mov rax, [rsi+big_offset]; test rax, rax; je +3; mov rax, [rax]; ret
+    image.put(l.big, {0x48, 0x8B, 0x86, 0, 0, 0, 0, 0x48, 0x85, 0xC0, 0x74, 0x03, 0x48, 0x8B, 0x00, 0xC3});
+    image.put_value<uint32_t>(l.big + 3, l.big_offset);
+    // lea r8, [__ImageBase]; mov ecx, [r8+rax*4+switch_table]; ret
+    image.put(l.switcher, {0x4C, 0x8D, 0x05, 0, 0, 0, 0, 0x41, 0x8B, 0x8C, 0x80, 0, 0, 0, 0, 0xC3});
+    image.put_value<int32_t>(l.switcher + 3, -static_cast<int32_t>(l.switcher + 7));
+    image.put_value<uint32_t>(l.switcher + 11, l.switch_table);
     if (l.twin != 0) image.put(l.twin, kTwin);
     if (l.second_twin != 0) image.put(l.second_twin, kTwin);
     if (l.gone != 0) image.put(l.gone, kGone);
@@ -80,8 +91,8 @@ std::vector<uint8_t> build_exe(const Layout& l) {
     return image.file();
 }
 
-constexpr Layout kOld = {0x1000, 0x1020, 0x1040, 0x1060, 0, 0x1080, 0x3008, 0x2020, 0x418};
-constexpr Layout kNew = {0x1010, 0x1030, 0x1050, 0x1070, 0x1090, 0, 0x3010, 0x2040, 0x408};
+constexpr Layout kOld = {0x1000, 0x1020, 0x1040, 0x1060, 0, 0x1080, 0x3008, 0x2020, 0x418, 0x10A0, 0x32610, 0x10C0, 0x2060};
+constexpr Layout kNew = {0x1010, 0x1030, 0x1050, 0x1070, 0x1090, 0, 0x3010, 0x2040, 0x408, 0x10B0, 0x32618, 0x10D0, 0x2080};
 
 std::string hex_bytes(std::initializer_list<uint8_t> bytes) {
     std::string out;
@@ -302,6 +313,41 @@ void port_tests() {
         CHECK(contains(json, "\"caller\": \"0x1050\""));
         CHECK(!contains(json, "\"gone\": \"0x"));  // a generator's map holds only what was placed
         CHECK(!contains(json, "48 8B"));           // no game bytes in a report
+    });
+
+    run("port treats a large displacement as an operand unless it goes through __ImageBase", [&] {
+        const std::string text = "build = \"old\"\n[symbol.big]\nrva = 0x10A0\nbytes = \"48 8B 86 10 26 03 00\"\nmemory = \"code\"\n"
+                                 "[symbol.switcher]\nrva = 0x10C0\nbytes = \"4C 8D 05 ?? ?? ?? ?? 41 8B 8C 80 ?? ?? ?? ??\"\nmemory = \"code\"\n"
+                                 "signature = \"void ()\"\n";
+        const PortReport report = fx.port(text);
+        const ManualSymbol* big = manual(report, "big");
+        CHECK(big != nullptr);                  // 0x32610 became 0x32618: not the same code
+        CHECK(ported(report, "big") == nullptr);
+        const PortedSymbol* table = ported(report, "switcher");
+        CHECK(table != nullptr && table->rva == kNew.switcher && table->review.empty());
+    });
+
+    run("port keeps the file valid at its edges", [&] {
+        // No newline at the end of the file: what follows the last line starts a line of its own.
+        std::string text = placeable();
+        text.pop_back();
+        CHECK(fx.port(text).exit_code == kExitOk);
+        CHECK(fx.verifies(read(fx.out), "new", fx.new_exe));
+        // The same with a symbol left by hand: the file stays TOML.
+        const PortReport left = fx.port("build = \"old\"\n[symbol.gone]\nrva = 0x1080\nbytes = \"" + hex_bytes(kGone) + "\"\nmemory = \"code\"");
+        CHECK(left.exit_code == kExitProblems && left.written);
+        CHECK(contains(parse_symbols_text(read(fx.out)).error, "gone"));
+        // builds over several lines, with and without a last comma.
+        for (const char* list : {"builds = [\n  \"old\",\n  \"other\",\n]\n", "builds = [\n  \"old\",\n  \"other\"  # a note\n]\n",
+                                 "builds = [\"old\", \"other\",]\n"}) {
+            const std::string many = std::string(list) + "[symbol.far_fn]\nbytes = \"" + hex_bytes(kFar) +
+                                     "\"\nmemory = \"code\"\nbuild.\"old\" = { rva = 0x1000 }\nbuild.\"other\" = { rva = 0x1000 }\n";
+            CHECK(fx.port(many).exit_code == kExitOk);
+            const std::string out = read(fx.out);
+            CHECK(fx.verifies(out, "new", fx.new_exe));
+            const auto parsed = parse_symbols_text(out);
+            CHECK(parsed.file && parsed.file->builds.size() == 3);
+        }
     });
 
     run("port checks what it is given", [&] {

@@ -15,9 +15,7 @@ namespace anvil::cli {
 namespace {
 
 constexpr size_t kMaxInstruction = 15;
-// A struct offset never reaches this; an image-relative displacement (a jump
-// table, `[r8+rax*4+rva]` after `lea r8, [__ImageBase]`) does not stay below it.
-constexpr uint32_t kFirstImageOffset = 0x10000;
+constexpr uint32_t kFirstImageOffset = 0x1000;  // below it lie only the headers
 constexpr uint32_t kMinPairedSize = 16;  // shorter code proves nothing by being unique
 constexpr uint32_t kMinShapePairedSize = 64;  // with the operands gone, it takes more
 constexpr uint32_t kMinWindow = 16;
@@ -79,6 +77,15 @@ template <typename Pair> std::vector<Pair> rising_run(const std::vector<Pair>& p
     for (uint32_t i = tail_index.empty() ? UINT32_MAX : tail_index.back(); i != UINT32_MAX; i = previous[i]) kept.push_back(pairs[i]);
     std::reverse(kept.begin(), kept.end());
     return kept;
+}
+
+// Whether the memory operand's base or index is one of `registers`, a bit per register.
+bool uses_image_base(const ZydisDecodedInstruction& instruction, uint32_t registers) {
+    const auto& raw = instruction.raw;
+    const bool sib = (instruction.attributes & ZYDIS_ATTRIB_HAS_SIB) != 0;
+    const uint32_t base = (sib ? raw.sib.base : raw.modrm.rm) | (raw.rex.B << 3);
+    const uint32_t index = raw.sib.index | (raw.rex.X << 3);
+    return ((registers >> base) & 1) != 0 || (sib && ((registers >> index) & 1) != 0);
 }
 
 bool same_shape(const BuildImage::Code& a, const BuildImage::Code& b) {
@@ -161,6 +168,11 @@ void BuildImage::zero_code(Code& code) {
         std::memset(shape_.data() + where, 0, width);
     };
     std::set<uint32_t> tables;  // jump tables this code has named, ahead of `at`
+    // Registers `lea reg, [__ImageBase]` has loaded in this code. Only through them
+    // is a displacement an RVA (a jump table: `[r8+rax*4+rva]`): by its value alone
+    // it may as well be a large struct offset, which is an operand like any other.
+    // Code that got the register elsewhere looks changed, the safe way to be wrong.
+    uint32_t image_base_registers = 0;
     uint32_t at = code.start;
     while (at < code.end) {
         if (!tables.empty() && at >= *tables.begin()) {
@@ -202,7 +214,10 @@ void BuildImage::zero_code(Code& code) {
             if (rip) {
                 blank(at + raw.disp.offset, 4);
                 references_.push_back({at + raw.disp.offset, next + disp});
-            } else if (disp >= kFirstImageOffset && disp < image_size) {
+                if (instruction.mnemonic == ZYDIS_MNEMONIC_LEA && next + disp == 0) {
+                    image_base_registers |= 1u << (raw.modrm.reg | (raw.rex.R << 3));
+                }
+            } else if (disp >= kFirstImageOffset && disp < image_size && uses_image_base(instruction, image_base_registers)) {
                 blank(at + raw.disp.offset, 4);
                 references_.push_back({at + raw.disp.offset, disp});
                 if (disp > at && disp < code.end && raw.sib.scale == 2) tables.insert(disp);

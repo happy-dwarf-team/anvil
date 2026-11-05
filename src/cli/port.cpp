@@ -100,15 +100,14 @@ public:
     }
 
     std::string text() const {
-        std::string out;
+        std::vector<std::string> out;
         for (uint32_t number = 1; number <= lines_.size(); ++number) {
-            if (!dropped_[number]) {
-                out += lines_[number - 1];
-                if (number != lines_.size()) out += eol_;
-            }
-            for (const std::string& extra : after_[number]) out += extra + eol_;
+            if (!dropped_[number]) out.push_back(lines_[number - 1]);
+            out.insert(out.end(), after_[number].begin(), after_[number].end());
         }
-        return out;
+        std::string joined;
+        for (size_t i = 0; i < out.size(); ++i) joined += (i == 0 ? "" : eol_) + out[i];
+        return joined;
     }
 
 private:
@@ -117,6 +116,13 @@ private:
     std::vector<bool> dropped_;
     std::string eol_;
 };
+
+// Where a line's TOML ends, before its comment and trailing spaces; 0 when it has none.
+size_t code_end(const std::string& line) {
+    const std::string code = line.substr(0, line.find('#'));
+    const size_t last = code.find_last_not_of(" \t");
+    return last == std::string::npos ? 0 : last + 1;
+}
 
 std::string inline_table(const Keys& keys) {
     std::string out = "{ ";
@@ -192,10 +198,22 @@ std::optional<std::string> with_new_build(const std::string& text, const SymbolF
     }
     TextEdit edit(text);
     if (const auto* builds = root.get("builds")) {
-        std::string& line = edit.line(static_cast<uint32_t>(builds->source().end.line));
+        const auto last = static_cast<uint32_t>(builds->source().end.line);
+        std::string& line = edit.line(last);
         const size_t close = line.rfind(']', builds->source().end.column - 1);
-        const size_t before = line.find_last_not_of(' ', close - 1);
-        line.insert(before + 1, ", \"" + build + "\"");
+        const size_t before = close == 0 ? std::string::npos : line.find_last_not_of(" \t", close - 1);
+        const std::string id = "\"" + build + "\"";
+        if (before != std::string::npos) {
+            line.insert(before + 1, line[before] == ',' ? " " + id : ", " + id);
+        } else {
+            // The bracket on its own line: the new id gets one too, after the last id.
+            uint32_t above = last - 1;
+            while (above > builds->source().begin.line && code_end(edit.line(above)) == 0) --above;
+            std::string& previous = edit.line(above);
+            const size_t end = code_end(previous);
+            if (previous[end - 1] != ',') previous.insert(end, ",");
+            edit.insert_after(above, previous.substr(0, previous.find_first_not_of(" \t")) + id + ",");
+        }
     } else if (const auto* single = root.get("build")) {
         std::string& line = edit.line(static_cast<uint32_t>(single->source().begin.line));
         const size_t value_end = single->source().end.column - 1;
@@ -455,6 +473,12 @@ PortReport port_symbols(const PortOptions& options) {
     if (options.out.empty()) return report;
     const auto written = with_new_build(text, file, options.build, placed, report.manual, error);
     if (!written) return cannot("cannot rewrite symbols.toml: " + error);
+    // Symbols left by hand fail the schema until they are placed, never the TOML.
+    try {
+        (void)toml::parse(*written);
+    } catch (const toml::parse_error& e) {
+        return cannot("the rewritten symbols.toml is not TOML: " + std::string(e.description()));
+    }
     if (report.manual.empty()) {
         // A file with symbols left to place cannot parse yet; a complete one must read
         // back and verify on both builds, or the rewrite went wrong.
