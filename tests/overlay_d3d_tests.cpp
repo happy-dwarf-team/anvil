@@ -222,7 +222,7 @@ int main(int argc, char** argv) {
         CHECK(changes.count(overlay.owner) == 8);
         size_t drawn = 0;
         for (int i = 0; i < 3; ++i) drawn = frame(device, top_right);
-        CHECK(contains(log, "ImGui 1.91.8 started") && contains(log, "1 notice(s) at the start"));
+        CHECK(contains(log, "ImGui 1.93.0 started") && contains(log, "1 notice(s) at the start"));
         CHECK(drawn > 1000);
         CHECK(frame(device, middle) == 0);  // no panel yet
     });
