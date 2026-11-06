@@ -54,7 +54,13 @@ fs::path link_target(const fs::path& link) {
 
 bool link_starts(const fs::path& link, const fs::path& exe) {
     const fs::path target = link_target(link);
-    return !target.empty() && _wcsicmp(target.lexically_normal().c_str(), exe.lexically_normal().c_str()) == 0;
+    if (target.empty()) return false;
+    // Windows may give the link's target long where the folder was given short
+    // (8.3) or through a junction; `exe` may be gone after an uninstall.
+    std::error_code ec_target, ec_exe;
+    const fs::path a = fs::weakly_canonical(target, ec_target);
+    const fs::path b = fs::weakly_canonical(exe, ec_exe);
+    return !ec_target && !ec_exe && _wcsicmp(a.c_str(), b.c_str()) == 0;
 }
 
 bool write_link(const fs::path& link, const fs::path& exe, std::string& error) {

@@ -550,7 +550,8 @@ int main(int argc, char** argv) {
         remove_link(link, exe);  // another game's shortcut stays
         CHECK(fs::exists(link));
         CHECK(write_link(link, exe, error));  // and the button moves it to this game
-        CHECK(link_target(link) == exe);
+        CHECK(link_starts(link, exe));
+        CHECK(link_target(link).filename() == "AnvilManager.exe");
         remove_link(link, exe);
         CHECK(!fs::exists(link));
 
