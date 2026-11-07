@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.0](https://github.com/happy-dwarf-team/anvil/compare/v1.13.0...v1.14.0) (2026-11-07)
+
+
+### Features
+
+* **api:** report out-of-sync state from anvil-game ([#244](https://github.com/happy-dwarf-team/anvil/issues/244)) ([8dd2e76](https://github.com/happy-dwarf-team/anvil/commit/8dd2e76c9b790429af3da0461d570812679355f2))
+
 ## [1.13.0](https://github.com/happy-dwarf-team/anvil/compare/v1.12.0...v1.13.0) (2026-11-06)
 
 
