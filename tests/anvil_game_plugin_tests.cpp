@@ -254,6 +254,7 @@ struct FakeWorld {
     alignas(8) uint8_t db[0x800] = {};
     std::vector<uint64_t> bucket_tags[64];
     std::string long_name = "S\xE3o Tom\xE9 and a name long enough for the heap";
+    std::string tax_key = "local_tax_modifier";
     std::string long_key = "a_modifier_key_too_long_to_be_kept_in_place";
     alignas(8) uint8_t war_a[0x218] = {};
     alignas(8) uint8_t war_b[0x218] = {};
@@ -340,7 +341,7 @@ struct FakeWorld {
         image.put_pointer(kCountriesDb, reinterpret_cast<uintptr_t>(db));
         // Three modifier definitions, and values for fake_modifier_value.
         set_key(definitions[0], "land_morale");
-        set_key(definitions[1], "local_tax_modifier");
+        set_key(definitions[1], tax_key);
         set_key(definitions[2], long_key);
         image.commit(kDefinitions & ~0xFFFu, PAGE_READWRITE);
         image.put_pointer(kDefinitions, reinterpret_cast<uintptr_t>(definitions));
