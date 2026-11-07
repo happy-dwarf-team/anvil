@@ -349,9 +349,9 @@ typedef struct AnvilGameWorldService {
      * all three when a port declared the modifier symbols absent. */
     AnvilResult (*modifier_id)(const char *key, int32_t *id);
     /* The value of a modifier as the game uses it, x 1000: the sum of
-     * everything that adds to it, and 0 for a modifier whose DLC is off. A yes
-     * or no modifier is 1000 or 0. ANVIL_ERROR_NOT_FOUND for an unknown tag or
-     * id. */
+     * everything that adds to it, after the game's own adjustment for a DLC
+     * that is off, which mostly makes it 0. A yes or no modifier is 1000 or 0.
+     * ANVIL_ERROR_NOT_FOUND for an unknown tag or id. */
     AnvilResult (*country_modifier)(const char *tag, int32_t id, int32_t *value);
     /* The same for a province: only what the province has itself, not its
      * owner's values. */
