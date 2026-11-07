@@ -251,7 +251,8 @@ struct FakeWorld {
     uint64_t defenders[1] = {game_tag("TUR", 1)};
 
     // RUS's units: an army with a leader drilling in Moskva, three regiments
-    // (1000, 1000 and 500 men), and an idle navy at sea without a leader. The
+    // (1000, 1000 and 500 men), and an idle navy at sea without a leader: as in
+    // the game, it points at a placeholder leader with id 0 named "No Leader". The
     // selection: a province, the navy and the army.
     static constexpr uint32_t kArmyKind = 0x1761F40;   // xor eax,eax; ret
     static constexpr uint32_t kNavyKind = 0x1761F48;   // mov eax,1; ret
@@ -264,6 +265,7 @@ struct FakeWorld {
     alignas(8) uint8_t army[0x260] = {};
     alignas(8) uint8_t navy[0x260] = {};
     alignas(8) uint8_t leader[0xA8] = {};
+    alignas(8) uint8_t no_leader[0xA8] = {};
     alignas(8) uint8_t regiments[3][0x90] = {};
     uintptr_t army_subunits[3] = {};
     alignas(8) uint8_t drill[0x10] = {};
@@ -316,6 +318,9 @@ struct FakeWorld {
         set(navy, 0, reinterpret_cast<uintptr_t>(navy_vtable));
         set(navy, 0x20, kNavyId);
         set(navy, 0xD0, game_tag("RUS", 0));
+        set(navy, 0xD8, reinterpret_cast<uintptr_t>(no_leader));
+        set(no_leader, 0x10, uint64_t{0x31});
+        set_short_string(no_leader + 0x20, "No Leader");
         set(navy, 0xE8, reinterpret_cast<uintptr_t>(province(3)));
         set(navy, 0x1F8, reinterpret_cast<uintptr_t>(idle));
         set_short_string(navy + 0x148, "1st Fleet");

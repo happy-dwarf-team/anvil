@@ -522,6 +522,7 @@ AnvilResult read_unit(const WorldLayout& l, std::string_view tag, std::uint64_t 
     out.reserved = 0;
     out.leader = 0;
     if (leader != 0 && !read(leader + l.leader_id, out.leader)) return ANVIL_ERROR_INTERNAL;
+    if ((out.leader >> 32) == 0) out.leader = 0;  // the game's placeholder for "no leader" has id 0
     return ANVIL_OK;
 }
 
@@ -539,6 +540,10 @@ AnvilResult read_unit_leader_name(const WorldLayout& l, std::string_view tag, st
     if (const AnvilResult r = unit_at(l, tag, id, unit); r != ANVIL_OK) return r;
     if (!read(unit + l.unit_leader, leader)) return ANVIL_ERROR_INTERNAL;
     if (leader == 0) return ANVIL_ERROR_NOT_FOUND;
+    // A unit without a leader points at the game's placeholder leader, whose id is 0.
+    std::uint64_t leader_id = 0;
+    if (!read(leader + l.leader_id, leader_id)) return ANVIL_ERROR_INTERNAL;
+    if ((leader_id >> 32) == 0) return ANVIL_ERROR_NOT_FOUND;
     std::string name;
     if (!read_string(leader + l.leader_name, name)) return ANVIL_ERROR_INTERNAL;
     utf8 = game_text_to_utf8(name);
