@@ -69,8 +69,8 @@ pub struct DayEnd { /* the service table */ }
 impl DayEnd {
     /// The service, when anvil-script publishes it.
     pub fn get(host: &Host) -> Option<Self>;
-    /// Subscribes `handler` to the Day end; call it in the plugin's load.
-    pub fn subscribe<F: Fn(&Day) + Send + Sync + 'static>(&self, handler: F) -> Result<()>;
+    /// Subscribes `handler` to the Day end for this plugin; call it in the plugin's load.
+    pub fn subscribe<F: Fn(&Day) + Send + Sync + 'static>(&self, host: &Host, handler: F) -> Result<()>;
 }
 ```
 
