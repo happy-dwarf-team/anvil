@@ -162,11 +162,27 @@ struct FakeEffect {
 };
 static_assert(sizeof(FakeEffect) == 0x38 && offsetof(FakeEffect, begin) == 0x10 && offsetof(FakeEffect, token) == 0x28);
 
-// A scope as the stand-ins read it.
+// CEventScope as the plugin reads it: the province at +0x28, the country's
+// tag at +0x2C and an override tag at +0x44 (CCountryTag, valid at +7).
 struct FakeScope {
+    std::uint8_t head[0x28] = {};
     int province = 0;
-    char tag[4] = {};
+    char tag[8] = {};
+    std::uint8_t mid[0x10] = {};
+    char override_tag[8] = {};
+    FakeScope(int p, const char* t, const char* o = nullptr) : province(p) {
+        if (t) {
+            std::memcpy(tag, t, 3);
+            tag[7] = 1;
+        }
+        if (o) {
+            std::memcpy(override_tag, o, 3);
+            override_tag[7] = 1;
+        }
+    }
 };
+static_assert(offsetof(FakeScope, province) == 0x28 && offsetof(FakeScope, tag) == 0x2C &&
+              offsetof(FakeScope, override_tag) == 0x44);
 
 // What the stand-ins of the game got.
 std::vector<std::string> g_read_keys;       // ReadMember reached the game
@@ -186,17 +202,6 @@ void* fake_ctor(void* effect) {
 }
 void fake_dtor(void*) { ++g_dtors; }
 void fake_grow(void*, void**) { ++g_grows; }
-int fake_scope_province(void*, const void* scope) { return static_cast<const FakeScope*>(scope)->province; }
-void* fake_scope_tag(void*, void* tag, const void* scope) {
-    auto* out = static_cast<std::uint8_t*>(tag);
-    std::memset(out, 0, 8);
-    const auto* s = static_cast<const FakeScope*>(scope);
-    if (s->tag[0]) {
-        std::memcpy(out, s->tag, 3);
-        out[7] = 1;
-    }
-    return tag;
-}
 void* fake_cstring(void* string, const char* text) {
     g_strings.push_back(text);
     auto* s = static_cast<GameString*>(string);
@@ -232,7 +237,7 @@ struct FakeEu4 {
     FakeEu4() {
         base = static_cast<uint8_t*>(VirtualAlloc(nullptr, kSize, MEM_RESERVE, PAGE_NOACCESS));
         commit(0x0, PAGE_READWRITE);
-        for (uint32_t page : {0xC9000u, 0x5DE000u, 0x5E0000u, 0x5E4000u, 0x5ED000u, 0x5EF000u, 0x1703000u})
+        for (uint32_t page : {0xC9000u, 0x5DE000u, 0x5E0000u, 0x5E4000u, 0x5ED000u, 0x5EF000u, 0x623000u, 0x1703000u})
             commit(page, PAGE_EXECUTE_READWRITE);
         commit(0x1C9E000, PAGE_READWRITE);
         write_headers();
@@ -263,13 +268,10 @@ struct FakeEu4 {
         put(0x5E0F43, {0x48, 0x8D, 0x4F, 0x10, 0x48, 0x8D, 0x54, 0x24, 0x20, 0xE8, 0xBF, 0x8F, 0xAE, 0xFF, 0x48, 0x8B,
                        0x4C, 0x24, 0x20, 0x48, 0x8B, 0x01, 0x48, 0x8D, 0x96, 0x40, 0x04, 0x00, 0x00, 0xFF, 0x50, 0x48});
         put(0x5EF140, {0x89, 0x51, 0x28, 0xC3});
-        // The scope getters: their declared bytes, add rsp,510h; pop rdi.
-        put(0x5EDAD0, {0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x81, 0xEC, 0x10, 0x05, 0x00, 0x00, 0x8B, 0x41, 0x2C,
-                       0x48, 0x81, 0xC4, 0x10, 0x05, 0x00, 0x00, 0x5F});
-        jump(0x5EDAD0 + 24, &fake_scope_province);
-        put(0x5ED880, {0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x81, 0xEC, 0x10, 0x05,
-                       0x00, 0x00, 0x48, 0x81, 0xC4, 0x10, 0x05, 0x00, 0x00, 0x5F});
-        jump(0x5ED880 + 26, &fake_scope_tag);
+        // Where the game's effects read the scope (not run): a province and a country effect.
+        put(0x62367F, {0x48, 0x8B, 0xDA, 0x48, 0x8B, 0xF9, 0x83, 0x7A, 0x28, 0x00});
+        put(0x5EFC55, {0x44, 0x0F, 0xB6, 0x42, 0x4B, 0xBA, 0x44, 0x00, 0x00, 0x00, 0x8B, 0xC2, 0x41, 0xB9, 0x2C, 0x00,
+                       0x00, 0x00, 0x45, 0x84, 0xC0, 0x41, 0x0F, 0x44, 0xC1});
         // CString::CString(const char*): its declared bytes, add rsp,20h; pop rbx.
         put(0x1703550, {0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x33, 0xC0, 0x48, 0xC7, 0x41, 0x18, 0x0F, 0x00, 0x00, 0x00,
                         0x48, 0x89, 0x01, 0x48, 0x8B, 0xD9, 0x88, 0x01, 0x48, 0x83, 0xC4, 0x20, 0x5B});
@@ -493,7 +495,7 @@ int main(int argc, char** argv) {
     });
 
     Reader& reader = *new Reader;
-    const auto member = [&](Parent& parent, const char* key, const char* value, int token = 0xC) {
+    const auto member = [&](Parent& parent, const char* key, const char* value, int token = 0xF) {
         std::snprintf(reader.lhs.text, sizeof reader.lhs.text, "%s", key);
         std::snprintf(reader.rhs.text, sizeof reader.rhs.text, "%s", value);
         reader.lhs.id = token;
@@ -516,7 +518,7 @@ int main(int argc, char** argv) {
         CHECK(g_read_keys.empty() && g_ctors == 1 && parent.children() == 1);
         if (parent.children() != 1) return;
         FakeEffect* e = parent.child(0);
-        CHECK(e->token == 0xC && e->vtable != reinterpret_cast<const void*>(g_vtable_address));
+        CHECK(e->token == 0xF && e->vtable != reinterpret_cast<const void*>(g_vtable_address));
         auto* const* slots = static_cast<void* const*>(e->vtable);
         auto* const* game = reinterpret_cast<void* const*>(g_vtable_address);
         CHECK(slots[4] == game[4] && slots[1] == game[1] && slots[0] != game[0] && slots[15] != game[15]);
@@ -561,6 +563,12 @@ int main(int argc, char** argv) {
         FakeScope country{0, "SWE"};
         reinterpret_cast<ExecuteFn*>(slots[15])(effect, &country, 0);
         CHECK(g_executed.size() == 2 && g_executed[1].province == 0 && g_executed[1].country == "SWE");
+        FakeScope overridden{33, "RUS", "TUR"};
+        reinterpret_cast<ExecuteFn*>(slots[15])(effect, &overridden, 0);
+        CHECK(g_executed.size() == 3 && g_executed[2].province == 33 && g_executed[2].country == "TUR");
+        FakeScope no_country{33, nullptr};
+        reinterpret_cast<ExecuteFn*>(slots[15])(effect, &no_country, 0);
+        CHECK(g_executed.size() == 4 && g_executed[3].country.empty());
     });
 
     run("script plugin: a suspended owner's effect does nothing", [&] {
@@ -579,13 +587,13 @@ int main(int argc, char** argv) {
         g_strings.clear();
         g_base_descs = 0;
         reinterpret_cast<GetDescFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
-        CHECK(g_base_descs == 1 && prefix.size == 0xDEAD && out.text() == "Mountains ahead" &&
-              (g_strings == std::vector<std::string>{"Mountains ahead"}));
-        // Without Mei's UTF-8: Windows-1252, the game's marks dropped.
+        CHECK(g_base_descs == 1 && prefix.size == 0xDEAD && out.text() == "Mountains ahead\n" &&
+              (g_strings == std::vector<std::string>{"Mountains ahead\n"}));
+        // Without Mei's UTF-8: Windows-1252, the game's marks dropped; a line break ends it.
         g_line = "Teren: g\xC3\xB3ry \xC2\xA7Y$x$ \xE4\xB8\x80";
         g_strings.clear();
         reinterpret_cast<GetDescFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
-        CHECK((g_strings == std::vector<std::string>{"Teren: g\xF3ry Yx ?"}));
+        CHECK((g_strings == std::vector<std::string>{"Teren: g\xF3ry Yx ?\n"}));
         g_line = "Mountains ahead";
     });
 

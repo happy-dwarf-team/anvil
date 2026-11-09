@@ -3,7 +3,7 @@
  * lets a gameplay plugin add effects of its own to EU4's script language
  * (docs/adr/0008-plugin-script-effects.md, docs/spec/script-effects-v1.md).
  *
- * A modder writes `chisel_set_terrain = mountains` in an event option, a
+ * A modder writes `chisel_set_terrain = mountain` in an event option, a
  * decision or a scripted effect; the game parses it as one of its own effects
  * and, when it runs the effect, calls the plugin's `execute` with the value
  * and the scope.

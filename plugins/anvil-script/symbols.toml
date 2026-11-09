@@ -82,21 +82,24 @@ note = "CArray<T*>::Append, a std::vector<void*> push_back with the game's heap"
 build."eu4-1.37.5-steam-win64" = { rva = 0xC9F10 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0xC9F40 }
 
-[symbol.scope_province_id]
-bytes = "48 89 5C 24 08 57 48 81 EC 10 05 00 00 8B 41 2C"
+[symbol.scope_province_site]
+bytes = "48 8B DA 48 8B F9 83 7A 28 00"                  # mov rbx,rdx; mov rdi,rcx; cmp dword [rdx+28h],0
 memory = "code"
-signature = "int (void* effect, const void* scope)"
-note = "CEffect::GetScopeProvinceId(const CEventScope&): the province of the effect's scope, with its ROOT/FROM/... bits"
-build."eu4-1.37.5-steam-win64" = { rva = 0x5EDAD0 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x5ED5A0 }
+values.province = { at = 8, size = 1 }
+note = "CProvinceCultureEffect::Execute+0x1F: a province effect reads the scope's own province (CEventScope+0x28); CEffect::GetScopeProvinceId answers only for ROOT, FROM and event targets"
+build."eu4-1.37.5-steam-win64" = { rva = 0x62367F }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x62314F }
 
-[symbol.scope_country_tag]
-bytes = "48 89 5C 24 08 48 89 74 24 10 57 48 81 EC 10 05 00 00"
+[symbol.scope_country_site]
+# movzx r8d,byte [rdx+4Bh]; mov edx,44h; mov eax,edx; mov r9d,2Ch; test r8b,r8b; cmove eax,r9d
+bytes = "44 0F B6 42 4B BA 44 00 00 00 8B C2 41 B9 2C 00 00 00 45 84 C0 41 0F 44 C1"
 memory = "code"
-signature = "void* (void* effect, void* tag, const void* scope)"
-note = "CEffect::GetScopeCountryTag(const CEventScope&): a CCountryTag (8 bytes: text, index, type, valid at +7) in a hidden slot"
-build."eu4-1.37.5-steam-win64" = { rva = 0x5ED880 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x5ED350 }
+values.override_valid = { at = 4, size = 1 }
+values.override = { at = 6, size = 4 }
+values.tag = { at = 14, size = 4 }
+note = "CTreasuryEffect::Execute+0x25: a country effect's country is the scope's tag at +0x44 when +0x4B is set, else the tag at +0x2C (CCountryTag: text, then valid at +7)"
+build."eu4-1.37.5-steam-win64" = { rva = 0x5EFC55 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x5EF725 }
 
 [symbol.cstring_from_text]
 bytes = "40 53 48 83 EC 20 33 C0 48 C7 41 18 0F 00 00 00 48 89 01 48 8B D9 88 01"

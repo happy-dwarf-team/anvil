@@ -44,9 +44,11 @@ constexpr std::size_t kSlotExecute = 15;   // void Execute(CEventScope&, int)
 constexpr std::size_t kTokenText = 4;      // CToken: lexer id, then the text
 constexpr std::size_t kMaxValue = 255;
 constexpr std::size_t kMaxLine = 511;
-// The lexer's id for a word it does not know (CLexer::FindTok), which is what
-// a key of a plugin is. Any other id is a word of the game or of its data.
-constexpr int kUnknownToken = 0xC;
+// The token the parser passes for a name the lexer does not know, which is
+// what a key of a plugin is (0xF, seen in the game: eu4-engine-lab#77; the
+// lexer's FindTok answers 0xC, but that is not what reaches ReadMember). The
+// game's keywords start at 0xB and its data words are dynamic ids above them.
+constexpr int kUnknownToken = 0xF;
 
 // Our CEffect: the game's object, then what we keep.
 struct Effect {
@@ -58,6 +60,7 @@ struct Effect {
 
 struct Layout {
     std::size_t lhs = 0, rhs = 0, children = 0, token = 0, assign_slot = 0;
+    std::size_t scope_province = 0, scope_tag = 0, scope_override = 0, scope_override_valid = 0;
 } g_layout;
 
 Registry g_registry;
@@ -98,16 +101,17 @@ bool suspended(const AnvilPlugin* owner) {
 }
 
 AnvilScriptCall call_of(Effect* e, void* scope) {
-    anvil::Host host;
     AnvilScriptCall call{};
     call.size = sizeof(call);
     call.key = g_registry.entry(static_cast<int>(e->entry)).key;
     call.value = e->value;
     call.scope.size = sizeof(call.scope);
-    call.scope.province = host.call(sym::scope_province_id, static_cast<void*>(e), static_cast<const void*>(scope));
+    // The scope's own fields, as the game's simple effects read them: the
+    // effect's scope bits (ROOT, FROM, ...) are never set on ours.
+    call.scope.province = read_at<int>(scope, g_layout.scope_province);
     if (call.scope.province < 0) call.scope.province = 0;
-    alignas(8) std::uint8_t tag[8] = {};
-    host.call(sym::scope_country_tag, static_cast<void*>(e), static_cast<void*>(tag), static_cast<const void*>(scope));
+    const bool override_tag = read_at<std::uint8_t>(scope, g_layout.scope_override_valid) != 0;
+    const auto* tag = static_cast<const std::uint8_t*>(scope) + (override_tag ? g_layout.scope_override : g_layout.scope_tag);
     if (tag[7] != 0) {  // CCountryTag::_bIsValid
         for (int i = 0; i < 3 && tag[i] >= 0x20 && tag[i] < 0x7F; ++i) call.scope.country[i] = static_cast<char>(tag[i]);
     }
@@ -186,8 +190,10 @@ void* get_desc(void* self, void* out, void* scope, void* prefix, int indent, boo
     char line[kMaxLine + 1] = {};
     if (entry.describe(entry.context, &call, line, sizeof line) == 0) return out;
     line[kMaxLine] = 0;
+    // The game's own lines end with a line break, and the parent adds the
+    // indentation (eu4-engine-lab#77): without it the next line joins ours.
     const std::string text = game_text(line);
-    if (!text.empty()) anvil::Host{}.call(sym::cstring_from_text, out, text.c_str());
+    if (!text.empty()) anvil::Host{}.call(sym::cstring_from_text, out, (text + "\n").c_str());
     return out;
 }
 
@@ -283,6 +289,10 @@ struct AnvilScript : anvil::Plugin {
         g_layout.children = host.value(sym::effect_assign_site, "children");
         g_layout.token = host.value(sym::effect_set_token, "token");
         g_layout.assign_slot = host.value(sym::effect_assign_site, "assign") / sizeof(void*);
+        g_layout.scope_province = host.value(sym::scope_province_site, "province");
+        g_layout.scope_tag = host.value(sym::scope_country_site, "tag");
+        g_layout.scope_override = host.value(sym::scope_country_site, "override");
+        g_layout.scope_override_valid = host.value(sym::scope_country_site, "override_valid");
 
         // The game's vtable: its ReadMember slot must be the hooked function,
         // and the slots we keep must be code of eu4.exe.
