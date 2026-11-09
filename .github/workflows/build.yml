@@ -26,7 +26,9 @@ jobs:
 
       # Ninja with sccache in front of cl: a run compiles only the sources whose
       # inputs changed since the cached run. The MSVC environment (cl, link, rc on
-      # PATH, INCLUDE, LIB) comes from vcvars64.bat, as a Developer prompt has it.
+      # PATH, INCLUDE, LIB) comes from vcvars64.bat, as a Developer prompt has it,
+      # saved to msvc.env and loaded only by the steps that run cl: for the whole
+      # job it would also make rustc in a bash step link with Git's link.exe.
       - name: MSVC environment
         shell: pwsh
         run: |
@@ -36,7 +38,7 @@ jobs:
           cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul && set" | ForEach-Object {
             $name, $value = $_ -split '=', 2
             if ($name -and $null -ne $value -and [Environment]::GetEnvironmentVariable($name) -ne $value) { "$name=$value" }
-          } | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          } | Out-File (Join-Path $env:RUNNER_TEMP msvc.env) -Encoding utf8
 
       - name: sccache
         shell: pwsh
@@ -73,12 +75,18 @@ jobs:
           key: fetchcontent-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
 
       - name: Configure
-        run: >-
-          cmake -S . -B build -G "Ninja Multi-Config"
-          -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+        shell: pwsh
+        run: |
+          Get-Content (Join-Path $env:RUNNER_TEMP msvc.env) |
+            ForEach-Object { $name, $value = $_ -split '=', 2; Set-Item "env:$name" $value }
+          cmake -S . -B build -G "Ninja Multi-Config" `
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Build
+        shell: pwsh
         run: |
+          Get-Content (Join-Path $env:RUNNER_TEMP msvc.env) |
+            ForEach-Object { $name, $value = $_ -split '=', 2; Set-Item "env:$name" $value }
           cmake --build build --config Release
           sccache --show-stats
 
@@ -146,7 +154,11 @@ jobs:
       - name: Test
         env:
           ANVIL_REQUIRE_HELLO_RUST: '1'
-        run: ctest --test-dir build -C Release --output-on-failure
+        shell: pwsh
+        run: |
+          Get-Content (Join-Path $env:RUNNER_TEMP msvc.env) |
+            ForEach-Object { $name, $value = $_ -split '=', 2; Set-Item "env:$name" $value }
+          ctest --test-dir build -C Release --output-on-failure
 
       # Microbenchmarks (design §17): three runs, gated on each case's ratio to a
       # plain call against bench/baseline-ci.json for this runner's CPU model.
