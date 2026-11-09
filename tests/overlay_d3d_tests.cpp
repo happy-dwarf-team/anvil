@@ -122,6 +122,29 @@ size_t frame(IDirect3DDevice9* device, RECT area) {
     return drawn;
 }
 
+// The overlay reads modifiers with GetKeyState, the key state of this thread,
+// while the test sends its keys with SendMessage, which does not change it. A
+// Shift, Ctrl or Alt that the machine's real keyboard (or another program's
+// SendInput) holds can show up there, and a key without modifiers then does
+// not match. Before a test sends keys, its thread's modifiers are set up.
+bool release_modifiers() {
+    BYTE state[256]{};
+    if (!GetKeyboardState(state)) return false;
+    for (const int vk : {VK_SHIFT, VK_LSHIFT, VK_RSHIFT, VK_CONTROL, VK_LCONTROL, VK_RCONTROL, VK_MENU, VK_LMENU, VK_RMENU,
+                         VK_LWIN, VK_RWIN}) {
+        state[vk] = 0;
+    }
+    return SetKeyboardState(state) != 0;
+}
+
+// For a failed check: what the overlay would have read.
+void print_modifiers() {
+    std::printf("    modifiers: shift %d ctrl %d alt %d (async %d %d %d)\n", GetKeyState(VK_SHIFT) & 0x8000 ? 1 : 0,
+                GetKeyState(VK_CONTROL) & 0x8000 ? 1 : 0, GetKeyState(VK_MENU) & 0x8000 ? 1 : 0,
+                GetAsyncKeyState(VK_SHIFT) & 0x8000 ? 1 : 0, GetAsyncKeyState(VK_CONTROL) & 0x8000 ? 1 : 0,
+                GetAsyncKeyState(VK_MENU) & 0x8000 ? 1 : 0);
+}
+
 D3DPRESENT_PARAMETERS parameters(HWND window) {
     D3DPRESENT_PARAMETERS p{};
     p.Windowed = TRUE;
@@ -252,10 +275,15 @@ int main(int argc, char** argv) {
         // F11 alone, so the test needs no modifier keys held.
         AnvilControlResult result{};
         CHECK(control.service()->setting_set_text("anvil-overlay", 0, "F11", &result) == ANVIL_OK && result.applied == 1);
+        CHECK(release_modifiers());
         SendMessageW(window, WM_KEYDOWN, VK_F11, 1);
         size_t drawn = 0;
         for (int i = 0; i < 3; ++i) drawn = frame(device, middle);
         CHECK(drawn > 1000);
+        if (drawn <= 1000) {
+            std::printf("    drawn %zu in the middle\n", drawn);
+            print_modifiers();
+        }
         SendMessageW(window, WM_KEYDOWN, VK_F11, 1);
         frame(device, middle);
         CHECK(frame(device, middle) == 0);
@@ -443,6 +471,7 @@ int main(int argc, char** argv) {
         const auto* input = static_cast<const AnvilInputService*>(bus.get_service(ANVIL_INPUT_SERVICE, ANVIL_INPUT_SERVICE_VERSION));
         CHECK(input != nullptr && input->size == sizeof(AnvilInputService) && ANVIL_INPUT_HAS(input, held));
         if (input == nullptr) return;
+        CHECK(release_modifiers());
         static std::vector<AnvilInputEvent> got;
         const AnvilInputHandler handler = [](void*, const AnvilInputEvent* e) { got.push_back(*e); };
         const int64_t ctrl_k = 'K' | ANVIL_INPUT_CTRL;
