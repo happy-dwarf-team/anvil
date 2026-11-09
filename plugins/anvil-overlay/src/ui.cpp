@@ -231,6 +231,7 @@ void start_release_check() {
     const std::string version = running_version();
     std::wstring agent = L"anvil-overlay/";
     for (const char c : version) agent += static_cast<wchar_t>(static_cast<unsigned char>(c));
+    log_info("release check: asking api.github.com for the latest Anvil release");
     try {
         std::thread([agent] {
             anvil::net::ReleaseCheck check;
@@ -247,7 +248,6 @@ void start_release_check() {
             shared().release_done.store(true, std::memory_order_release);
             shared().mark_dirty();
         }).detach();
-        log_info("release check: asking api.github.com for the latest Anvil release");
     } catch (const std::exception&) {
         log_warning("release check: cannot start its thread");
     }
