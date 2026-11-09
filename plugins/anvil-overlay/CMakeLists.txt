@@ -39,8 +39,8 @@ anvil_add_plugin(anvil_overlay SOURCES src/plugin.cpp src/ui.cpp src/notices.cpp
     src/release.cpp)
 target_include_directories(anvil_overlay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../src/control)
 # anvil_net: the opt-in release check it shares with the Manager. Its DLLs are
-# delay-loaded, so a start without the check loads none of them (winhttp.dll
-# is loaded from System32 before the first call, src/ui.cpp).
+# delay-loaded, so the static imports stay KERNEL32 and USER32; winhttp.dll is
+# loaded from System32 before the first call (src/ui.cpp).
 target_link_libraries(anvil_overlay PRIVATE anvil_overlay_imgui anvil_i18n anvil_net delayimp)
 target_link_options(anvil_overlay PRIVATE /DELAYLOAD:winhttp.dll /DELAYLOAD:shell32.dll /DELAYLOAD:ole32.dll)
 target_sources(anvil_overlay PRIVATE ${ANVIL_CJK_FONTS_RC})
