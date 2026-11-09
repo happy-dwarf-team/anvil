@@ -86,7 +86,7 @@ The id's prefix cannot be checked by the service (a service does not know its ca
 
 ## 8. Symbols
 
-One `symbols.toml`, the builds `anvil-game` knows (Steam 1.37.5 and GOG 1.37.5.2 now; GOG 1.37.5.0 has the same addresses and bytes in these functions). Addresses are RVAs from the lab's reading of the PDB and both builds; every symbol has its `bytes`.
+One `symbols.toml`, the builds `anvil-game` knows (Steam 1.37.5, GOG 1.37.5.2 and GOG 1.37.5.0; the last has the same addresses and bytes as 1.37.5.2 here, placed by `anvil port`). Addresses are RVAs from the lab's reading of the PDB and both builds; every symbol has its `bytes`.
 
 | Symbol | What | Steam | GOG | Change |
 | --- | --- | --- | --- | --- |
