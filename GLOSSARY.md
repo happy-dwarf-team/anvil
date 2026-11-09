@@ -114,6 +114,12 @@ _Avoid_: send, execute
 The state a plugin asks for, such as "drilling", which `anvil-game.commands` turns into a command only for the units whose state differs.
 _Avoid_: toggle
 
+### The game's day
+
+**Day end**:
+The moment after the game has finished a day (with its month and year) on the main thread, before it compares checksums, when no worker thread runs. A gameplay plugin is called there through `anvil-script.day_end`.
+_Avoid_: daily tick hook, after tick, end of tick
+
 ### When the game crashes
 
 **Crash report**:
