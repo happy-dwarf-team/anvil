@@ -46,7 +46,7 @@ target_include_directories(anvil_messages PUBLIC src)
 target_compile_definitions(anvil_messages PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 add_library(anvil_i18n STATIC src/i18n/translate.cpp src/i18n/cjk_font.cpp src/i18n/catalog_fr.cpp
     src/i18n/catalog_de.cpp src/i18n/catalog_es.cpp src/i18n/catalog_zh_hans.cpp src/i18n/catalog_zh_hant.cpp
-    src/i18n/catalog_ja.cpp src/i18n/catalog_ko.cpp)
+    src/i18n/catalog_ja.cpp src/i18n/catalog_ko.cpp src/i18n/catalog_pl.cpp)
 # The CJK fonts are resources of each binary that draws text (cjk_font.hpp):
 # target_sources(<target> PRIVATE ${ANVIL_CJK_FONTS_RC}).
 set(ANVIL_CJK_FONTS_RC ${CMAKE_CURRENT_SOURCE_DIR}/src/i18n/fonts/fonts.rc CACHE INTERNAL "")
@@ -93,6 +93,7 @@ add_library(anvil_core STATIC
     src/core/manifest.cpp
     src/core/mod_plugins.cpp
     src/core/pe_image.cpp
+    src/core/platform.cpp
     src/core/playset.cpp
     src/core/plugin_hash.cpp
     src/core/resolver.cpp
@@ -199,6 +200,10 @@ if(ANVIL_BUILD_EXAMPLES)
     set(CMAKE_COMPILE_WARNING_AS_ERROR ON)
     add_subdirectory(examples/hello-c)
     add_subdirectory(examples/hello-cpp)
+    # A plugin map mode on anvil-game.world and anvil-map.modes (docs/spec/map-modes-v1.md).
+    add_subdirectory(examples/player-cores)
+    # A script effect on anvil-script.effects (docs/spec/script-effects-v1.md).
+    add_subdirectory(examples/hello-script)
     unset(CMAKE_COMPILE_WARNING_AS_ERROR)
 endif()
 
@@ -213,10 +218,16 @@ add_subdirectory(plugins/anvil-overlay)
 # anvil-log-throttle, the standard plugin that counts the repeats of a line of
 # the game's logs instead of writing them (anvil#172), released next to them.
 add_subdirectory(plugins/anvil-log-throttle)
+# anvil-map, the standard plugin of plugin map modes (ADR 0007,
+# docs/spec/map-modes-v1.md), released next to them.
+add_subdirectory(plugins/anvil-map)
+# anvil-script, the standard plugin through which gameplay plugins add script
+# effects (ADR 0008, docs/spec/script-effects-v1.md), released next to them.
+add_subdirectory(plugins/anvil-script)
 unset(CMAKE_COMPILE_WARNING_AS_ERROR)
 # The standard plugins ship only inside the package, so their version is
 # Anvil's: release-please bumps their manifests with version.txt.
-foreach(_standard anvil-game anvil-overlay anvil-log-throttle)
+foreach(_standard anvil-game anvil-overlay anvil-log-throttle anvil-map anvil-script)
     set(_manifest plugins/${_standard}/plugin.toml)
     file(STRINGS ${_manifest} _manifest_version LIMIT_COUNT 1 REGEX "^version = \"[^\"]*\"$")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_manifest})
@@ -397,11 +408,28 @@ if(ANVIL_BUILD_TESTS)
     add_dependencies(anvil_log_throttle_tests anvil_log_throttle)
     add_test(NAME anvil_log_throttle_tests COMMAND anvil_log_throttle_tests ${CMAKE_BINARY_DIR}/plugin)
 
+    # anvil-map's registry, colour buffers and text rules on their own
+    # (tests/map_modes_tests.cpp).
+    add_executable(anvil_map_tests tests/map_modes_tests.cpp plugins/anvil-map/src/modes.cpp
+        plugins/anvil-map/src/text.cpp)
+    target_include_directories(anvil_map_tests PRIVATE include)
+    target_link_libraries(anvil_map_tests PRIVATE anvil_loader)
+    add_test(NAME anvil_map_tests COMMAND anvil_map_tests)
+    # anvil-script's key table on its own, and the plugin end to end on a
+    # synthetic image with CEffect's code and vtable (tests/script_tests.cpp).
+    add_executable(anvil_script_tests tests/script_tests.cpp plugins/anvil-script/src/registry.cpp)
+    target_include_directories(anvil_script_tests PRIVATE src/control)
+    target_link_libraries(anvil_script_tests PRIVATE anvil_loader)
+    add_dependencies(anvil_script_tests anvil_script)
+    add_test(NAME anvil_script_tests COMMAND anvil_script_tests ${CMAKE_BINARY_DIR}/plugin)
+
     # The symbols.lock of anvil-game and of every example matches its
     # symbols.toml (anvil check without --exe; the locks come from anvil check
     # --exe on the real eu4.exe).
     add_test(NAME anvil_game_symbols_lock COMMAND anvil check ${CMAKE_CURRENT_SOURCE_DIR}/plugins/anvil-game)
     add_test(NAME anvil_log_throttle_symbols_lock COMMAND anvil check ${CMAKE_CURRENT_SOURCE_DIR}/plugins/anvil-log-throttle)
+    add_test(NAME anvil_map_symbols_lock COMMAND anvil check ${CMAKE_CURRENT_SOURCE_DIR}/plugins/anvil-map)
+    add_test(NAME anvil_script_symbols_lock COMMAND anvil check ${CMAKE_CURRENT_SOURCE_DIR}/plugins/anvil-script)
     foreach(example hello-c hello-cpp hello-rust)
         add_test(NAME anvil_${example}_symbols_lock COMMAND anvil check ${CMAKE_CURRENT_SOURCE_DIR}/examples/${example})
     endforeach()
@@ -447,6 +475,10 @@ install(FILES $<TARGET_FILE:anvil_overlay> plugins/anvil-overlay/plugin.toml plu
 install(FILES $<TARGET_FILE:anvil_log_throttle> plugins/anvil-log-throttle/plugin.toml
     plugins/anvil-log-throttle/symbols.toml plugins/anvil-log-throttle/settings.toml
     DESTINATION anvil/plugins/anvil-log-throttle COMPONENT anvil)
+install(FILES $<TARGET_FILE:anvil_map> plugins/anvil-map/plugin.toml plugins/anvil-map/symbols.toml
+    DESTINATION anvil/plugins/anvil-map COMPONENT anvil)
+install(FILES $<TARGET_FILE:anvil_script> plugins/anvil-script/plugin.toml plugins/anvil-script/symbols.toml
+    DESTINATION anvil/plugins/anvil-script COMPONENT anvil)
 install(FILES LICENSE README.md DESTINATION anvil/docs COMPONENT anvil)
 # Third-party code compiled into version.dll: ship its license texts.
 # Zydis is declared inside SafetyHook's scope; fetch its properties here.
@@ -477,7 +509,8 @@ include(CMakePackageConfigHelpers)
 write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/sdk/AnvilPluginConfigVersion.cmake
     VERSION ${PROJECT_VERSION} COMPATIBILITY SameMajorVersion ARCH_INDEPENDENT)
 install(FILES include/anvil/anvil_plugin.h include/anvil/anvil_panel.h include/anvil/anvil_input.h include/anvil/anvil.hpp include/anvil/anvil_symbols.hpp
-    include/anvil/anvil_game.h include/anvil/anvil_benchmark.h include/anvil/anvil_benchmark.hpp
+    include/anvil/anvil_game.h include/anvil/anvil_map.h include/anvil/anvil_script.h
+    include/anvil/anvil_benchmark.h include/anvil/anvil_benchmark.hpp
     DESTINATION include/anvil COMPONENT sdk)
 install(TARGETS anvil RUNTIME DESTINATION bin COMPONENT sdk)
 install(FILES sdk/cmake/AnvilPluginConfig.cmake ${CMAKE_CURRENT_BINARY_DIR}/sdk/AnvilPluginConfigVersion.cmake

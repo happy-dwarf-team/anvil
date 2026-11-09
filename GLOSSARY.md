@@ -38,6 +38,10 @@ _Avoid_: store, marketplace, plugin registry
 The release a catalog entry names, with the zip's URL, size and SHA-256; the Manager installs a downloaded zip only when it matches the pin.
 _Avoid_: lock (taken by `symbols.lock`)
 
+**Legacy text patch**:
+EU4DLL or EU4 Unicode Patch: a `version.dll` loader with its files in the game folder, which Anvil replaces. The Manager recognizes one by its files, moves them to `anvil-legacy-backup/` and can put them back when Anvil is uninstalled.
+_Avoid_: old loader, foreign DLL (for a recognized one), EU4DLL (for both)
+
 **Game session**:
 One loaded save or new game while it runs, from the moment it is playable until the player leaves it or loads another; it is ironman, multiplayer, both or neither.
 _Avoid_: game (for this), campaign, match
@@ -71,6 +75,36 @@ _Avoid_: mid hook (for this; a mid hook lets the original code run), code cave, 
 **Chain**:
 The ordered changes of several plugins at one address, each passing control or the previous value to the next.
 _Avoid_: stack, hook list
+
+### Map modes
+
+**Plugin mode**:
+A map mode that a plugin registers with the service `anvil-map.modes`, known by its id `<plugin-id>.<name>`; the plugin gives its colours and tooltip lines, and the game shows its button on the minimap's list.
+_Avoid_: custom map mode, user map mode, mapmode (as one word in prose)
+
+**Borrowed number**:
+A value of the game's map mode enum that `anvil-map` has lent to one plugin mode for the whole process; the game's own mode under that number is not shown while it runs, not even from the console.
+_Avoid_: slot, map mode id (the id is the text), enum value (for a lent one)
+
+**Number pool**:
+The 13 values of the game's map mode enum that `anvil-map` may lend: 80–83 first, then the debug modes 50, 57–60, 66, 68, 71 and 84.
+_Avoid_: slots, free modes
+
+### Script effects
+
+**Script effect**:
+A word of the game's script language that does something when the game runs it, such as `add_treasury = 50` in an event option. A plugin's script effect is one that a gameplay plugin adds through `anvil-script` and a mod writes like the game's own.
+_Avoid_: command (the game's commands are what its clients exchange), script hook, custom effect (for the service)
+
+**Effect key**:
+The word on the left of a script effect, `chisel_set_terrain` in `chisel_set_terrain = mountain`. A plugin's key starts with its id.
+_Avoid_: effect name, keyword (for the game's own lexer words)
+
+### The game's day
+
+**Day end**:
+The moment after the game has finished a day (with its month and year) on the main thread, before it compares checksums, when no worker thread runs. A gameplay plugin is called there through `anvil-script.day_end`.
+_Avoid_: daily tick hook, after tick, end of tick
 
 ### When the game crashes
 
