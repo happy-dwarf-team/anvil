@@ -88,6 +88,7 @@ mod text;
 
 pub mod benchmark;
 pub mod game;
+pub mod input;
 pub mod map;
 pub mod panel;
 pub mod world;
