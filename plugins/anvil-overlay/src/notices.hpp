@@ -15,21 +15,29 @@ namespace overlay {
 enum class NoticeKind { Info, Warning, Error };
 
 struct NoticeAction {
-    enum class Type { OpenPanel, DisablePlugin };
+    // OpenLink and CopyLink: `url`. ReleaseCheckOn and ReleaseCheckOff answer
+    // the release question (release.hpp).
+    enum class Type { OpenPanel, DisablePlugin, OpenLink, CopyLink, ReleaseCheckOn, ReleaseCheckOff };
     Type type = Type::OpenPanel;
     std::string plugin;  // DisablePlugin
     std::string label;
+    std::string url;  // OpenLink, CopyLink
 };
 
 struct Notice {
-    std::string id;  // stable: "safe-mode", "crash", "unknown-build", "waiting-for-build", "not-loaded", "approvals", "ironman", "multiplayer"
+    // Stable: "safe-mode", "crash", "unknown-build", "waiting-for-build", "not-loaded", "approvals",
+    // "release-question", "release" (release.hpp), "ironman", "multiplayer".
+    std::string id;
     NoticeKind kind = NoticeKind::Info;
     std::string title;
     std::vector<std::string> lines;
     std::vector<NoticeAction> actions;
-    // Session notices stay while their session lasts and cannot be closed;
-    // the others close after the notification time or on a click.
+    // Session notices stay while their session lasts; the others close after
+    // the notification time or on a click.
     bool lasting = false;
+    // A lasting notice the player may close for the rest of its session (the
+    // multiplayer hash, once compared). The ironman notice cannot be closed (§13).
+    bool closable = false;
     // Stays until the player closes it, whatever the notification time: it comes
     // before the game's menu, when a timer would run out on the loading screen.
     bool until_closed = false;

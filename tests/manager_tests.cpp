@@ -12,7 +12,7 @@
 #include "mods.hpp"
 #include "core/trust.hpp"
 #include "plugin_zip.hpp"
-#include "release_check.hpp"
+#include "net/release_check.hpp"
 #include "start_menu.hpp"
 #include "test_image.hpp"
 #include "test_support.hpp"
@@ -32,6 +32,7 @@ namespace {
 
 using namespace anvil;
 using namespace anvil::manager;
+using namespace anvil::net;
 namespace fs = std::filesystem;
 
 void write(const fs::path& path, const std::string& text) {
@@ -256,11 +257,37 @@ int main(int argc, char** argv) {
         CHECK(CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &process));
         CHECK(game_running(game));
         CHECK(!game_running(other));
+        // Seen from the other folder, the game runs elsewhere (issue #253); from its own, it started now.
+        FILETIME created{}, exited{}, kernel{}, user{};
+        CHECK(GetProcessTimes(process.hProcess, &created, &exited, &kernel, &user));
+        const GameProcesses here = game_processes(game);
+        CHECK(here.here && here.here_started == ((static_cast<uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime));
+        CHECK(std::none_of(here.elsewhere.begin(), here.elsewhere.end(), [&](const fs::path& f) { return same_file(f, game); }));
+        const GameProcesses there = game_processes(other);
+        CHECK(!there.here && there.here_started == 0);
+        CHECK(std::any_of(there.elsewhere.begin(), there.elsewhere.end(), [&](const fs::path& f) { return same_file(f, game); }));
         TerminateProcess(process.hProcess, 0);
         WaitForSingleObject(process.hProcess, 5000);
         CloseHandle(process.hThread);
         CloseHandle(process.hProcess);
         CHECK(!game_running(game));
+        const GameProcesses after = game_processes(other);
+        CHECK(std::none_of(after.elsewhere.begin(), after.elsewhere.end(), [&](const fs::path& f) { return same_file(f, game); }));
+    });
+
+    run("anvil.log: a game that ended without writing it ran without Anvil (issue #253)", [&] {
+        const TempDir temp("missed");
+        const fs::path log = temp.dir / "anvil.log";
+        CHECK(!file_written(log));
+        CHECK(!file_written(temp.dir));  // a folder is no log
+        write(log, "anvil 1.0 starting\n");
+        const auto written = file_written(log);
+        CHECK(written.has_value() && *written > 0);
+        CHECK(!anvil_missed_game(written, *written));       // written as the game started
+        CHECK(!anvil_missed_game(written, *written - 10));  // written during the game
+        CHECK(anvil_missed_game(written, *written + 10));   // from an earlier game
+        CHECK(anvil_missed_game(std::nullopt, *written));   // never written
+        CHECK(!anvil_missed_game(std::nullopt, 0));         // the start is not known
     });
 
     run("package: version.dll's resource names Anvil and its version", [&] {
@@ -576,6 +603,22 @@ int main(int argc, char** argv) {
         CHECK(newer_release("v1.2.0", "1.1.0") && newer_release("1.1.1", "1.1.0"));
         CHECK(!newer_release("v1.1.0", "1.1.0") && !newer_release("v1.0.9", "1.1.0") && !newer_release("latest", "1.1.0"));
         CHECK(!newer_release("v1.2.0-rc.1", "1.2.0"));
+    });
+
+    run("release check: the Manager's answer as the overlay reads manager.toml", [] {
+        // As save_manager_settings writes it (toml++).
+        CHECK(manager_release_answer("# Anvil Manager's settings.\nasked_releases = true\ncheck_releases = true\n"
+                                     "game_folder = 'D:\\EU4'\n") == std::optional(true));
+        CHECK(manager_release_answer("check_releases = false\r\nasked_releases = true\r\n") == std::optional(false));
+        // Not answered yet, or nothing said.
+        CHECK(!manager_release_answer("asked_releases = false\ncheck_releases = false\n"));
+        CHECK(!manager_release_answer("check_releases = true\n"));
+        CHECK(!manager_release_answer("asked_releases = true\n"));
+        CHECK(!manager_release_answer(""));
+        CHECK(!manager_release_answer("asked_releases = yes\ncheck_releases = true\n"));
+        // Keys of a table are not the top level's.
+        CHECK(!manager_release_answer("[other]\nasked_releases = true\ncheck_releases = true\n"));
+        CHECK(manager_settings_file().filename() == "manager.toml");
     });
 
     run("catalog: a mod that presents itself as a catalog plugin is told apart from its Workshop item", [] {

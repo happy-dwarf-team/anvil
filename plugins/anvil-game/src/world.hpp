@@ -1,9 +1,10 @@
 // The world of a running session, read straight from game memory for the
 // service anvil-game.world (docs/adr/0004-plugins-without-addresses.md). The
 // walk is Tongs' (its docs/design.md, "World reads"), checked live there. It
-// calls no game code and keeps nothing between calls, so a load cannot leave a
-// stale pointer behind. Every read is guarded on its own, so memory that is not
-// what it should be costs one answer.
+// keeps nothing between calls, so a load cannot leave a stale pointer behind.
+// Every read is guarded on its own, so memory that is not what it should be
+// costs one answer. It calls no game code but one function: a modifier's value
+// goes through a DLC transformer per definition, and that function only reads.
 #pragma once
 
 #include <anvil/anvil_game.h>
@@ -80,6 +81,15 @@ struct WorldLayout {
     std::uint32_t war_defenders = 0;
     std::uint32_t war_defenders_end = 0;
 
+    // Modifiers: `modifier_value` 0 when absent on this build.
+    std::uintptr_t modifier_value = 0;    // the address of the game's value function
+    std::uintptr_t definitions = 0;       // the address of the definitions' begin
+    std::uintptr_t definitions_end = 0;   // and of their end
+    std::uint32_t definition_size = 0;    // a definition: its key, a std::string, comes first
+    std::uint32_t country_modifiers = 0;  // country: the state, an int32, of its modifiers
+    std::uint32_t calculating = 0;        // the state while they are worked out
+    std::uint32_t country_total = 0;      // from that state: the sum, a modifier
+    std::uint32_t province_modifier = 0;  // province: the sum of its own, a modifier
     // Units: `units` 0 when absent on this build. A list is the game's linked
     // list: head, count, and nodes with the object and the next node.
     std::uintptr_t image_begin = 0;  // eu4.exe in memory: a getter decoded from a vtable must be in it
@@ -122,6 +132,9 @@ AnvilResult read_war(const WorldLayout& l, std::uint64_t id, AnvilGameWar& out);
 AnvilResult read_war_name(const WorldLayout& l, std::uint64_t id, std::string& utf8);
 AnvilResult read_war_side(const WorldLayout& l, std::uint64_t id, std::uint32_t side, std::vector<AnvilGameTag>& out);
 
+AnvilResult read_modifier_id(const WorldLayout& l, std::string_view key, std::int32_t& id);
+AnvilResult read_country_modifier(const WorldLayout& l, std::string_view tag, std::int32_t id, std::int32_t& value);
+AnvilResult read_province_modifier(const WorldLayout& l, std::int32_t province, std::int32_t id, std::int32_t& value);
 AnvilResult read_country_units(const WorldLayout& l, std::string_view tag, std::vector<std::uint64_t>& out);
 AnvilResult read_unit(const WorldLayout& l, std::string_view tag, std::uint64_t id, AnvilGameUnit& out);
 AnvilResult read_unit_name(const WorldLayout& l, std::string_view tag, std::uint64_t id, std::string& utf8);

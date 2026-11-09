@@ -12,7 +12,7 @@ restart = false
 type = "bool"
 default = true
 label = "Show notifications"
-description = "Notices about skipped plugins, the previous crash and safe mode when the game is ready. The ironman and multiplayer notices are always shown."
+description = "Notices about skipped plugins, the previous crash and safe mode when the game is ready. The ironman notice is always shown; the multiplayer notice too, until you close it."
 restart = false
 
 [setting.notification_seconds]
@@ -60,4 +60,15 @@ values = [
 default = "game"
 label = "Language"
 description = "The language of the panel and the notices. Like the game: EU4's language, or with Mei the Chinese, Japanese or Korean of Steam or Windows. The Manager follows it too."
+restart = false
+[setting.release_check]
+type = "enum"
+values = [
+    { name = "ask", label = "Ask (or follow Anvil Manager)" },
+    { name = "on", label = "On" },
+    { name = "off", label = "Off" },
+]
+default = "ask"
+label = "Check for new Anvil releases"
+description = "When the game is ready, ask GitHub (api.github.com) once for Anvil's latest release and, when it is newer, show a notice with a link to its page. Nothing is downloaded. Ask: follow your answer in Anvil Manager, or ask once in the game."
 restart = false

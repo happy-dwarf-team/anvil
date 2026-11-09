@@ -584,6 +584,28 @@ AnvilResult world_war_side(std::uint64_t id, std::uint32_t side, AnvilGameTag* o
     }
 }
 
+AnvilResult world_modifier_id(const char* key, std::int32_t* id) {
+    if (key == nullptr || key[0] == '\0' || id == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (!world_open()) return ANVIL_ERROR_WRONG_PHASE;
+    try {
+        return anvil_game::read_modifier_id(g_world, key, *id);
+    } catch (const std::bad_alloc&) {
+        return ANVIL_ERROR_OUT_OF_MEMORY;
+    }
+}
+
+AnvilResult world_country_modifier(const char* tag, std::int32_t id, std::int32_t* value) {
+    if (tag == nullptr || value == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (!world_open()) return ANVIL_ERROR_WRONG_PHASE;
+    return anvil_game::read_country_modifier(g_world, tag, id, *value);
+}
+
+AnvilResult world_province_modifier(std::int32_t province, std::int32_t id, std::int32_t* value) {
+    if (value == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (!world_open()) return ANVIL_ERROR_WRONG_PHASE;
+    return anvil_game::read_province_modifier(g_world, province, id, *value);
+}
+
 // A name into the caller's buffer, cut at a whole character; *length gets its whole size.
 AnvilResult give_text(const std::string& text, char* utf8, std::uint32_t capacity, std::uint32_t* length) {
     if (capacity != 0) {
@@ -660,9 +682,10 @@ AnvilResult world_selected_units(AnvilGameUnitRef* out, std::uint32_t capacity, 
 }
 
 constexpr AnvilGameWorldService kWorldService = {
-    sizeof(AnvilGameWorldService), world_player,           world_province_limit, world_province,
-    world_province_name,           world_province_cores,   world_country,        world_country_provinces,
-    world_war_ids,                 world_war,              world_war_name,       world_war_side,
+    sizeof(AnvilGameWorldService), world_player,         world_province_limit, world_province,
+    world_province_name,           world_province_cores, world_country,        world_country_provinces,
+    world_war_ids,                 world_war,            world_war_name,       world_war_side,
+    world_modifier_id,             world_country_modifier, world_province_modifier,
     world_country_units,           world_unit,             world_unit_name,      world_unit_leader_name,
     world_selected_units,
 };
@@ -744,6 +767,18 @@ void load_world(anvil::Host& host) {
         l.war_attackers_end = sym::war_attackers.end;
         l.war_defenders = sym::war_defenders.begin;
         l.war_defenders_end = sym::war_defenders.end;
+    }
+    if (host.present(sym::modifier_value) && host.present(sym::modifier_definitions) &&
+        host.present(sym::country_modifiers) && host.present(sym::country_modifier_total) &&
+        host.present(sym::province_modifier)) {
+        l.modifier_value = reinterpret_cast<std::uintptr_t>(host.address(sym::modifier_value));
+        l.definitions = base + host.value(sym::modifier_definitions, "definitions");
+        l.definitions_end = base + host.value(sym::modifier_definitions, "definitions_end");
+        l.definition_size = sym::modifier_definitions.definition_size;
+        l.country_modifiers = sym::country_modifier_total.cached + sym::country_modifiers.modifiers;
+        l.calculating = sym::country_modifiers.calculating;
+        l.country_total = sym::country_modifier_total.total;
+        l.province_modifier = sym::province_modifier.modifier;
     }
     if (host.present(sym::unit_list) && host.present(sym::unit_country) && host.present(sym::unit_leader) &&
         host.present(sym::unit_location) && host.present(sym::unit_mission) && host.present(sym::unit_name) &&
