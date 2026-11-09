@@ -180,9 +180,8 @@ impl Input {
     }
 
     /// Binds `code` (`Key(0)` for none yet). A code another binding holds is
-    /// [`ErrorCode::Conflict`](crate::ErrorCode::Conflict): the binding is
-    /// then in the error's place only as inert, so bind again or call
-    /// [`Binding::set_code`] with a free code. 256 bindings a process.
+    /// [`ErrorCode::Conflict`]; bind again with a free code. 256 bindings a
+    /// process.
     pub fn bind<F>(&self, code: Key, flags: BindFlags, handler: F) -> Result<Binding>
     where
         F: Fn(Press) + Send + Sync + 'static,
