@@ -1,6 +1,7 @@
 // The Polish catalog of the overlay and the Manager: English words to Polish
-// ones, sorted by the English. Drafted for review by a native speaker
-// (eu4-engine-lab#25). anvil_i18n_tests lists what is missing or unused
+// ones, sorted by the English. Drafted by the agent and accepted by a native
+// speaker, the maintainer, on 2026-11-09 (eu4-engine-lab#25); corrections come
+// as later changes. anvil_i18n_tests lists what is missing or unused
 // (`anvil_i18n_tests --keys` prints every text a catalog needs).
 #include "i18n/translate.hpp"
 
