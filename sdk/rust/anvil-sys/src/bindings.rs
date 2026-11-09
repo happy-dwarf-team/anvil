@@ -1258,7 +1258,9 @@ pub struct AnvilGameCommand {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of AnvilGameCommand"][::core::mem::size_of::<AnvilGameCommand>() - 24usize];
-    ["Alignment of AnvilGameCommand"][::core::mem::align_of::<AnvilGameCommand>() - 8usize];
+    [
+        "Alignment of AnvilGameCommand",
+    ][::core::mem::align_of::<AnvilGameCommand>() - 8usize];
     [
         "Offset of field: AnvilGameCommand::size",
     ][::core::mem::offset_of!(AnvilGameCommand, size) - 0usize];
@@ -1285,8 +1287,12 @@ pub struct AnvilGameCommandResult {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AnvilGameCommandResult"][::core::mem::size_of::<AnvilGameCommandResult>() - 16usize];
-    ["Alignment of AnvilGameCommandResult"][::core::mem::align_of::<AnvilGameCommandResult>() - 4usize];
+    [
+        "Size of AnvilGameCommandResult",
+    ][::core::mem::size_of::<AnvilGameCommandResult>() - 16usize];
+    [
+        "Alignment of AnvilGameCommandResult",
+    ][::core::mem::align_of::<AnvilGameCommandResult>() - 4usize];
     [
         "Offset of field: AnvilGameCommandResult::size",
     ][::core::mem::offset_of!(AnvilGameCommandResult, size) - 0usize];
@@ -1314,8 +1320,12 @@ pub struct AnvilGameCommandsService {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AnvilGameCommandsService"][::core::mem::size_of::<AnvilGameCommandsService>() - 16usize];
-    ["Alignment of AnvilGameCommandsService"][::core::mem::align_of::<AnvilGameCommandsService>() - 8usize];
+    [
+        "Size of AnvilGameCommandsService",
+    ][::core::mem::size_of::<AnvilGameCommandsService>() - 16usize];
+    [
+        "Alignment of AnvilGameCommandsService",
+    ][::core::mem::align_of::<AnvilGameCommandsService>() - 8usize];
     [
         "Offset of field: AnvilGameCommandsService::size",
     ][::core::mem::offset_of!(AnvilGameCommandsService, size) - 0usize];
