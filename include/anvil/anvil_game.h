@@ -341,7 +341,7 @@ typedef struct AnvilGameWorldService {
     AnvilResult (*war_name)(uint64_t id, char *utf8, uint32_t capacity, uint32_t *length);
     /* The countries on one side now, ANVIL_GAME_WAR_ATTACKERS or _DEFENDERS. */
     AnvilResult (*war_side)(uint64_t id, uint32_t side, AnvilGameTag *out, uint32_t capacity, uint32_t *count);
-    /* Since anvil-game 1.14.0, for the three calls below. The id of a modifier
+    /* Since anvil-game 1.15.0, for the three calls below. The id of a modifier
      * from its script key, as written in the game's files ("land_morale",
      * "local_tax_modifier"), case included. An id holds as long as the game
      * runs, so ask once: this call walks every definition.
