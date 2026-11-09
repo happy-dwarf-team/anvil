@@ -62,6 +62,16 @@ jobs:
           key: sccache-${{ runner.os }}-${{ github.run_id }}
           restore-keys: sccache-${{ runner.os }}-
 
+      # The sources FetchContent downloads and their sub-builds, keyed on the CMake
+      # files that pin them: Configure then skips the clones and downloads.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: ${{ inputs.ref == '' }}
+        with:
+          path: |
+            build/_deps/*-src
+            build/_deps/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+
       - name: Configure
         run: >-
           cmake -S . -B build -G "Ninja Multi-Config"
