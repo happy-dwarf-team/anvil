@@ -72,6 +72,14 @@ _Avoid_: mid hook (for this; a mid hook lets the original code run), code cave, 
 The ordered changes of several plugins at one address, each passing control or the previous value to the next.
 _Avoid_: stack, hook list
 
+**Script effect**:
+A word of the game's script language that does something when the game runs it, such as `add_treasury = 50` in an event option. A plugin's script effect is one that a gameplay plugin adds through `anvil-script` and a mod writes like the game's own.
+_Avoid_: command (the game's commands are what its clients exchange), script hook, custom effect (for the service)
+
+**Effect key**:
+The word on the left of a script effect, `chisel_set_terrain` in `chisel_set_terrain = mountain`. A plugin's key starts with its id.
+_Avoid_: effect name, keyword (for the game's own lexer words)
+
 ### When the game crashes
 
 **Crash report**:
