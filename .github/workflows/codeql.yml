@@ -76,7 +76,6 @@ jobs:
         with:
           languages: c-cpp
           build-mode: manual
-          tools: linked
 
       - name: Build
         run: cmake --build build --config Release --parallel
