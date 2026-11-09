@@ -11,9 +11,8 @@
 //! The first binding of a code keeps it: a second one is
 //! [`ErrorCode::Conflict`] and stays inert until it gets a free code. The
 //! handler runs on the game's main thread after the next outer frame, so it
-//! may read [`World`](crate::world::World) and post
-//! [`Commands`](crate::commands::Commands). Without anvil-game, [`Input::bind`]
-//! is [`ErrorCode::Unsupported`].
+//! may read [`World`](crate::world::World). Without anvil-game,
+//! [`Input::bind`] is [`ErrorCode::Unsupported`].
 //!
 //! [`ErrorCode::Conflict`]: crate::ErrorCode::Conflict
 //! [`ErrorCode::Unsupported`]: crate::ErrorCode::Unsupported
