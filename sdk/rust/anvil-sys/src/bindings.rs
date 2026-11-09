@@ -1641,6 +1641,22 @@ pub struct AnvilScriptScope {
     pub province: i32,
     pub country: [core::ffi::c_char; 4usize],
 }
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AnvilScriptScope"][::core::mem::size_of::<AnvilScriptScope>() - 12usize];
+    [
+        "Alignment of AnvilScriptScope",
+    ][::core::mem::align_of::<AnvilScriptScope>() - 4usize];
+    [
+        "Offset of field: AnvilScriptScope::size",
+    ][::core::mem::offset_of!(AnvilScriptScope, size) - 0usize];
+    [
+        "Offset of field: AnvilScriptScope::province",
+    ][::core::mem::offset_of!(AnvilScriptScope, province) - 4usize];
+    [
+        "Offset of field: AnvilScriptScope::country",
+    ][::core::mem::offset_of!(AnvilScriptScope, country) - 8usize];
+};
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct AnvilScriptCall {
@@ -1650,6 +1666,28 @@ pub struct AnvilScriptCall {
     pub value: *const core::ffi::c_char,
     pub scope: AnvilScriptScope,
 }
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AnvilScriptCall"][::core::mem::size_of::<AnvilScriptCall>() - 40usize];
+    [
+        "Alignment of AnvilScriptCall",
+    ][::core::mem::align_of::<AnvilScriptCall>() - 8usize];
+    [
+        "Offset of field: AnvilScriptCall::size",
+    ][::core::mem::offset_of!(AnvilScriptCall, size) - 0usize];
+    [
+        "Offset of field: AnvilScriptCall::reserved",
+    ][::core::mem::offset_of!(AnvilScriptCall, reserved) - 4usize];
+    [
+        "Offset of field: AnvilScriptCall::key",
+    ][::core::mem::offset_of!(AnvilScriptCall, key) - 8usize];
+    [
+        "Offset of field: AnvilScriptCall::value",
+    ][::core::mem::offset_of!(AnvilScriptCall, value) - 16usize];
+    [
+        "Offset of field: AnvilScriptCall::scope",
+    ][::core::mem::offset_of!(AnvilScriptCall, scope) - 24usize];
+};
 pub type AnvilScriptExecute = ::core::option::Option<
     unsafe extern "C" fn(context: *mut core::ffi::c_void, call: *const AnvilScriptCall),
 >;
@@ -1671,6 +1709,31 @@ pub struct AnvilScriptEffect {
     pub describe: AnvilScriptDescribe,
     pub context: *mut core::ffi::c_void,
 }
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AnvilScriptEffect"][::core::mem::size_of::<AnvilScriptEffect>() - 40usize];
+    [
+        "Alignment of AnvilScriptEffect",
+    ][::core::mem::align_of::<AnvilScriptEffect>() - 8usize];
+    [
+        "Offset of field: AnvilScriptEffect::size",
+    ][::core::mem::offset_of!(AnvilScriptEffect, size) - 0usize];
+    [
+        "Offset of field: AnvilScriptEffect::flags",
+    ][::core::mem::offset_of!(AnvilScriptEffect, flags) - 4usize];
+    [
+        "Offset of field: AnvilScriptEffect::key",
+    ][::core::mem::offset_of!(AnvilScriptEffect, key) - 8usize];
+    [
+        "Offset of field: AnvilScriptEffect::execute",
+    ][::core::mem::offset_of!(AnvilScriptEffect, execute) - 16usize];
+    [
+        "Offset of field: AnvilScriptEffect::describe",
+    ][::core::mem::offset_of!(AnvilScriptEffect, describe) - 24usize];
+    [
+        "Offset of field: AnvilScriptEffect::context",
+    ][::core::mem::offset_of!(AnvilScriptEffect, context) - 32usize];
+};
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct AnvilScriptEffectsService {
@@ -1682,6 +1745,21 @@ pub struct AnvilScriptEffectsService {
         ) -> AnvilResult,
     >,
 }
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    [
+        "Size of AnvilScriptEffectsService",
+    ][::core::mem::size_of::<AnvilScriptEffectsService>() - 16usize];
+    [
+        "Alignment of AnvilScriptEffectsService",
+    ][::core::mem::align_of::<AnvilScriptEffectsService>() - 8usize];
+    [
+        "Offset of field: AnvilScriptEffectsService::size",
+    ][::core::mem::offset_of!(AnvilScriptEffectsService, size) - 0usize];
+    [
+        "Offset of field: AnvilScriptEffectsService::register_effect",
+    ][::core::mem::offset_of!(AnvilScriptEffectsService, register_effect) - 8usize];
+};
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct AnvilScriptDay {
@@ -1691,6 +1769,26 @@ pub struct AnvilScriptDay {
     pub month: i32,
     pub day: i32,
 }
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AnvilScriptDay"][::core::mem::size_of::<AnvilScriptDay>() - 20usize];
+    ["Alignment of AnvilScriptDay"][::core::mem::align_of::<AnvilScriptDay>() - 4usize];
+    [
+        "Offset of field: AnvilScriptDay::size",
+    ][::core::mem::offset_of!(AnvilScriptDay, size) - 0usize];
+    [
+        "Offset of field: AnvilScriptDay::flags",
+    ][::core::mem::offset_of!(AnvilScriptDay, flags) - 4usize];
+    [
+        "Offset of field: AnvilScriptDay::year",
+    ][::core::mem::offset_of!(AnvilScriptDay, year) - 8usize];
+    [
+        "Offset of field: AnvilScriptDay::month",
+    ][::core::mem::offset_of!(AnvilScriptDay, month) - 12usize];
+    [
+        "Offset of field: AnvilScriptDay::day",
+    ][::core::mem::offset_of!(AnvilScriptDay, day) - 16usize];
+};
 pub type AnvilScriptDayEnd = ::core::option::Option<
     unsafe extern "C" fn(context: *mut core::ffi::c_void, day: *const AnvilScriptDay),
 >;
@@ -1706,3 +1804,18 @@ pub struct AnvilScriptDayEndService {
         ) -> AnvilResult,
     >,
 }
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    [
+        "Size of AnvilScriptDayEndService",
+    ][::core::mem::size_of::<AnvilScriptDayEndService>() - 16usize];
+    [
+        "Alignment of AnvilScriptDayEndService",
+    ][::core::mem::align_of::<AnvilScriptDayEndService>() - 8usize];
+    [
+        "Offset of field: AnvilScriptDayEndService::size",
+    ][::core::mem::offset_of!(AnvilScriptDayEndService, size) - 0usize];
+    [
+        "Offset of field: AnvilScriptDayEndService::subscribe",
+    ][::core::mem::offset_of!(AnvilScriptDayEndService, subscribe) - 8usize];
+};
