@@ -308,6 +308,19 @@ int main(int argc, char** argv) {
         std::ofstream(dir / "settings.txt") << "language=\"l_german\"\n";
         CHECK(choose_language(dir, false, {"polish", "pl-PL"}).language == Language::German);  // EU4's own language first
         std::ofstream(dir / "settings.txt") << "language=\"l_english\"\n";
+        // The Manager follows Steam and Windows without Mei (lab#93): it
+        // installs Anvil before Mei is there.
+        CHECK(choose_manager_language(dir, chinese_steam).language == Language::SimplifiedChinese);
+        CHECK(choose_manager_language(dir, chinese_steam).source == "Steam");
+        CHECK(choose_manager_language(dir, {"english", "zh-TW"}).language == Language::TraditionalChinese);
+        CHECK(choose_manager_language(dir, {"english", "zh-TW"}).source == "Windows");
+        CHECK(choose_manager_language(dir, {"english", "en-US"}).language == Language::English);
+        CHECK(choose_manager_language(dir, {"polish", "pl-PL"}).language == Language::Polish);
+        std::ofstream(dir / "settings.txt") << "language=\"l_french\"\n";
+        CHECK(choose_manager_language(dir, chinese_steam).language == Language::French);  // EU4's own language first
+        SetEnvironmentVariableA("ANVIL_LANGUAGE", "en");
+        CHECK(choose_manager_language(dir, chinese_steam).language == Language::English);
+        SetEnvironmentVariableA("ANVIL_LANGUAGE", nullptr);
         fs::remove(dir / "settings.txt");
         CHECK(choose_language(dir, true, {"", "ja-JP"}).language == Language::Japanese);
         SetEnvironmentVariableA("ANVIL_LANGUAGE", "de");

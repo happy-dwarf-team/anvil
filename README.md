@@ -55,13 +55,13 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
   downloaded ([ADR 0005](docs/adr/0005-release-check-in-the-game.md)). It
   draws on the game's Direct3D 9 renderer and stays off with OpenGL.
 - The overlay and the Manager speak the language EU4 is set to: English,
-  French, German or Spanish (other languages show English). With
+  French, German or Spanish (other languages show English). The Manager
+  speaks Simplified or Traditional Chinese, Japanese or Korean when Steam or
+  Windows is set to it, from its first start; the overlay does so with
   [Mei](https://github.com/happy-dwarf-team/mei), which shows a translation
-  mod's Chinese, Japanese or Korean, they speak Simplified or Traditional
-  Chinese, Japanese or Korean when Steam or Windows is set to it. They speak
-  Polish when Steam is set to Polish. The overlay's setting "Language" chooses
-  one for both. `anvil.log` and `anvil check` stay
-  in English, for bug reports and plugin authors.
+  mod's Chinese, Japanese or Korean. They speak Polish when Steam is set to
+  Polish. The overlay's setting "Language" chooses one for both. `anvil.log`
+  and `anvil check` stay in English, for bug reports and plugin authors.
 - And `anvil-log-throttle` (`anvil/plugins/anvil-log-throttle/`): a line that
   repeats in the game's `error.log` is written 10 times, then only counted,
   with a line that gives the count every minute and when the game closes the
@@ -129,9 +129,15 @@ menu" on its Anvil tab makes that one click, and uninstalling removes the entry.
   Anvil. The game folder, your user folder and Windows user name are left
   out. Nothing is uploaded.
 - "Repair" puts back Anvil's own files.
+- It recognizes EU4DLL and EU4 Unicode Patch, which Anvil replaces (Mei
+  shows Chinese, Japanese and Korean text instead): "Replace EU4DLL" moves
+  their files to `anvil-legacy-backup/` in the game folder and installs
+  Anvil. Another mod's `version.dll` is replaced only if you tick the box,
+  and also goes to that folder rather than being overwritten.
 - "Uninstall Anvil" removes `version.dll`, the standard plugins and the
   Manager, and keeps your plugins, their settings and `anvil/anvil.toml`.
-  Tick "Also remove my plugins…" to remove the `anvil` folder too.
+  Tick "Also remove my plugins…" to remove the `anvil` folder too, and
+  "Restore … from the backup" to put back what Anvil replaced.
 - To update Anvil, run the Manager of the newer release.
 - While the game runs, the Manager only shows. From Anvil 1.14 it also says
   when the game runs from another folder than the one Anvil is installed in
@@ -213,7 +219,7 @@ verification, `settings.toml`, the game build identity) with `version.dll`:
 ```powershell
 anvil gen symbols.toml build\generated            # symbols.gen.h and symbols.gen.hpp
 anvil gen settings.toml build\generated           # settings.gen.h and settings.gen.hpp
-anvil gen --lang rust symbols.toml out            # symbols.gen.rs (Rust plugins, anvil-sys)
+anvil gen --lang rust symbols.toml out            # symbols.gen.rs (Rust plugins)
 anvil check my-plugin --exe "C:\...\eu4.exe"     # verify against the game, write symbols.lock
 anvil check my-plugin --format github             # in CI, without the game: schemas and symbols.lock
 anvil port symbols.toml --from old\eu4.exe --to new\eu4.exe --build <new id> --out symbols.toml
@@ -221,11 +227,12 @@ anvil port symbols.toml --from old\eu4.exe --to new\eu4.exe --build <new id> --o
                                                   # (--unknown-build for a build this anvil.exe does not know yet)
 ```
 
-The Rust side (`sdk/rust/anvil-sys`, `examples/hello-rust`, see
+The Rust side (`sdk/rust/anvil-sys`, the safe crate `sdk/rust/anvil-sdk`,
+`examples/hello-rust` and `examples/panel-rust`, see
 [§9](docs/design.md#9-plugin-api-2)) is a Cargo workspace at the root; it needs
 Rust 1.82 or newer and the `anvil.exe` built above, which the hello's `build.rs`
 runs. CI uses Rust 1.99.1, and `sdk/rust/regen-bindings.ps1` (bindgen 0.73.2 and
-libclang) regenerates the committed bindings after a change to the header:
+libclang) regenerates the committed bindings after a change to a header:
 
 ```powershell
 $env:ANVIL = "$PWD\build\Release\anvil.exe"
