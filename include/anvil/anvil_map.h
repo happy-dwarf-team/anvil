@@ -72,8 +72,10 @@ extern "C" {
     ((uint32_t)((((uint32_t)(r) & 0xFFu) << 16) | (((uint32_t)(g) & 0xFFu) << 8) | ((uint32_t)(b) & 0xFFu)))
 #define ANVIL_MAP_NO_COLOR 0xFF000000u
 
-/* The four tabs of the minimap's list of map modes, in the order the game
- * shows their buttons. ANVIL_MAP_TAB_DEFAULT is the last one. */
+/* The four tabs of the minimap's list of map modes, named by the game's map
+ * modes they start with: 1 political, 2 terrain, 3 trade, 4 diplomacy. Their
+ * buttons stand two by two beside the shortcuts: 1 and 4 above, 3 and 2
+ * below. ANVIL_MAP_TAB_DEFAULT is tab 4. */
 typedef enum AnvilMapTab {
     ANVIL_MAP_TAB_DEFAULT = 0,
     ANVIL_MAP_TAB_1 = 1,

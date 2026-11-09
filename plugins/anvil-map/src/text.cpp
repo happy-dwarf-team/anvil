@@ -96,10 +96,10 @@ std::string game_text(std::string_view utf8, bool utf8_game) {
         i += decode(valid, i, c);
         if (c < 0x20 && c != '\n') continue;
         if (c == 0x7F) continue;
-        // The game starts a colour with U+00A7 and the next character; a
-        // plugin's text is literal, so the sign is shown as a plain section
-        // sign would read in a sentence: "S".
-        if (c == 0xA7) c = 'S';
+        // The game starts a colour with U+00A7 and the next character, and it
+        // has no escape for the sign. A plugin's text is literal, so the sign
+        // becomes '?', like any character the game cannot show.
+        if (c == 0xA7) c = '?';
         if (utf8_game) {
             append_utf8(out, c);
         } else {

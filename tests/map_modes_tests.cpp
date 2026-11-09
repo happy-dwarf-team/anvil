@@ -171,8 +171,8 @@ void text_tests() {
         CHECK(game_text("\xE2\x82\xAC 5", false) == "\x80 5");
         CHECK(game_text("\xE2\x82\xAC 5", true) == "\xE2\x82\xAC 5");
         CHECK(game_text("\xF0\x9F\x98\x80", false) == "?");
-        CHECK(game_text("\xC2\xA7Rred", false) == "SRred");
-        CHECK(game_text("\xC2\xA7Rred", true) == "SRred");
+        CHECK(game_text("\xC2\xA7Rred", false) == "?Rred");
+        CHECK(game_text("\xC2\xA7Rred", true) == "?Rred");
         CHECK(game_text("$PROV$", false) == "$PROV$");
         CHECK(game_text("ok\xFFtail", true) == "ok");
         CHECK(windows_1252(0x153) == 0x9C && windows_1252(0x81) == 0 && windows_1252(0xE9) == 0xE9);

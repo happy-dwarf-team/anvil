@@ -17,9 +17,9 @@ bool valid_utf8(std::string_view text);
 
 // `utf8` as the game should get it: the valid prefix unchanged when the game's
 // text is UTF-8 (Mei's utf8_localization), else in Windows-1252 with '?' for
-// a character it lacks. The game's colour code character (U+00A7) is not
-// passed on, so the text stays literal; control characters other than '\n'
-// are dropped.
+// a character it lacks. The game's colour code character (U+00A7) becomes '?'
+// too, so the text stays literal; control characters other than '\n' are
+// dropped.
 std::string game_text(std::string_view utf8, bool utf8_game);
 
 // The Windows-1252 byte of a code point, or 0 when it has none.
