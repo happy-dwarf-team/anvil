@@ -202,7 +202,7 @@ jobs:
           cmake --install build --config Release --component manager --prefix dist/anvil-manager
           # The hello examples, laid out as plugin folders (not installed: docs only).
           New-Item -ItemType Directory -Force dist/anvil-package/anvil/docs/examples | Out-Null
-          foreach ($example in 'hello-c', 'hello-cpp', 'hello-rust') {
+          foreach ($example in 'hello-c', 'hello-cpp', 'hello-script', 'hello-rust') {
             Copy-Item build/plugin/$example -Destination dist/anvil-package/anvil/docs/examples/$example -Recurse
           }
           $files = Get-ChildItem dist/anvil-package -Recurse -File
