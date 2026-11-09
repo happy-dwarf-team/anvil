@@ -467,9 +467,10 @@ typedef struct AnvilGameWorldService {
  * Results. `posted` is not "happened": a posted command runs at the session's
  * next turn of the queue on every machine, also while the game is paused, and
  * the game checks it again then. In multiplayer a command is only on its way to
- * the host. `refused` counts the commands the session did not take: its own
- * check, which in multiplayer fails outside the game's own input handling. The
- * service frees a refused command. A plugin that needs the outcome reads
+ * the host. `refused` counts the commands the session did not take at its own
+ * check (a session without a server, or an observer's game, which allows
+ * posting only inside its input handling). The service frees a refused
+ * command. A plugin that needs the outcome reads
  * anvil-game.world a few frames later.
  *
  * Game builds. A build whose symbols for a command type are declared absent
