@@ -48,14 +48,35 @@ jobs:
         with:
           persist-credentials: false
 
+      # The FetchContent sources and sub-builds, keyed on the CMake files that pin
+      # them (a key of its own: build.yml configures them with Ninja).
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            build/_deps/*-src
+            build/_deps/*-subbuild
+          key: fetchcontent-vs-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+
+      # What ships, in parallel: version.dll, anvil.exe, the Manager and the standard plugins.
+      # Configure and the third-party libraries (Zydis, SafetyHook, miniz, the two ImGui
+      # builds) run before init, so CodeQL neither traces nor analyses them (their
+      # results were dropped from the upload anyway).
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DANVIL_BUILD_TESTS=OFF -DANVIL_BUILD_EXAMPLES=OFF -DANVIL_BUILD_BENCH=OFF
+
+      - name: Third-party libraries
+        run: >-
+          cmake --build build --config Release --parallel
+          --target Zycore Zydis safetyhook anvil_miniz anvil_manager_imgui anvil_overlay_imgui
+
+      # tools: linked is the CodeQL bundle of this action version, which the runner
+      # image has in its toolcache; left out, the action takes a newer bundle when
+      # GitHub offers one and spends over a minute unpacking it.
       - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           languages: c-cpp
           build-mode: manual
-
-      # What ships, in parallel: version.dll, anvil.exe, the Manager and the standard plugins.
-      - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DANVIL_BUILD_TESTS=OFF -DANVIL_BUILD_EXAMPLES=OFF -DANVIL_BUILD_BENCH=OFF
+          tools: linked
 
       - name: Build
         run: cmake --build build --config Release --parallel
