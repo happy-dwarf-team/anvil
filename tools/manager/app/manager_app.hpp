@@ -57,10 +57,26 @@ private:
         bool dirty = false;
     };
 
+    // What catalog_status needs from the snapshot.
+    struct CatalogInputs {
+        std::vector<std::pair<std::string, std::string>> local;  // (id, version) in anvil/plugins
+        std::vector<std::string> mods;                          // ids of plugins from enabled mods
+        std::string anvil_version;                              // "" when Anvil is not installed
+        std::string build;
+    };
+
     void choose_game(const std::filesystem::path& dir);
+    // The release check and, with it, the catalog (ADR 0005, ADR 0006): once
+    // per start and when the player turns the check on; what is already being
+    // asked is not asked again.
+    void check_for_updates();
+    CatalogInputs catalog_inputs() const;
+    // The catalog plugins with an update for this game folder (ADR 0006).
+    std::vector<const CatalogPlugin*> catalog_updates_here() const;
     void refresh();
     void poll();
     bool read_only() const;
+    bool anvil_installed() const;  // the snapshot found Anvil's version.dll in game_
 
     void draw_game_bar();
     void draw_anvil_tab();
@@ -111,6 +127,9 @@ private:
     std::future<Snapshot> pending_;
     bool running_ = false;
     std::chrono::steady_clock::time_point running_checked_{};
+    uint64_t running_started_ = 0;  // when the game that runs from game_ started (FILETIME), 0 when not known
+    std::vector<std::filesystem::path> running_elsewhere_;  // folders of an eu4.exe that is not game_'s (issue #253)
+    bool anvil_missed_ = false;     // the last game from game_ ended without writing anvil.log
 
     std::filesystem::path start_menu_game_;  // the game in_start_menu_ was read for
     bool in_start_menu_ = false;             // the shortcut starts that game's copy of the Manager
@@ -133,6 +152,7 @@ private:
     std::optional<Catalog> catalog_;
     std::string catalog_error_;  // why the built-in list or the last fetch was refused
     bool catalog_fetched_ = false;
+    bool catalog_by_check_ = false;  // the fetch, pending or done, is the release check's and not a click
     std::future<CatalogFetch> catalog_pending_;
     std::optional<CatalogPlugin> download_;  // asked about, then downloading
     std::future<ZipDownload> download_pending_;
@@ -151,6 +171,7 @@ private:
     std::optional<cli::GameModPlugin> approve_;  // the plugin from a mod the approval modal asks about
     bool close_after_message_ = false;
     bool show_settings_tab_ = false;
+    bool show_catalog_tab_ = false;
     bool log_previous_ = false;
     bool log_report_ = false;   // the Log tab shows the problem report, which is in the clipboard
     bool report_copied_ = false;

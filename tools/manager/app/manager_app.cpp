@@ -12,6 +12,7 @@
 #include "problem_report.hpp"
 #include "start_menu.hpp"
 #include "ui.hpp"
+#include "ui/settings_order.hpp"
 
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
@@ -19,6 +20,8 @@
 #include <algorithm>
 #include <cstdio>
 #include <span>
+#include <string_view>
+#include <vector>
 
 namespace anvil::manager {
 namespace {
@@ -39,6 +42,24 @@ std::optional<i18n::Language> overlay_language(const fs::path& game) {
         const SettingValue value = player.values[setting.id].value_or(setting.default_value);
         if (value.integer < 0 || static_cast<size_t>(value.integer) >= setting.options.size()) return std::nullopt;
         return i18n::language_of_setting(setting.options[static_cast<size_t>(value.integer)].name);
+    }
+    return std::nullopt;
+}
+
+// The overlay's `release_check` setting in that game folder: true for "on",
+// false for "off", nullopt for "ask" (it follows the Manager) or no overlay.
+std::optional<bool> overlay_release_answer(const fs::path& game) {
+    const SettingsFileResult schema = load_settings(game / "anvil" / "plugins" / "anvil-overlay" / "settings.toml");
+    if (!schema.file) return std::nullopt;
+    const PlayerSettings player = load_player_settings(*schema.file, game / "anvil" / "data" / "anvil-overlay" / "settings.toml");
+    for (const Setting& setting : schema.file->settings) {
+        if (setting.name != "release_check" || setting.type != SettingType::Enum) continue;
+        const SettingValue value = player.values[setting.id].value_or(setting.default_value);
+        if (value.integer < 0 || static_cast<size_t>(value.integer) >= setting.options.size()) return std::nullopt;
+        const std::string& name = setting.options[static_cast<size_t>(value.integer)].name;
+        if (name == "on") return true;
+        if (name == "off") return false;
+        return std::nullopt;
     }
     return std::nullopt;
 }
@@ -97,6 +118,8 @@ const char* step_text(Step::Kind kind) {
     return "";
 }
 
+constexpr const char* kTroubleshootingUrl = "https://anvil.happydwarf.dev/docs/troubleshooting/#if-anvil-does-not-run-at-all";
+
 std::string megabytes(uint64_t bytes) {
     char text[32];
     std::snprintf(text, sizeof(text), "%.1f", static_cast<double>(bytes) / (1 << 20));
@@ -127,9 +150,38 @@ ManagerApp::ManagerApp(HWND window, std::optional<Package> package, std::string 
         game = gog_game_ ? *gog_game_ : steam_games_.front();
     }
     follow_language(game);
-    if (!game.empty() && package_) choose_game(game);
-    if (settings_.check_releases) release_pending_ = std::async(std::launch::async, fetch_latest_release);
     catalog_ = load_embedded_catalog(catalog_error_);
+    if (!game.empty() && package_) choose_game(game);
+    if (settings_.check_releases) check_for_updates();
+}
+
+void ManagerApp::check_for_updates() {
+    if (!release_pending_.valid()) release_pending_ = std::async(std::launch::async, fetch_latest_release);
+    if (!catalog_pending_.valid()) {
+        catalog_by_check_ = true;
+        catalog_pending_ = std::async(std::launch::async, fetch_catalog);
+    }
+}
+
+ManagerApp::CatalogInputs ManagerApp::catalog_inputs() const {
+    CatalogInputs in;
+    if (!snapshot_) return in;
+    if (const auto& report = snapshot_->report) {
+        for (const cli::GamePlugin& plugin : report->plugins) {
+            if (plugin.report.manifest) in.local.emplace_back(plugin.report.manifest->id, plugin.report.manifest->version.to_string());
+        }
+        for (const cli::GameModPlugin& plugin : report->mod_plugins) in.mods.push_back(plugin.id);
+    }
+    const auto& installation = snapshot_->installation;
+    if (installation && installation->installed()) in.anvil_version = installation->dll_version;
+    in.build = snapshot_->folder.build;
+    return in;
+}
+
+std::vector<const CatalogPlugin*> ManagerApp::catalog_updates_here() const {
+    if (!catalog_ || !snapshot_ || !snapshot_->report) return {};
+    const CatalogInputs in = catalog_inputs();
+    return catalog_updates(*catalog_, in.build, in.anvil_version, in.local, in.mods);
 }
 
 void ManagerApp::choose_game(const fs::path& dir) {
@@ -142,7 +194,19 @@ void ManagerApp::choose_game(const fs::path& dir) {
     crash_text_.clear();
     log_text_.clear();
     running_checked_ = {};
+    running_started_ = 0;
+    running_elsewhere_.clear();
+    anvil_missed_ = false;
     launcher_opened_ = false;
+    // A player who answered the release question in the game (the overlay's
+    // setting) is not asked again here (design §15).
+    if (!settings_.asked_releases) {
+        if (const auto answer = overlay_release_answer(game_)) {
+            settings_.asked_releases = true;
+            settings_.check_releases = *answer;
+            if (*answer) check_for_updates();
+        }
+    }
     if (settings_.game_folder != game_) {
         settings_.game_folder = game_;
         std::string error;
@@ -195,8 +259,22 @@ void ManagerApp::poll() {
     if (!game_.empty() && now - running_checked_ > 1500ms) {
         running_checked_ = now;
         const bool was = running_;
-        running_ = game_running(game_);
-        if (running_) launcher_opened_ = false;  // the note did its job
+        GameProcesses processes = game_processes(game_);
+        running_ = processes.here;
+        running_elsewhere_ = std::move(processes.elsewhere);
+        if (running_) {
+            launcher_opened_ = false;  // the note did its job
+            anvil_missed_ = false;
+            if (processes.here_started != 0) running_started_ = processes.here_started;
+        }
+        if (was && !running_) {
+            // Anvil opens anvil.log first thing once Windows loads its version.dll: a game that ended without
+            // writing it ran without Anvil (issue #253). A benchmark series starts the game itself.
+            const bool benchmark = benchmark_.busy() || benchmark_busy_;
+            anvil_missed_ = !benchmark && anvil_installed() &&
+                            anvil_missed_game(file_written(game_ / "anvil" / "anvil.log"), running_started_);
+            running_started_ = 0;
+        }
         // The game may have written logs and crash reports; a benchmark series
         // is read once it ends, not between its starts.
         if (was && !running_ && !benchmark_.busy()) refresh();
@@ -206,6 +284,10 @@ void ManagerApp::poll() {
 }
 
 bool ManagerApp::read_only() const { return running_ || pending_.valid(); }
+
+bool ManagerApp::anvil_installed() const {
+    return snapshot_ && snapshot_->installation && snapshot_->installation->dll == Installation::Dll::Anvil;
+}
 
 void ManagerApp::draw() {
     poll();
@@ -241,7 +323,21 @@ void ManagerApp::draw() {
             ImGui::EndTabItem();
         };
         tab(N_("Anvil"), 0, &ManagerApp::draw_anvil_tab);
-        tab(N_("Catalog"), 0, &ManagerApp::draw_catalog_tab);
+        {
+            // The number of updates rides on the label (ADR 0006); the id stays "Catalog".
+            const size_t updates = catalog_updates_here().size();
+            const std::string name = std::string(tr("Catalog")) + (updates > 0 ? " (" + std::to_string(updates) + ")" : "");
+            ImGui::BeginDisabled(locked);
+            // The Plugins tab, drawn after this one, asks for it in the frame before.
+            const bool open = ImGui::BeginTabItem((name + "###Catalog").c_str(), nullptr,
+                                                  !locked && show_catalog_tab_ ? ImGuiTabItemFlags_SetSelected : 0);
+            show_catalog_tab_ = false;
+            ImGui::EndDisabled();
+            if (open) {
+                draw_catalog_tab();
+                ImGui::EndTabItem();
+            }
+        }
         tab(N_("Plugins"), 0, &ManagerApp::draw_plugins_tab);
         tab(N_("Mods"), 0, &ManagerApp::draw_mods_tab);
         tab(N_("Settings"), show_settings_tab_ ? ImGuiTabItemFlags_SetSelected : 0, &ManagerApp::draw_settings_tab);
@@ -321,6 +417,18 @@ void ManagerApp::draw_game_bar() {
     } else if (running_) {
         colored_wrapped(kWarn, tr("EU4 is running from this folder. Close the game to change Anvil, plugins or "
                                   "settings; until then the Manager only shows them."));
+    } else if (!running_elsewhere_.empty() && anvil_installed()) {
+        // Steam starts its own copy whatever folder the Manager shows (issue #253).
+        const fs::path& other = running_elsewhere_.front();
+        colored_wrapped(kWarn, trf("EU4 is running from {0}, not from the folder Anvil is installed in.", {u8(other)}));
+        if (ImGui::SmallButton(tr("Switch to that folder"))) {
+            const fs::path chosen = other;  // choose_game clears running_elsewhere_
+            choose_game(chosen);
+        }
+    }
+    if (anvil_missed_ && !running_ && !benchmark_.busy()) {
+        colored_wrapped(kWarn, tr("The game ran, but Anvil did not load."));
+        if (ImGui::SmallButton(tr("What to check"))) open_url(kTroubleshootingUrl);
     }
 }
 
@@ -447,14 +555,16 @@ void ManagerApp::draw_anvil_tab() {
     if (!settings_.asked_releases) {
         ImGui::Spacing();
         ImGui::Separator();
-        wrapped(tr("Should the Manager ask GitHub for new Anvil releases when it starts? It only shows a link; "
-                   "nothing is downloaded. You can change this in About."));
+        wrapped(tr("Should Anvil ask GitHub for new releases when the Manager or the game starts? The game asks about "
+                   "Anvil; the Manager also reads the list of the team's plugins and shows which installed ones have an "
+                   "update. Nothing is downloaded or installed until you click. You can change this in About, and for "
+                   "the game in the Anvil panel's settings."));
         const auto answer = [&](bool yes) {
             settings_.asked_releases = true;
             settings_.check_releases = yes;
             std::string error;
             save_manager_settings(settings_, error);
-            if (yes && !release_pending_.valid()) release_pending_ = std::async(std::launch::async, fetch_latest_release);
+            if (yes) check_for_updates();
         };
         if (ImGui::Button(tr("Yes, check for releases"))) answer(true);
         ImGui::SameLine();
@@ -475,33 +585,34 @@ void ManagerApp::draw_catalog_tab() {
                  : tr("Plugins of the Anvil team. Install puts one in anvil/plugins; a plugin from the Steam Workshop comes "
                       "with its mod instead."));
     ImGui::BeginDisabled(catalog_pending_.valid());
-    if (ImGui::Button(tr("Get the current list"))) catalog_pending_ = std::async(std::launch::async, fetch_catalog);
+    if (ImGui::Button(tr("Get the current list"))) {
+        catalog_by_check_ = false;
+        catalog_pending_ = std::async(std::launch::async, fetch_catalog);
+    }
     ImGui::EndDisabled();
     ImGui::SameLine();
     if (catalog_pending_.valid()) weak(tr("asking GitHub..."));
-    else weak(catalog_fetched_ ? std::string(tr("The list from GitHub.")) : trf("The list of Manager {0}.", {ANVIL_VERSION}));
-    weak_wrapped(tr("Nothing is downloaded until you click: the list from the anvil repository on GitHub, and a plugin's "
-                    "zip from its GitHub release, installed only if its SHA-256 equals the list's."));
+    else if (!catalog_fetched_) weak(trf("The list of Manager {0}.", {ANVIL_VERSION}));
+    else weak(catalog_by_check_ ? tr("The list from GitHub, read with the release check.") : tr("The list from GitHub."));
+    if (settings_.check_releases) {
+        weak_wrapped(tr("You agreed that Anvil asks GitHub for new releases, so the Manager reads this list from the anvil "
+                        "repository when it starts (About turns it off). A plugin's zip is downloaded from its GitHub "
+                        "release only when you click, and installed only if its SHA-256 equals the list's."));
+    } else {
+        weak_wrapped(tr("Nothing is downloaded until you click: the list from the anvil repository on GitHub, and a plugin's "
+                        "zip from its GitHub release, installed only if its SHA-256 equals the list's."));
+    }
     if (!catalog_error_.empty()) colored_wrapped(kWarn, trf("The list was refused: {0}", {catalog_error_}));
     if (!catalog_) return;
     if (!report) colored_wrapped(kWarn, tr("Install Anvil first, then its plugins."));
     if (download_pending_.valid() && download_) weak(trf("Downloading {0}...", {zip_file_name(*download_)}));
 
-    std::vector<std::pair<std::string, std::string>> local;
-    std::vector<std::string> mods;
-    if (report) {
-        for (const cli::GamePlugin& plugin : report->plugins) {
-            if (plugin.report.manifest) local.emplace_back(plugin.report.manifest->id, plugin.report.manifest->version.to_string());
-        }
-        for (const cli::GameModPlugin& plugin : report->mod_plugins) mods.push_back(plugin.id);
-    }
-    const auto& installation = snapshot_->installation;
-    const std::string anvil_version = installation && installation->installed() ? installation->dll_version : "";
-    const std::string& build = snapshot_->folder.build;
+    const CatalogInputs in = catalog_inputs();
+    const std::string& build = in.build;
     const bool steam = !gog_;
 
     for (const CatalogPlugin& plugin : catalog_->plugins) {
-        const CatalogStatus status = catalog_status(plugin, build, anvil_version, local, mods);
+        const CatalogStatus status = catalog_status(plugin, build, in.anvil_version, in.local, in.mods);
         ImGui::PushID(plugin.id.c_str());
         ImGui::Separator();
         ImGui::Text("%s %s", plugin.name.c_str(), plugin.version.c_str());
@@ -525,6 +636,8 @@ void ManagerApp::draw_catalog_tab() {
         const bool newer_installed = installed && pinned && *pinned < *installed;
         if (status.current(plugin)) {
             colored_wrapped(kGood, tr("Installed."));
+        } else if (status.update(plugin)) {
+            colored_wrapped(kGood, trf("Version {0} is installed; {1} is available.", {status.installed, plugin.version}));
         } else if (!status.installed.empty()) {
             weak_wrapped(trf("Version {0} is installed.", {status.installed}));
         }
@@ -598,6 +711,7 @@ void ManagerApp::draw_plugins_tab() {
         colored_wrapped(kWarn, tr("version.dll is not Anvil's or missing: nothing below loads until Anvil is installed."));
     }
 
+    const std::vector<const CatalogPlugin*> updates = catalog_updates_here();
     const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp;
     if (ImGui::BeginTable("plugins", 5, flags)) {
         ImGui::TableSetupColumn(tr("Load"), ImGuiTableColumnFlags_WidthFixed);
@@ -647,6 +761,11 @@ void ManagerApp::draw_plugins_tab() {
             } else {
                 colored_wrapped(kBad, skipped != report->skipped.end() ? trf("skipped: {0}", {i18n::text(skipped->why)})
                                                                        : std::string(tr("skipped")));
+            }
+            const auto update = std::find_if(updates.begin(), updates.end(), [&](const CatalogPlugin* p) { return manifest && p->id == id; });
+            if (update != updates.end()) {
+                colored_wrapped(kGood, trf("{0} is available in the Catalog tab.", {(*update)->version}));
+                if (ImGui::SmallButton(tr("Open the Catalog tab"))) show_catalog_tab_ = true;
             }
             for (const cli::Problem& problem : shown_problems(plugin.report)) {
                 ImGui::PushStyleColor(ImGuiCol_Text, plugin.disabled ? ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled) : kWarn);
@@ -911,8 +1030,11 @@ void ManagerApp::draw_settings_tab() {
     for (const std::string& warning : editor.warnings) colored_wrapped(kWarn, trf("Ignored in your file: {0}", {warning}));
     ImGui::Spacing();
     ImGui::BeginDisabled(read_only());
+    std::vector<std::string_view> groups;
+    for (const Setting& setting : editor.schema.settings) groups.emplace_back(setting.group);
     std::string group;
-    for (const Setting& setting : editor.schema.settings) {
+    for (const std::size_t position : anvil::ui::settings_display_order(groups)) {
+        const Setting& setting = editor.schema.settings[position];
         SettingValue& value = editor.values[setting.id];
         std::string& text = editor.texts[setting.id];
         if (setting.group != group) {
@@ -1143,6 +1265,14 @@ std::string ManagerApp::make_problem_report() const {
     if (!snapshot_->crashes.empty()) input.newest_crash = load_crash_summary(game_ / "anvil" / "crashes", snapshot_->crashes.front());
     input.log_name = "anvil.log";
     input.log_tail = read_text_tail(game_ / "anvil" / "anvil.log", kProblemReportLogLines, kProblemReportLogBytes);
+    input.steam_folders = steam_games_.size();
+    input.gog_folder = gog_game_.has_value();
+    for (size_t i = 0; i < steam_games_.size(); ++i) {
+        if (same_file(steam_games_[i], game_)) input.chosen_steam = i;
+    }
+    input.chosen_gog = gog_game_ && same_file(*gog_game_, game_);
+    input.running_elsewhere = running_elsewhere_.size();
+    input.anvil_missed = anvil_missed_;
 
     const auto environment = [](const wchar_t* name) {
         wchar_t value[512];
@@ -1168,13 +1298,16 @@ void ManagerApp::draw_about_tab() {
     ImGui::Spacing();
     ImGui::SeparatorText(tr("New releases"));
     bool check = settings_.check_releases;
-    if (ImGui::Checkbox(tr("Ask GitHub for the latest release when the Manager starts"), &check)) {
+    if (ImGui::Checkbox(tr("Ask GitHub for new releases of Anvil and its plugins when the Manager or the game starts"), &check)) {
         settings_.check_releases = check;
         settings_.asked_releases = true;
         std::string error;
         save_manager_settings(settings_, error);
+        if (check) check_for_updates();
     }
-    weak_wrapped(tr("Only a link is shown; nothing is downloaded. To update Anvil, run the Manager of the new release."));
+    weak_wrapped(tr("For Anvil a link is shown, and the Catalog and Plugins tabs show plugin updates; nothing is downloaded "
+                    "until you click. To update Anvil, run the Manager of the new release."));
+    weak_wrapped(tr("The game follows this answer unless the Anvil panel's setting \"Check for new Anvil releases\" says On or Off."));
     ImGui::BeginDisabled(release_pending_.valid());
     if (ImGui::Button(tr("Check now"))) release_pending_ = std::async(std::launch::async, fetch_latest_release);
     ImGui::EndDisabled();

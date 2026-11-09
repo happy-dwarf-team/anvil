@@ -4,11 +4,15 @@
 #include "i18n/cjk_font.hpp"
 #include "notices.hpp"
 #include "overlay.hpp"
+#include "release.hpp"
 #include "ui/imgui_colors.hpp"
+#include "ui/settings_order.hpp"
 
 #include <imgui.h>
 #include <backends/imgui_impl_dx9.h>
 #include <backends/imgui_impl_win32.h>
+#include <objbase.h>
+#include <shellapi.h>
 
 #include <algorithm>
 #include <cfloat>
@@ -16,11 +20,16 @@
 #include <cstdlib>
 #include <chrono>
 #include <climits>
+#include <fstream>
 #include <iterator>
 #include <map>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
+#include <string_view>
+#include <thread>
+#include <utility>
 #include <vector>
 
 IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
@@ -59,6 +68,12 @@ struct Ui {
     bool start_built = false;
     std::vector<ShownNotice> start;
     std::vector<Notice> session;
+    std::vector<bool> session_closed;  // per session notice: closed by the player in this session
+
+    // The release check (release.hpp): once per start.
+    bool release_started = false;     // the worker thread was started
+    bool release_questioned = false;  // the question was shown in this start
+    std::optional<anvil::net::Release> latest;  // GitHub's answer
 
     // Panel caches
     ULONGLONG refreshed = 0;
@@ -174,6 +189,159 @@ void disable_plugin(const std::string& id) {
     }
 }
 
+// ---- the release check (design §15, ADR 0005) ------------------------------------------
+
+// What the worker thread hands to the frame.
+struct ReleaseResult {
+    std::mutex mutex;
+    anvil::net::ReleaseCheck check;
+};
+ReleaseResult& release_result() {
+    static ReleaseResult r;
+    return r;
+}
+
+std::string read_small_file(const std::filesystem::path& file) {
+    std::error_code ec;
+    if (file.empty() || std::filesystem::file_size(file, ec) > 64 * 1024 || ec) return "";
+    std::ifstream in(file, std::ios::binary);
+    std::ostringstream text;
+    text << in.rdbuf();
+    return text.str();
+}
+
+// The release whose notice the player closed, in anvil/data/anvil-overlay.
+std::filesystem::path dismissed_file() {
+    const std::filesystem::path& dir = shared().data_dir;
+    return dir.empty() ? dir : dir / "release-notice.txt";
+}
+
+std::string running_version() {
+    const AnvilControlStatus status = shared().control.status();
+    return status.anvil_version != nullptr ? status.anvil_version : "";
+}
+
+bool benchmark_start() {
+    wchar_t value[2] = {};
+    return GetEnvironmentVariableW(L"ANVIL_BENCHMARK", value, 2) > 0;
+}
+
+// The GET on a thread of its own: the game's threads never wait for the network.
+void start_release_check() {
+    Ui& u = ui();
+    if (u.release_started) return;
+    u.release_started = true;
+    const std::string version = running_version();
+    std::wstring agent = L"anvil-overlay/";
+    for (const char c : version) agent += static_cast<wchar_t>(static_cast<unsigned char>(c));
+    log_info("release check: asking api.github.com for the latest Anvil release");
+    try {
+        std::thread([agent] {
+            anvil::net::ReleaseCheck check;
+            // winhttp.dll is delay-loaded: only from System32, and only here.
+            if (LoadLibraryExW(L"winhttp.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32) == nullptr) {
+                check.english_error = "winhttp.dll cannot be loaded (error " + std::to_string(GetLastError()) + ")";
+            } else {
+                check = anvil::net::fetch_latest_release(agent);
+            }
+            {
+                std::lock_guard lock(release_result().mutex);
+                release_result().check = std::move(check);
+            }
+            shared().release_done.store(true, std::memory_order_release);
+            shared().mark_dirty();
+        }).detach();
+    } catch (const std::exception&) {
+        log_warning("release check: cannot start its thread");
+    }
+}
+
+// Once the game is ready, and again when the setting changes: check, ask, or nothing.
+void plan_release_check(ULONGLONG now) {
+    Ui& u = ui();
+    const auto consent = static_cast<ReleaseConsent>(shared().release_check.load());
+    std::optional<bool> manager_answer;
+    if (consent == ReleaseConsent::Ask) {
+        manager_answer = anvil::net::manager_release_answer(read_small_file(anvil::net::manager_settings_file()));
+    }
+    const ReleasePlan plan = release_plan(consent, manager_answer, benchmark_start());
+    // An answer closes the question.
+    for (ShownNotice& shown : u.start) {
+        if (shown.notice.id == "release-question" && plan != ReleasePlan::Question) shown.closed = true;
+    }
+    if (plan == ReleasePlan::Check) {
+        start_release_check();
+    } else if (plan == ReleasePlan::Question && !u.release_questioned) {
+        u.release_questioned = true;
+        u.start.push_back({release_question(), now, false});
+        log_info("release check: asking the player first");
+    }
+}
+
+// The worker's answer: the notice of a newer release, or a line in the log.
+void take_release_result(ULONGLONG now) {
+    Ui& u = ui();
+    anvil::net::ReleaseCheck check;
+    {
+        std::lock_guard lock(release_result().mutex);
+        check = std::move(release_result().check);
+    }
+    if (!check.release) {
+        log_warning(("release check: no answer (" + check.english_error + ")").c_str());
+        return;
+    }
+    const std::string running = running_version();
+    log_info(("release check: the latest release is " + check.release->tag + ", this is Anvil " + running).c_str());
+    u.latest = check.release;
+    if (auto notice = release_notice(*check.release, running, dismissed_tag(read_small_file(dismissed_file())))) {
+        u.start.push_back({std::move(*notice), now, false});
+    }
+}
+
+// The player closed the release notice or opened its page: not again for that release.
+void dismiss_release_notice() {
+    Ui& u = ui();
+    for (ShownNotice& shown : u.start) {
+        if (shown.notice.id == "release") shown.closed = true;
+    }
+    const std::filesystem::path file = dismissed_file();
+    if (!u.latest || file.empty()) return;
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    out << u.latest->tag << "\n";
+}
+
+// Opens a release page in the browser, on a thread of its own: ShellExecute
+// wants COM and may take a while.
+void open_link(const std::string& url) {
+    if (!url.starts_with(std::string(anvil::net::kReleasesUrl) + "/")) return;
+    const int chars = MultiByteToWideChar(CP_UTF8, 0, url.c_str(), -1, nullptr, 0);
+    if (chars <= 0) return;
+    std::wstring wide(static_cast<size_t>(chars), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, url.c_str(), -1, wide.data(), chars);
+    try {
+        std::thread([wide] {
+            const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+            ShellExecuteW(nullptr, L"open", wide.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            if (SUCCEEDED(com)) CoUninitialize();
+        }).detach();
+    } catch (const std::exception&) {
+    }
+}
+
+// The question's buttons: the setting, as the panel's editor writes it.
+void answer_release_question(bool yes) {
+    const ReleaseConsent consent = yes ? ReleaseConsent::On : ReleaseConsent::Off;
+    AnvilControlValue v{static_cast<int64_t>(consent), 0.0, nullptr};
+    const std::string error = shared().control.set("anvil-overlay", shared().release_check_setting, v);
+    if (!error.empty()) {
+        log_warning(("release check: cannot save the answer: " + error).c_str());
+        // This start follows the answer all the same.
+        shared().release_check.store(static_cast<int64_t>(consent));
+        shared().release_consent_changed.store(true);
+        shared().mark_dirty();
+    }
+}
+
 void build_start_notices(ULONGLONG now) {
     Ui& u = ui();
     const ControlClient& control = shared().control;
@@ -196,6 +364,7 @@ void build_start_notices(ULONGLONG now) {
         const std::string text = std::to_string(u.start.size()) + " notice(s) at the start";
         log_info(text.c_str());
     }
+    plan_release_check(now);
 }
 
 void build_session_notices() {
@@ -207,6 +376,12 @@ void build_session_notices() {
     facts.gameplay_active = status.gameplay_active;
     facts.gameplay_hash = status.gameplay_hash;
     ui().session = session_notices(facts);
+    ui().session_closed.assign(ui().session.size(), false);  // a new session shows them again
+}
+
+bool session_notice_shown(size_t index) {
+    const Ui& u = ui();
+    return index < u.session.size() && !(index < u.session_closed.size() && u.session_closed[index]);
 }
 
 bool notice_alive(const ShownNotice& n, ULONGLONG now) {
@@ -220,7 +395,8 @@ bool notice_alive(const ShownNotice& n, ULONGLONG now) {
 bool content_visible(ULONGLONG now) {
     const Shared& s = shared();
     const Ui& u = ui();
-    bool any = !u.session.empty() || s.panel_open.load() || s.recording_key.load() || s.panels.any_shown();
+    bool any = s.panel_open.load() || s.recording_key.load() || s.panels.any_shown();
+    for (size_t i = 0; i < u.session.size(); ++i) any = any || session_notice_shown(i);
     for (const ShownNotice& n : u.start) any = any || notice_alive(n, now);
     return any;
 }
@@ -526,9 +702,16 @@ void help_marker(const char* text) {
 
 void run_action(const Notice& notice, const NoticeAction& action) {
     Shared& s = shared();
-    if (action.type == NoticeAction::Type::DisablePlugin) {
-        disable_plugin(action.plugin);
+    switch (action.type) {
+    case NoticeAction::Type::DisablePlugin: disable_plugin(action.plugin); return;
+    case NoticeAction::Type::OpenLink:
+        open_link(action.url);
+        if (notice.id == "release") dismiss_release_notice();
         return;
+    case NoticeAction::Type::CopyLink: copy_to_clipboard(action.url); return;
+    case NoticeAction::Type::ReleaseCheckOn: answer_release_question(true); return;
+    case NoticeAction::Type::ReleaseCheckOff: answer_release_question(false); return;
+    case NoticeAction::Type::OpenPanel: break;
     }
     s.panel_open.store(true);
     ui().requested_tab = notice.id == "crash" || (notice.id == "safe-mode" && ui().crash) ? Tab::Crash
@@ -581,10 +764,20 @@ void draw_notices(ULONGLONG now) {
     Ui& u = ui();
     float y = 12.0f * scale();
     int index = 0;
-    for (const Notice& n : u.session) draw_notice(n, nullptr, y, index++);
-    for (ShownNotice& n : u.start) {
-        if (notice_alive(n, now)) draw_notice(n.notice, &n.closed, y, index++);
+    for (size_t i = 0; i < u.session.size(); ++i) {
+        if (!session_notice_shown(i)) continue;
+        const Notice& n = u.session[i];
+        bool closed = false;
+        draw_notice(n, n.closable ? &closed : nullptr, y, index++);
+        if (closed && i < u.session_closed.size()) u.session_closed[i] = true;
     }
+    bool release_closed = false;
+    for (ShownNotice& n : u.start) {
+        if (!notice_alive(n, now)) continue;
+        draw_notice(n.notice, &n.closed, y, index++);
+        release_closed = release_closed || (n.closed && n.notice.id == "release");
+    }
+    if (release_closed) dismiss_release_notice();
 }
 
 // ---- the badge in the main menu ----------------------------------------------------------
@@ -692,6 +885,13 @@ void draw_status() {
         colored(kRed, trf("Safe mode: the last {0} starts ended before the game was ready.", {std::to_string(s.unfinished_starts)}));
     } else if (s.unfinished_starts > 0) {
         colored(kAmber, trf("{0} earlier start(s) ended before the game was ready.", {std::to_string(s.unfinished_starts)}));
+    }
+    if (u.latest && s.anvil_version != nullptr && anvil::net::newer_release(u.latest->tag, s.anvil_version)) {
+        colored(kGreen, trf("Anvil {0} is available.", {u.latest->tag}));
+        ImGui::SameLine();
+        if (ImGui::SmallButton(tr("Open its page"))) open_link(u.latest->url);
+        ImGui::SameLine();
+        if (ImGui::SmallButton((std::string(tr("Copy link")) + "##release").c_str())) copy_to_clipboard(u.latest->url);
     }
     if (s.session) line(session_text(s));
     if (!s.loading_done) weak(tr("Plugins are still loading."));
@@ -1030,15 +1230,21 @@ void draw_settings() {
     ImGui::SameLine();
     if (ImGui::BeginChild("editor", ImVec2(0.0f, -footer), ImGuiChildFlags_Borders)) {
         const uint32_t count = control.setting_count(u.selected_plugin);
-        std::string group;
+        std::vector<std::pair<AnvilSetting, AnvilControlSetting>> settings;
+        std::vector<std::string_view> groups;
         for (AnvilSetting id = 0; id < count; ++id) {
             const auto info = control.setting_info(u.selected_plugin, id);
             if (!info) continue;
-            if (info->group != nullptr && group != info->group) {
-                group = info->group;
-                if (!group.empty()) ImGui::SeparatorText(group.c_str());
+            settings.emplace_back(id, *info);
+            groups.emplace_back(info->group != nullptr ? info->group : "");
+        }
+        std::string_view group;
+        for (const std::size_t i : anvil::ui::settings_display_order(groups)) {
+            if (groups[i] != group) {
+                group = groups[i];
+                ImGui::SeparatorText(std::string(group).c_str());
             }
-            draw_setting(u.selected_plugin, id, *info);
+            draw_setting(u.selected_plugin, settings[i].first, settings[i].second);
         }
         for (const std::string& w : control.setting_warnings(u.selected_plugin)) ImGui::TextColored(kAmber, "%s", w.c_str());
     }
@@ -1158,6 +1364,8 @@ void ui_frame(IDirect3DDevice9* device) {
     if (s.dirty.exchange(false, std::memory_order_acq_rel)) {
         if (s.start_ready.load() && !u.start_built) build_start_notices(now);
         if (s.session_changed.exchange(false)) build_session_notices();
+        if (s.release_done.exchange(false)) take_release_result(now);
+        if (s.release_consent_changed.exchange(false) && u.start_built) plan_release_check(now);
         if (s.panel_open.load()) refresh(true);
     }
     // A key recorded for the settings editor.

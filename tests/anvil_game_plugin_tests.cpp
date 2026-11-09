@@ -198,7 +198,7 @@ struct FakeEu4 {
 struct GameObjects {
     alignas(16) uint8_t app[0x400] = {};
     alignas(16) uint8_t root[0x2500] = {};
-    alignas(16) uint8_t session[0x4E0] = {};
+    alignas(16) uint8_t session[0x1C00] = {};  // the map input's pointer is at +0x1B80
     alignas(16) uint8_t speed[0x60] = {};
     alignas(16) uint8_t oos_handler[0x50] = {};
     alignas(16) uint8_t frontend[0x910] = {};
@@ -228,7 +228,16 @@ uint64_t game_tag(const char* text, uint16_t index, uint8_t kind = 0, uint8_t va
 
 // A small world, laid out as eu4.exe 1.37.5 on Steam does: provinces 1-3 and
 // the countries RUS, TUR and the observer.
+// CModifier::GetValue in FakeEu4: the n-th int32 from +0x20, and a fault for type 2.
+int32_t* fake_modifier_value(const uint8_t* modifier, int32_t* out, int32_t type) {
+    const uint8_t* at = type == 2 ? nullptr : modifier + 0x20 + type * 4;
+    *out = *reinterpret_cast<const volatile int32_t*>(at);
+    return out;
+}
+
 struct FakeWorld {
+    static constexpr uint32_t kDefinitions = 0x2358080;
+    static constexpr uint32_t kModifierValue = 0x8E6BD0;
     static constexpr size_t kProvinceSize = 0x2E10;
     static constexpr int kProvinces = 4;  // the dummy entry 0 included
 
@@ -237,18 +246,112 @@ struct FakeWorld {
     alignas(8) uint8_t map[kProvinces][0x240] = {};
     uint64_t cores[2] = {game_tag("RUS", 0), game_tag("TUR", 1)};
     int32_t owned[2] = {1, 3};
-    alignas(8) uint8_t rus[0x1500] = {};
-    alignas(8) uint8_t tur[0x1500] = {};
-    alignas(8) uint8_t observer[0x1500] = {};
+    alignas(8) uint8_t rus[0x3000] = {};
+    alignas(8) uint8_t tur[0x3000] = {};
+    alignas(8) uint8_t observer[0x3000] = {};
+    alignas(8) uint8_t definitions[3][0x60] = {};
     uintptr_t countries[3] = {};
     alignas(8) uint8_t db[0x800] = {};
     std::vector<uint64_t> bucket_tags[64];
     std::string long_name = "S\xE3o Tom\xE9 and a name long enough for the heap";
+    std::string tax_key = "local_tax_modifier";
+    std::string long_key = "a_modifier_key_too_long_to_be_kept_in_place";
     alignas(8) uint8_t war_a[0x218] = {};
     alignas(8) uint8_t war_b[0x218] = {};
     uintptr_t wars[2] = {};
     uint64_t attackers[2] = {game_tag("RUS", 0), game_tag("O00", 2, 7)};
     uint64_t defenders[1] = {game_tag("TUR", 1)};
+
+    // RUS's units: an army with a leader drilling in Moskva, three regiments
+    // (1000, 1000 and 500 men), and an idle navy at sea without a leader: as in
+    // the game, it points at a placeholder leader with id 0 named "No Leader". The
+    // selection: a province, the navy and the army.
+    static constexpr uint32_t kArmyKind = 0x1761F40;   // xor eax,eax; ret
+    static constexpr uint32_t kNavyKind = 0x1761F48;   // mov eax,1; ret
+    static constexpr uint32_t kDrillType = 0x1761F50;  // mov eax,15; ret
+    static constexpr uint32_t kPlaceKind = 0x1761F58;  // mov eax,2; ret: a province
+    static constexpr uint32_t kComputed = 0x1761F60;   // mov eax,[rcx+8]; ret: not a constant
+    static constexpr uint64_t kArmyId = 0x000003E900000036;
+    static constexpr uint64_t kNavyId = 0x000003EA00000036;
+    static constexpr uint64_t kLeaderId = 0x0000004D00000031;
+    alignas(8) uint8_t army[0x260] = {};
+    alignas(8) uint8_t navy[0x260] = {};
+    alignas(8) uint8_t leader[0xA8] = {};
+    alignas(8) uint8_t no_leader[0xA8] = {};
+    alignas(8) uint8_t regiments[3][0x90] = {};
+    uintptr_t army_subunits[3] = {};
+    alignas(8) uint8_t drill[0x10] = {};
+    alignas(8) uint8_t idle[0x10] = {};
+    uintptr_t army_vtable[2] = {}, navy_vtable[2] = {}, place_vtable[2] = {};
+    uintptr_t drill_vtable[11] = {}, idle_vtable[11] = {};
+    alignas(8) uint8_t unit_nodes[2][0x20] = {};
+    alignas(8) uint8_t map_input[0x168] = {};
+    alignas(8) uint8_t selected_nodes[3][0x20] = {};
+    alignas(8) uint8_t place[0x10] = {};
+
+    static void set_short_string(uint8_t* at, const char* text) {
+        const uint64_t size = std::strlen(text);
+        std::memcpy(at, text, size);
+        set(at, 0x10, size);
+        set(at, 0x18, uint64_t{15});
+    }
+    void install_units(uint8_t* session, FakeEu4& image) {
+        image.put(kArmyKind, {0x33, 0xC0, 0xC3});
+        image.put(kNavyKind, {0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3});
+        image.put(kDrillType, {0xB8, 0x0F, 0x00, 0x00, 0x00, 0xC3});
+        image.put(kPlaceKind, {0xB8, 0x02, 0x00, 0x00, 0x00, 0xC3});
+        image.put(kComputed, {0x8B, 0x41, 0x08, 0xC3});
+        army_vtable[1] = image.address(kArmyKind);
+        navy_vtable[1] = image.address(kNavyKind);
+        place_vtable[1] = image.address(kPlaceKind);
+        drill_vtable[10] = image.address(kDrillType);
+        idle_vtable[10] = image.address(kArmyKind);  // returns 0: no mission
+        set(drill, 0, reinterpret_cast<uintptr_t>(drill_vtable));
+        set(idle, 0, reinterpret_cast<uintptr_t>(idle_vtable));
+        set(place, 0, reinterpret_cast<uintptr_t>(place_vtable));
+
+        set(army, 0, reinterpret_cast<uintptr_t>(army_vtable));
+        set(army, 0x20, kArmyId);
+        set(army, 0xD0, game_tag("RUS", 0));
+        set(army, 0xD8, reinterpret_cast<uintptr_t>(leader));
+        set(army, 0xE8, reinterpret_cast<uintptr_t>(province(1)));
+        set(army, 0x1F8, reinterpret_cast<uintptr_t>(drill));
+        set_short_string(army + 0x148, "1st Army");
+        const int32_t strengths[3] = {1000, 1000, 500};
+        for (int i = 0; i < 3; ++i) {
+            set(regiments[i], 0x28, strengths[i]);
+            army_subunits[i] = reinterpret_cast<uintptr_t>(regiments[i]);
+        }
+        set(army, 0x30, reinterpret_cast<uintptr_t>(army_subunits));
+        set(army, 0x38, reinterpret_cast<uintptr_t>(army_subunits + 3));
+        set(leader, 0x10, kLeaderId);
+        set_short_string(leader + 0x20, "Sheremetev");
+
+        set(navy, 0, reinterpret_cast<uintptr_t>(navy_vtable));
+        set(navy, 0x20, kNavyId);
+        set(navy, 0xD0, game_tag("RUS", 0));
+        set(navy, 0xD8, reinterpret_cast<uintptr_t>(no_leader));
+        set(no_leader, 0x10, uint64_t{0x31});
+        set_short_string(no_leader + 0x20, "No Leader");
+        set(navy, 0xE8, reinterpret_cast<uintptr_t>(province(3)));
+        set(navy, 0x1F8, reinterpret_cast<uintptr_t>(idle));
+        set_short_string(navy + 0x148, "1st Fleet");
+
+        set(unit_nodes[0], 0, reinterpret_cast<uintptr_t>(army));
+        set(unit_nodes[0], 0x10, reinterpret_cast<uintptr_t>(unit_nodes[1]));
+        set(unit_nodes[1], 0, reinterpret_cast<uintptr_t>(navy));
+        set(rus, 0xD18, reinterpret_cast<uintptr_t>(unit_nodes[0]));
+        set(rus, 0xD18 + 0x10, int32_t{2});
+
+        uint8_t* selected[3] = {place, navy, army};
+        for (int i = 0; i < 3; ++i) {
+            set(selected_nodes[i], 0, reinterpret_cast<uintptr_t>(selected[i]));
+            if (i < 2) set(selected_nodes[i], 0x10, reinterpret_cast<uintptr_t>(selected_nodes[i + 1]));
+        }
+        set(map_input, 0x28, reinterpret_cast<uintptr_t>(selected_nodes[0]));
+        set(map_input, 0x38, int32_t{3});
+        set(session, 0x1B80, reinterpret_cast<uintptr_t>(map_input));
+    }
 
     template <class T>
     static void set(void* at, size_t offset, T value) {
@@ -266,6 +369,16 @@ struct FakeWorld {
             set(at, 0x18, size);
         }
         set(at, 0x10, size);
+    }
+    static void set_key(uint8_t* at, const std::string& key) {
+        if (key.size() < 16) {
+            std::memcpy(at, key.data(), key.size());
+            set(at, 0x18, uint64_t{15});
+        } else {
+            set(at, 0, reinterpret_cast<uintptr_t>(key.data()));
+            set(at, 0x18, uint64_t{key.size()});
+        }
+        set(at, 0x10, uint64_t{key.size()});
     }
     void add_country(uint8_t* country, uint64_t tag, uint16_t index) {
         set(country, 0x20, tag);
@@ -317,6 +430,22 @@ struct FakeWorld {
             set(db, 0x154 + n * 0x18, static_cast<int32_t>(bucket_tags[n].size()));
         }
         image.put_pointer(kCountriesDb, reinterpret_cast<uintptr_t>(db));
+        // Three modifier definitions, and values for fake_modifier_value.
+        set_key(definitions[0], "land_morale");
+        set_key(definitions[1], tax_key);
+        set_key(definitions[2], long_key);
+        image.commit(kDefinitions & ~0xFFFu, PAGE_READWRITE);
+        image.put_pointer(kDefinitions, reinterpret_cast<uintptr_t>(definitions));
+        image.put_pointer(kDefinitions + 8, reinterpret_cast<uintptr_t>(definitions + 3));
+        set(rus, 0x28C8, int32_t{2});
+        set(rus, 0x28D0 + 0x20, int32_t{750});
+        set(rus, 0x28D0 + 0x24, int32_t{-250});
+        set(province(1), 0x998 + 0x24, int32_t{100});
+        // The value function: its declared bytes are in place (the symbols test
+        // copied them), then add rsp,20h; pop rbx; mov rax, fake_modifier_value; jmp rax.
+        image.put(kModifierValue + 16, {0x48, 0x83, 0xC4, 0x20, 0x5B, 0x48, 0xB8});
+        image.put_pointer(kModifierValue + 23, reinterpret_cast<uintptr_t>(&fake_modifier_value));
+        image.put(kModifierValue + 31, {0xFF, 0xE0});
         // The Great War: RUS and O00 against TUR.
         set(war_a, 0x28 + 0x10, uint64_t{9});
         set(war_a, 0x28 + 0x18, uint64_t{15});
@@ -633,7 +762,7 @@ int main(int argc, char** argv) {
         const std::string reason = anvil::i18n::english(check_plugin_symbols(dir / parsed.manifest->symbols, kBuild, changes,
                                                                           image.address(0), &verified, &declared));
         if (!reason.empty()) std::printf("  %s\n", reason.c_str());
-        CHECK(reason.empty() && verified.symbols.size() == 44);
+        CHECK(reason.empty() && verified.symbols.size() == 62);
         if (!reason.empty()) return;
         auto* p = new AnvilPlugin;
         p->context = &context;
@@ -1023,7 +1152,8 @@ int main(int argc, char** argv) {
         const auto* world = static_cast<const AnvilGameWorldService*>(
             bus.get_service(ANVIL_GAME_WORLD_SERVICE, ANVIL_GAME_WORLD_SERVICE_VERSION));
         CHECK(world != nullptr && world->size == sizeof(AnvilGameWorldService) &&
-              ANVIL_GAME_WORLD_HAS(world, country_provinces) && ANVIL_GAME_WORLD_HAS(world, war_side));
+              ANVIL_GAME_WORLD_HAS(world, country_provinces) && ANVIL_GAME_WORLD_HAS(world, war_side) &&
+              ANVIL_GAME_WORLD_HAS(world, province_modifier));
         if (world == nullptr) return;
         FakeWorld& fake = *new FakeWorld;
         fake.install(game.root, image);
@@ -1043,6 +1173,10 @@ int main(int argc, char** argv) {
         AnvilGameCountry c{};
         c.size = sizeof(c);
         CHECK(world->player(&tag) == ANVIL_ERROR_WRONG_PHASE && world->province_limit() == 0);
+        std::int32_t outside = 0;
+        CHECK(world->modifier_id("land_morale", &outside) == ANVIL_ERROR_WRONG_PHASE &&
+              world->country_modifier("RUS", 0, &outside) == ANVIL_ERROR_WRONG_PHASE &&
+              world->province_modifier(1, 0, &outside) == ANVIL_ERROR_WRONG_PHASE);
         CHECK(world->province(1, &p) == ANVIL_ERROR_WRONG_PHASE && world->country("RUS", &c) == ANVIL_ERROR_WRONG_PHASE);
         static AnvilResult inside = ANVIL_OK;
         static const AnvilGameWorldService* world_inside = nullptr;
@@ -1146,6 +1280,34 @@ int main(int argc, char** argv) {
             CHECK(world->war_side(war_ids[0], ANVIL_GAME_WAR_DEFENDERS, cores, 4, &count) == ANVIL_OK && count == 1 &&
                   std::strcmp(cores[0].text, "TUR") == 0);
             CHECK(world->war_side(war_ids[0], 2, cores, 4, &count) == ANVIL_ERROR_INVALID_ARGUMENT);
+
+            std::int32_t morale = -1, local = -1, key_id = -1, value = 0;
+            CHECK(world->modifier_id("land_morale", &morale) == ANVIL_OK && morale == 0);
+            CHECK(world->modifier_id("local_tax_modifier", &local) == ANVIL_OK && local == 1);
+            CHECK(world->modifier_id(fake.long_key.c_str(), &key_id) == ANVIL_OK && key_id == 2);
+            CHECK(world->modifier_id("Land_Morale", &key_id) == ANVIL_ERROR_NOT_FOUND);
+            CHECK(world->modifier_id("", &key_id) == ANVIL_ERROR_INVALID_ARGUMENT);
+            CHECK(world->modifier_id(nullptr, &key_id) == ANVIL_ERROR_INVALID_ARGUMENT);
+            CHECK(world->modifier_id("land_morale", nullptr) == ANVIL_ERROR_INVALID_ARGUMENT);
+            CHECK(world->country_modifier("rus", morale, &value) == ANVIL_OK && value == 750);
+            CHECK(world->country_modifier("RUS", local, &value) == ANVIL_OK && value == -250);
+            CHECK(world->province_modifier(1, local, &value) == ANVIL_OK && value == 100);
+            CHECK(world->province_modifier(1, morale, &value) == ANVIL_OK && value == 0);
+            CHECK(world->country_modifier("ZZZ", morale, &value) == ANVIL_ERROR_NOT_FOUND);
+            CHECK(world->country_modifier("RUS", 3, &value) == ANVIL_ERROR_NOT_FOUND);
+            CHECK(world->country_modifier("RUS", -1, &value) == ANVIL_ERROR_NOT_FOUND);
+            CHECK(world->country_modifier(nullptr, morale, &value) == ANVIL_ERROR_INVALID_ARGUMENT);
+            CHECK(world->country_modifier("RUS", morale, nullptr) == ANVIL_ERROR_INVALID_ARGUMENT);
+            CHECK(world->province_modifier(4, morale, &value) == ANVIL_ERROR_NOT_FOUND);
+            CHECK(world->province_modifier(1, 3, &value) == ANVIL_ERROR_NOT_FOUND);
+            CHECK(world->province_modifier(1, morale, nullptr) == ANVIL_ERROR_INVALID_ARGUMENT);
+            // A fault in the game's function costs that answer, and so do
+            // modifiers that are being worked out.
+            CHECK(world->country_modifier("RUS", 2, &value) == ANVIL_ERROR_INTERNAL);
+            FakeWorld::set(fake.rus, 0x28C8, int32_t{1});
+            CHECK(world->country_modifier("RUS", morale, &value) == ANVIL_ERROR_INTERNAL);
+            FakeWorld::set(fake.rus, 0x28C8, int32_t{2});
+            CHECK(world->country_modifier("RUS", morale, &value) == ANVIL_OK && value == 750);
         };
         frame(game.app, 1);
         CHECK(ran);
@@ -1186,9 +1348,114 @@ int main(int argc, char** argv) {
         l.treasury = 0xBB0;
         std::vector<uint64_t> no_wars;
         CHECK(anvil_game::read_war_ids(l, no_wars) == ANVIL_ERROR_NOT_DECLARED);
+        std::int32_t no_modifier = 0;
+        CHECK(anvil_game::read_modifier_id(l, "land_morale", no_modifier) == ANVIL_ERROR_NOT_DECLARED);
+        CHECK(anvil_game::read_country_modifier(l, "RUS", 0, no_modifier) == ANVIL_ERROR_NOT_DECLARED);
+        CHECK(anvil_game::read_province_modifier(l, 1, 0, no_modifier) == ANVIL_ERROR_NOT_DECLARED);
         AnvilGameCountry partial{};
         CHECK(anvil_game::read_country(l, "RUS", partial) == ANVIL_OK && partial.values == ANVIL_GAME_VALUE_TREASURY &&
               partial.treasury == 123456 && partial.stability == 0);
+    });
+
+    run("anvil-game.world: units and the selection", [&] {
+        const auto* world = static_cast<const AnvilGameWorldService*>(
+            bus.get_service(ANVIL_GAME_WORLD_SERVICE, ANVIL_GAME_WORLD_SERVICE_VERSION));
+        CHECK(world != nullptr && ANVIL_GAME_WORLD_HAS(world, selected_units));
+        if (world == nullptr) return;
+        FakeWorld& fake = *new FakeWorld;
+        fake.install(game.root, image);
+        fake.install_units(game.session, image);
+        game.set_session(game.session);
+        frame(game.app, 1);
+
+        uint64_t ids[4] = {};
+        uint32_t count = 0;
+        CHECK(world->country_units("RUS", ids, 4, &count) == ANVIL_ERROR_WRONG_PHASE);  // between frames
+        bool ran = false;
+        g_in_frame_handler = [&] {
+            ran = true;
+            CHECK(world->country_units("RUS", ids, 4, &count) == ANVIL_OK && count == 2 && ids[0] == FakeWorld::kArmyId &&
+                  ids[1] == FakeWorld::kNavyId);
+            CHECK(world->country_units("rus", nullptr, 0, &count) == ANVIL_OK && count == 2);
+            CHECK(world->country_units("TUR", ids, 4, &count) == ANVIL_OK && count == 0);
+            CHECK(world->country_units("XXX", ids, 4, &count) == ANVIL_ERROR_NOT_FOUND);
+            CHECK(world->country_units(nullptr, ids, 4, &count) == ANVIL_ERROR_INVALID_ARGUMENT);
+
+            AnvilGameUnit army{};
+            army.size = sizeof(army);
+            CHECK(world->unit("RUS", FakeWorld::kArmyId, &army) == ANVIL_OK && army.size == sizeof(army) &&
+                  army.kind == ANVIL_GAME_UNIT_ARMY && army.id == FakeWorld::kArmyId &&
+                  std::strcmp(army.country.text, "RUS") == 0 && army.location == 1 &&
+                  army.mission == ANVIL_GAME_MISSION_DRILL && army.subunits == 3 && army.strength == 2500 &&
+                  army.leader == FakeWorld::kLeaderId);
+            AnvilGameUnit navy{};
+            navy.size = sizeof(navy);
+            CHECK(world->unit("RUS", FakeWorld::kNavyId, &navy) == ANVIL_OK && navy.kind == ANVIL_GAME_UNIT_NAVY &&
+                  navy.location == 3 && navy.mission == ANVIL_GAME_MISSION_NONE && navy.subunits == 0 &&
+                  navy.strength == 0 && navy.leader == 0);
+            // A caller built against a shorter struct gets only that much.
+            AnvilGameUnit shorter{};
+            shorter.size = offsetof(AnvilGameUnit, location);
+            shorter.location = 77;
+            CHECK(world->unit("RUS", FakeWorld::kArmyId, &shorter) == ANVIL_OK && shorter.kind == ANVIL_GAME_UNIT_ARMY &&
+                  shorter.location == 77);
+            CHECK(world->unit("TUR", FakeWorld::kArmyId, &army) == ANVIL_ERROR_NOT_FOUND &&
+                  world->unit("RUS", 777, &army) == ANVIL_ERROR_NOT_FOUND &&
+                  world->unit("RUS", FakeWorld::kArmyId, nullptr) == ANVIL_ERROR_INVALID_ARGUMENT);
+
+            char name[32] = {};
+            uint32_t length = 0;
+            CHECK(world->unit_name("RUS", FakeWorld::kArmyId, name, sizeof(name), &length) == ANVIL_OK &&
+                  std::strcmp(name, "1st Army") == 0 && length == 8);
+            CHECK(world->unit_name("RUS", FakeWorld::kNavyId, name, 4, &length) == ANVIL_OK &&
+                  std::strcmp(name, "1st") == 0 && length == 9);
+            CHECK(world->unit_leader_name("RUS", FakeWorld::kArmyId, name, sizeof(name), &length) == ANVIL_OK &&
+                  std::strcmp(name, "Sheremetev") == 0);
+            CHECK(world->unit_leader_name("RUS", FakeWorld::kNavyId, name, sizeof(name), &length) == ANVIL_ERROR_NOT_FOUND);
+
+            AnvilGameUnitRef selected[4] = {};
+            CHECK(world->selected_units(selected, 4, &count) == ANVIL_OK && count == 2 &&
+                  selected[0].id == FakeWorld::kNavyId && selected[0].kind == ANVIL_GAME_UNIT_NAVY &&
+                  selected[1].id == FakeWorld::kArmyId && std::strcmp(selected[1].country.text, "RUS") == 0);
+            CHECK(world->selected_units(nullptr, 0, &count) == ANVIL_OK && count == 2);
+        };
+        frame(game.app, 1);
+        CHECK(ran);
+
+        // A mission whose getter computes, a kind getter outside the game, a
+        // session without a map input.
+        ran = false;
+        fake.drill_vtable[10] = image.address(FakeWorld::kComputed);
+        fake.navy_vtable[1] = reinterpret_cast<uintptr_t>(&fake_frame_body);
+        FakeWorld::set(game.session, 0x1B80, uintptr_t{0});
+        g_in_frame_handler = [&] {
+            ran = true;
+            AnvilGameUnit u{};
+            u.size = sizeof(u);
+            CHECK(world->unit("RUS", FakeWorld::kArmyId, &u) == ANVIL_OK && u.mission == ANVIL_GAME_MISSION_UNKNOWN);
+            CHECK(world->unit("RUS", FakeWorld::kNavyId, &u) == ANVIL_ERROR_INTERNAL);
+            AnvilGameUnitRef selected[4] = {};
+            CHECK(world->selected_units(selected, 4, &count) == ANVIL_OK && count == 0);
+        };
+        frame(game.app, 1);
+        CHECK(ran);
+        g_in_frame_handler = nullptr;
+
+        // Absent on a build: NOT_DECLARED.
+        anvil_game::WorldLayout l;
+        std::vector<uint64_t> none;
+        std::vector<AnvilGameUnitRef> no_selection;
+        CHECK(anvil_game::read_country_units(l, "RUS", none) == ANVIL_ERROR_NOT_DECLARED &&
+              anvil_game::read_selected_units(l, no_selection) == ANVIL_ERROR_NOT_DECLARED);
+
+        const uint8_t zero[] = {0x33, 0xC0, 0xC3}, five[] = {0xB8, 0x05, 0x00, 0x00, 0x00, 0xC3},
+                      other[] = {0x8B, 0x41, 0x08, 0xC3, 0x00, 0x00}, no_ret[] = {0xB8, 0x05, 0x00, 0x00, 0x00, 0x90};
+        int64_t value = -1;
+        CHECK(anvil_game::decode_constant_getter(zero, sizeof zero, value) && value == 0);
+        CHECK(anvil_game::decode_constant_getter(five, sizeof five, value) && value == 5);
+        CHECK(!anvil_game::decode_constant_getter(other, sizeof other, value) &&
+              !anvil_game::decode_constant_getter(no_ret, sizeof no_ret, value) &&
+              !anvil_game::decode_constant_getter(five, 3, value));
     });
 
     run("anvil-game: the campaign's events after outer frames", [&] {
