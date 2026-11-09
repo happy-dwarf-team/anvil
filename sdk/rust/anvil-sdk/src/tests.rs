@@ -9,7 +9,8 @@ use std::sync::{Mutex, MutexGuard};
 
 use crate::sys::*;
 use crate::{
-    game, map, panel, script, world, Change, ErrorCode, FunctionHook, Host, Payload, Plugin, Tag,
+    commands, game, map, panel, script, world, Change, ErrorCode, FunctionHook, Host, Payload,
+    Plugin, Tag,
 };
 
 /// One test at a time: the host is global to the crate, as in a plugin DLL.
@@ -27,6 +28,7 @@ struct Recorded {
     describes: Vec<(usize, usize)>,
     colors: Vec<u32>,
     day_ends: Vec<(usize, usize, usize)>, // (self, callback, context)
+    commands: Vec<String>,
 }
 
 static RECORDED: Mutex<Option<Recorded>> = Mutex::new(None);
@@ -123,9 +125,47 @@ unsafe extern "C" fn fake_get_service(
         ("anvil-game.world", 1) => ptr::from_ref(&*FAKE_WORLD).cast(),
         ("anvil-map.modes", 1) => ptr::from_ref(&*FAKE_MAP).cast(),
         ("anvil-script.day_end", 1) => ptr::from_ref(&*FAKE_DAY_END).cast(),
+        ("anvil-game.commands", 1) => ptr::from_ref(&*FAKE_COMMANDS).cast(),
         _ => ptr::null(),
     }
 }
+
+// --- a fake commands service ----------------------------------------------------
+
+// "<self> <type> <flags> <id>/<tag>/<kind> ..."; a count of 0 is refused, and a
+// drill start skips one.
+unsafe extern "C" fn commands_post(
+    plugin: *mut AnvilPlugin,
+    command: *const AnvilGameCommand,
+    out: *mut AnvilGameCommandResult,
+) -> AnvilResult {
+    let c = unsafe { &*command };
+    if c.size as usize != std::mem::size_of::<AnvilGameCommand>() || c.count == 0 {
+        return ANVIL_ERROR_INVALID_ARGUMENT;
+    }
+    let units = unsafe { std::slice::from_raw_parts(c.units, c.count as usize) };
+    let mut line = format!("{:x} {} {}", plugin as usize, c.type_, c.flags);
+    for u in units {
+        let tag: String = u.country.text[..3]
+            .iter()
+            .map(|&b| b as u8 as char)
+            .collect();
+        line += &format!(" {:x}/{tag}/{}", u.id, u.kind);
+    }
+    with(|r| r.commands.push(line));
+    let out = unsafe { &mut *out };
+    let skipped =
+        u32::from(c.type_ == ANVIL_GAME_COMMAND_DRILL && c.flags == ANVIL_GAME_COMMAND_START);
+    out.posted = c.count - skipped;
+    out.skipped = skipped;
+    out.refused = 0;
+    ANVIL_OK
+}
+
+static FAKE_COMMANDS: Shared<AnvilGameCommandsService> = Shared(AnvilGameCommandsService {
+    size: std::mem::size_of::<AnvilGameCommandsService>() as u32,
+    post: Some(commands_post),
+});
 
 // --- a fake panel service -------------------------------------------------------
 
@@ -654,6 +694,45 @@ fn world_reads_grow_their_buffers_and_old_services_answer_unsupported() {
 }
 
 #[test]
+fn commands_post_for_this_plugin_with_the_units_as_given() {
+    let (_guard, table) = fake_host();
+    assert_eq!(load::<Quiet>(table), ANVIL_OK);
+    let host = Host::current().unwrap();
+    let c = commands::Commands::get(&host).unwrap();
+    let rus = Tag::new("RUS");
+    let army = world::UnitRef {
+        id: 0x36,
+        country: rus,
+        kind: world::UnitKind::Army,
+    };
+    let navy = world::UnitRef {
+        id: 0x37,
+        country: rus,
+        kind: world::UnitKind::Navy,
+    };
+    assert_eq!(
+        c.drill(&[army, army], true).unwrap(),
+        commands::Posted {
+            posted: 1,
+            skipped: 1,
+            refused: 0
+        }
+    );
+    assert_eq!(c.split(&navy).unwrap().posted, 1);
+    assert_eq!(c.merge(&[]).unwrap_err().code(), ErrorCode::InvalidArgument);
+    assert_eq!(
+        with(|r| r.commands.clone()),
+        ["5e1f 1 1 36/RUS/0 36/RUS/0", "5e1f 3 0 37/RUS/1"]
+    );
+    assert_eq!(commands::MAX_UNITS, 64);
+    assert_eq!(
+        ErrorCode::from_result(ANVIL_ERROR_LIMIT),
+        Some(ErrorCode::Limit)
+    );
+    assert_eq!(ErrorCode::Suspended.result(), ANVIL_ERROR_SUSPENDED);
+}
+
+#[test]
 fn map_modes_register_paint_and_cut_tooltips_at_a_whole_character() {
     let (_guard, table) = fake_host();
     assert_eq!(load::<Quiet>(table), ANVIL_OK);
@@ -775,7 +854,7 @@ fn milli_tags_and_errors_read_as_people_write_them() {
 
 #[test]
 fn event_and_service_names_are_the_headers() {
-    let pairs: [(&CStr, &[u8]); 10] = [
+    let pairs: [(&CStr, &[u8]); 11] = [
         (crate::PLUGINS_LOADED.name(), ANVIL_EVENT_PLUGINS_LOADED),
         (crate::SUSPENDED.name(), ANVIL_EVENT_SUSPENDED),
         (crate::RESUMED.name(), ANVIL_EVENT_RESUMED),
@@ -783,6 +862,7 @@ fn event_and_service_names_are_the_headers() {
         (game::WAR.name(), ANVIL_GAME_EVENT_WAR),
         (game::SERVICE, ANVIL_GAME_SERVICE),
         (world::SERVICE, ANVIL_GAME_WORLD_SERVICE),
+        (commands::SERVICE, ANVIL_GAME_COMMANDS_SERVICE),
         (panel::SERVICE, ANVIL_PANEL_SERVICE),
         (crate::benchmark::SERVICE, ANVIL_BENCHMARK_SERVICE),
         (map::SERVICE, ANVIL_MAP_MODES_SERVICE),
