@@ -32,8 +32,11 @@ jobs:
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * `
             -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul && set" |
-            Where-Object { $_ -match '^[^=]+=' } | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          # Only what vcvars64.bat adds or changes, not the runner's own GITHUB_* and the rest.
+          cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul && set" | ForEach-Object {
+            $name, $value = $_ -split '=', 2
+            if ($name -and $null -ne $value -and [Environment]::GetEnvironmentVariable($name) -ne $value) { "$name=$value" }
+          } | Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: sccache
         shell: pwsh
