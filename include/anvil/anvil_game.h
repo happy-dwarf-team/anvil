@@ -320,7 +320,8 @@ typedef struct AnvilGameUnit {
     uint64_t leader;      /* the leader's id; 0: no leader */
 } AnvilGameUnit;
 
-/* One unit of the player's selection. */
+/* One unit of the player's selection. It comes in arrays and has no `size`,
+ * so it never grows within version 1: more about a unit comes from unit(). */
 typedef struct AnvilGameUnitRef {
     uint64_t id;
     AnvilGameTag country;
