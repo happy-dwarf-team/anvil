@@ -46,7 +46,7 @@ struct HelloScript : anvil::Plugin {
         if (r != ANVIL_OK) throw anvil::Error(r, "register_effect hello_script_log");
         host.info("hello_script_log is a script effect now");
 
-        // anvil-script.day_end came after the effects (Anvil 1.17): optional here.
+        // anvil-script.day_end came after the effects (Anvil 1.18): optional here.
         const auto* days =
             host.service<AnvilScriptDayEndService>(ANVIL_SCRIPT_DAY_END_SERVICE, ANVIL_SCRIPT_DAY_END_SERVICE_VERSION);
         if (days == nullptr) {

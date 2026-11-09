@@ -22,7 +22,7 @@ affects_gameplay = true
 
 [[dependencies]]
 id = "anvil-script"
-version = "^1.17"   # the first Anvil with the service (working number)
+version = "^1.18"   # the first Anvil with the service (working number)
 ```
 
 ## 2. The interface

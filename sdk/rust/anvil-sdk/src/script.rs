@@ -6,7 +6,7 @@
 //! Only a plugin with `affects_gameplay = true` subscribes, and only before
 //! the first Day end of the process: in its [`Plugin::load`](crate::Plugin).
 //! Depend on anvil-script in plugin.toml (`[[dependencies]] id =
-//! "anvil-script"`, `version = "^1.17"`) and look the service up with
+//! "anvil-script"`, `version = "^1.18"`) and look the service up with
 //! [`DayEnd::get`]. The handler runs inside the game's day command:
 //! [`World`](crate::world::World) answers `WrongPhase` there. In multiplayer
 //! every client runs the same Day ends in the same order, so the handler must
@@ -96,7 +96,7 @@ where
 }
 
 impl DayEnd {
-    /// The service; `None` without anvil-script, on an Anvil older than 1.17,
+    /// The service; `None` without anvil-script, on an Anvil older than 1.18,
     /// or on a build without the Day end's symbols.
     pub fn get(host: &Host) -> Option<Self> {
         // SAFETY: the table type of anvil-script.day_end version 1.
