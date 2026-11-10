@@ -2,16 +2,16 @@
 
 ## [1.19.0](https://github.com/happy-dwarf-team/anvil/compare/v1.18.0...v1.19.0) (2026-11-10)
 
-
 ### Features
 
-* **api:** wrap anvil-script.effects in anvil-sdk ([#310](https://github.com/happy-dwarf-team/anvil/issues/310)) ([c764783](https://github.com/happy-dwarf-team/anvil/commit/c764783aa0957b9451b08ca753ced57d256fd2a7))
-
+* **api:** Rust plugins can add script effects. `anvil-sdk` 0.1.7 wraps `anvil-script.effects` as `anvil::script::Effects`: `register` and `register_with_tooltip` take a handler that gets the effect's value and the province and country it runs in, and a tooltip handler whose first line goes into the game's tooltip. A panic in a handler is logged once and the game goes on. Tested with the crate's unit tests against a stand-in service; not run in the game, since the handlers reach the same C service as the C++ example `hello-script`, which was tested in the game for Anvil 1.16. ([#310](https://github.com/happy-dwarf-team/anvil/issues/310))
 
 ### Bug Fixes
 
-* **api:** keep the inert binding of a key conflict in anvil-sdk ([#308](https://github.com/happy-dwarf-team/anvil/issues/308)) ([479c13b](https://github.com/happy-dwarf-team/anvil/commit/479c13b36c37a9e2ffa929f6bb5af14dca603556))
-* **api:** write anvil-script's tooltip lines by anvil-map's text rule ([#311](https://github.com/happy-dwarf-team/anvil/issues/311)) ([10e3546](https://github.com/happy-dwarf-team/anvil/commit/10e3546fcaf9cfcb9e44a58d8850d9886a7c11fd))
+* **api:** a script effect's tooltip line now shows exactly what the plugin wrote, as a map mode's lines do. The game's colour sign `§`, which the game cannot escape, shows as `?` instead of being dropped with the letter after it kept (`§Yred` showed as `Yred`), `$` is no longer dropped, and text that is not valid UTF-8 is cut at the first bad byte. Line breaks still end the line. Tested with Anvil's unit tests; not seen in the game yet: whether a decision's or an event's tooltip replaces a `$…$` in a plugin's line (a map mode's tooltip shows it as written). ([#311](https://github.com/happy-dwarf-team/anvil/issues/311))
+* **api:** in `anvil-sdk`, a key binding whose key another plugin already holds is no longer lost. The new `Input::bind_or_inert` keeps it, inert, so the plugin can give it a free key later with `set_code`, for example when the player picks another key in the panel; `Input::bind` still answers `Conflict` as before. Each lost binding used to take one of the 256 a game may have. Tested with the crate's unit tests. ([#308](https://github.com/happy-dwarf-team/anvil/issues/308))
+
+Nothing changes for players without plugins that use these services. The C and C++ interface is unchanged.
 
 ## [1.18.0](https://github.com/happy-dwarf-team/anvil/compare/v1.17.0...v1.18.0) (2026-11-10)
 
