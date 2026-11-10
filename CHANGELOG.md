@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.19.0](https://github.com/happy-dwarf-team/anvil/compare/v1.18.0...v1.19.0) (2026-11-10)
+
+
+### Features
+
+* **api:** wrap anvil-script.effects in anvil-sdk ([#310](https://github.com/happy-dwarf-team/anvil/issues/310)) ([c764783](https://github.com/happy-dwarf-team/anvil/commit/c764783aa0957b9451b08ca753ced57d256fd2a7))
+
+
+### Bug Fixes
+
+* **api:** keep the inert binding of a key conflict in anvil-sdk ([#308](https://github.com/happy-dwarf-team/anvil/issues/308)) ([479c13b](https://github.com/happy-dwarf-team/anvil/commit/479c13b36c37a9e2ffa929f6bb5af14dca603556))
+* **api:** write anvil-script's tooltip lines by anvil-map's text rule ([#311](https://github.com/happy-dwarf-team/anvil/issues/311)) ([10e3546](https://github.com/happy-dwarf-team/anvil/commit/10e3546fcaf9cfcb9e44a58d8850d9886a7c11fd))
+
 ## [1.18.0](https://github.com/happy-dwarf-team/anvil/compare/v1.17.0...v1.18.0) (2026-11-10)
 
 
