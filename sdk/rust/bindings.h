@@ -6,3 +6,4 @@
 #include <anvil/anvil_input.h>
 #include <anvil/anvil_benchmark.h>
 #include <anvil/anvil_map.h>
+#include <anvil/anvil_script.h>
