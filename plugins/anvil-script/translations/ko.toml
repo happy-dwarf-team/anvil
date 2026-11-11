@@ -3,4 +3,4 @@
 status = "draft"
 
 [text]
-"Standard plugin: gameplay plugins add effects of their own to the game's script language, which mods use in events, decisions and scripted effects." = "표준 플러그인: 게임플레이 플러그인이 게임의 스크립트 언어에 자체 효과를 추가하고, 모드는 이를 이벤트, 결정, 스크립트 효과에서 사용합니다."
+"Standard plugin: gameplay plugins add effects of their own to the game's script language, which mods use in events, decisions and scripted effects, and mods ask has_dlc = \"anvil:<id>\" whether a plugin acts." = "표준 플러그인: 게임플레이 플러그인이 게임의 스크립트 언어에 자체 효과를 추가하고, 모드는 이를 이벤트, 결정, 스크립트 효과에서 사용하며, has_dlc = \"anvil:<id>\"로 플러그인이 작동하는지 묻습니다."
