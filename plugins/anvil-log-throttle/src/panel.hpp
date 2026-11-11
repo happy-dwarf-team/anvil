@@ -10,8 +10,8 @@
 namespace log_throttle::panel {
 
 // At the plugin's load: the overlay's panel service, if there is one, and the
-// setting's value. On: the table starts now and the panel is created, hidden;
-// the player shows it from the Status tab of the Anvil panel.
+// setting's value. On: the table starts now and the panel opens; once the
+// player closes it, its switch is in the Status tab of the Anvil panel.
 void load(const anvil::Host& host, Tally& tally, bool on);
 
 // The setting changed (any thread). On: the table starts, if it has not, and

@@ -278,6 +278,7 @@ void load(const anvil::Host& host, Tally& tally, bool on) {
     tally.keep(GetTickCount64());
     g_from_start = true;
     g_on.store(true);
+    g_show.store(true);
     start_thread();
     host.info("the script errors panel is on: it counts every message of the throttled logs from now on");
 }
