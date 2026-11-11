@@ -582,7 +582,8 @@ impl World {
 
     /// A country's ruler, heir or consort. `NotFound` when it has none: the
     /// game then holds a placeholder that every such country shares, and the
-    /// service never reads it.
+    /// service never reads it. A country no longer on the map keeps its last
+    /// ruler: check [`Country::province_count`] when that matters.
     pub fn monarch(&self, tag: Tag, kind: MonarchKind) -> Result<Monarch> {
         let f = function!(self.table, AnvilGameWorldService, monarch)?;
         let text = tag.c_text();
