@@ -113,7 +113,7 @@ const TextEntry kEntries[] = {
      {"{0} : {1} écrites, {2} comptées par le limiteur", "{0}: {1} geschrieben, {2} vom Drosseln gezählt",
       "{0}: {1} escritas, {2} contadas por el limitador", "{0}：写入 {1} 次，限流计数 {2} 次",
       "{0}：寫入 {1} 次，限流計數 {2} 次", "{0}：書き込み {1} 回、抑制で計数 {2} 回",
-      "{0}: 기록 {1}회, 제한으로 셈 {2}회", "{0}: zapisane: {1}, policzone przez dławienie: {2}"}},
+      "{0}: 기록 {1}회, 제한으로 셈 {2}회", "{0}: zapisane: {1}, policzone przez ograniczanie: {2}"}},
     {"Game code",
      {"Code du jeu", "Spielcode", "Código del juego", "游戏代码", "遊戲程式碼", "ゲームのコード", "게임 코드",
       "Kod gry"}},
