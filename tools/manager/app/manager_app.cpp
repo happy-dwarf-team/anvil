@@ -238,6 +238,7 @@ void ManagerApp::poll() {
     using namespace std::chrono;
     if (pending_.valid() && pending_.wait_for(0s) == std::future_status::ready) {
         snapshot_ = pending_.get();
+        translations_.clear();   // a plugin installed or updated may bring other translations
         follow_language(game_);  // the overlay's setting may be new: the folder was installed or changed
     }
     if (release_pending_.valid() && release_pending_.wait_for(0s) == std::future_status::ready) {
