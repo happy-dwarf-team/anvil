@@ -2041,3 +2041,51 @@ const _: () = {
         "Offset of field: AnvilScriptDayEndService::subscribe",
     ][::core::mem::offset_of!(AnvilScriptDayEndService, subscribe) - 8usize];
 };
+pub const ANVIL_LOG_THROTTLE_ID: &[u8; 19] = b"anvil-log-throttle\0";
+pub const ANVIL_LOG_MESSAGES_SERVICE: &[u8; 28] = b"anvil-log-throttle.messages\0";
+pub const ANVIL_LOG_MESSAGES_SERVICE_VERSION: u32 = 1;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AnvilLogTotals {
+    pub size: u32,
+    pub keeping: u32,
+    pub version: u64,
+    pub since_ms: u64,
+    pub messages: u64,
+    pub written: u64,
+    pub counted: u64,
+    pub untracked: u64,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AnvilLogMessage {
+    pub index: u64,
+    pub version: u64,
+    pub written: u64,
+    pub counted: u64,
+    pub log: *const core::ffi::c_char,
+    pub source: *const core::ffi::c_char,
+    pub source_line: i32,
+    pub reserved: u32,
+    pub text: *const core::ffi::c_char,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AnvilLogMessagesService {
+    pub size: u32,
+    pub keep: ::core::option::Option<unsafe extern "C" fn() -> AnvilResult>,
+    pub totals: ::core::option::Option<
+        unsafe extern "C" fn(out: *mut AnvilLogTotals) -> AnvilResult,
+    >,
+    pub read: ::core::option::Option<
+        unsafe extern "C" fn(
+            first: u64,
+            changed_after: u64,
+            out: *mut AnvilLogMessage,
+            capacity: u32,
+            message_size: u32,
+            count: *mut u32,
+            next: *mut u64,
+        ) -> AnvilResult,
+    >,
+}
