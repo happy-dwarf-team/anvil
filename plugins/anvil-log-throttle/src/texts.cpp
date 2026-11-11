@@ -1,7 +1,6 @@
 // The panel's words: English, then French, German, Spanish, Simplified and
-// Traditional Chinese, Japanese, Korean and Polish. Drafted by the agent; the
-// Polish was written by a fluent speaker, the others wait for a native
-// speaker's check (docs/script-errors-panel.md).
+// Traditional Chinese, Japanese, Korean and Polish. Drafted by the agent; each
+// language waits for a native speaker's check (docs/script-errors-panel.md).
 #include "texts.hpp"
 
 #include <cstring>
