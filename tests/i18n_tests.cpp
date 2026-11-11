@@ -130,18 +130,6 @@ std::set<std::string> catalog_keys(const fs::path& root) {
         }
     }
     for (const Pattern& p : patterns()) keys.insert(p.english);
-    // The settings of the standard plugins that the overlay and the Manager
-    // show translated: their labels, descriptions, groups and option labels.
-    for (const char* plugin : {"anvil-log-throttle"}) {
-        const anvil::SettingsFileResult parsed = anvil::load_settings(root / "plugins" / plugin / "settings.toml");
-        if (!parsed.file) continue;
-        for (const anvil::Setting& s : parsed.file->settings) {
-            for (const std::string* text : {&s.label, &s.description, &s.group}) {
-                if (!text->empty()) keys.insert(*text);
-            }
-            for (const anvil::SettingOption& o : s.options) keys.insert(o.label);
-        }
-    }
     return keys;
 }
 

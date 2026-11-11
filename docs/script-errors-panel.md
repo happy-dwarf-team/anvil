@@ -112,12 +112,12 @@ notification, a filter, an editor other than VS Code, a link to Etch.
   `anvil-overlay.panel`), that every text the panel uses has every language with the same
   placeholders, the playset's layers and Find on a folder of files, and the service end to end
   through the plugin's write hook, with the count compared to the lines and reports the log gets.
-- `anvil_i18n_tests`: the settings of anvil-log-throttle are in every catalog, since the overlay
-  and the Manager show them translated.
 - The Rust wrapper against a stand-in service (`cargo test -p anvil-sdk`).
 - In the game: see the pull request that added the panel.
 
 ## Translations
 
-The panel's words and the settings of anvil-log-throttle were drafted by the agent, in every
-language; each waits for a native speaker's check (for Polish, the maintainer's).
+The panel's words were drafted by the agent, in every language; each waits for a native
+speaker's check (for Polish, the maintainer's). The `panel` setting's label and description are
+translated like the plugin's other settings, in `plugins/anvil-log-throttle/translations/`
+(eu4-engine-lab#113).

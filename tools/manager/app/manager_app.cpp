@@ -1059,9 +1059,7 @@ void ManagerApp::draw_settings_tab() {
             ImGui::SeparatorText(group.c_str());
         }
         ImGui::PushID(static_cast<int>(setting.id));
-        // The catalogs translate the settings of the standard plugins whose
-        // texts they hold (tests/i18n_tests.cpp); any other stays as written.
-        const std::string label = setting.label.empty() ? setting.name : tr(setting.label.c_str());
+        const std::string label = setting.label.empty() ? setting.name : setting.label;
         bool changed = false;
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
         switch (setting.type) {
@@ -1128,7 +1126,7 @@ void ManagerApp::draw_settings_tab() {
         }
         if (!setting.description.empty()) {
             ImGui::Indent();
-            weak(tr(setting.description.c_str()));
+            weak(setting.description);
             ImGui::Unindent();
         }
         editor.dirty = editor.dirty || changed;
