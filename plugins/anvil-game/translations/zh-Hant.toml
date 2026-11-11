@@ -3,4 +3,4 @@
 status = "draft"
 
 [text]
-"Standard plugin: game readiness, a frame event, work on the main thread, the game date and its events, read-only provinces, countries and units, a session event with ironman and multiplayer, which Anvil uses to suspend gameplay plugins, and the unit panel's commands for gameplay plugins." = "標準外掛：遊戲就緒、每幀事件、主執行緒上的工作、遊戲日期及其事件、唯讀的省份、國家和部隊、包含鐵人和多人模式的工作階段事件（Anvil 用它暫停影響遊戲的外掛），以及供影響遊戲的外掛使用的部隊面板指令。"
+"Standard plugin: game readiness, a frame event, work on the main thread, the game date and its events, read-only provinces, countries, units, rulers, flags and variables, a session event with ironman and multiplayer, which Anvil uses to suspend gameplay plugins, and the unit panel's commands for gameplay plugins." = "標準外掛：遊戲就緒、每幀事件、主執行緒上的工作、遊戲日期及其事件、唯讀的省份、國家、部隊、統治者、旗標和變數、包含鐵人和多人模式的工作階段事件（Anvil 用它暫停影響遊戲的外掛），以及供影響遊戲的外掛使用的部隊面板指令。"

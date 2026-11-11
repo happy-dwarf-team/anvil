@@ -3,4 +3,4 @@
 status = "draft"
 
 [text]
-"Standard plugin: gameplay plugins add effects of their own to the game's script language, which mods use in events, decisions and scripted effects." = "Plugin estándar: los plugins de jugabilidad añaden efectos propios al lenguaje de script del juego, que los mods usan en eventos, decisiones y efectos con script."
+"Standard plugin: gameplay plugins add effects of their own to the game's script language, which mods use in events, decisions and scripted effects, and mods ask has_dlc = \"anvil:<id>\" whether a plugin acts." = "Plugin estándar: los plugins de jugabilidad añaden efectos propios al lenguaje de script del juego, que los mods usan en eventos, decisiones y efectos con script, y los mods preguntan con has_dlc = \"anvil:<id>\" si un plugin actúa."
