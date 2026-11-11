@@ -1090,7 +1090,9 @@ void draw_setting(const std::string& plugin, AnvilSetting id, const AnvilControl
     const std::string saved = control.setting_value(plugin, id, ANVIL_CONTROL_VALUE_SAVED);
     const std::string fallback = control.setting_value(plugin, id, ANVIL_CONTROL_VALUE_DEFAULT);
     const std::string key = edit_key(plugin, id);
-    const char* label = info.label;
+    // The catalogs translate the settings of the standard plugins whose texts
+    // they hold (tests/i18n_tests.cpp); any other label stays as written.
+    const char* label = info.label != nullptr ? tr(info.label) : "";
     const float width = 220.0f * scale();
     ImGui::PushID(static_cast<int>(id));
     const auto applied = [&](const std::string& error) {
@@ -1191,7 +1193,7 @@ void draw_setting(const std::string& plugin, AnvilSetting id, const AnvilControl
         ImGui::Text("%s: %s", label, saved.c_str());
         break;
     }
-    help_marker(info.description);
+    help_marker(info.description != nullptr ? tr(info.description) : nullptr);
     if (current != saved) {
         // restart = true: the saved value waits for the next start. Otherwise
         // an ANVIL_<ID>_<NAME> variable overrides it until the next change.
