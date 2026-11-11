@@ -171,7 +171,25 @@ AnvilResult host_mid_hook_at(AnvilPlugin* self, void* address, const void* expec
 AnvilResult host_remove(AnvilPlugin* self, AnvilChange* change) {
     if (process_exiting()) return ANVIL_OK;
     if (!valid(self) || change == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
-    return to_result(changes_of(self).remove(self->owner, change_id(change)));
+    ChangeRegistry& changes = changes_of(self);
+    const ChangeStatus status = changes.remove(self->owner, change_id(change));
+    if (status != ChangeStatus::NotFound) return to_result(status);
+    // Any handle of the same plugin may remove a change of its plugin or of
+    // one of its modules (ADR 0010): the C++ and Rust wrappers remove with the
+    // handle the plugin was loaded with.
+    AnvilPlugin& root = root_of(self);
+    if (&root != self) {
+        if (const ChangeStatus s = changes.remove(root.owner, change_id(change)); s != ChangeStatus::NotFound) {
+            return to_result(s);
+        }
+    }
+    for (const auto& m : root.modules) {
+        if (m.get() == self) continue;
+        if (const ChangeStatus s = changes.remove(m->owner, change_id(change)); s != ChangeStatus::NotFound) {
+            return to_result(s);
+        }
+    }
+    return ANVIL_ERROR_NOT_FOUND;
 }
 
 AnvilResult host_begin_group(AnvilPlugin* self) {

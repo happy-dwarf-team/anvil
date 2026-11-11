@@ -372,6 +372,15 @@ default = false
                        "allow_multiplayer in anvil.toml); 1 change(s) out of the game"));
         w.session(ANVIL_GAME_SESSION_ENDED, false, true);
         CHECK(w.patched(0x300) && (heard == std::vector<std::string>{ANVIL_EVENT_SUSPENDED, ANVIL_EVENT_RESUMED}));
+
+        // The wrappers remove with the plugin's handle: a module's change goes too.
+        ChangeId id = 0;
+        CHECK(w.changes->patch_bytes(drill->owner, at(0x400), patch, 2, &id) == ChangeStatus::Ok);
+        auto* handle = reinterpret_cast<AnvilChange*>(static_cast<uintptr_t>(id));
+        CHECK(host.remove(&plugin, handle) == ANVIL_OK && !w.patched(0x400) && w.changes->count(drill->owner) == 1);
+        CHECK(host.remove(&plugin, handle) == ANVIL_ERROR_NOT_FOUND);
+        CHECK(w.changes->patch_bytes(plugin.owner, at(0x500), patch, 2, &id) == ChangeStatus::Ok);
+        CHECK(host.remove(ui, reinterpret_cast<AnvilChange*>(static_cast<uintptr_t>(id))) == ANVIL_OK);
         if (g_failures != 0) w.dump();
     });
 
