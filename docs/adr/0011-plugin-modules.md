@@ -1,6 +1,6 @@
 # A plugin may declare modules, each with its own gameplay flags
 
-Status: **proposed** (2026-11-11), for the maintainer's decision. A minimal implementation of the core and of `anvil-sdk` is in the same pull request; the Manager and the overlay are not, and nothing has been run in the game.
+Status: **accepted** (2026-11-12, proposed 2026-11-11). The maintainer chose variant C (handles) and the points under "Release" below. A minimal implementation of the core and of `anvil-sdk` is in the same pull request; the Manager and the overlay are not.
 
 `affects_gameplay`, `allow_ironman` and `allow_multiplayer` belong to a whole plugin (design §13). A plugin that bundles features of different kinds therefore takes the strictest kind for all of them: one feature that posts a command makes the plugin a gameplay plugin, and the core suspends every feature of it in ironman, including the ones that only draw the interface. The lab's port of europagiga (16 features by one author, MIT; eu4-engine-lab `docs/europagiga-port-plan.md`) was split into five plugins for this reason alone: Whetstone and Sieve draw, Muster posts commands, the automata and Anbennar's lifespan fix change the rules. Each would be its own repository, Workshop item, catalog entry and approval. The maintainer asked for one plugin with a switch per feature instead. This ADR decides how a plugin declares such modules, how the core keeps applying §13 to each of them, and what the player, the multiplayer hash and older plugins see. One choice is hard to undo once plugins use it: a module is a handle the plugin acts through, not a tag on its changes.
 
@@ -14,6 +14,13 @@ How to read the evidence. **[code]**: read in this repository or a team plugin. 
 4. **The player names a module `<plugin>.<module>`** in `anvil.toml`: `allow_ironman = ["smithy.drill_all"]`, `allow_multiplayer = […]`, and two new lists, `enabled_modules` (turns on a module whose `default` is `false`) and `disabled_modules` (turns one off). A choice applies at the next start.
 5. **The multiplayer hash** of §13 has a line `<plugin>.<module> <version>` for every module that affects gameplay and acts in the session, next to the line `<plugin> <version>` of a plugin whose own handle does, so two players with the same plugin and different gameplay modules see different hashes.
 6. **The plugin's own `affects_gameplay` stays required** and covers its own handle: the shared code that subscribes to events, reads the world and registers services. A modular plugin usually has `affects_gameplay = false` there and keeps everything that changes the game in modules. The plugin depends on `anvil-game` implicitly (§10) when it or any module affects gameplay.
+
+## Release
+
+- **The core, not the plugin, turns a module on and off**, by the two `anvil.toml` lists of point 4. A plugin's own bool setting per feature was the alternative; only the core's lists keep the multiplayer hash and the suspension true, and a module off at the start runs no code at all, which also helps when a module crashes.
+- **A choice applies at the next start.** Turning a module off while the game runs is left for later (see "Considered options").
+- **Modules ship whole, in the release after 1.21** (working number 1.22.0), not split across releases. Before that release the player gets, each in its own pull request: the module switches and opt-ins in the Manager, the modules' state in the overlay, the module list in the approval prompt of a plugin from a mod, and the modules in `anvil check` output. The catalog's "some modules" can follow, since no modular plugin is in the catalog before then.
+- **"Module" is one word across the team's plugins.** A plugin that already calls its setting-switched feature groups modules (Bellows) means the same thing and can move them to `[[modules]]` once this ships.
 
 ## Why handles
 
@@ -59,7 +66,7 @@ A setting's value is not in the hash, for a module as for a plugin today. A game
 - **New `plugin.toml` on an older Anvil.** Unknown manifest keys are errors, so an older Anvil skips the plugin with `unknown key 'modules'`. The plugin declares `anvil = ">=<the release with modules>"`, as for any added key (CONTRIBUTING).
 - **API 2.** The host table grows after the "end of API 2.0" line (`ANVIL_HOST_HAS(host, module)`), and `AnvilResult` gets `ANVIL_ERROR_DISABLED = 15`; nothing is changed or removed, so this is a `feat(api)`, not a new API. A plugin that declares modules never runs on a host without the field, because that host refuses the manifest.
 - **`anvil.control`** gets appended fields: the module count and a call for a module's entry. It is private (ADR 0001) and may change in a minor release.
-- **`anvil.toml`.** `enabled_modules` and `disabled_modules` are new keys that an older Anvil ignores [hypothesis: `discovery.cpp` reads only the keys it knows; to check before the release].
+- **`anvil.toml`.** `enabled_modules` and `disabled_modules` are new keys that an older Anvil ignores [code: `discovery.cpp` of 1.20.0 reads only the keys it knows and reports no unknown ones].
 - **Rust.** `anvil-sdk` 0.1.9 gets `Host::module(name) -> Result<Host>` and `ErrorCode::Disabled` (`ErrorCode` is `#[non_exhaustive]`, so the variant breaks nothing); `anvil-sys` gets the field and the constant in its bindings.
 
 ## Considered options
