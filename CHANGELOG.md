@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.20.0](https://github.com/happy-dwarf-team/anvil/compare/v1.19.0...v1.20.0) (2026-11-12)
+
+
+### Features
+
+* add a script errors panel for modders to anvil-log-throttle ([#318](https://github.com/happy-dwarf-team/anvil/issues/318)) ([5890af6](https://github.com/happy-dwarf-team/anvil/commit/5890af68ae66c3e6ebc46924ab52f88ae412c080))
+* **api:** answer has_dlc for plugin names in anvil-script ([#321](https://github.com/happy-dwarf-team/anvil/issues/321)) ([e035589](https://github.com/happy-dwarf-team/anvil/commit/e03558908277bb1b543eb673a90e0b53bb611f27))
+* **api:** read rulers, flags and variables from anvil-game.world ([#320](https://github.com/happy-dwarf-team/anvil/issues/320)) ([076f28b](https://github.com/happy-dwarf-team/anvil/commit/076f28b51cf1299246415d4dba91fce8e45b19a3))
+* translate plugins' texts and the catalog's summaries in eight languages ([#322](https://github.com/happy-dwarf-team/anvil/issues/322)) ([00053d9](https://github.com/happy-dwarf-team/anvil/commit/00053d924a0878d6619765489f105da839c8746d))
+
+
+### Bug Fixes
+
+* **sdk:** install anvil_log_throttle.h with the other headers ([#324](https://github.com/happy-dwarf-team/anvil/issues/324)) ([a617cb7](https://github.com/happy-dwarf-team/anvil/commit/a617cb7f4a6e616212f15f260b74fceb894a66c3))
+
 ## [1.19.0](https://github.com/happy-dwarf-team/anvil/compare/v1.18.0...v1.19.0) (2026-11-10)
 
 ### Features
