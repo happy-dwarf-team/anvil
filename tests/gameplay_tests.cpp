@@ -192,7 +192,7 @@ void gameplay_tests() {
         // Single player: nothing changes.
         w.session(ANVIL_GAME_SESSION_STARTED, false, false);
         CHECK(w.patched(0x100) && w.patched(0x200) && w.patched(0x300) && w.events.empty());
-        CHECK(w.logged("anvil: game session started (neither ironman nor multiplayer): 0 gameplay plugin(s) suspended"));
+        CHECK(w.logged("anvil: game session started (neither ironman nor multiplayer): 0 gameplay plugin(s) or module(s) suspended"));
         w.session(ANVIL_GAME_SESSION_ENDED, false, false);
 
         // Ironman: gp out, optin allowed by the player, plain untouched.
@@ -203,7 +203,7 @@ void gameplay_tests() {
         CHECK(w.logged("gp: suspended: affects gameplay and its plugin.toml does not offer allow_ironman = \"opt-in\" "
                        "(ironman); 1 change(s) out of the game"));
         CHECK(w.logged("optin: stays active: the player allows it in ironman"));
-        CHECK(w.logged("anvil: game session started (ironman): 1 gameplay plugin(s) suspended, 1 allowed by the player"));
+        CHECK(w.logged("anvil: game session started (ironman): 1 gameplay plugin(s) or module(s) suspended, 1 allowed by the player"));
         w.session(ANVIL_GAME_SESSION_ENDED, true, false);
         CHECK(w.patched(0x100) && !w.changes->suspended(gp) && !policy.session());
         CHECK((w.events == std::vector<std::string>{"gp:anvil.suspended", "gp:anvil.resumed"}));
