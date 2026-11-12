@@ -488,7 +488,7 @@ typedef struct AnvilGameRelation {
     AnvilGameTag first;
     AnvilGameTag second;
     AnvilGameDate start; /* when it began; its `session` is the current one; all 0 when the game keeps none */
-    AnvilGameDate end;   /* when it ends; all 0 when it has no end date, as most do not */
+    AnvilGameDate end;   /* when it ends, as the game keeps it, even when past; all 0 when it has none, as most */
 } AnvilGameRelation;
 
 /* AnvilGameDiplomacyStatus.flags */
