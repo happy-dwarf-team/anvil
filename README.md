@@ -104,7 +104,8 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
   `logs/script_profile_<date>.csv`
   ([docs/script-profiler.md](docs/script-profiler.md)). It hooks nothing until
   you press Start or Measure N days in its window; while it measures, the game
-  runs slower (OVERHEAD_TBD).
+  runs slower: 1.7% fewer days per second on vanilla and 1% on Anbennar in the
+  lab (eu4-engine-lab#164, within the run-to-run spread of a few percent).
 - Each start writes `anvil/anvil.log`: what was loaded, what was skipped and why.
 - A crash writes a report to `anvil/crashes/` (the last 10 are kept): where it
   happened and which plugins were involved, with each plugin's `issues` link.

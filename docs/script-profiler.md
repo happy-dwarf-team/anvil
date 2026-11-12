@@ -94,8 +94,11 @@ lists: the effect's time includes it.
 ## Cost
 
 - Without a span: no hook, no thread, no work in a frame or a day; the panel is a row in the Status tab.
-- During a span: measured in the lab (eu4-engine-lab#164, see the README's number). The cost grows with
-  the number of root blocks a day runs, so a large mod slows down more than vanilla.
+- During a span (eu4-engine-lab#164, lab series on Steam 1.37.5, process on CPU 1–7, 6 workers in each pool,
+  ABBA rounds of 180 days at speed 5): vanilla, the 1719 Russia save reloaded before each segment, 9.80 days
+  per second measuring against 9.98 idle, **−1.7%** (rounds −4.5% to +1.3%); Anbennar 1445–1450 in one game,
+  **−1.0%** (rounds −7.0% to +5.8%), with 54 M root calls in 181 days (vanilla 8.3 M). Both are within the
+  spread of the runs: the cost is smaller than this series resolves, below the 5% gate of #158.
 - Memory: about 2.8 MB per game thread that ran a script block, kept after the first span.
 
 ## Limits
