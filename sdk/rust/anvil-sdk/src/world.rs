@@ -326,7 +326,7 @@ impl StatisticKind {
 /// One year of a series. The value is whole units, not × 1000.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct StatisticPoint {
-    /// The year whose end it was taken at.
+    /// The year whose 1 January wrote it: 1720 holds the value at the end of 1719.
     pub year: i32,
     /// The value then (0 for a year before the country had one).
     pub value: i32,

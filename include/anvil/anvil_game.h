@@ -390,7 +390,9 @@ typedef struct AnvilGameFlag {
  * hidden event leave it in the frame after they came, so the service counts an
  * entry only once it was there at two outer frames in a row (and every entry a
  * session starts with, a loaded save's included). A real event shows up at most
- * one frame late. */
+ * one frame late. A save keeps the AI's and the hidden entries that were waiting
+ * when it was written, and after its load they count as well while the game
+ * has not run them: ANVIL_GAME_PENDING_HIDDEN tells the hidden ones. */
 
 /* AnvilGamePendingEvent.flags */
 #define ANVIL_GAME_PENDING_HIDDEN 0x1u /* the event is hidden: the game shows no window for it */
@@ -437,7 +439,7 @@ typedef struct AnvilGamePendingChange {
 /* One year of a series. It comes in arrays and has no `size`, so it never grows
  * within version 1. Unlike the rest of the service the value is not x 1000. */
 typedef struct AnvilGameStatisticPoint {
-    int32_t year;
+    int32_t year;  /* the year whose 1 January wrote it: 1720 holds the value at the end of 1719 */
     int32_t value;
 } AnvilGameStatisticPoint;
 
@@ -597,10 +599,11 @@ typedef struct AnvilGameWorldService {
     /* Since anvil-game 1.21.0. A country's yearly series of the game's graphs,
      * by `kind` (ANVIL_GAME_STATISTIC_*), oldest first: one point per year end
      * since the history began (the save's history included), written by the
-     * game's yearly update only, so it changes at anvil-game.year. The game
-     * keeps 0 for the years before the country had a value, which its save
-     * leaves out. A tag that no longer exists keeps its series. For this
-     * year's value read the country itself. ANVIL_ERROR_NOT_FOUND for a tag
+     * game's yearly update on 1 January only, so it changes at anvil-game.year.
+     * The game keeps 0 for the years before the country had a value, which its
+     * save leaves out. A tag that no longer exists keeps its series. For this
+     * year's value read the country itself. A read walks every country's
+     * series: about 15 us with 1380 countries. ANVIL_ERROR_NOT_FOUND for a tag
      * without a series (none has one before its first year end);
      * ANVIL_ERROR_INVALID_ARGUMENT for another kind; ANVIL_ERROR_NOT_DECLARED
      * when a port declared the statistics symbols absent. */
