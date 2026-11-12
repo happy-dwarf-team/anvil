@@ -381,7 +381,7 @@ public:
     AnvilPlugin* self() const noexcept { return handle_ != nullptr ? handle_ : detail::self(); }
 
     // The host of module `id`, which plugin.toml declares in [[modules]]
-    // (Anvil 1.21.0, working number; ADR 0011): every call on it acts for the
+    // (Anvil 1.22.0, working number; ADR 0011): every call on it acts for the
     // module, which Anvil suspends by its own affects_gameplay and opt-ins.
     // std::nullopt when the player turned the module off (its code should not
     // run then); anvil::Error for an undeclared module or an Anvil without
@@ -389,7 +389,7 @@ public:
     std::optional<Host> module(const char* id) const {
         const AnvilHost& h = c_api();
         if (!ANVIL_HOST_HAS(&h, module) || h.module == nullptr) {
-            throw Error(ANVIL_ERROR_UNSUPPORTED, "module: this Anvil has no modules (1.21.0 or newer needed)");
+            throw Error(ANVIL_ERROR_UNSUPPORTED, "module: this Anvil has no modules (1.22.0 or newer needed)");
         }
         AnvilPlugin* out = nullptr;
         const AnvilResult r = h.module(self(), id, &out);

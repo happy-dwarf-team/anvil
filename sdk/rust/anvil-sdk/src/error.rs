@@ -45,7 +45,7 @@ pub enum ErrorCode {
     /// call was done. Since Anvil 1.17.0.
     Limit,
     /// `ANVIL_ERROR_DISABLED`: the player turned this module off
-    /// ([`Host::module`](crate::Host::module)). Since Anvil 1.21.0 (working
+    /// ([`Host::module`](crate::Host::module)). Since Anvil 1.22.0 (working
     /// number; ADR 0011).
     Disabled,
     /// A result this crate does not know.
