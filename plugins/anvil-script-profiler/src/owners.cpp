@@ -14,7 +14,9 @@
 //     +376, _Trigger +496; the province one also _OnActivation +616 and
 //     _OnDeactivation +672;
 //   CMission: _Tag +16, _Trigger +112, _Effect +232, _AIWeight +320,
-//     _ProvincesToHighlightTrigger +384.
+//     _ProvincesToHighlightTrigger +384;
+//   CChurchAspect: _Key +16, _Effect +464, _Trigger +520, _Potential +640, _AICheck +760;
+//   CScriptedTrigger (a use of a scripted trigger, an AND block itself): _Key +104.
 // Each owner keeps its vtable at +0.
 #include "owners.hpp"
 
@@ -48,6 +50,8 @@ constexpr int kModifierSize = 240;
 constexpr int kModifierPotential = 112;
 constexpr int kDecisionAiCheck = 464;
 constexpr int kMissionAiWeight = 320;
+constexpr int kAspectAiCheck = 760;
+constexpr int kScriptedKey = 104;
 constexpr std::size_t kMaxHeld = 256;  // options or modifiers of one owner; more is not a real one
 
 const Rule kRules[] = {
@@ -71,6 +75,11 @@ const Rule kRules[] = {
     {OwnerKind::mission, &Vtables::mission, 112, false, "trigger", 16},
     {OwnerKind::mission, &Vtables::mission, 384, false, "provinces_to_highlight", 16},
     {OwnerKind::mission, &Vtables::mission, 232, true, "effect", 16},
+    {OwnerKind::church_aspect, &Vtables::church_aspect, 520, false, "trigger", 16},
+    {OwnerKind::church_aspect, &Vtables::church_aspect, 640, false, "potential", 16},
+    {OwnerKind::church_aspect, &Vtables::church_aspect, 464, true, "effect", 16},
+    // A scripted trigger as a root block: the AND block is the CScriptedTrigger itself.
+    {OwnerKind::scripted_trigger, &Vtables::scripted_trigger, 0, false, "trigger", kScriptedKey},
 };
 
 const Owner kNone{};
@@ -97,6 +106,8 @@ const char* kind_key(OwnerKind kind) {
     case OwnerKind::country_modifier: return "triggered_modifier";
     case OwnerKind::province_modifier: return "province_triggered_modifier";
     case OwnerKind::mission: return "mission";
+    case OwnerKind::church_aspect: return "church_aspect";
+    case OwnerKind::scripted_trigger: return "scripted_trigger";
     case OwnerKind::none: break;
     }
     return "none";
@@ -174,12 +185,25 @@ void Resolver::expand(const Owner& owner) {
     }
     case OwnerKind::decision: add_modifiers(o + kDecisionAiCheck, owner, "ai_will_do"); break;
     case OwnerKind::mission: add_modifiers(o + kMissionAiWeight, owner, "ai_weight"); break;
+    case OwnerKind::church_aspect: add_modifiers(o + kAspectAiCheck, owner, "ai_will_do"); break;
     default: break;
     }
 }
 
-Owner Resolver::find(const void* block, bool effect) {
+Owner Resolver::find(const void* block, Kind kind) {
     const auto b = reinterpret_cast<std::uintptr_t>(block);
+    if (kind == Kind::scripted) {
+        // The hook's block is always a CScriptedTrigger, recorded at its address + 1 (the same
+        // object is also an AND block of its own); its name says which scripted trigger.
+        Owner o;
+        o.name = read_game_string(b - 1 + kScriptedKey);
+        if (o.name.empty()) return o;
+        o.kind = OwnerKind::scripted_trigger;
+        o.object = reinterpret_cast<const void*>(b - 1);
+        o.role = "";
+        return o;
+    }
+    const bool effect = kind == Kind::effect;
     for (const Rule& r : kRules) {
         if (r.effect != effect) continue;
         const std::uintptr_t vtable = vtables_.*r.vtable;
@@ -197,11 +221,11 @@ Owner Resolver::find(const void* block, bool effect) {
     return {};
 }
 
-const Owner& Resolver::owner_of(const void* block, bool effect, bool read_memory_now) {
+const Owner& Resolver::owner_of(const void* block, Kind kind, bool read_memory_now) {
     if (const auto it = cache_.find(block); it != cache_.end()) return it->second;
     if (const auto it = held_.find(block); it != held_.end()) return cache_.emplace(block, it->second).first->second;
     if (!read_memory_now) return kNone;
-    Owner o = find(block, effect);
+    Owner o = find(block, kind);
     if (o.kind != OwnerKind::none) {
         Owner owner = o;
         owner.role = "";
