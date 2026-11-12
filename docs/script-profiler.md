@@ -94,6 +94,12 @@ lists: the effect's time includes it.
   owners are looked up on the main thread at each day's end and at the end of the span; every read is
   guarded, and a block that is not what the tables expect has no owner. The owner's name is its key
   (`_DebugKey` for an event, `_Tag` for the rest).
+- **Church aspects** (v1.1): `CChurch::FindCheapestAspect` evaluates the children of each aspect's
+  `trigger` and `potential` one by one (its own loop), so those children are the root blocks. They are
+  found from the game's aspect database (`CChurchAspectDatabase::_pDB`, read through a code site in
+  `symbols.toml`) when the first day of a span ends.
+- **Scripted triggers** (v1.1): a use of a scripted trigger in a script is a `CScriptedTrigger` object,
+  an `AND` block itself; its name is its template's key.
 - **Builds.** Steam 1.37.5, GOG 1.37.5.2 and GOG 1.37.5.0. A build that declared an owner's vtable absent
   would still measure, without that owner's names.
 
@@ -105,7 +111,21 @@ lists: the effect's time includes it.
   per second measuring against 9.98 idle, **−1.7%** (rounds −4.5% to +1.3%); Anbennar 1445–1450 in one game,
   **−1.0%** (rounds −7.0% to +5.8%), with 54 M root calls in 181 days (vanilla 8.3 M). Both are within the
   spread of the runs: the cost is smaller than this series resolves, below the 5% gate of #158.
+- With v1.1's third hook (eu4-engine-lab#165, the same conditions): vanilla reloaded **+0.7%** (rounds −0.1% to
+  +1.3%), Anbennar in one game **−0.1%** (rounds −6.3% to +5.1%).
 - Memory: about 2.8 MB per game thread that ran a script block, kept after the first span.
+
+## Coverage
+
+The share of the trigger list's time that has an owner, from one span of 181 days (Steam 1.37.5, lab):
+
+| Playset | v1 | v1.1 (scripted triggers, church aspects) |
+| --- | --- | --- |
+| Vanilla, Russia 1719 | 71.5% | 76.6% |
+| Anbennar, Verne 1444 | 39.4% | 70.0% (84.7% of the calls) |
+
+Most of what is left: the AI's decision checks (`CEU3AI::ExecuteDecisions`), `OR` blocks run on their own,
+`limit`s (`CIfTrigger`) and, on Anbennar, `CReligiousSchool::CanInviteScholar`.
 
 ## Limits
 
