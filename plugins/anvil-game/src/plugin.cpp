@@ -311,7 +311,8 @@ void after_frame_body(std::uint64_t number) {
     }
     const SessionView view = read_session();
     const SessionChanges changes = g_tracker.update(view);
-    if (g_world_available) see_pending(view.running && g_tracker.active());
+    // A view that faulted says nothing, so the pending baseline stays.
+    if (g_world_available && view.readable) see_pending(view.running && g_tracker.active());
     // The date changes with the session it belongs to, under one lock; a view
     // that faulted keeps the last one, as it keeps the session.
     AnvilGameDate date{};
