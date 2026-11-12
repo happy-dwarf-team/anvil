@@ -34,7 +34,7 @@ struct Conflict {
     VersionRange range;
 };
 
-// [[modules]] (ADR 0010): a part of the plugin with its own gameplay flags.
+// [[modules]] (ADR 0011): a part of the plugin with its own gameplay flags.
 struct Module {
     std::string id;  // [a-z][a-z0-9_]*, max 32, unique in the plugin
     std::string name;

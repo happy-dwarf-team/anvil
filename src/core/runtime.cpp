@@ -769,7 +769,7 @@ void startup_impl(const std::filesystem::path& game_dir) {
         }
         plugin->manifest = std::move(m);
         g_runtime->policy->add(plugin->manifest, plugin->owner);
-        // Its modules (ADR 0010): owners right after the plugin's, and a
+        // Its modules (ADR 0011): owners right after the plugin's, and a
         // policy entry for each module that is on at this start.
         add_modules(*plugin, *g_runtime->changes, [&](const std::string& key, bool by_default) {
             return module_enabled(settings, key, by_default);

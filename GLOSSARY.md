@@ -35,7 +35,7 @@ A file of a plugin package, `translations/<code>.toml`, with one language's word
 _Avoid_: catalog (Anvil's own texts have catalogs; the Plugin catalog is the list of plugins), locale
 
 **Module**:
-A part of one plugin that `plugin.toml` declares with its own `affects_gameplay` and opt-ins, and that the player turns on or off by `<plugin>.<module>`; the plugin acts for it through the module's handle, so Anvil suspends it on its own (ADR 0010, proposed).
+A part of one plugin that `plugin.toml` declares with its own `affects_gameplay` and opt-ins, and that the player turns on or off by `<plugin>.<module>`; the plugin acts for it through the module's handle, so Anvil suspends it on its own (ADR 0011, proposed).
 _Avoid_: feature (the player's word for what a module does), sub-plugin, component
 
 **Plugin catalog**:

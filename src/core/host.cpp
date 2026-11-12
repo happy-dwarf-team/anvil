@@ -14,7 +14,7 @@ bool valid(const AnvilPlugin* self) { return self != nullptr && self->context !=
 ChangeRegistry& changes_of(AnvilPlugin* self) { return *self->context->changes; }
 
 // A module's handle uses its plugin's symbols, settings, folders and names
-// (ADR 0010); a plugin's own handle is its own root.
+// (ADR 0011); a plugin's own handle is its own root.
 AnvilPlugin& root_of(AnvilPlugin* self) { return self->parent != nullptr ? *self->parent : *self; }
 const AnvilPlugin& root_of(const AnvilPlugin* self) { return self->parent != nullptr ? *self->parent : *self; }
 
@@ -175,7 +175,7 @@ AnvilResult host_remove(AnvilPlugin* self, AnvilChange* change) {
     const ChangeStatus status = changes.remove(self->owner, change_id(change));
     if (status != ChangeStatus::NotFound) return to_result(status);
     // Any handle of the same plugin may remove a change of its plugin or of
-    // one of its modules (ADR 0010): the C++ and Rust wrappers remove with the
+    // one of its modules (ADR 0011): the C++ and Rust wrappers remove with the
     // handle the plugin was loaded with.
     AnvilPlugin& root = root_of(self);
     if (&root != self) {
@@ -273,7 +273,7 @@ const void* host_get_service(AnvilPlugin* self, const char* name, uint32_t versi
 AnvilResult host_subscribe(AnvilPlugin* self, const char* event, AnvilEventCallback callback, void* context) {
     if (!valid(self) || event == nullptr || callback == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
     // A module subscribes as "<plugin>.<module>", so anvil.suspended for the
-    // module reaches only what it subscribed (ADR 0010).
+    // module reaches only what it subscribed (ADR 0011).
     return self->context->bus->subscribe(self->manifest.id, event, callback, context);
 }
 
@@ -292,7 +292,7 @@ AnvilResult host_publish(AnvilPlugin* self, const char* event, const void* paylo
     return ANVIL_OK;
 }
 
-// ---- modules (ADR 0010) ------------------------------------------------------------------
+// ---- modules (ADR 0011) ------------------------------------------------------------------
 
 AnvilResult host_module(AnvilPlugin* self, const char* module, AnvilPlugin** out) {
     if (out != nullptr) *out = nullptr;
@@ -406,7 +406,7 @@ LoadOutcome run_plugin_load(AnvilPlugin& plugin, const AnvilHost& host, PluginLo
     LoadOutcome out;
     // The load is one group for the plugin and one for each module: changes
     // requested through any handle are enabled when the load returns ANVIL_OK,
-    // and none are when it fails (ADR 0010).
+    // and none are when it fails (ADR 0011).
     changes.begin_group(plugin.owner);
     for (const auto& m : plugin.modules) changes.begin_group(m->owner);
     plugin.loading = true;

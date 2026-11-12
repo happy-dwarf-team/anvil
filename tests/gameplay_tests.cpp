@@ -266,7 +266,7 @@ void gameplay_tests() {
         CHECK(w.logged("anvil: anvil-game.session with unknown change 7: ignored"));
     });
 
-    run("gameplay: modules are suspended by their own flags (ADR 0010)", [] {
+    run("gameplay: modules are suspended by their own flags (ADR 0011)", [] {
         World w;
         const Manifest smithy = manifest(plugin_toml("smithy", R"([[modules]]
 id = "ui_fix"
@@ -384,7 +384,7 @@ default = false
         if (g_failures != 0) w.dump();
     });
 
-    run("gameplay: a module that affects gameplay needs anvil-game (ADR 0010)", [] {
+    run("gameplay: a module that affects gameplay needs anvil-game (ADR 0011)", [] {
         ResolveInput input;
         input.host_api = kManifestApi;
         input.manifests = {manifest(plugin_toml("smithy", "[[modules]]\nid = \"drill_all\"\nname = \"Drill\"\n"

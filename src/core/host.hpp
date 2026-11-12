@@ -42,7 +42,7 @@ struct AnvilPlugin {
     // Inside anvil_plugin_load the load itself is the plugin's group.
     std::atomic<bool> loading{false};
 
-    // --- modules (ADR 0010) ---
+    // --- modules (ADR 0011) ---
     // A module's handle: `parent` is its plugin, whose symbols, settings,
     // folders and names it uses; its own are `owner` (the registry and the
     // gameplay policy) and `manifest`, which is module_manifest() of the
@@ -71,7 +71,7 @@ struct HostContext {
 // reach their context through `self`, so one table serves every plugin.
 AnvilHost make_host(const AnvilGameInfo* game);
 
-// The handles of `plugin`'s modules (ADR 0010), one per [[modules]] entry in
+// The handles of `plugin`'s modules (ADR 0011), one per [[modules]] entry in
 // file order: each gets its own owner in `changes`, right after the plugin's,
 // and is on when `enabled(module key, default)` says so. Call it once, before
 // the next plugin's owner is added.

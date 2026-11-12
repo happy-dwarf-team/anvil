@@ -60,7 +60,7 @@ A setting's value is not in the hash, for a module as for a plugin today. A game
 - **API 2.** The host table grows after the "end of API 2.0" line (`ANVIL_HOST_HAS(host, module)`), and `AnvilResult` gets `ANVIL_ERROR_DISABLED = 15`; nothing is changed or removed, so this is a `feat(api)`, not a new API. A plugin that declares modules never runs on a host without the field, because that host refuses the manifest.
 - **`anvil.control`** gets appended fields: the module count and a call for a module's entry. It is private (ADR 0001) and may change in a minor release.
 - **`anvil.toml`.** `enabled_modules` and `disabled_modules` are new keys that an older Anvil ignores [hypothesis: `discovery.cpp` reads only the keys it knows; to check before the release].
-- **Rust.** `anvil-sdk` 0.1.8 gets `Host::module(name) -> Result<Host>` and `ErrorCode::Disabled` (`ErrorCode` is `#[non_exhaustive]`, so the variant breaks nothing); `anvil-sys` gets the field and the constant in its bindings.
+- **Rust.** `anvil-sdk` 0.1.9 gets `Host::module(name) -> Result<Host>` and `ErrorCode::Disabled` (`ErrorCode` is `#[non_exhaustive]`, so the variant breaks nothing); `anvil-sys` gets the field and the constant in its bindings.
 
 ## Considered options
 

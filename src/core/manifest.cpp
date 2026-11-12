@@ -25,7 +25,7 @@ const std::set<std::string> kKnownDependencyKeys = {"id", "version", "optional"}
 const std::set<std::string> kKnownModuleKeys = {"id",           "name",           "description",      "affects_gameplay",
                                                 "allow_ironman", "allow_multiplayer", "default"};
 
-// A module id: [a-z][a-z0-9_]*, at most 32 characters (ADR 0010).
+// A module id: [a-z][a-z0-9_]*, at most 32 characters (ADR 0011).
 bool is_valid_module_id(std::string_view id) {
     if (id.empty() || id.size() > 32 || id.front() < 'a' || id.front() > 'z') return false;
     for (char c : id) {

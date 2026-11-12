@@ -24,7 +24,7 @@ struct AnvilSettings {
     // only plugins whose plugin.toml offers "opt-in" for that mode can use it.
     std::vector<std::string> allow_ironman;
     std::vector<std::string> allow_multiplayer;
-    // Modules by "<plugin>.<module>" (ADR 0010): turned on although their
+    // Modules by "<plugin>.<module>" (ADR 0011): turned on although their
     // `default` is false, and turned off. At the next start.
     std::vector<std::string> enabled_modules;
     std::vector<std::string> disabled_modules;

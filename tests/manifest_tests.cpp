@@ -208,7 +208,7 @@ id = "legacy"
         CHECK(load_manifest(folder).error == "plugin.toml not found");
     });
 
-    run("manifest v2: modules (ADR 0010)", [] {
+    run("manifest v2: modules (ADR 0011)", [] {
         const auto r = parse_manifest_text(plugin_toml("smithy", R"([[modules]]
 id = "ui_size_fix"
 name = "Country views at a raised GUI scale"

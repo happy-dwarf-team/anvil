@@ -383,7 +383,7 @@ void Control::status(AnvilControlStatus& out) const {
         else if (p->state == "failed") ++out.failed;
         if (p->state != "loaded") continue;
         // One line for the plugin's own handle and one per module that
-        // affects gameplay and acts now (ADR 0010): "<plugin>.<module> <version>".
+        // affects gameplay and acts now (ADR 0011): "<plugin>.<module> <version>".
         const auto acting = [&](const AnvilPlugin& h) {
             return h.manifest.affects_gameplay && h.enabled &&
                    (sources_.policy == nullptr || !sources_.policy->suspended(h.owner));
@@ -455,7 +455,7 @@ bool Control::plugin_of(const AnvilPlugin* plugin, AnvilControlPlugin& out) cons
     const auto& plugins = *sources_.plugins;
     for (size_t i = 0; i < plugins.size(); ++i) {
         if (plugins[i].get() == plugin) return this->plugin(static_cast<uint32_t>(i), out);
-        // A module's handle (ADR 0010): its plugin's entry with the module's
+        // A module's handle (ADR 0011): its plugin's entry with the module's
         // key, flags and state, so a service that checks its caller
         // (anvil-game.commands, anvil-script) gates the module, not the plugin.
         for (const auto& m : plugins[i]->modules) {

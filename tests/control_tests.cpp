@@ -480,7 +480,7 @@ void control_tests() {
         fs::remove_all(dir);
     });
 
-    run("control: modules in the plugin-set hash and plugin_of (ADR 0010)", [] {
+    run("control: modules in the plugin-set hash and plugin_of (ADR 0011)", [] {
         const fs::path dir = fresh_dir("anvil-control-modules");
         static uint8_t image[0x100];
         ChangeRegistry changes(reinterpret_cast<uintptr_t>(image), sizeof(image));
