@@ -121,6 +121,7 @@ struct State {
     std::uint64_t tsc0 = 0, qpc0 = 0;
     std::string started_at;
     std::string csv_name;
+    std::filesystem::path logs;  // the user folder's logs/
     std::vector<std::uint32_t> cursors;  // per thread: blocks already given an owner
     std::unique_ptr<sp::Report> last;
     std::string csv_path;
@@ -260,11 +261,11 @@ void stop_locked(sp::Ending ending, bool exiting) {
     }
     const sp::Report full = sp::make_report(snapshot, *g_resolver, span, true, !exiting);
     // Never over an earlier span's file (two spans in one second).
-    std::filesystem::path path = user_dir() / L"logs" / g_state.csv_name;
+    std::filesystem::path path = g_state.logs / g_state.csv_name;
     std::error_code ignored;
     for (int n = 2; std::filesystem::exists(path, ignored) && n < 100; ++n) {
         const std::string stem = g_state.csv_name.substr(0, g_state.csv_name.size() - 4);
-        path = user_dir() / L"logs" / (stem + "_" + std::to_string(n) + ".csv");
+        path = g_state.logs / (stem + "_" + std::to_string(n) + ".csv");
     }
     g_state.csv_name = path.filename().string();
     const bool ok = write_file(path, sp::csv(full));
@@ -295,6 +296,8 @@ void start_locked(std::uint32_t days) {
                   now.wMinute, now.wSecond);
     g_state.started_at = at;
     g_state.csv_name = sp::csv_name(now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
+    // Found now: at exit the shell's folder lookup may not run.
+    g_state.logs = user_dir() / L"logs";
     const anvil::Host host;
     try {
         host.group([&] {
