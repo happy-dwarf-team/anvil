@@ -42,12 +42,18 @@ lists, **Triggers** and **Effects**, each with its total time and calls and then
 | Triggered modifier (a country's) | `potential`, `trigger` |
 | Province triggered modifier | `potential`, `trigger`, `on_activation`, `on_deactivation` |
 | Mission | `trigger`, `effect`, `ai_weight`, `provinces_to_highlight` |
+| Church aspect (from 1.22's v1.1) | `trigger`, `potential`, `effect`, `ai_will_do` |
+| Scripted trigger, when one runs as a root block | `trigger` |
 
 Every block of one owner and one role is one row: an event's `mean_time_to_happen` modifiers make one
 row, as do all blocks of one decision's `ai_will_do`. Each row has the total time, the calls, the mean
 and the longest single run (`max`), which shows a rare effect that takes tens of milliseconds at once.
-Blocks whose owner the profiler cannot tell (a scripted trigger, a church aspect, the AI's own checks)
-are one row **No owner found** per list.
+Blocks whose owner the profiler cannot tell (an `OR` or `NOT` run on its own, a `limit`, the AI's own
+checks) are one row **No owner found** per list.
+
+A third list, **Scripted triggers**, has every call of a scripted trigger by its name: the outermost
+one on its thread is timed wherever it runs, also inside an event's or a decision's trigger, so its
+time is part of a row of the trigger list too. All uses of one scripted trigger are one row.
 
 Times are summed over every game thread. A trigger root inside an effect (a `limit`) counts in both
 lists: the effect's time includes it.
@@ -65,16 +71,16 @@ lists: the effect's time includes it.
 - then a header and one row per owner and role, triggers first, each list longest first:
   `list,rank,owner,name,option,role,calls,total_ms,mean_us,max_us,main_thread_ms,caller_rva`.
   `owner` is `event`, `event_option`, `decision`, `on_action`, `casus_belli`, `triggered_modifier`,
-  `province_triggered_modifier`, `mission` or `none`; `main_thread_ms` is the part of the time on the
+  `province_triggered_modifier`, `mission`, `church_aspect`, `scripted_trigger` or `none`; `main_thread_ms` is the part of the time on the
   game's main thread. Rows without an owner are split by `caller_rva`, where in `eu4.exe` the block was
   run from (an address relative to the image, to look up in the game's code).
 
 ## How it works
 
-- **Hooks, only during a span.** Two detours, put in together when a span starts and removed when it
+- **Hooks, only during a span.** Three detours, put in together when a span starts and removed when it
   ends: `CAndTrigger::Evaluate` (Steam `0xB98200`), which every `AND` block runs through, the root of each
   trigger and each limit; and `CEffect::Execute` (Steam `0x5ED800`), which every block of effects runs
-  through. `anvil.log` says when the span starts ("profiling span started: hooks on …") and ends ("hooks
+  through; and `CScriptedTrigger::Evaluate` (Steam `0xB99B30`), every use of a scripted trigger. `anvil.log` says when the span starts ("profiling span started: hooks on …") and ends ("hooks
   removed"); the plugin's load line says `0 change(s)`.
 - **Recording.** Each game thread has a table of its own (65 536 slots, made on its first block and kept
   for the process), written only by that thread, without a lock and without sampling. On each thread only
@@ -103,8 +109,8 @@ lists: the effect's time includes it.
 
 ## Limits
 
-- Scripted triggers and church aspects are not attributed yet (eu4-engine-lab#165): they are in **No
-  owner found**.
+- `OR` and `NOT` blocks that run on their own (not inside an `AND`), `limit`s and the AI's decision
+  checks have no owner (eu4-engine-lab#165 left them without hooks).
 - A thread's table holds 49 152 different root blocks; more in one span are summed into
   `dropped_calls` without a row.
 - For very short blocks (well under a microsecond) the two `rdtsc` reads are a noticeable part of the

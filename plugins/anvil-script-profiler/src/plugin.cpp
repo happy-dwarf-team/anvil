@@ -224,9 +224,19 @@ void publish_locked() {
     g_state.published_ms = GetTickCount64();
 }
 
+std::uintptr_t* g_aspect_db = nullptr;  // where the game keeps CChurchAspectDatabase*
+bool g_aspects_added = false;
+
 // Gives the blocks recorded since the last call their owner while the game's
 // data is certainly alive (a day's end, the end of a span). Under g_mutex.
 void name_new_blocks_locked() {
+    if (!g_aspects_added && g_aspect_db != nullptr) {
+        std::uintptr_t db = 0;
+        if (sp::read_memory(reinterpret_cast<std::uintptr_t>(g_aspect_db), &db, sizeof(db)) && db != 0) {
+            g_resolver->add_church_aspects(db);
+            g_aspects_added = true;
+        }
+    }
     const std::size_t n = sp::thread_count();
     if (g_state.cursors.size() < n) g_state.cursors.resize(n, 0);
     for (std::size_t i = 0; i < n; ++i) {
@@ -488,6 +498,7 @@ struct ScriptProfiler : anvil::Plugin {
         v.church_aspect = vtable(host, sym::church_aspect_vtable);
         v.scripted_trigger = vtable(host, sym::scripted_trigger_vtable);
         g_resolver = std::make_unique<sp::Resolver>(v);
+        if (host.present(sym::church_aspect_db_site)) g_aspect_db = host.data(sym::aspect_db);
         g_measure_days = cfg::days.get();
         g_top = cfg::rows.get();
         g_game = host.service<AnvilGameService>(ANVIL_GAME_SERVICE, ANVIL_GAME_SERVICE_VERSION);

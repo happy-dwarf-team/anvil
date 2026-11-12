@@ -94,6 +94,11 @@ struct World {
     std::uint8_t* scripted = object(176);   // two uses of the scripted trigger "my_scripted"
     std::uint8_t* scripted2 = object(176);
     std::uint8_t* aspect = object(864);     // the church aspect "organised_through_bishops"
+    std::uint8_t* aspect_child = object(120);  // an AND block inside the aspect's trigger
+    std::uint8_t* aspect_children = object(8);
+    std::uint8_t* aspect_list = object(8);
+    std::uint8_t* aspect_db = object(96);   // CChurchAspectDatabase
+    std::uint8_t* scripted_template = object(136);
 
     World(std::uintptr_t event_vtable, std::uintptr_t decision_vtable, std::uintptr_t aspect_vtable = 0,
           std::uintptr_t scripted_vtable = 0) {
@@ -106,12 +111,19 @@ struct World {
         put_string(option[1] + 136, "test_events.1.b");
         put_pointer(decision, decision_vtable);
         put_string(decision + 16, "my_decision_with_a_long_name");
+        put_string(scripted_template + 16, "my_scripted");
         put_pointer(scripted, scripted_vtable);
-        put_string(scripted + 104, "my_scripted");
+        put_pointer(scripted + 168, reinterpret_cast<std::uintptr_t>(scripted_template));
         put_pointer(scripted2, scripted_vtable);
-        put_string(scripted2 + 104, "my_scripted");
+        put_pointer(scripted2 + 168, reinterpret_cast<std::uintptr_t>(scripted_template));
         put_pointer(aspect, aspect_vtable);
         put_string(aspect + 16, "organised_through_bishops");
+        put_pointer(aspect_children, reinterpret_cast<std::uintptr_t>(aspect_child));
+        put_pointer(aspect + 520 + 8, reinterpret_cast<std::uintptr_t>(aspect_children));
+        const std::int32_t one = 1;
+        std::memcpy(aspect + 520 + 0x14, &one, sizeof(one));
+        put_pointer(aspect_list, reinterpret_cast<std::uintptr_t>(aspect));
+        put_vector(aspect_db + 16, aspect_list, 1, 8);
     }
     void* trigger() const { return event + 64; }
     void* immediate() const { return event + 304 + 80; }
@@ -163,7 +175,10 @@ struct FakeEu4 {
     FakeEu4() {
         base = static_cast<uint8_t*>(VirtualAlloc(nullptr, kSize, MEM_RESERVE, PAGE_NOACCESS));
         commit(0x0, PAGE_READWRITE);
-        for (uint32_t page : {0xB98000u, 0x5ED000u, 0xB99000u}) commit(page, PAGE_EXECUTE_READWRITE);
+        for (uint32_t page : {0xB98000u, 0x5ED000u, 0xB99000u, 0x7F6000u}) commit(page, PAGE_EXECUTE_READWRITE);
+        // CChurchAspectDatabase::AccessInstance+0xF: mov rax,[_pDB] (0x242BCB8); not run.
+        commit(0x242B000, PAGE_READWRITE);
+        put(0x7F6EFF, {0x48, 0x8B, 0x05, 0xB2, 0x4D, 0xC3, 0x01, 0x48, 0x85, 0xC0, 0x0F, 0x85, 0x07, 0x01, 0x00, 0x00});
         write_headers();
         // CAndTrigger::Evaluate: its declared bytes, then add rsp,20h; pop rdi; restore rsi and rbx.
         put(0xB98200, {0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48,
@@ -423,6 +438,14 @@ void owner_tests() {
         // A scripted trigger as a root AND block, and a call of one through its own hook (address + 1).
         const sp::Owner& st = r.owner_of(w.scripted, sp::Kind::trigger);
         CHECK(st.kind == sp::OwnerKind::scripted_trigger && st.name == "my_scripted" && std::string(st.role) == "trigger");
+        // From the database, before any of the aspect's own blocks was seen.
+        sp::Resolver fresh(v);
+        CHECK(fresh.owner_of(w.aspect_child, sp::Kind::trigger).kind == sp::OwnerKind::none);
+        fresh.retry_unowned();
+        fresh.add_church_aspects(reinterpret_cast<std::uintptr_t>(w.aspect_db));
+        const sp::Owner& child = fresh.owner_of(w.aspect_child, sp::Kind::trigger);
+        CHECK(child.kind == sp::OwnerKind::church_aspect && child.name == "organised_through_bishops" &&
+              std::string(child.role) == "trigger");
         const sp::Owner& call = r.owner_of(w.scripted + 1, sp::Kind::scripted);
         CHECK(call.kind == sp::OwnerKind::scripted_trigger && call.name == "my_scripted" && call.object == w.scripted &&
               std::string(call.role).empty());
@@ -630,7 +653,7 @@ int main(int argc, char** argv) {
         const std::string reason = anvil::i18n::english(check_plugin_symbols(dir / parsed.manifest->symbols, kBuild, changes,
                                                                           image.address(0), &verified, &declared));
         if (!reason.empty()) std::printf("  %s\n", reason.c_str());
-        CHECK(reason.empty() && verified.symbols.size() == 12);
+        CHECK(reason.empty() && verified.symbols.size() == 13);
         if (!reason.empty()) return;
         auto* p = new AnvilPlugin;
         p->context = &context;
@@ -693,6 +716,7 @@ int main(int argc, char** argv) {
     };
     const World& w = *new World(image.address(0x1CAB3A8), image.address(0x1C66920), image.address(0x1CB5C40),
                                 image.address(0x1D07670));
+    image.put_pointer(0x242BCB8, reinterpret_cast<std::uintptr_t>(w.aspect_db));
     // The event's trigger evaluates a nested AND; its immediate a limit, a root trigger of its own.
     g_children[w.trigger()] = w.loose + 16;
     g_limits[w.immediate()] = w.loose;
@@ -702,6 +726,7 @@ int main(int argc, char** argv) {
         g_evaluate(w.potential(), &scope);
         g_execute(w.immediate(), &scope, 0);
         g_scripted_evaluate(w.scripted, &scope);
+        g_evaluate(w.aspect_child, &scope);
         std::thread([&] {
             int s = 0;
             g_evaluate(w.potential(), &s);
@@ -727,7 +752,7 @@ int main(int argc, char** argv) {
                             "CEffect::Execute and CScriptedTrigger::Evaluate"));
         g_evaluated = g_executed = 0;
         play();
-        CHECK(g_evaluated == 14 && g_executed == 1);  // 5 x (trigger + nested), 2 potentials, the limit, the scripted
+        CHECK(g_evaluated == 15 && g_executed == 1);  // 5 x (trigger + nested), 2 potentials, the limit, the scripted, the aspect
         day();
         day();
         click("Stop");
@@ -745,6 +770,7 @@ int main(int argc, char** argv) {
         CHECK(text.find("effect,1,event,test_events.1,,immediate,1,") != std::string::npos);
         CHECK(text.find(",none,,,trigger,1,") != std::string::npos);  // the limit inside the effect
         CHECK(text.find(",scripted_trigger,my_scripted,,trigger,1,") != std::string::npos);
+        CHECK(text.find(",church_aspect,organised_through_bishops,,trigger,1,") != std::string::npos);
         CHECK(text.find("\nscripted_trigger,1,scripted_trigger,my_scripted,,,1,") != std::string::npos);
         CHECK(row_labelled("Event test_events.1 \xC2\xB7 trigger") != nullptr &&
               row_labelled("Decision my_decision_with_a_long_name \xC2\xB7 potential") != nullptr);
@@ -752,7 +778,7 @@ int main(int argc, char** argv) {
         CHECK(saved != nullptr);
         g_evaluated = 0;
         play();
-        CHECK(g_evaluated == 14);  // the game's code runs as before
+        CHECK(g_evaluated == 15);  // the game's code runs as before
     });
 
     run("profiler plugin: Measure N days stops by itself; the setting changes N", [&] {

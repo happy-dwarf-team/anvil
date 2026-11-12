@@ -69,6 +69,10 @@ public:
     // Forgets blocks that had no owner, so that the next owner_of tries again
     // (after more owners were found).
     void retry_unowned();
+    // Every church aspect of the game's database (CChurchAspectDatabase, its address): the children of an
+    // aspect's trigger and potential are root blocks of their own, since CChurch::FindCheapestAspect
+    // evaluates them one by one. Once per process is enough: the aspects never change.
+    void add_church_aspects(std::uintptr_t database);
     void clear();
 
 private:
@@ -76,6 +80,7 @@ private:
     void expand(const Owner& owner);
     void add(const void* block, const Owner& owner, const char* role, int option = 0);
     void add_modifiers(std::uintptr_t mtth, const Owner& owner, const char* role, int option = 0);
+    void add_children(std::uintptr_t block, const Owner& owner, const char* role);
 
     Vtables vtables_;
     std::unordered_map<const void*, Owner> cache_;
