@@ -383,6 +383,7 @@ if(ANVIL_BUILD_TESTS)
     # anvil-game end to end on a synthetic image laid out like eu4.exe, with
     # the gameplay policy listening (tests/anvil_game_plugin_tests.cpp).
     add_executable(anvil_game_plugin_tests tests/anvil_game_plugin_tests.cpp plugins/anvil-game/src/commands.cpp
+        plugins/anvil-game/src/restart.cpp
         plugins/anvil-game/src/session.cpp
         plugins/anvil-game/src/work_queue.cpp plugins/anvil-game/src/world.cpp)
     target_link_libraries(anvil_game_plugin_tests PRIVATE anvil_loader)
