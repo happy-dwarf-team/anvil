@@ -941,8 +941,11 @@ void draw_restart() {
     } else if (s.ironman) {
         wrapped(tr("Your ironman campaign is saved, as at Exit to Menu, and the game starts again."));
     } else {
-        colored(kAmber, tr("Your campaign closes as at Exit to Menu: progress since your last save is lost. To keep it, "
-                           "save first in the game's menu."));
+        // A long sentence: wrapped, unlike colored().
+        ImGui::PushStyleColor(ImGuiCol_Text, kAmber);
+        wrapped(tr("Your campaign closes as at Exit to Menu: progress since your last save is lost. To keep it, "
+                   "save first in the game's menu."));
+        ImGui::PopStyleColor();
     }
     if (ImGui::Button(tr("Restart now"))) {
         u.confirm_restart = false;
