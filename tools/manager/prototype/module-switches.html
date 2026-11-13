@@ -1,13 +1,14 @@
 <!doctype html>
 <!--
   PROTOTYPE, throwaway (branch prototype/module-switches; never merge to main).
-  Question: what should the Manager's module switches and ironman / multiplayer opt-ins look like?
-  Variant 0 is the Manager as it is today; A, B and C are proposals. Switch via ?variant=0|A|B|C, the bar at the
-  bottom, or the arrow keys. The Plugins and Settings tabs both work. A, B and C also show a module's settings
-  next to the module, which needs a new optional `module` key in settings.toml (today there is only `group`).
-  The real Manager is Dear ImGui; this page imitates its dark style and density in HTML so the variants
-  can be compared without a build. Plugins and modules below are sample data, not real manifests.
-  State lives in memory: the anvil.toml lists and the overlay preview follow every click.
+  Question: what should module switches, ironman / multiplayer opt-ins and plugin settings look like,
+  in the Manager and in the in-game overlay?
+  Variant 0 is Anvil 1.22 as it is today (manager_app.cpp, anvil-overlay ui.cpp); A, B and C are proposals in which
+  both apps draw the same model the same way. Switch via ?variant=0|A|B|C, the bar at the bottom, or the arrow keys.
+  "Start EU4" starts a pretend game: the overlay appears, the Manager turns read-only (as it does today), settings
+  with restart = false apply at once and everything else waits for the next start.
+  A, B and C tie settings to modules with a new optional `module` key in settings.toml (today there is only `group`).
+  The real apps are Dear ImGui; this page imitates their dark style. Plugins, modules and settings are sample data.
 -->
 <html lang="en">
 <head>
@@ -24,11 +25,13 @@
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:#1b1b1d;color:var(--text);font:14px/1.45 "Segoe UI",system-ui,sans-serif}
-.app{max-width:1100px;margin:0 auto;background:var(--win);min-height:100vh;padding:0 0 90px}
+.app{max-width:1100px;margin:0 auto;background:var(--win);padding:0 0 10px}
+.cap{max-width:1100px;margin:0 auto;padding:10px 12px 4px;color:#aaa;font-size:12px;text-transform:none;letter-spacing:.02em}
 .titlebar{padding:6px 12px;background:#202022;font-size:12px;color:#ccc;display:flex;justify-content:space-between}
 .gamebar{padding:8px 12px;border-bottom:1px solid var(--bl);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.tabs{display:flex;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--check)}
+.tabs{display:flex;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--check);flex-wrap:wrap}
 .tab{padding:4px 12px;background:rgba(46,89,148,.86);border-radius:4px 4px 0 0;font-size:13px}
+.tab[data-act]{cursor:pointer}
 .tab.cur{background:var(--check)}
 .pane{padding:10px 12px}
 .weak{color:var(--weak)} .good{color:var(--good)} .warn{color:var(--warn)} .bad{color:var(--bad)} .info{color:var(--info)}
@@ -43,6 +46,7 @@ button.small{padding:1px 7px;font-size:13px}
 .cb.dis{opacity:.4;cursor:default}
 .cb.dis:hover .box{background:var(--frame)}
 .dash{color:var(--weak);cursor:help;padding-left:4px}
+.help{color:var(--weak);cursor:help;margin-left:4px}
 .tag{font-size:11px;padding:0 6px;border-radius:3px;border:1px solid rgba(245,184,66,.55);color:var(--warn);margin-left:6px;white-space:nowrap;vertical-align:1px}
 .pending{font-size:12px;color:var(--info);white-space:nowrap}
 table.im{width:100%;border-collapse:collapse;border:1px solid var(--bs)}
@@ -53,7 +57,8 @@ table.im tr:nth-child(even) td{background:var(--rowalt)}
 .tree{color:var(--bs);margin-right:4px}
 .section{margin:14px 0 6px;color:#ddd;border-bottom:1px solid var(--bl);padding-bottom:3px}
 .banner{background:rgba(111,168,255,.10);border:1px solid rgba(111,168,255,.35);border-radius:3px;padding:6px 10px;margin:0 0 10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.split{display:grid;grid-template-columns:minmax(200px,280px) minmax(0,1fr);gap:10px}
+.banner.amber{background:rgba(245,184,66,.08);border-color:rgba(245,184,66,.4)}
+.split{display:grid;grid-template-columns:minmax(180px,260px) minmax(0,1fr);gap:10px}
 .list{border:1px solid var(--bs);background:var(--child)}
 .li{padding:6px 8px;border-bottom:1px solid var(--bl);cursor:pointer}
 .li:hover{background:rgba(66,150,250,.18)} .li.sel{background:var(--sel)}
@@ -63,27 +68,30 @@ table.im tr:nth-child(even) td{background:var(--rowalt)}
 .seg button.cur{background:var(--check)}
 .seg button:disabled{opacity:.35}
 .mod{padding:8px 0;border-bottom:1px solid var(--bl)}
-.modes{display:flex;gap:0;margin:0 0 10px;border:1px solid var(--bs);border-radius:3px;overflow:hidden;width:max-content;max-width:100%;flex-wrap:wrap}
+.modes{display:flex;margin:0 0 10px;border:1px solid var(--bs);border-radius:3px;overflow:hidden;width:max-content;max-width:100%;flex-wrap:wrap}
 .modes button{border-radius:0;background:var(--frame);padding:6px 16px;border-right:1px solid var(--bl)}
 .modes button.cur{background:var(--check)}
 .modes button.cur .weak{color:#e6eefc}
 .row{display:flex;gap:10px;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--bl);flex-wrap:wrap}
 .row .nm{min-width:220px}
-.overlay{margin:18px 12px 0;border:1px solid var(--bs);background:rgba(15,15,15,.94)}
-.overlay .ttl{background:#29497a;padding:3px 8px;font-size:13px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
-.overlay .body{padding:8px}
 select,input{font:inherit;background:var(--frame);color:var(--text);border:0;padding:2px 6px;border-radius:2px}
 input[type=number],input[type=text]{width:10em}
 input:disabled,select:disabled{opacity:.4}
 .sep{display:flex;align-items:center;gap:8px;margin:12px 0 6px;color:#ddd}
 .sep::after{content:"";flex:1;border-top:1px solid var(--bs)}
 .set{display:flex;align-items:center;gap:8px;padding:3px 0;flex-wrap:wrap}
-.set .lab{min-width:12em}
 .setbox{border-left:2px solid var(--bs);margin:4px 0 4px 2px;padding:2px 0 2px 12px}
-.tab{cursor:pointer}
 .expander{background:none;color:var(--info);padding:0 4px;font-size:12px}
 .expander:hover:not(:disabled){background:rgba(111,168,255,.15)}
-pre.toml{margin:12px;padding:8px 10px;background:#000;border:1px solid var(--bl);font:12px/1.5 Consolas,monospace;white-space:pre-wrap}
+.ro{pointer-events:none;opacity:.5}
+.game{max-width:1100px;margin:0 auto;background:#1d2a1f}
+.gametitle{padding:6px 12px;background:#202022;font-size:12px;color:#ccc;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.map{padding:28px 16px;min-height:200px;background:repeating-linear-gradient(135deg,#24361f 0 22px,#21321d 22px 44px)}
+.owin{max-width:860px;margin:0 auto;background:rgba(15,15,15,.94);border:1px solid #6e6e80}
+.otitle{background:#29497a;padding:3px 8px;font-size:13px;display:flex;justify-content:space-between}
+.obody{padding:8px;min-height:240px}
+.msg{display:flex;gap:8px;align-items:center;margin:0 0 6px}
+pre.toml{max-width:1100px;margin:0 auto;padding:8px 12px;background:#000;border:1px solid var(--bl);font:12px/1.5 Consolas,monospace;white-space:pre-wrap}
 pre.toml .chg{color:var(--info)}
 .switcher{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:#f4f4f4;color:#111;border-radius:999px;padding:6px 8px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 18px rgba(0,0,0,.6);font:13px system-ui,sans-serif;z-index:10;max-width:calc(100vw - 32px)}
 .switcher button{background:#111;color:#fff;border-radius:999px;width:30px;height:30px;padding:0;font-size:15px}
@@ -93,30 +101,33 @@ pre.toml .chg{color:var(--info)}
 </style>
 </head>
 <body>
+<div class="cap">ANVIL MANAGER</div>
 <div class="app">
   <div class="titlebar"><span>Anvil Manager 1.22.0</span><span>PROTOTYPE &middot; sample data</span></div>
   <div class="gamebar">
     <span>EU4 1.37.5.0 &middot; <span class="weak">...\Europa Universalis IV</span> &middot; <span class="good">Anvil 1.22.0 installed</span></span>
     <span style="flex:1"></span>
-    <button data-act="start">Start EU4</button>
+    <span id="startbtn"></span>
   </div>
   <div class="tabs" id="tabs"></div>
-  <div class="pane">
-    <div id="pending"></div>
-    <div id="variant"></div>
-  </div>
-  <div class="overlay">
-    <div class="ttl"><span>Overlay preview: Plugins tab in your next game</span>
-      <label>Game: <select id="session">
-        <option value="sp">Single-player</option><option value="im" selected>Ironman</option>
-        <option value="mp">Multiplayer</option><option value="immp">Ironman multiplayer</option></select></label></div>
-    <div class="body" id="overlay"></div>
-  </div>
-  <pre class="toml" id="toml"></pre>
+  <div class="pane"><div id="mbanner"></div><div id="pending"></div><div id="variant"></div></div>
 </div>
+<div class="cap">IN THE GAME: THE OVERLAY</div>
+<div class="game">
+  <div class="gametitle"><span>Europa Universalis IV</span>
+    <label>Game: <select id="session">
+      <option value="sp">Single-player</option><option value="im" selected>Ironman</option>
+      <option value="mp">Multiplayer</option><option value="immp">Ironman multiplayer</option></select></label>
+    <span style="flex:1"></span><span id="quitbtn"></span></div>
+  <div class="map" id="map"></div>
+</div>
+<div class="cap">anvil/anvil.toml AND THE SETTINGS FILES</div>
+<pre class="toml" id="toml"></pre>
+<div style="height:80px"></div>
 <div class="switcher" id="switcher"></div>
 
 <script>
+// ---- sample data ----------------------------------------------------------------------
 const PLUGINS = [
   {id:'anvil-inspector', name:'Anvil Inspector', version:'1.22.0', standard:true, gameplay:false, modules:[]},
   {id:'bellows', name:'Bellows', version:'1.6.0', gameplay:false, modules:[]},
@@ -129,31 +140,31 @@ const PLUGINS = [
   ]},
   {id:'trade-helper', name:'Trade helper', version:'0.9.2', gameplay:true, ironman:true, mp:false, modules:[]},
 ];
-const LISTS = ['disabled_plugins','enabled_modules','disabled_modules','allow_ironman','allow_multiplayer'];
-let toml = {disabled_plugins:[], enabled_modules:[], disabled_modules:[], allow_ironman:['europagiga.lifespan'], allow_multiplayer:[]};
-let lastStart = JSON.parse(JSON.stringify(toml));
-// settings.toml of each plugin. `module` is the PROPOSED key that ties a setting to a module;
-// today's settings.toml has no such key, only `group`, and the Manager ignores it in variant 0.
+// settings.toml of each plugin. `module` is the PROPOSED key; variant 0 ignores it, as Anvil does today.
 const SETTINGS = {
   europagiga: [
-    {name:'panel_key', type:'key', label:'Panel key', def:'Ctrl+Shift+E', group:''},
-    {name:'ledger_cols', type:'bool', label:'Extra ledger columns', def:true, group:'Whetstone', module:'whetstone'},
-    {name:'merge_key', type:'key', label:'Merge hotkey', def:'Ctrl+M', group:'Muster', module:'muster'},
-    {name:'keep_one', type:'bool', label:'Keep one regiment home', def:true, group:'Muster', module:'muster'},
-    {name:'trade_steer', type:'enum', label:'Trade steering', def:'balanced', group:'Automata', module:'automata',
-     values:[['off','Off'],['balanced','Balanced'],['greedy','Greedy']]},
+    {name:'panel_key', type:'key', label:'Panel key', def:'Ctrl+Shift+E', group:'', restart:false, desc:'Opens and closes the Europagiga panel.'},
+    {name:'ledger_cols', type:'bool', label:'Extra ledger columns', def:true, group:'Whetstone', module:'whetstone', restart:false},
+    {name:'merge_key', type:'key', label:'Merge hotkey', def:'Ctrl+M', group:'Muster', module:'muster', restart:false},
+    {name:'keep_one', type:'bool', label:'Keep one regiment home', def:true, group:'Muster', module:'muster', restart:true, desc:'Muster leaves one regiment in each home province.'},
+    {name:'trade_steer', type:'enum', label:'Trade steering', def:'balanced', group:'Automata', module:'automata', restart:true,
+     values:[['off','Off'],['balanced','Balanced'],['greedy','Greedy']], desc:'How hard Automata steers trade towards your capital.'},
   ],
-  bellows: [{name:'ram_prefetch_budget_mb', type:'int', label:'RAM prefetch budget (MB)', def:1024, group:'RAM prefetch'}],
-  'trade-helper': [{name:'highlight', type:'bool', label:'Highlight the best node', def:true, group:''}],
+  bellows: [{name:'ram_prefetch_budget_mb', type:'int', label:'RAM prefetch budget (MB)', def:1024, group:'RAM prefetch', restart:true, desc:'RAM for unpacked archive members the game has not taken yet.'}],
+  'trade-helper': [{name:'highlight', type:'bool', label:'Highlight the best node', def:true, group:'', restart:false}],
 };
-let values = {}, lastValues = {};
-let ui = {selected:'europagiga', mode:'ironman', tab:'plugins', settingsPlugin:'europagiga', open:new Set()};
+const LISTS = ['disabled_plugins','enabled_modules','disabled_modules','allow_ironman','allow_multiplayer'];
+let toml = {disabled_plugins:[], enabled_modules:[], disabled_modules:[], allow_ironman:['europagiga.lifespan'], allow_multiplayer:[]};
+let lastStart = JSON.parse(JSON.stringify(toml));   // what the running (or last) game started with
+let values = {}, lastValues = {};                    // the player's settings: saved / in effect
+let running = false, SESSION = {ironman:true, mp:false}, CTX = 'manager', message = null;
+let ui = {selected:'europagiga', oselected:'europagiga', mode:'ironman', omode:'ironman', tab:'plugins', otab:'plugins',
+          settingsPlugin:'europagiga', osettings:'europagiga', open:new Set()};
 
+// ---- the model --------------------------------------------------------------------------
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const has = (t, list, k) => t[list].includes(k);
 function setListed(list, k, on){ const a = toml[list].filter(x => x !== k); if (on) a.push(k); toml[list] = a; }
-
-// Every switchable thing: a plugin, or a module of a plugin.
 function items(){
   const out = [];
   for (const p of PLUGINS){
@@ -163,7 +174,7 @@ function items(){
   return out;
 }
 const item = k => items().find(i => i.key === k);
-function pluginOn(t, p){ return !has(t,'disabled_plugins',p.id); }
+const pluginOn = (t, p) => !has(t,'disabled_plugins',p.id);
 function isOn(t, it){
   if (!pluginOn(t, it.plugin)) return false;
   if (!it.mod) return true;
@@ -179,20 +190,25 @@ const allowed = (t, it, mode) => has(t, mode === 'ironman' ? 'allow_ironman' : '
 const setAllowed = (it, mode, on) => setListed(mode === 'ironman' ? 'allow_ironman' : 'allow_multiplayer', it.key, on);
 const offers = (it, mode) => mode === 'ironman' ? it.ironman : it.mp;
 const MODE = {ironman:'ironman', mp:'multiplayer'};
-
-// Why it does not act in a session, in player words; '' when it acts.
+// Why it does not act in a session; '' when it acts.
 function keptOut(t, it, s){
   if (!it.gameplay) return '';
   for (const mode of ['ironman','mp']){
     if (!s[mode]) continue;
-    if (!offers(it, mode)) return 'kept out of this game: its author keeps it out of ' + MODE[mode];
-    if (!allowed(t, it, mode)) return 'kept out of this game: not allowed in ' + MODE[mode] + ' (Manager, Plugins tab)';
+    if (!offers(it, mode)) return 'its author keeps it out of ' + MODE[mode];
+    if (!allowed(t, it, mode)) return 'not allowed in ' + MODE[mode];
   }
   return '';
 }
 const sig = (t, it) => [isOn(t,it), allowed(t,it,'ironman'), allowed(t,it,'mp')].join();
 const isPending = it => sig(toml, it) !== sig(lastStart, it);
 function hash(keys){ let h = 2166136261; for (const c of keys.join('|')){ h ^= c.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; } return h.toString(16).padStart(8,'0'); }
+const valKey = (pid, s) => pid + '/' + s.name;
+const getVal = (pid, s, v = values) => valKey(pid, s) in v ? v[valKey(pid, s)] : s.def;
+const setPending = (pid, s) => getVal(pid, s) !== getVal(pid, s, lastValues);
+const settingsOf = (pid, moduleId) => (SETTINGS[pid] || []).filter(s => (s.module || null) === moduleId);
+const show = v => v === true ? 'on' : v === false ? 'off' : String(v);
+const pendingCount = () => items().filter(isPending).length + PLUGINS.flatMap(p => (SETTINGS[p.id] || []).filter(s => setPending(p.id, s))).length;
 
 // ---- shared bits ---------------------------------------------------------------------
 function cb(label, on, act, key, extra = {}){
@@ -201,198 +217,49 @@ function cb(label, on, act, key, extra = {}){
     ${extra.disabled ? 'aria-disabled="true"' : `data-act="${act}" data-key="${esc(key)}" ${extra.mode ? `data-mode="${extra.mode}"` : ''}`}>
     <span class="box"></span>${label ? esc(label) : ''}</span>`;
 }
+const help = d => d ? `<span class="help" title="${esc(d)}">(?)</span>` : '';
 const tag = it => it.gameplay ? '<span class="tag">changes the game</span>' : '';
 const pend = it => isPending(it) ? '<span class="pending">&#9679; at the next start</span>' : '';
 const POLICY = 'Plugins and modules that <b>change the game</b> are kept out of ironman and multiplayer games unless you allow them there.';
+const inGame = () => CTX === 'overlay';
+// Manager: what the next start does. Overlay: what this game does, plus what changes at the next start.
 function stateWord(it){
+  if (inGame()){
+    if (!isOn(lastStart, it)) return '<span class="weak">off in this game</span>';
+    const r = keptOut(lastStart, it, SESSION);
+    return r ? `<span class="warn">kept out of this game</span><div class="weak" style="font-size:12px">${r}</div>` : '<span class="good">on in this game</span>';
+  }
   if (!pluginOn(toml, it.plugin)) return it.mod ? '<span class="weak">off with its plugin</span>' : '<span class="weak">off</span>';
-  if (!isOn(toml, it)) return '<span class="weak">off</span>';
-  return '<span class="good">on</span>';
+  return isOn(toml, it) ? '<span class="good">on</span>' : '<span class="weak">off</span>';
 }
+const removeBtn = p => !inGame() && !p.standard ? '<button class="small">Remove</button>' : '';
 
-// ---- Variant A: one matrix table ------------------------------------------------------
-function variantA(){
-  let h = `<p class="weak" style="margin:0 0 8px">${POLICY} Changes apply at the next start.</p>
-  <table class="im"><tr><th style="width:44px">On</th><th>Plugin / module</th><th style="width:80px">Version</th>
-  <th style="width:82px">Ironman</th><th style="width:100px">Multiplayer</th><th style="width:170px">State</th><th style="width:150px"></th></tr>`;
-  for (const it of items()){
-    const p = it.plugin, on = isOn(toml, it), parentOff = it.mod && !pluginOn(toml, p);
-    const opt = mode => {
-      if (!it.gameplay) return '';
-      if (!offers(it, mode)) return `<span class="dash" title="Its author keeps it out of ${MODE[mode]}.">&mdash;</span>`;
-      return cb('', allowed(toml, it, mode), 'allow', it.key, {mode, disabled: !on, title: on ? '' : 'Turn it on first; your choice is kept.'});
-    };
-    h += `<tr class="${it.mod ? 'child' : ''}">
-      <td>${p.standard && !it.mod ? cb('', true, '', '', {disabled:true, title:'Comes with Anvil.'}) : cb('', on, 'on', it.key, {disabled: parentOff, title: parentOff ? 'Its plugin is off.' : ''})}</td>
-      <td class="${it.mod ? 'indent' : ''}">${it.mod ? '<span class="tree">&#9492;</span>' : ''}<span title="${esc(it.key)}">${esc(it.name)}</span>${tag(it)}
-        ${!it.mod && p.modules.length ? `<span class="weak"> &middot; ${p.modules.length} modules</span>` : ''}
-        ${it.mod ? `<div class="weak" style="font-size:12px;padding-left:16px">${esc(it.mod.desc)}</div>` : ''}</td>
-      <td>${it.mod ? '' : esc(p.version)}</td>
-      <td>${opt('ironman')}</td><td>${opt('mp')}</td>
-      <td>${stateWord(it)} ${pend(it)}</td>
-      <td style="white-space:nowrap">${expander(it.key, settingsOf(p.id, it.mod ? it.mod.id : null).length)} ${it.mod || p.standard ? '' : '<button class="small">Remove</button>'}</td></tr>`;
-    if (ui.open.has(it.key)) h += `<tr class="${it.mod ? 'child' : ''}"><td></td><td colspan="6" class="${it.mod ? 'indent' : ''}">${settingsBlock(p.id, it.mod ? it.mod.id : null, !isOn(toml, it), offNoteFor(it))}</td></tr>`;
-  }
-  return h + '</table>';
-}
-
-// ---- Variant B: list and detail, one "where it runs" choice per module -----------------
-function whereChoices(it){
-  if (!it.gameplay) return [{k:'off', l:'Off'}, {k:'on', l:'On'}];
-  return [
-    {k:'off', l:'Off'}, {k:'normal', l:'Normal games'},
-    {k:'im', l:'+ Ironman', need:['ironman']}, {k:'mp', l:'+ Multiplayer', need:['mp']},
-    {k:'all', l:'Everywhere', need:['ironman','mp']},
-  ];
-}
-function whereNow(it){
-  if (!isOn(toml, it)) return 'off';
-  if (!it.gameplay) return 'on';
-  const i = allowed(toml, it, 'ironman'), m = allowed(toml, it, 'mp');
-  return i && m ? 'all' : i ? 'im' : m ? 'mp' : 'normal';
-}
-function whereText(it){
-  const w = whereNow(it);
-  if (w === 'off') return 'Does not load.';
-  if (!it.gameplay) return 'Runs in every game; it does not change the game.';
-  const parts = {normal:'Runs in normal games. Kept out of ironman and multiplayer.',
-    im:'Runs in normal and ironman games. Kept out of multiplayer.',
-    mp:'Runs in normal and multiplayer games. Kept out of ironman.',
-    all:'Runs in every game, ironman and multiplayer included.'};
-  let t = parts[w];
-  const locked = ['ironman','mp'].filter(m => !offers(it, m)).map(m => MODE[m]);
-  if (locked.length) t += ` Its author keeps it out of ${locked.join(' and ')}.`;
-  return t;
-}
-function segment(it, disabled){
-  const cur = whereNow(it);
-  return `<div class="seg" role="radiogroup">${whereChoices(it).map(c => {
-    const missing = (c.need || []).filter(m => !offers(it, m));
-    const dis = disabled || missing.length > 0;
-    const title = disabled ? 'Its plugin is off.' : missing.length ? `Its author keeps it out of ${missing.map(m => MODE[m]).join(' and ')}.` : '';
-    return `<button role="radio" aria-checked="${c.k === cur}" class="${c.k === cur ? 'cur' : ''}" ${dis ? 'disabled' : ''} title="${esc(title)}" data-act="where" data-key="${esc(it.key)}" data-where="${c.k}">${esc(c.l)}</button>`;
-  }).join('')}</div>`;
-}
-function variantB(){
-  const all = items();
-  let list = '';
-  for (const p of PLUGINS){
-    const mods = all.filter(i => i.mod && i.plugin === p);
-    const g = mods.filter(i => i.gameplay).length;
-    const pi = all.find(i => i.key === p.id);
-    const anyPending = all.some(i => i.plugin === p && isPending(i));
-    const summary = mods.length ? `${mods.length} modules${g ? `, ${g} change the game` : ''}` : (p.gameplay ? 'changes the game' : 'does not change the game');
-    list += `<div class="li ${ui.selected === p.id ? 'sel' : ''}" data-act="select" data-key="${p.id}">
-      <div>${esc(p.name)} <span class="weak">${esc(p.version)}</span> <span style="float:right">${stateWord(pi)}</span></div>
-      <div class="weak" style="font-size:12px">${summary}${anyPending ? ' &middot; <span class="pending">changes at the next start</span>' : ''}</div></div>`;
-  }
-  const p = PLUGINS.find(x => x.id === ui.selected), pi = all.find(i => i.key === p.id), pOn = pluginOn(toml, p);
-  let d = `<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><div style="font-size:16px">${esc(p.name)} <span class="weak">${esc(p.version)} &middot; ${esc(p.id)}</span></div>
-    <div>${p.standard ? '' : '<button class="small">Remove</button>'}</div></div>
-    <div style="margin:8px 0">${p.standard ? '<span class="weak">Comes with Anvil; always loads.</span>' : cb('Load this plugin', pOn, 'on', p.id)} ${pend(pi)}</div>
-    ${settingsOf(p.id, null).length ? `<div class="section">Settings</div>${settingsBlock(p.id, null, !pOn, 'The plugin is off; its settings are kept.')}` : ''}`;
-  if (p.gameplay && !p.modules.length){
-    d += `<div class="mod"><div style="margin-bottom:6px">Where it runs ${tag(pi)}</div>${segment(pi, !pOn)}<div class="weak" style="margin-top:4px">${whereText(pi)}</div></div>`;
-  }
-  if (p.modules.length){
-    d += `<div class="section">Modules</div><p class="weak" style="margin:0 0 4px">${POLICY}</p>`;
-    for (const it of all.filter(i => i.mod && i.plugin === p)){
-      d += `<div class="mod"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>${esc(it.name)}${tag(it)}</span>${pend(it)}</div>
-        <div class="weak" style="font-size:12px;margin-bottom:6px">${esc(it.mod.desc)}</div>
-        ${segment(it, !pOn)}<div class="weak" style="margin-top:4px;font-size:13px">${pOn ? whereText(it) : 'Off with its plugin.'}</div>
-        ${settingsBlock(p.id, it.mod.id, !isOn(toml, it), offNoteFor(it))}</div>`;
-    }
-  }
-  if (!p.gameplay && !p.modules.length) d += '<p class="weak">It does not change the game, so it runs in every game, ironman and multiplayer included.</p>';
-  return `<div class="split"><div class="list">${list}</div><div class="detail">${d}</div></div>`;
-}
-
-// ---- Variant C: by game mode ----------------------------------------------------------
-function variantC(){
-  const all = items(), mode = ui.mode;
-  const g = all.filter(i => i.gameplay);
-  const runs = m => g.filter(i => isOn(toml, i) && offers(i, m) && allowed(toml, i, m)).length;
-  const onCount = all.filter(i => isOn(toml, i)).length;
-  let h = `<div class="modes" role="tablist">
-    <button role="tab" class="${mode === 'normal' ? 'cur' : ''}" data-act="mode" data-key="normal">Normal games <span class="weak">&middot; ${onCount} on</span></button>
-    <button role="tab" class="${mode === 'ironman' ? 'cur' : ''}" data-act="mode" data-key="ironman">Ironman <span class="weak">&middot; ${runs('ironman')} allowed</span></button>
-    <button role="tab" class="${mode === 'mp' ? 'cur' : ''}" data-act="mode" data-key="mp">Multiplayer <span class="weak">&middot; ${runs('mp')} allowed</span></button></div>`;
-  if (mode === 'normal'){
-    h += `<p class="weak" style="margin:0 0 6px">What loads at the next start. Choose what may run in ironman and multiplayer in their tabs.</p>`;
-    for (const it of all){
-      const parentOff = it.mod && !pluginOn(toml, it.plugin);
-      h += `<div class="row" style="${it.mod ? 'padding-left:26px' : ''}"><span class="nm">${it.plugin.standard && !it.mod ? cb(it.name, true, '', '', {disabled:true, title:'Comes with Anvil.'}) : cb(it.name, isOn(toml, it), 'on', it.key, {disabled: parentOff, title: parentOff ? 'Its plugin is off.' : ''})}${tag(it)}</span>
-        <span class="weak" style="font-size:12px;flex:1">${it.mod ? esc(it.mod.desc) : esc(it.plugin.version)}</span>${pend(it)}${expander(it.key, settingsOf(it.plugin.id, it.mod ? it.mod.id : null).length)}</div>`;
-      if (ui.open.has(it.key)) h += `<div style="padding-left:${it.mod ? 34 : 8}px">${settingsBlock(it.plugin.id, it.mod ? it.mod.id : null, !isOn(toml, it), offNoteFor(it))}</div>`;
-    }
-    return h;
-  }
-  const m = mode, word = MODE[m];
-  h += `<p style="margin:0 0 6px">In ${word} games Anvil keeps out everything that changes the game, except what you allow here.</p>`;
-  for (const it of g){
-    const on = isOn(toml, it), path = it.mod ? `${esc(it.plugin.name)} <span class="weak">&rsaquo;</span> ${esc(it.name)}` : esc(it.name);
-    let control, note;
-    if (!offers(it, m)){ control = cb('', false, '', '', {disabled:true, title:`Its author keeps it out of ${word}.`}); note = `<span class="weak">its author keeps it out of ${word}</span>`; }
-    else if (!on){ control = cb('', allowed(toml, it, m), '', '', {disabled:true, title:'Turn it on in Normal games first.'}); note = '<span class="weak">off in every game</span>'; }
-    else { control = cb('', allowed(toml, it, m), 'allow', it.key, {mode:m}); note = allowed(toml, it, m) ? `<span class="good">runs in ${word}</span>` : `<span class="warn">kept out of ${word}</span>`; }
-    h += `<div class="row"><span class="nm">${control} ${path}</span><span style="flex:1">${note}</span>${pend(it)}</div>`;
-  }
-  const quiet = all.filter(i => !i.gameplay && isOn(toml, i)).length;
-  h += `<p class="weak" style="margin:8px 0 0">${quiet} plugins and modules that do not change the game run in ${word} too.</p>`;
-  if (m === 'mp'){
-    const acting = g.filter(i => isOn(toml, i) && offers(i, 'mp') && allowed(toml, i, 'mp')).map(i => i.key);
-    h += `<div class="banner" style="margin-top:10px">Players in one game compare this code in the overlay: <b>${hash(acting)}</b>. It matches when everyone allows the same things.</div>`;
-  }
-  return h;
-}
-
-// ---- settings ----------------------------------------------------------------------------
-const valKey = (pid, s) => pid + '/' + s.name;
-const getVal = (pid, s, v = values) => valKey(pid, s) in v ? v[valKey(pid, s)] : s.def;
-const setPending = (pid, s) => getVal(pid, s) !== getVal(pid, s, lastValues);
-const settingsOf = (pid, moduleId) => (SETTINGS[pid] || []).filter(s => (s.module || null) === moduleId);
+// One setting, the same in both apps (proposal).
 function control(pid, s, disabled){
   const v = getVal(pid, s), k = esc(valKey(pid, s)), dis = disabled ? 'disabled' : '';
   let c;
   if (s.type === 'bool') c = cb(s.label, v, 'set', valKey(pid, s), {disabled});
   else if (s.type === 'enum') c = `<select data-set="${k}" ${dis}>${s.values.map(([n, l]) => `<option value="${n}" ${n === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select> <span>${esc(s.label)}</span>`;
   else c = `<input type="${s.type === 'int' ? 'number' : 'text'}" data-set="${k}" value="${esc(v)}" ${dis}> <span>${esc(s.label)}</span>`;
-  return `<div class="set">${c}${setPending(pid, s) ? '<span class="pending">&#9679; at the next start</span>' : ''}</div>`;
+  const p = setPending(pid, s) ? `<span class="pending">&#9679; at the next start${running ? ` (now ${esc(show(getVal(pid, s, lastValues)))})` : ''}</span>` : '';
+  const when = `<span class="weak" style="font-size:12px">${s.restart ? 'next start' : 'applies at once'}</span>`;
+  const reset = v !== s.def && !disabled ? `<button class="small" data-act="reset" data-key="${k}">Reset</button>` : '';
+  return `<div class="set">${c}${help(s.desc)}${p || when}${reset}</div>`;
 }
 function settingsBlock(pid, moduleId, disabled, offNote){
   const list = settingsOf(pid, moduleId);
   if (!list.length) return '';
   return `<div class="setbox">${disabled && offNote ? `<div class="weak" style="font-size:12px">${offNote}</div>` : ''}${list.map(s => control(pid, s, disabled)).join('')}</div>`;
 }
+const openKey = key => CTX + ':' + key;
 function expander(key, count){
   if (!count) return '';
-  return `<button class="expander" data-act="toggle" data-key="${esc(key)}">${ui.open.has(key) ? '&#9662;' : '&#9656;'} Settings (${count})</button>`;
+  return `<button class="expander" data-act="toggle" data-key="${esc(openKey(key))}">${ui.open.has(openKey(key)) ? '&#9662;' : '&#9656;'} Settings (${count})</button>`;
 }
 const offNoteFor = it => !pluginOn(toml, it.plugin) ? 'Its plugin is off; these settings are kept.' : `${esc(it.name)} is off; its settings are kept and apply when you turn it on.`;
 
-// The Settings tab. Today: a plugin picker and its settings by `group`, unrelated to modules.
-// Proposed: the plugin's own settings first, then a section per module with its state.
-function settingsTab(today){
-  const pid = ui.settingsPlugin, p = PLUGINS.find(x => x.id === pid);
-  let h = `<div class="set"><select data-act-select="plugin">${PLUGINS.filter(x => SETTINGS[x.id]).map(x => `<option value="${x.id}" ${x.id === pid ? 'selected' : ''}>${esc(x.id)}</option>`).join('')}</select> Plugin</div>`;
-  if (today){
-    let group = null;
-    const list = [...SETTINGS[pid]].sort((a, b) => (a.group ? 1 : 0) - (b.group ? 1 : 0));
-    for (const s of list){
-      if (s.group !== group){ group = s.group; if (group) h += `<div class="sep">${esc(group)}</div>`; }
-      h += control(pid, s, false);
-    }
-    return h + '<p class="weak">Plugins with a settings.toml can be set up here. The values go to anvil/data/&lt;plugin&gt;/settings.toml and apply when the game starts.</p>';
-  }
-  h += settingsBlock(pid, null, !pluginOn(toml, p), 'The plugin is off; its settings are kept.');
-  for (const it of items().filter(i => i.mod && i.plugin === p)){
-    if (!settingsOf(pid, it.mod.id).length) continue;
-    h += `<div class="sep">${esc(it.name)} ${tag(it)} ${stateWord(it)}</div>` + settingsBlock(pid, it.mod.id, !isOn(toml, it), offNoteFor(it));
-  }
-  return h;
-}
-
-// ---- Variant 0: the Manager as it is today (manager_app.cpp, draw_plugins_tab / draw_modules) ----
+// ---- Variant 0: Anvil 1.22 as it is today -------------------------------------------------
+// Manager, Plugins tab (manager_app.cpp: draw_plugins_tab, draw_modules, module_summary).
 function todaySummary(it){
   const label = `${it.name} (${it.key})`;
   if (!it.gameplay) return `${label}: does not change the game.`;
@@ -410,12 +277,9 @@ function todayOptIns(it){
 function variant0(){
   let h = `<table class="im"><tr><th style="width:30px"></th><th style="width:22%">Plugin</th><th style="width:70px">Version</th><th>Status</th><th style="width:150px"></th></tr>`;
   for (const p of PLUGINS){
-    const pi = items().find(i => i.key === p.id), on = pluginOn(toml, p);
+    const pi = item(p.id), on = pluginOn(toml, p);
     let status = on ? '<div class="good">loads</div>' : '<div class="weak">disabled</div>';
-    if (p.gameplay){
-      status += '<div class="weak">Changes the game: kept out of ironman and multiplayer unless allowed.</div>';
-      status += `<div>${todayOptIns(pi)}</div>`;
-    }
+    if (p.gameplay) status += '<div class="weak">Changes the game: kept out of ironman and multiplayer unless allowed.</div>' + `<div>${todayOptIns(pi)}</div>`;
     for (const it of items().filter(i => i.mod && i.plugin === p)){
       const mon = isOn(toml, it);
       status += `<div style="display:flex;gap:6px;align-items:flex-start;margin-top:3px">${cb('', mon, 'on', it.key)}<span>${esc(todaySummary(it))}</span></div>`;
@@ -424,66 +288,267 @@ function variant0(){
     h += `<tr><td>${p.standard ? cb('', true, '', '', {disabled:true}) : cb('', on, 'on', p.id)}</td>
       <td><span title="id ${esc(p.id)}">${esc(p.name)}</span>${p.standard ? ' <span class="weak">(comes with Anvil)</span>' : ''}</td>
       <td>${esc(p.version)}</td><td>${status}</td>
-      <td style="white-space:nowrap">${SETTINGS[p.id] ? `<button class="small" data-act="opensettings" data-key="${p.id}">Settings</button>` : ''} ${p.standard ? '' : '<button class="small">Remove</button>'}</td></tr>`;
+      <td style="white-space:nowrap">${SETTINGS[p.id] ? `<button class="small" data-act="opensettings" data-key="${p.id}">Settings</button>` : ''} ${removeBtn(p)}</td></tr>`;
   }
   return h + '</table>';
 }
-
-// ---- overlay preview, anvil.toml, pending ---------------------------------------------
-function overlay(){
-  const v = document.getElementById('session').value;
-  const s = {ironman: v === 'im' || v === 'immp', mp: v === 'mp' || v === 'immp'};
-  const acting = items().filter(i => i.gameplay && isOn(toml, i) && !keptOut(toml, i, s));
-  const name = s.ironman && s.mp ? 'an ironman multiplayer game' : s.ironman ? 'an ironman game' : s.mp ? 'a multiplayer game' : 'a single-player game';
-  let h = `<div style="margin-bottom:6px">In ${name}; ${acting.length ? `${acting.length} plugin(s) or module(s) that change the game act (${hash(acting.map(i => i.key))}).` : 'nothing that changes the game acts.'}</div>
-    <table class="im"><tr><th>Plugin / module</th><th style="width:80px">Version</th><th style="width:160px">State</th><th>Details</th></tr>`;
-  const today = variant === '0';
+// Manager, Settings tab (draw_settings_tab): a plugin picker, its settings under `group` headers.
+function todayGroups(pid, draw){
+  let h = '', group = null;
+  const list = [...SETTINGS[pid]].sort((a, b) => (a.group ? 1 : 0) - (b.group ? 1 : 0));
+  for (const s of list){
+    if (s.group !== group){ group = s.group; if (group) h += `<div class="sep">${esc(group)}</div>`; }
+    h += draw(s);
+  }
+  return h;
+}
+function todayManagerSettings(){
+  const pid = ui.settingsPlugin;
+  return `<div class="set"><select data-pick="manager">${PLUGINS.filter(x => SETTINGS[x.id]).map(x => `<option value="${x.id}" ${x.id === pid ? 'selected' : ''}>${esc(x.id)}</option>`).join('')}</select> Plugin</div>`
+    + todayGroups(pid, s => todayControl(pid, s, false))
+    + '<p class="weak">Plugins with a settings.toml can be set up here. The values go to anvil/data/&lt;plugin&gt;/settings.toml and apply when the game starts.</p>';
+}
+// One setting as both apps draw it today: control, (?) help, "(now X; applies at the next start)", Reset.
+function todayControl(pid, s){
+  const v = getVal(pid, s), k = esc(valKey(pid, s));
+  let c;
+  if (s.type === 'bool') c = cb(s.label, v, 'set', valKey(pid, s));
+  else if (s.type === 'enum') c = `<select data-set="${k}">${s.values.map(([n, l]) => `<option value="${n}" ${n === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select> <span>${esc(s.label)}</span>`;
+  else if (s.type === 'key' && inGame()) c = `<button class="small" style="min-width:12em">${esc(v)}</button> <span>${esc(s.label)}</span> <button class="small">Clear</button>`;
+  else c = `<input type="${s.type === 'int' ? 'number' : 'text'}" data-set="${k}" value="${esc(v)}"> <span>${esc(s.label)}</span>`;
+  const now = inGame() && s.restart && setPending(pid, s) ? `<span class="weak">(now ${esc(show(getVal(pid, s, lastValues)))}; applies at the next start)</span>` : '';
+  const reset = inGame() && v !== s.def ? `<button class="small" data-act="reset" data-key="${k}">Reset</button>` : '';
+  return `<div class="set">${c}${help(s.desc)}${now}${reset}</div>`;
+}
+// Overlay, Status tab (draw_status): the modules are rows to read, not to switch.
+function todayOverlayStatus(){
+  const g = lastStart, s = SESSION;
+  const acting = items().filter(i => i.gameplay && isOn(g, i) && !keptOut(g, i, s));
+  const kind = s.ironman && s.mp ? 'an ironman multiplayer game' : s.ironman ? 'an ironman game' : s.mp ? 'a multiplayer game' : 'a single-player game';
+  const loaded = PLUGINS.filter(p => pluginOn(g, p)).length;
+  let h = `<div>Anvil 1.22.0, game build 1.37.5.0</div>
+    <div>In ${kind}; ${acting.length ? `${acting.length} gameplay plugin(s) act (${hash(acting.map(i => i.key))}).` : 'no gameplay plugin acts.'}</div>
+    <div style="margin-bottom:6px">${loaded} loaded, 0 failed, 0 skipped</div>
+    <table class="im"><tr><th>Plugin</th><th style="width:70px">Version</th><th style="width:80px">State</th><th>Details</th><th style="width:150px">Next start</th></tr>`;
   for (const it of items()){
-    let st, det = it.gameplay ? 'changes the game' : '';
-    if (!isOn(toml, it)) st = today ? '<span class="weak">disabled</span>' : '<span class="weak">off</span>';
-    else if (keptOut(toml, it, s)){
-      if (today){ st = '<span class="good">loaded</span>'; det = 'suspended in this game; changes the game'; }
-      else { st = '<span class="warn">kept out</span>'; det = keptOut(toml, it, s); }
-    }
-    else st = '<span class="good">loaded</span>';
-    h += `<tr class="${it.mod ? 'child' : ''}"><td class="${it.mod ? 'indent' : ''}">${it.mod ? '<span class="tree">&#9492;</span>' : ''}${esc(it.name)}</td><td>${it.mod ? '' : esc(it.plugin.version)}</td><td>${st}</td><td>${esc(det)}</td></tr>`;
+    const on = isOn(g, it);
+    const st = on ? '<span class="good">loaded</span>' : '<span class="warn">disabled</span>';
+    const det = [on && keptOut(g, it, s) ? 'suspended in this game' : '', it.gameplay ? 'changes the game' : ''].filter(Boolean).join('; ');
+    let next = '';
+    if (!it.mod) next = has(toml, 'disabled_plugins', it.key) ? '<span class="weak">disabled</span>' : `<button class="small" data-act="disablenext" data-key="${it.key}">Disable at next start</button>`;
+    h += `<tr class="${it.mod ? 'child' : ''}"><td class="${it.mod ? 'indent' : ''}">${esc(it.mod ? it.key : it.plugin.id)}</td><td>${it.mod ? '' : esc(it.plugin.version)}</td><td>${st}</td><td>${esc(det)}</td><td>${next}</td></tr>`;
   }
   return h + '</table>';
 }
-function tomlText(){
-  return '# anvil/anvil.toml (the lists the Manager writes)\n' + LISTS.map(l => {
-    const changed = JSON.stringify([...toml[l]].sort()) !== JSON.stringify([...lastStart[l]].sort());
-    const line = `${l} = [${toml[l].map(x => `"${x}"`).join(', ')}]`;
-    return changed ? `<span class="chg">${esc(line)}   # changed since the last start</span>` : esc(line);
-  }).join('\n');
-}
-function pendingBar(){
-  const changedSettings = PLUGINS.flatMap(p => (SETTINGS[p.id] || []).filter(s => setPending(p.id, s)));
-  const n = items().filter(isPending).length + changedSettings.length;
-  if (!n || variant === '0') return '';
-  return `<div class="banner"><span class="info">&#9679;</span><span>${n} change(s) apply at the next start of EU4.</span><span style="flex:1"></span><button class="small" data-act="undo">Undo changes</button></div>`;
+// Overlay, Settings tab (draw_settings): plugin ids on the left, the editor on the right.
+function todayOverlaySettings(){
+  const pid = ui.osettings;
+  const list = PLUGINS.filter(p => SETTINGS[p.id]).map(p => `<div class="li ${p.id === pid ? 'sel' : ''}" data-act="opick" data-key="${p.id}">${esc(p.id)}</div>`).join('');
+  return `<div class="split"><div class="list">${list}</div><div class="detail">${todayGroups(pid, s => todayControl(pid, s))}</div></div>
+    <div class="weak" style="margin-top:6px">Values are saved in anvil\\data\\${esc(pid)}\\settings.toml.</div>`;
 }
 
-// ---- wiring and the variant bar -------------------------------------------------------
+// ---- Variant A: one matrix table -------------------------------------------------------
+function variantA(){
+  let h = `<p class="weak" style="margin:0 0 8px">${POLICY} ${inGame() ? 'Switches apply at the next start; settings marked "applies at once" apply now.' : 'Changes apply at the next start.'}</p>
+  <table class="im"><tr><th style="width:44px">On</th><th>Plugin / module</th><th style="width:70px">Version</th>
+  <th style="width:76px">Ironman</th><th style="width:96px">Multiplayer</th><th style="width:170px">${inGame() ? 'This game' : 'State'}</th><th style="width:150px"></th></tr>`;
+  for (const it of items()){
+    const p = it.plugin, on = isOn(toml, it), parentOff = it.mod && !pluginOn(toml, p);
+    const opt = mode => {
+      if (!it.gameplay) return '';
+      if (!offers(it, mode)) return `<span class="dash" title="Its author keeps it out of ${MODE[mode]}.">&mdash;</span>`;
+      return cb('', allowed(toml, it, mode), 'allow', it.key, {mode, disabled: !on, title: on ? '' : 'Turn it on first; your choice is kept.'});
+    };
+    h += `<tr class="${it.mod ? 'child' : ''}">
+      <td>${p.standard && !it.mod ? cb('', true, '', '', {disabled:true, title:'Comes with Anvil.'}) : cb('', on, 'on', it.key, {disabled: parentOff, title: parentOff ? 'Its plugin is off.' : ''})}</td>
+      <td class="${it.mod ? 'indent' : ''}">${it.mod ? '<span class="tree">&#9492;</span>' : ''}<span title="${esc(it.key)}">${esc(it.name)}</span>${tag(it)}
+        ${!it.mod && p.modules.length ? `<span class="weak"> &middot; ${p.modules.length} modules</span>` : ''}
+        ${it.mod ? `<div class="weak" style="font-size:12px;padding-left:16px">${esc(it.mod.desc)}</div>` : ''}</td>
+      <td>${it.mod ? '' : esc(p.version)}</td>
+      <td>${opt('ironman')}</td><td>${opt('mp')}</td>
+      <td>${stateWord(it)} ${pend(it)}</td>
+      <td style="white-space:nowrap">${expander(it.key, settingsOf(p.id, it.mod ? it.mod.id : null).length)} ${it.mod ? '' : removeBtn(p)}</td></tr>`;
+    if (ui.open.has(openKey(it.key))) h += `<tr class="${it.mod ? 'child' : ''}"><td></td><td colspan="6" class="${it.mod ? 'indent' : ''}">${settingsBlock(p.id, it.mod ? it.mod.id : null, !isOn(toml, it), offNoteFor(it))}</td></tr>`;
+  }
+  return h + '</table>';
+}
+
+// ---- Variant B: list and detail, one "where it runs" choice per module -----------------
+function whereChoices(it){
+  if (!it.gameplay) return [{k:'off', l:'Off'}, {k:'on', l:'On'}];
+  return [{k:'off', l:'Off'}, {k:'normal', l:'Normal games'}, {k:'im', l:'+ Ironman', need:['ironman']},
+          {k:'mp', l:'+ Multiplayer', need:['mp']}, {k:'all', l:'Everywhere', need:['ironman','mp']}];
+}
+function whereNow(it){
+  if (!isOn(toml, it)) return 'off';
+  if (!it.gameplay) return 'on';
+  const i = allowed(toml, it, 'ironman'), m = allowed(toml, it, 'mp');
+  return i && m ? 'all' : i ? 'im' : m ? 'mp' : 'normal';
+}
+function whereText(it){
+  const w = whereNow(it);
+  if (w === 'off') return 'Does not load.';
+  if (!it.gameplay) return 'Runs in every game; it does not change the game.';
+  let t = {normal:'Runs in normal games. Kept out of ironman and multiplayer.', im:'Runs in normal and ironman games. Kept out of multiplayer.',
+           mp:'Runs in normal and multiplayer games. Kept out of ironman.', all:'Runs in every game, ironman and multiplayer included.'}[w];
+  const locked = ['ironman','mp'].filter(m => !offers(it, m)).map(m => MODE[m]);
+  if (locked.length) t += ` Its author keeps it out of ${locked.join(' and ')}.`;
+  return t;
+}
+function segment(it, disabled){
+  const cur = whereNow(it);
+  return `<div class="seg" role="radiogroup">${whereChoices(it).map(c => {
+    const missing = (c.need || []).filter(m => !offers(it, m)), dis = disabled || missing.length > 0;
+    const title = disabled ? 'Its plugin is off.' : missing.length ? `Its author keeps it out of ${missing.map(m => MODE[m]).join(' and ')}.` : '';
+    return `<button role="radio" aria-checked="${c.k === cur}" class="${c.k === cur ? 'cur' : ''}" ${dis ? 'disabled' : ''} title="${esc(title)}" data-act="where" data-key="${esc(it.key)}" data-where="${c.k}">${esc(c.l)}</button>`;
+  }).join('')}</div>`;
+}
+function variantB(){
+  const all = items(), sel = inGame() ? ui.oselected : ui.selected;
+  let list = '';
+  for (const p of PLUGINS){
+    const mods = all.filter(i => i.mod && i.plugin === p), g = mods.filter(i => i.gameplay).length;
+    const anyPending = all.some(i => i.plugin === p && isPending(i)) || (SETTINGS[p.id] || []).some(s => setPending(p.id, s));
+    const summary = mods.length ? `${mods.length} modules${g ? `, ${g} change the game` : ''}` : (p.gameplay ? 'changes the game' : 'does not change the game');
+    list += `<div class="li ${sel === p.id ? 'sel' : ''}" data-act="select" data-key="${CTX}:${p.id}">
+      <div>${esc(p.name)} <span class="weak">${esc(p.version)}</span> <span style="float:right">${stateWord(item(p.id))}</span></div>
+      <div class="weak" style="font-size:12px;clear:both">${summary}${anyPending ? ' &middot; <span class="pending">changes at the next start</span>' : ''}</div></div>`;
+  }
+  const p = PLUGINS.find(x => x.id === sel), pi = item(p.id), pOn = pluginOn(toml, p);
+  let d = `<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><div style="font-size:16px">${esc(p.name)} <span class="weak">${esc(p.version)} &middot; ${esc(p.id)}</span></div><div>${removeBtn(p)}</div></div>
+    <div style="margin:8px 0">${p.standard ? '<span class="weak">Comes with Anvil; always loads.</span>' : cb('Load this plugin', pOn, 'on', p.id)} ${pend(pi)}</div>
+    ${settingsOf(p.id, null).length ? `<div class="section">Settings</div>${settingsBlock(p.id, null, !pOn, 'The plugin is off; its settings are kept.')}` : ''}`;
+  if (p.gameplay && !p.modules.length) d += `<div class="mod"><div style="margin-bottom:6px">Where it runs ${tag(pi)}</div>${segment(pi, !pOn)}<div class="weak" style="margin-top:4px">${whereText(pi)}</div>${inGame() ? `<div style="margin-top:4px">${stateWord(pi)}</div>` : ''}</div>`;
+  if (p.modules.length){
+    d += `<div class="section">Modules</div><p class="weak" style="margin:0 0 4px">${POLICY}</p>`;
+    for (const it of all.filter(i => i.mod && i.plugin === p)){
+      d += `<div class="mod"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>${esc(it.name)}${tag(it)}</span><span>${inGame() ? stateWord(it) : ''} ${pend(it)}</span></div>
+        <div class="weak" style="font-size:12px;margin-bottom:6px">${esc(it.mod.desc)}</div>
+        ${segment(it, !pOn)}<div class="weak" style="margin-top:4px;font-size:13px">${pOn ? whereText(it) : 'Off with its plugin.'}</div>
+        ${settingsBlock(p.id, it.mod.id, !isOn(toml, it), offNoteFor(it))}</div>`;
+    }
+  }
+  if (!p.gameplay && !p.modules.length && !settingsOf(p.id, null).length) d += '<p class="weak">It does not change the game, so it runs in every game, ironman and multiplayer included.</p>';
+  return `<div class="split"><div class="list">${list}</div><div class="detail">${d}</div></div>`;
+}
+
+// ---- Variant C: by game mode ----------------------------------------------------------
+function variantC(){
+  const all = items(), mode = inGame() ? ui.omode : ui.mode, g = all.filter(i => i.gameplay);
+  const runs = m => g.filter(i => isOn(toml, i) && offers(i, m) && allowed(toml, i, m)).length;
+  const thisGame = m => inGame() && ((m === 'normal' && !SESSION.ironman && !SESSION.mp) || (m === 'ironman' && SESSION.ironman) || (m === 'mp' && SESSION.mp)) ? ' &middot; <b>this game</b>' : '';
+  const tabBtn = (m, label, extra) => `<button role="tab" class="${mode === m ? 'cur' : ''}" data-act="mode" data-key="${CTX}:${m}">${label} <span class="weak">&middot; ${extra}</span>${thisGame(m)}</button>`;
+  let h = `<div class="modes" role="tablist">${tabBtn('normal', 'Normal games', all.filter(i => isOn(toml, i)).length + ' on')}${tabBtn('ironman', 'Ironman', runs('ironman') + ' allowed')}${tabBtn('mp', 'Multiplayer', runs('mp') + ' allowed')}</div>`;
+  if (mode === 'normal'){
+    h += `<p class="weak" style="margin:0 0 6px">What loads at the next start, and the settings of each. Choose what may run in ironman and multiplayer in their tabs.</p>`;
+    for (const it of all){
+      const parentOff = it.mod && !pluginOn(toml, it.plugin);
+      h += `<div class="row" style="${it.mod ? 'padding-left:26px' : ''}"><span class="nm">${it.plugin.standard && !it.mod ? cb(it.name, true, '', '', {disabled:true, title:'Comes with Anvil.'}) : cb(it.name, isOn(toml, it), 'on', it.key, {disabled: parentOff, title: parentOff ? 'Its plugin is off.' : ''})}${tag(it)}</span>
+        <span class="weak" style="font-size:12px;flex:1">${it.mod ? esc(it.mod.desc) : esc(it.plugin.version)}</span>${inGame() ? stateWord(it) : ''}${pend(it)}${expander(it.key, settingsOf(it.plugin.id, it.mod ? it.mod.id : null).length)}</div>`;
+      if (ui.open.has(openKey(it.key))) h += `<div style="padding-left:${it.mod ? 34 : 8}px">${settingsBlock(it.plugin.id, it.mod ? it.mod.id : null, !isOn(toml, it), offNoteFor(it))}</div>`;
+    }
+    return h;
+  }
+  const word = MODE[mode];
+  h += `<p style="margin:0 0 6px">In ${word} games Anvil keeps out everything that changes the game, except what you allow here.</p>`;
+  for (const it of g){
+    const on = isOn(toml, it), path = it.mod ? `${esc(it.plugin.name)} <span class="weak">&rsaquo;</span> ${esc(it.name)}` : esc(it.name);
+    let control, note;
+    if (!offers(it, mode)){ control = cb('', false, '', '', {disabled:true, title:`Its author keeps it out of ${word}.`}); note = `<span class="weak">its author keeps it out of ${word}</span>`; }
+    else if (!on){ control = cb('', allowed(toml, it, mode), '', '', {disabled:true, title:'Turn it on in Normal games first.'}); note = '<span class="weak">off in every game</span>'; }
+    else { control = cb('', allowed(toml, it, mode), 'allow', it.key, {mode}); note = allowed(toml, it, mode) ? `<span class="good">runs in ${word}</span>` : `<span class="warn">kept out of ${word}</span>`; }
+    h += `<div class="row"><span class="nm">${control} ${path}</span><span style="flex:1">${note}</span>${inGame() ? stateWord(it) : ''}${pend(it)}</div>`;
+  }
+  h += `<p class="weak" style="margin:8px 0 0">${all.filter(i => !i.gameplay && isOn(toml, i)).length} plugins and modules that do not change the game run in ${word} too.</p>`;
+  if (mode === 'mp'){
+    const acting = g.filter(i => isOn(toml, i) && offers(i, 'mp') && allowed(toml, i, 'mp')).map(i => i.key);
+    h += `<div class="banner" style="margin-top:10px">Players in one game compare this code in the overlay: <b>${hash(acting)}</b>. It matches when everyone allows the same things.</div>`;
+  }
+  return h;
+}
+
+// ---- the two apps --------------------------------------------------------------------
 const VARIANTS = {'0':['Today', variant0], A:['Matrix table', variantA], B:['List and detail, one choice per module', variantB], C:['By game mode', variantC]};
 const KEYS = ['0', 'A', 'B', 'C'];
 let variant = (new URLSearchParams(location.search).get('variant') || '0').toUpperCase();
 if (!VARIANTS[variant]) variant = '0';
+const today = () => variant === '0';
 
+function pendingBar(){
+  const n = pendingCount();
+  if (!n || today()) return '';
+  return `<div class="banner"><span class="info">&#9679;</span><span>${n} change(s) apply at the next start of EU4.</span><span style="flex:1"></span><button class="small" data-act="undo">Undo changes</button></div>`;
+}
+function sessionLine(){
+  const s = SESSION, g = lastStart, acting = items().filter(i => i.gameplay && isOn(g, i) && !keptOut(g, i, s));
+  const kind = s.ironman && s.mp ? 'an ironman multiplayer game' : s.ironman ? 'an ironman game' : s.mp ? 'a multiplayer game' : 'a single-player game';
+  return `<div style="margin-bottom:6px">In ${kind}: ${acting.length ? `${acting.length} plugin(s) or module(s) that change the game act. Multiplayer code <b>${hash(acting.map(i => i.key))}</b>.` : 'nothing that changes the game acts.'}</div>`;
+}
+function manager(){
+  CTX = 'manager';
+  const tabs = today() ? ['Anvil','Catalog','Plugins','Mods','Settings','Benchmark','Crashes','Log','About'] : ['Anvil','Catalog','Plugins','Mods','Benchmark','Crashes','Log','About'];
+  if (!today() && ui.tab === 'settings') ui.tab = 'plugins';
+  document.getElementById('tabs').innerHTML = tabs.map(t => `<span class="tab ${ui.tab === t.toLowerCase() ? 'cur' : ''}" ${t === 'Plugins' || t === 'Settings' ? `data-act="tab" data-key="${t.toLowerCase()}"` : ''}>${t}</span>`).join('');
+  document.getElementById('mbanner').innerHTML = running ? `<div class="banner amber">EU4 is running from this folder. Close it to change plugins here${today() ? '' : '; the overlay changes the same things in the game'}.</div>` : '';
+  document.getElementById('pending').innerHTML = running ? '' : pendingBar();
+  const body = ui.tab === 'settings' ? todayManagerSettings() : VARIANTS[variant][1]();
+  document.getElementById('variant').innerHTML = `<div class="${running ? 'ro' : ''}">${body}</div>`;
+  document.getElementById('startbtn').innerHTML = running ? '<span class="weak">EU4 is running</span>' : '<button data-act="start">Start EU4</button>';
+}
+function overlay(){
+  CTX = 'overlay';
+  const map = document.getElementById('map');
+  document.getElementById('quitbtn').innerHTML = running ? '<button class="small" data-act="quit">Quit to desktop</button>' : '';
+  if (!running){ map.innerHTML = `<div style="text-align:center;padding:60px 0"><p>EU4 is not running.</p><button data-act="start">Start EU4</button></div>`; CTX = 'manager'; return; }
+  const tabs = today() ? [['status','Status'],['mods','Mods'],['settings','Settings'],['crash','Crash report'],['log','Log']]
+                       : [['plugins','Plugins'],['mods','Mods'],['crash','Crash report'],['log','Log']];
+  if (!tabs.some(([k]) => k === ui.otab)) ui.otab = tabs[0][0];
+  let body;
+  if (today()) body = ui.otab === 'settings' ? todayOverlaySettings() : ui.otab === 'status' ? todayOverlayStatus() : '<p class="weak">Not part of this prototype.</p>';
+  else body = ui.otab === 'plugins' ? sessionLine() + pendingBar() + VARIANTS[variant][1]() : '<p class="weak">Not part of this prototype.</p>';
+  const msg = message ? `<div class="msg"><span class="${message.error ? 'bad' : 'good'}">${esc(message.text)}</span><button class="small" data-act="okmsg">OK</button></div>` : '';
+  map.innerHTML = `<div class="owin"><div class="otitle"><span>Anvil</span><span>&times;</span></div>
+    <div class="tabs" style="padding:6px 8px 0">${tabs.map(([k, l]) => `<span class="tab ${ui.otab === k ? 'cur' : ''}" ${['status','settings','plugins'].includes(k) ? `data-act="otab" data-key="${k}"` : ''}>${l}</span>`).join('')}</div>
+    <div class="obody">${msg}${body}</div></div>`;
+  CTX = 'manager';
+}
+function tomlText(){
+  const lines = ['# anvil/anvil.toml (the switches and opt-ins)'];
+  for (const l of LISTS){
+    const changed = JSON.stringify([...toml[l]].sort()) !== JSON.stringify([...lastStart[l]].sort());
+    const line = `${l} = [${toml[l].map(x => `"${x}"`).join(', ')}]`;
+    lines.push(changed ? `<span class="chg">${esc(line)}   # changed since the game started</span>` : esc(line));
+  }
+  for (const p of PLUGINS){
+    const set = (SETTINGS[p.id] || []).filter(s => getVal(p.id, s) !== s.def);
+    if (!set.length) continue;
+    lines.push('', `# anvil/data/${p.id}/settings.toml (values that differ from the defaults)`);
+    for (const s of set){
+      const line = `${s.name} = ${JSON.stringify(getVal(p.id, s))}`;
+      lines.push(setPending(p.id, s) ? `<span class="chg">${esc(line)}   # waits for the next start</span>` : esc(line));
+    }
+  }
+  return lines.join('\n');
+}
 function render(){
-  const TABS = ['Anvil', 'Catalog', 'Plugins', 'Mods', 'Settings', 'Benchmark', 'Crashes', 'Log', 'About'];
-  document.getElementById('tabs').innerHTML = TABS.map(t => `<span class="tab ${ui.tab === t.toLowerCase() ? 'cur' : ''}" ${t === 'Plugins' || t === 'Settings' ? `data-act="tab" data-key="${t.toLowerCase()}"` : ''}>${t}</span>`).join('');
-  document.getElementById('pending').innerHTML = pendingBar();
-  document.getElementById('variant').innerHTML = ui.tab === 'settings' ? settingsTab(variant === '0') : VARIANTS[variant][1]();
-  document.getElementById('overlay').innerHTML = overlay();
+  manager(); overlay();
   document.getElementById('toml').innerHTML = tomlText();
   document.getElementById('switcher').innerHTML = `<button data-act="prev" aria-label="Previous variant">&larr;</button>
     <span class="lbl">${variant} (${esc(VARIANTS[variant][0])})</span><button data-act="next" aria-label="Next variant">&rarr;</button>`;
 }
+
+// ---- actions --------------------------------------------------------------------------
 function go(step){
   variant = KEYS[(KEYS.indexOf(variant) + step + KEYS.length) % KEYS.length];
   const u = new URL(location.href); u.searchParams.set('variant', variant); history.replaceState(null, '', u);
   render();
+}
+function setSetting(k, v){
+  const [pid, name] = k.split('/'), s = SETTINGS[pid].find(x => x.name === name);
+  values[k] = v;
+  if (running && !s.restart) lastValues[k] = v;   // the game takes a restart = false value at once
+  if (running) message = {text: `${s.label}: ${s.restart ? 'saved; applies at the next start' : 'applied'}`, error:false};
 }
 function act(el){
   const a = el.dataset.act, k = el.dataset.key;
@@ -496,27 +561,38 @@ function act(el){
     if (w === 'off') setOn(it, false);
     else { setOn(it, true); if (it.gameplay){ setAllowed(it, 'ironman', w === 'im' || w === 'all'); setAllowed(it, 'mp', w === 'mp' || w === 'all'); } }
   }
-  else if (a === 'select') ui.selected = k;
-  else if (a === 'mode') ui.mode = k;
+  else if (a === 'select'){ const [c, id] = k.split(':'); if (c === 'overlay') ui.oselected = id; else ui.selected = id; }
+  else if (a === 'mode'){ const [c, m] = k.split(':'); if (c === 'overlay') ui.omode = m; else ui.mode = m; }
   else if (a === 'tab') ui.tab = k;
+  else if (a === 'otab') ui.otab = k;
+  else if (a === 'opick') ui.osettings = k;
   else if (a === 'opensettings'){ ui.tab = 'settings'; ui.settingsPlugin = k; }
   else if (a === 'toggle'){ ui.open.has(k) ? ui.open.delete(k) : ui.open.add(k); }
-  else if (a === 'set'){ const [pid, name] = k.split('/'); const s = SETTINGS[pid].find(x => x.name === name); values[k] = !getVal(pid, s); }
+  else if (a === 'set'){ const [pid, name] = k.split('/'); setSetting(k, !getVal(pid, SETTINGS[pid].find(x => x.name === name))); }
+  else if (a === 'reset'){ const [pid, name] = k.split('/'); setSetting(k, SETTINGS[pid].find(x => x.name === name).def); }
+  else if (a === 'disablenext'){ setListed('disabled_plugins', k, true); message = {text:`${k} is disabled from the next start.`, error:false}; }
+  else if (a === 'okmsg') message = null;
   else if (a === 'undo'){ toml = JSON.parse(JSON.stringify(lastStart)); values = {...lastValues}; }
-  else if (a === 'start'){ lastStart = JSON.parse(JSON.stringify(toml)); lastValues = {...values}; }
+  else if (a === 'start'){ lastStart = JSON.parse(JSON.stringify(toml)); lastValues = {...values}; running = true; message = null; }
+  else if (a === 'quit'){ running = false; message = null; }
   else return;
   render();
 }
+document.addEventListener('click', e => { const el = e.target.closest('[data-act]'); if (el && !el.disabled) act(el); });
 document.addEventListener('change', e => {
   const t = e.target;
-  if (t.dataset.actSelect === 'plugin'){ ui.settingsPlugin = t.value; return render(); }
+  if (t.id === 'session'){
+    SESSION = {ironman: t.value === 'im' || t.value === 'immp', mp: t.value === 'mp' || t.value === 'immp'};
+    ui.omode = SESSION.ironman ? 'ironman' : SESSION.mp ? 'mp' : 'normal';
+    return render();
+  }
+  if (t.dataset.pick === 'manager'){ ui.settingsPlugin = t.value; return render(); }
   if (t.dataset.set){
     const [pid, name] = t.dataset.set.split('/'), s = SETTINGS[pid].find(x => x.name === name);
-    values[t.dataset.set] = s.type === 'int' ? Number(t.value) : t.value;
+    setSetting(t.dataset.set, s.type === 'int' ? Number(t.value) : t.value);
     render();
   }
 });
-document.addEventListener('click', e => { const el = e.target.closest('[data-act]'); if (el && !el.disabled) act(el); });
 document.addEventListener('keydown', e => {
   const t = e.target;
   if (t.matches && t.matches('input, textarea, select, [contenteditable]')) return;
@@ -524,7 +600,6 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'ArrowRight') go(1);
   else if ((e.key === ' ' || e.key === 'Enter') && t.dataset && t.dataset.act){ e.preventDefault(); act(t); }
 });
-document.getElementById('session').addEventListener('change', render);
 render();
 </script>
 </body>
