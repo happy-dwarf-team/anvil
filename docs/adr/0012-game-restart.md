@@ -51,6 +51,7 @@ The request never loses a campaign silently: `restart` refuses a session unless 
 - anvil-game declares 2 more symbols per build: the store of nation selection **Back** (its value is the flags' offset) and the check of `_bResignGame` in `CInGameIdler::Idle` (its value is the flag's offset). A build without them answers `ANVIL_ERROR_UNSUPPORTED`.
 - `anvil_game.h` grows by one function and one flag, and `anvil-sdk` gets its wrapper in the same pull request (CONTRIBUTING, Rust parity).
 - The overlay gets one button and its texts, in eight languages.
+- [live] The new process starts while the old one is still quitting, so what one process holds alone is still held at the new one's start: Anvil's own `anvil.log` (opened for writing, shared for reading) and Tongs' pipe. Anvil keeps the new process's lines and opens the log again every 250 ms for up to 60 s (`anvil.log was still in use … opened N ms later`); Tongs waits for its pipe's name the same way (tongs#201). A plugin that opens a file or a named object of its own for the whole process has to expect the same.
 - A restart takes as long as a start. The log says who asked and what anvil-game did (`restart requested by …`, `restart: the game's Exit to Menu`, `restart: application flags set`).
 
 ## Limits
