@@ -42,6 +42,10 @@ public:
     std::vector<Note> init(SettingsFile schema, const std::filesystem::path& player_file, std::string_view plugin_id,
                            const Environment& environment = {});
 
+    // A plugin that is off at this start (ADR 0013): from here on a change
+    // only saves the player's file (`applied` false), as for restart = true.
+    void save_only() { save_only_ = true; }
+
     const SettingsFile& schema() const { return schema_; }
     const std::filesystem::path& player_file() const { return player_file_; }
     size_t size() const { return slots_.size(); }
@@ -108,6 +112,7 @@ private:
     std::vector<SettingValue> current_;         // by id, under mutex_
     std::vector<SettingValue> saved_;           // by id, under mutex_
     std::vector<std::string> warnings_;
+    bool save_only_ = false;
     mutable std::mutex mutex_;
 };
 

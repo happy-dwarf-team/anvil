@@ -7,6 +7,7 @@
 #include "core/discovery.hpp"
 #include "core/log.hpp"
 #include "core/mod_plugins.hpp"
+#include "core/resolver.hpp"
 #include "core/safe_mode.hpp"
 #include "core/settings.hpp"
 #include "plugin_set_fixture.hpp"
@@ -843,6 +844,141 @@ affects_gameplay = false
         svc.status(&old);
         CHECK(old.size == offsetof(AnvilControlStatus, next_game_hash) && old.loading_done == 1 &&
               old.next_game_hash[0] == '\0' && old.settings_locked == 7);
+        fs::remove_all(dir);
+    });
+
+    run("control: modules, settings and dependencies of a plugin that is off at this start (ADR 0013)", [] {
+        const fs::path dir = fresh_dir("anvil-control-off");
+        TestStart start;
+        add_plugin(start, "anvil-game", true, "", dir / "data");
+        // A disabled plugin whose plugin.toml and settings.toml parse, as the
+        // runtime keeps them; and one whose plugin.toml does not.
+        auto parsed = parse_manifest_text(plugin_toml("lode", R"(issues = "https://example.org/lode"
+allow_ironman = "opt-in"
+
+[[dependencies]]
+id = "smithy"
+version = "^1.2"
+optional = true
+
+[[modules]]
+id = "flows"
+name = "Flows"
+affects_gameplay = true
+
+[[modules]]
+id = "extra"
+name = "Extra"
+affects_gameplay = true
+allow_multiplayer = "opt-in"
+default = false
+)",
+                                                          "2.0.0"),
+                                              dir / "plugins" / "lode");
+        CHECK(parsed.manifest.has_value());
+        if (!parsed.manifest) return;
+        Skipped lode = skipped_for("lode", i18n::Message("disabled", {}), dir / "plugins" / "lode", SkipKind::other, true);
+        lode.manifest = std::move(*parsed.manifest);
+        lode.manifest->affects_gameplay = true;
+        add_implied_dependencies(*lode.manifest);
+        auto schema = parse_settings_text(R"toml([setting.ratio]
+type = "float"
+default = 1.5
+label = "Ratio"
+module = "flows"
+restart = false
+
+[setting.note]
+type = "string"
+default = "x"
+label = "Note"
+affects_gameplay = false
+restart = false
+)toml");
+        CHECK(schema.file.has_value());
+        lode.settings = std::move(*schema.file);
+        lode.data_dir = dir / "data" / "lode";
+        const fs::path player = lode.data_dir / "settings.toml";
+        write_file(player, "ratio = 2.5\n");
+        start.skip(std::move(lode));
+        start.skip(skipped_for("broken", i18n::Message("disabled", {}), dir / "plugins" / "broken", SkipKind::other, true));
+        start.make();
+        const fs::path toml = dir / "anvil" / "anvil.toml";
+        write_file(toml, "disabled_plugins = [\"lode\", \"broken\"]\n");
+        ControlSources sources;
+        sources.anvil_dir = dir / "anvil";
+        sources.plugins = &start.set();
+        sources.policy = &start.policy;
+        sources.disabled = {"lode", "broken"};
+        Control control(sources);
+        control.loading_done();
+        const AnvilControlService& svc = *control.service();
+        CHECK(svc.size >= offsetof(AnvilControlService, requirement) + sizeof(svc.requirement));
+
+        // Its entry: what plugin.toml says, still skipped and disabled.
+        AnvilControlPlugin entry{};
+        entry.size = sizeof(entry);
+        CHECK(svc.plugin(1, &entry) == 1 && std::string(entry.id) == "lode" && std::string(entry.name) == "lode" &&
+              std::string(entry.version) == "2.0.0" && std::string(entry.state) == "skipped" && entry.disabled == 1 &&
+              entry.affects_gameplay == 1 && entry.offers_ironman == 1 && entry.offers_multiplayer == 0 &&
+              entry.settings == 2 && std::string(entry.issues) == "https://example.org/lode");
+        CHECK(svc.plugin(2, &entry) == 1 && std::string(entry.id) == "broken" && std::string(entry.name).empty() &&
+              std::string(entry.version).empty() && entry.settings == 0);
+
+        // Its modules: declared, without handles.
+        CHECK(svc.module_count("lode") == 2 && svc.module_count("broken") == 0);
+        AnvilControlModule module{};
+        module.size = sizeof(module);
+        CHECK(svc.module("lode", 1, &module) == 1 && std::string(module.key) == "lode.extra" &&
+              std::string(module.state) == "skipped" && module.enabled == 0 && module.on_by_default == 0 &&
+              module.offers_multiplayer == 1);
+        CHECK(svc.module("lode", 2, &module) == 0);
+        CHECK(start.plugin("lode").modules().size() == 2 && start.plugin("lode").modules()[0].handle == nullptr &&
+              start.plugin("lode").handle() == nullptr);
+
+        // Its settings: the player's values; a change only saves the file.
+        CHECK(svc.setting_count("lode") == 2 && svc.setting_count("broken") == 0);
+        AnvilControlSetting setting{};
+        setting.size = sizeof(setting);
+        CHECK(svc.setting_info("lode", 0, &setting) == 1 && std::string(setting.name) == "ratio" && setting.module == 0 &&
+              setting.counts == 1 && setting.locked == 0);
+        Text value;
+        CHECK(svc.setting_value("lode", 0, ANVIL_CONTROL_VALUE_CURRENT, Text::sink, &value) == 1 && value.value == "2.5");
+        AnvilControlResult result{};
+        result.size = sizeof(result);
+        CHECK(svc.setting_set_text("lode", 0, "3.5", &result) == ANVIL_OK && result.applied == 0 && result.saved == 1 &&
+              result.notified == 0);
+        CHECK(svc.setting_value("lode", 0, ANVIL_CONTROL_VALUE_CURRENT, Text::sink, &value) == 1 && value.value == "2.5");
+        CHECK(svc.setting_value("lode", 0, ANVIL_CONTROL_VALUE_SAVED, Text::sink, &value) == 1 && value.value == "3.5");
+        CHECK(contains_text(read_file(player), "ratio = 3.5"));
+        CHECK(svc.setting_set_text("lode", 1, "y", &result) == ANVIL_OK && result.applied == 0);
+        CHECK(svc.setting_set_text("broken", 0, "1", &result) == ANVIL_ERROR_NOT_FOUND);
+
+        // Its switches: the module keys answer as for a plugin that loads.
+        AnvilControlSwitch s{};
+        s.size = sizeof(s);
+        CHECK(svc.switch_state("lode.extra", ANVIL_CONTROL_SWITCH_ON, &s) == 1 && s.this_start == 0 && s.next_start == 0);
+        CHECK(svc.switch_set("lode.extra", ANVIL_CONTROL_SWITCH_ON, 1, &s, &result) == ANVIL_OK && s.next_start == 1);
+        CHECK(svc.switch_set("lode.extra", ANVIL_CONTROL_SWITCH_MULTIPLAYER, 1, nullptr, &result) == ANVIL_OK);
+        CHECK(svc.switch_set("lode", ANVIL_CONTROL_SWITCH_IRONMAN, 1, nullptr, &result) == ANVIL_OK);
+        CHECK(read_file(toml) == "disabled_plugins = [\"lode\", \"broken\"]\nenabled_modules = [\"lode.extra\"]\n"
+                                 "allow_multiplayer = [\"lode.extra\"]\nallow_ironman = [\"lode\"]\n");
+        CHECK(svc.switch_state("broken.x", ANVIL_CONTROL_SWITCH_ON, &s) == 0);
+
+        // Its dependencies, in plugin.toml order, then the implied one.
+        AnvilControlRequirement need{};
+        need.size = sizeof(need);
+        CHECK(svc.requirement("lode", 0, &need) == 1 && std::string(need.id) == "smithy" &&
+              std::string(need.version) == "^1.2" && need.optional == 1 && need.implied == 0);
+        CHECK(svc.requirement("lode", 1, &need) == 1 && std::string(need.id) == "anvil-game" &&
+              std::string(need.version) == "*" && need.optional == 0 && need.implied == 1);
+        CHECK(svc.requirement("lode", 2, &need) == 0 && svc.requirement("anvil-game", 0, &need) == 0 &&
+              svc.requirement("broken", 0, &need) == 0 && svc.requirement("nope", 0, &need) == 0);
+        // A smaller caller gets only what it knows.
+        AnvilControlRequirement small{};
+        small.size = offsetof(AnvilControlRequirement, optional);
+        small.optional = 7;
+        CHECK(svc.requirement("lode", 0, &small) == 1 && small.optional == 7 && std::string(small.id) == "smithy");
         fs::remove_all(dir);
     });
 

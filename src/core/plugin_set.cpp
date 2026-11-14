@@ -91,6 +91,7 @@ PluginSet::PluginSet(std::vector<ResolvedPlugin> resolved, std::vector<Skipped> 
     for (ResolvedPlugin& r : resolved) {
         PluginRecord& p = records_.emplace_back(PluginRecord::Key{});
         p.manifest_ = std::move(r.manifest);
+        p.declared_ = true;
         p.symbols_ = std::move(r.symbols);
         p.plugin_dir_ = p.manifest_.folder.wstring();
         p.data_dir_ = r.data_dir.wstring();
@@ -139,7 +140,28 @@ PluginSet::PluginSet(std::vector<ResolvedPlugin> resolved, std::vector<Skipped> 
     resolved_ = records_.size();
     for (Skipped& s : skipped) {
         PluginRecord& p = records_.emplace_back(PluginRecord::Key{});
-        p.manifest_.id = std::move(s.id);
+        if (s.manifest && s.manifest->id == s.id) {
+            // Off at this start, but its plugin.toml parses (ADR 0013): its
+            // modules without handles and its settings with the player's
+            // values, for anvil.control. Nothing is logged: the start that
+            // loads it logs its notes.
+            p.manifest_ = std::move(*s.manifest);
+            p.declared_ = true;
+            p.data_dir_ = s.data_dir.wstring();
+            for (const Module& m : p.manifest_.modules) {
+                PluginRecord::ModuleSlot slot;
+                slot.declared = &m;
+                slot.key = module_key(p.manifest_, m);
+                slot.name = p.manifest_.name + ": " + m.name;
+                p.modules_.push_back(std::move(slot));
+            }
+            if (s.settings) {
+                p.settings_.init(std::move(*s.settings), s.data_dir / "settings.toml", p.manifest_.id, deps_.environment);
+                p.settings_.save_only();
+            }
+        } else {
+            p.manifest_.id = std::move(s.id);
+        }
         p.manifest_.folder = s.folder;
         p.plugin_dir_ = s.folder.wstring();
         p.mod_ = std::move(s.mod);

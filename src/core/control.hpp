@@ -114,8 +114,11 @@ public:
     uint32_t mod_plugin_module_count(uint32_t index) const;
     bool mod_plugin_module(uint32_t index, uint32_t module, AnvilControlModule& out) const;
 
-    // setting_info of a resolved plugin, with the index of its module.
+    // setting_info of a plugin whose plugin.toml is known, with the index of
+    // its module.
     bool setting_info(std::string_view plugin_id, AnvilSetting setting, AnvilControlSetting& out) const;
+    // A dependency of a plugin whose plugin.toml is known, by index.
+    bool requirement(std::string_view plugin_id, uint32_t index, AnvilControlRequirement& out) const;
     // ADR 0013, point 14: a multiplayer session runs, and the setting counts
     // for the game, so the overlay may not change it.
     bool multiplayer_session() const;
@@ -142,9 +145,12 @@ private:
 
     // A plugin of this start that Anvil loads, by id.
     const PluginRecord* loadable(std::string_view plugin_id) const;
+    // A plugin of this start whose plugin.toml is known (PluginRecord::
+    // declared), loaded or off (ADR 0013).
+    const PluginRecord* declared(std::string_view plugin_id) const;
 
     // What a switch key names: a plugin of this start, and for a module key
-    // the module of a resolved plugin.
+    // the module of a plugin whose plugin.toml is known.
     struct Target {
         const PluginRecord* plugin = nullptr;
         const Module* module = nullptr;  // null: the plugin's own switch
@@ -161,7 +167,7 @@ private:
     std::string hash_line(const PluginRecord& p, const std::string& key, const Module* module) const;
 
     ControlSources sources_;
-    std::vector<std::string> versions_;  // by plugin index; "" for a skipped one
+    std::vector<std::string> versions_;  // by plugin index; "" for one whose plugin.toml is not known
     // The reasons as messages (i18n::serialize), by plugin index: the skipped
     // plugins' made once, the others' at loading_done.
     std::vector<std::string> messages_;

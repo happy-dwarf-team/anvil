@@ -7,7 +7,8 @@
  * its handle, for anvil-script (ADR 0008); since 1.20 the plugins' own texts
  * in the player's language (ADR 0010); since 1.22 the plugins' modules (ADR
  * 0011); since 1.23 the settings of modules, the writes of switches and
- * opt-ins, the record of the last start and the multiplayer lock (ADR 0013).
+ * opt-ins, the record of the last start, the multiplayer lock, and the
+ * modules, settings and dependencies of plugins that are off (ADR 0013).
  * Fields and functions are only appended: a caller checks `size` before it
  * reads a later one.
  *
@@ -91,8 +92,11 @@ typedef struct AnvilControlPlugin {
      * the player's language (src/i18n/message.hpp, i18n::parse). */
     const char *reason_message;
     /* Appended in 1.23 (ADR 0013): plugin.toml offers the opt-in for the
-     * plugin's own handle (allow_ironman / allow_multiplayer = "opt-in");
-     * 0 for a skipped plugin. */
+     * plugin's own handle (allow_ironman / allow_multiplayer = "opt-in").
+     * Since 1.23 a skipped or disabled local plugin whose plugin.toml parses
+     * has its name, version, issues, early, affects_gameplay, settings and
+     * these from plugin.toml too; one from a mod has them through
+     * mod_plugin. */
     int offers_ironman;
     int offers_multiplayer;
 } AnvilControlPlugin;
@@ -146,7 +150,9 @@ typedef struct AnvilControlModule {
     /* A resolved plugin's module at this start; for a plugin in a mod all 0/"". */
     /* "disabled" when it is off (by the player or `default`); when it is on,
      * its plugin's outcome: "pending" | "loaded" | "failed" (any way the
-     * plugin failed, also before anvil_plugin_load ran). */
+     * plugin failed, also before anvil_plugin_load ran). Since 1.23 a module
+     * of a plugin that is off at this start is "skipped", `enabled` 0
+     * (switch_state tells whether anvil.toml has it on). */
     const char *state;
     int enabled;             /* on at this start (anvil.toml, `default`) */
     int suspended;           /* taken out of the current session (design §13) */
@@ -182,6 +188,16 @@ typedef struct AnvilControlSetting {
     int counts;        /* counts for the game: in the multiplayer code, locked in a multiplayer session */
     int locked;        /* counts and a multiplayer session runs now: the setting calls refuse it */
 } AnvilControlSetting;
+
+/* A dependency of a plugin (plugin.toml [[dependencies]]; appended in 1.23,
+ * ADR 0013). Strings are valid for the process. */
+typedef struct AnvilControlRequirement {
+    uint32_t size;
+    const char *id;
+    const char *version; /* the range as plugin.toml writes it, e.g. "^1.2"; "*" for any */
+    int optional;        /* the plugin loads without it */
+    int implied;         /* not declared: a plugin that affects gameplay needs anvil-game */
+} AnvilControlRequirement;
 
 /* Which value setting_value gives. */
 enum {
@@ -253,6 +269,10 @@ typedef struct AnvilControlService {
     int (*warning)(uint32_t index, AnvilControlSink sink, void *context);
 
     /* --- settings of resolved plugins (design §11) --- */
+    /* Since 1.23 also of a skipped or disabled local plugin whose plugin.toml
+     * and settings.toml parse (ADR 0013): CURRENT and SAVED are the player's
+     * values, and a change only saves the player's file (`applied` 0, no
+     * callbacks); it is never locked. */
     uint32_t (*setting_count)(const char *plugin_id); /* 0: unknown plugin or none declared */
     int (*setting_info)(const char *plugin_id, AnvilSetting setting, AnvilControlSetting *out);
     int (*setting_option)(const char *plugin_id, AnvilSetting setting, uint32_t index, const char **name,
@@ -330,7 +350,8 @@ typedef struct AnvilControlService {
     /* --- plugin modules (appended in 1.22, working number; ADR 0011) --- */
     /* The [[modules]] of a resolved plugin by id, in plugin.toml order; 0 for
      * an unknown id or a plugin without modules. Their names and descriptions
-     * go through plugin_text like the plugin's own. */
+     * go through plugin_text like the plugin's own. Since 1.23 also of a
+     * skipped or disabled local plugin whose plugin.toml parses. */
     uint32_t (*module_count)(const char *plugin_id);
     int (*module)(const char *plugin_id, uint32_t index, AnvilControlModule *out);
     /* The same for the plugin in a mod by its mod_plugin index, as its
@@ -340,7 +361,7 @@ typedef struct AnvilControlService {
 
     /* --- switches and opt-ins (appended in 1.23, ADR 0013 point 7) --- */
     /* `key` is the id of a plugin of this start (resolved, disabled or
-     * skipped) or "<plugin>.<module>" of a resolved plugin's module; an
+     * skipped) or "<plugin>.<module>" of a module that module() gives; an
      * opt-in needs a plugin or module whose plugin.toml offers it. 0 for an
      * unknown key or `which`. */
     int (*switch_state)(const char *key, uint32_t which, AnvilControlSwitch *out);
@@ -363,6 +384,13 @@ typedef struct AnvilControlService {
     /* anvil/data/anvil/last-start.toml as this start wrote it, one call of the
      * sink; 0 when this start wrote none. */
     int (*last_start)(AnvilControlSink sink, void *context);
+
+    /* --- dependencies (appended in 1.23, ADR 0013) --- */
+    /* The [[dependencies]] of a plugin whose entry has its plugin.toml (a
+     * resolved one, or a skipped or disabled local one), in plugin.toml
+     * order, then the implied one; 0 when index is past the last or the id
+     * is unknown. */
+    int (*requirement)(const char *plugin_id, uint32_t index, AnvilControlRequirement *out);
 } AnvilControlService;
 
 #ifdef __cplusplus

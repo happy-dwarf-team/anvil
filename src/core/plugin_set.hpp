@@ -73,9 +73,15 @@ public:
     PluginRecord& operator=(const PluginRecord&) = delete;
 
     const std::string& id() const { return manifest_.id; }
-    // A skipped or disabled plugin's has only its id and folder (the id may be
-    // the folder's name when its plugin.toml does not parse).
+    // A skipped or disabled plugin's is its plugin.toml when that parses and
+    // it is a local plugin (ADR 0013, `declared`); otherwise only its id and
+    // folder (the id may be the folder's name when plugin.toml does not parse).
     const Manifest& manifest() const { return manifest_; }
+    // The manifest is the plugin's plugin.toml: every resolved plugin, and a
+    // skipped or disabled one whose plugin.toml parses. Its modules and
+    // settings are then the declared ones; a skipped plugin's modules have
+    // no handle and its settings only save the player's file.
+    bool declared() const { return declared_; }
     // The plugin's own handle; null for a skipped or disabled plugin.
     AnvilPlugin* handle() const { return handle_.get(); }
     // Null while the plugin's phase has not run. Readable from any thread:
@@ -114,6 +120,7 @@ private:
     std::atomic<HMODULE> dll_{nullptr};
     std::string mod_;
     bool awaiting_approval_ = false;
+    bool declared_ = false;
     Outcome outcome_;  // written once, before has_outcome_
     std::atomic<bool> has_outcome_{false};
 };

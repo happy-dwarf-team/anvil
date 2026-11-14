@@ -159,7 +159,7 @@ PluginSettings::Change PluginSettings::set(AnvilSetting id, const SettingValue& 
         const std::lock_guard lock(mutex_);
         saved_[id] = v;
         if (!player_file_.empty()) change.saved = write_player_settings(schema_, saved_, player_file_, change.error);
-        if (!s->restart) {
+        if (!s->restart && !save_only_) {
             current_[id] = v;
             store(*s, *slots_[id], v);
             change.applied = true;
