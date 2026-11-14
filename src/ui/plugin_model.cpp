@@ -161,6 +161,15 @@ std::size_t to_approve(const Snapshot& snapshot) {
     return static_cast<std::size_t>(std::count_if(snapshot.plugins.begin(), snapshot.plugins.end(), waits_for_approval));
 }
 
+InGame module_in_game(const Snapshot& snapshot, const PluginSnap& plugin, const ModuleSnap& module) {
+    if (!view(snapshot, plugin).in_this_game) return InGame::OffWithPlugin;
+    if (!module.in_effect.on) return InGame::Off;
+    if (kept_out(module.in_effect, module.changes_game, snapshot.game)) {
+        return snapshot.game == Game::Ironman ? InGame::KeptOutOfIronman : InGame::KeptOutOfMultiplayer;
+    }
+    return InGame::Runs;
+}
+
 PluginView view(const Snapshot& snapshot, const PluginSnap& plugin) {
     PluginView v;
     v.load = load_state(snapshot, plugin);

@@ -13,7 +13,7 @@ glossary: script block, root block, owner, profiling span.
 
 ## Measuring
 
-- The window is **Script profiler** in the **Status** tab of the Anvil panel, hidden until the modder
+- The window is **Script profiler**, switched above the list of the **Plugins** tab of the Anvil panel, hidden until the modder
   shows it. Its buttons appear while a game is loaded:
   - **Start** starts a profiling span, **Stop** ends it;
   - **Measure N days** starts a span that ends by itself after N game days (the setting **Days to
@@ -108,7 +108,7 @@ lists: the effect's time includes it.
 
 ## Cost
 
-- Without a span: no hook, no thread, no work in a frame or a day; the panel is a row in the Status tab.
+- Without a span: no hook, no thread, no work in a frame or a day; the panel is a switch above the Plugins tab's list.
 - During a span (eu4-engine-lab#164, lab series on Steam 1.37.5, process on CPU 1–7, 6 workers in each pool,
   ABBA rounds of 180 days at speed 5): vanilla, the 1719 Russia save reloaded before each segment, 9.80 days
   per second measuring against 9.98 idle, **−1.7%** (rounds −4.5% to +1.3%); Anbennar 1445–1450 in one game,

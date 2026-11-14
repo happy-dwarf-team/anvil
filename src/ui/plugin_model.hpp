@@ -48,6 +48,8 @@ struct SettingSnap {
     std::string default_value;
     std::string saved;        // the player's file
     std::string in_effect;    // the running game's value, else the last start's
+    std::string overridden;   // in the game: the value in effect when an environment
+                              // variable overrides the saved one; "" for none
 };
 
 struct ModuleSnap {
@@ -188,6 +190,12 @@ const ModuleSnap* find_module(const PluginSnap& plugin, std::string_view id);
 // What loads at the next start, with the saved files.
 LoadState load_state(const Snapshot& snapshot, const PluginSnap& plugin);
 PluginView view(const Snapshot& snapshot, const PluginSnap& plugin);
+
+// A module in the overlay's game, from what is in effect (the overlay's
+// "two states", ui-guidelines §5): it runs, it is off, it is off with its
+// plugin, or it is kept out of this ironman or multiplayer game.
+enum class InGame { Runs, Off, OffWithPlugin, KeptOutOfIronman, KeptOutOfMultiplayer };
+InGame module_in_game(const Snapshot& snapshot, const PluginSnap& plugin, const ModuleSnap& module);
 
 // Changes that wait for the next start: switches, opt-ins and approvals, and
 // settings whose saved value is not in effect. A change is counted where it

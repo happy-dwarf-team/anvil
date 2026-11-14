@@ -12,6 +12,7 @@
 #include "mods.hpp"
 #include "core/trust.hpp"
 #include "plugin_zip.hpp"
+#include "plugins_snapshot.hpp"
 #include "net/release_check.hpp"
 #include "start_menu.hpp"
 #include "test_image.hpp"
@@ -1057,6 +1058,53 @@ int main(int argc, char** argv) {
         CHECK(shown.state == "update-pending" && !shown.problem.empty() && !can_approve_shown(shown));
         CHECK(shown.report.manifest && !shown.offered().manifest);
         CHECK(!approve_shown_plugin(game, user, report, shown, error) && contains(error, "cannot be approved"));
+    });
+
+    run("plugins tab: what waits for the next start is measured against the last start", [] {
+        PluginsSnapshot s;
+        anvil::ui::PluginSnap p;
+        p.id = "tuning";
+        p.saved.on = true;
+        anvil::ui::ModuleSnap drill;
+        drill.id = "drill";
+        drill.default_on = false;
+        drill.saved = {true, false, true};  // turned on and allowed in multiplayer since
+        p.modules = {drill};
+        anvil::ui::SettingSnap armies;
+        armies.name = "max_armies";
+        armies.saved = "40";
+        anvil::ui::SettingSnap style;
+        style.name = "style";
+        style.saved = "\"brief\"";
+        p.settings = {armies, style};
+        anvil::ui::PluginSnap mod;
+        mod.id = "sieges";
+        mod.origin = anvil::ui::Origin::FromMod;
+        mod.approved = true;
+        anvil::ui::PluginSnap skipped;
+        skipped.id = "skipped";
+        anvil::ui::SettingSnap kept;
+        kept.name = "kept";
+        kept.saved = "1";
+        skipped.settings = {kept};
+        s.model.plugins = {p, mod, skipped};
+
+        LastStart last;
+        last.disabled_plugins = {"skipped"};
+        last.settings["tuning"]["max_armies"] = "20";
+        last.settings["tuning"]["style"] = "\"brief\"";
+        apply_last_start(s, last);
+        const anvil::ui::PluginSnap& t = s.model.plugins[0];
+        CHECK(t.in_effect.on && !t.modules[0].in_effect.on && !t.modules[0].in_effect.allow_multiplayer);
+        CHECK(t.settings[0].in_effect == "20" && t.settings[1].in_effect == "\"brief\"");
+        CHECK(anvil::ui::pending_count(t) == 3);  // the module's switch and its opt-in, and max_armies
+        CHECK(!s.model.plugins[1].approved_in_effect && anvil::ui::pending_count(s.model.plugins[1]) == 1);
+        // Not in the record: a plugin that did not resolve keeps its own values, so nothing waits.
+        CHECK(!s.model.plugins[2].in_effect.on && s.model.plugins[2].settings[0].in_effect == "1");
+
+        last.approvals.push_back({"sieges", "mod/ugc_1.mod", "1.0.0", "ab"});
+        apply_last_start(s, last);
+        CHECK(s.model.plugins[1].approved_in_effect);
     });
 
     manager_benchmark_tests();

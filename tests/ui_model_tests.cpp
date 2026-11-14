@@ -172,6 +172,29 @@ void game_tests() {
         s.plugins = {p};
         CHECK(view(s, s.plugins[0]).in_this_game);
     });
+    run("a module in this game: runs, off, kept out, off with its plugin", [] {
+        Snapshot s;
+        s.game = Game::Ironman;
+        PluginSnap p = plugin("smithy");
+        p.changes_game = true;
+        ModuleSnap drill = module("drill");
+        drill.changes_game = true;
+        ModuleSnap keys = module("keys");
+        ModuleSnap merge = module("merge", false);
+        p.modules = {drill, keys, merge};
+        s.plugins = {p};
+        const PluginSnap& sp = s.plugins[0];
+        CHECK(module_in_game(s, sp, sp.modules[0]) == InGame::KeptOutOfIronman);
+        CHECK(module_in_game(s, sp, sp.modules[1]) == InGame::Runs);
+        CHECK(module_in_game(s, sp, sp.modules[2]) == InGame::Off);
+        s.plugins[0].modules[0].in_effect.allow_ironman = true;
+        CHECK(module_in_game(s, s.plugins[0], s.plugins[0].modules[0]) == InGame::Runs);
+        // Saved off, still on in this game: the switch waits for the next start.
+        s.plugins[0].saved.on = false;
+        CHECK(module_in_game(s, s.plugins[0], s.plugins[0].modules[1]) == InGame::Runs);
+        s.plugins[0].in_effect.on = false;
+        CHECK(module_in_game(s, s.plugins[0], s.plugins[0].modules[1]) == InGame::OffWithPlugin);
+    });
 }
 
 void pending_tests() {

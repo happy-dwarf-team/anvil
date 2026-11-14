@@ -54,9 +54,10 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
   the modules that change the game ([ADR 0011](docs/adr/0011-plugin-modules.md)).
 - Anvil also ships `anvil-overlay` (`anvil/plugins/anvil-overlay/`): in-game
   notices about plugins that were not loaded, the previous crash and safe
-  mode, and a panel on `Ctrl+Shift+F12` with the status, "disable at the next
-  start", the crash report, the log and every plugin's settings. From Anvil
-  1.23 its Status tab has "Restart game": after a confirmation the game
+  mode, and a panel on `Ctrl+Shift+F12` with the crash report, the log and,
+  from Anvil 1.23, one Plugins tab drawn like the Manager's: each plugin's and
+  module's switch and opt-ins for the next start, its settings, and the approval
+  of plugins from mods. Above its list is "Restart game": after a confirmation the game
   restarts through its own restart, with the same launch options and mods; a
   campaign closes as at Exit to Menu (ironman is saved), and in multiplayer the
   button is off ([ADR 0012](docs/adr/0012-game-restart.md)). In the game's

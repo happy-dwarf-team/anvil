@@ -14,12 +14,12 @@ tried on a real Anbennar log of 19 649 lines and 18 831 messages); the reasons a
 ## Turning it on
 
 - The setting **Script errors panel** (`panel`, default off, applies at once) of
-  anvil-log-throttle, in the overlay's settings tab or the Manager's.
+  anvil-log-throttle, in the overlay's Plugins tab or the Manager's.
 - Turned on in the game: the table starts at that moment and the window opens. The panel says
   that earlier lines are not counted.
 - On at the start: the table starts when the plugin loads, before the game opens its logs, so it
   holds every line of the session, and the window opens with the main menu. Once closed, its
-  switch is in the **Status** tab of the Anvil panel, like every plugin's window.
+  switch is above the list of the **Plugins** tab of the Anvil panel, like every plugin's window.
 - Off: the window hides and is not refreshed. A table already started keeps counting until the
   game closes (nothing is unloaded in API 2).
 - The window needs `anvil-overlay` (an optional dependency) and, for its buttons,

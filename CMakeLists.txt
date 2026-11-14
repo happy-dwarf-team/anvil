@@ -223,6 +223,9 @@ endif()
 # anvil-game, the standard plugin of design §4 and §13.1 (readiness, frames,
 # main-thread work, sessions), built like any plugin repository and released
 # with Anvil in anvil/plugins/anvil-game/.
+# The plugins that come with Anvil: the overlay lists them apart (ADR 0013).
+set(ANVIL_STANDARD_PLUGINS anvil-game anvil-overlay anvil-log-throttle anvil-map anvil-script anvil-inspector
+    anvil-script-profiler)
 set(CMAKE_COMPILE_WARNING_AS_ERROR ON)
 add_subdirectory(plugins/anvil-game)
 # anvil-overlay, the standard plugin of design §15 (notifications and the
@@ -246,8 +249,7 @@ add_subdirectory(plugins/anvil-script-profiler)
 unset(CMAKE_COMPILE_WARNING_AS_ERROR)
 # The standard plugins ship only inside the package, so their version is
 # Anvil's: release-please bumps their manifests with version.txt.
-foreach(_standard anvil-game anvil-overlay anvil-log-throttle anvil-map anvil-script anvil-inspector
-    anvil-script-profiler)
+foreach(_standard ${ANVIL_STANDARD_PLUGINS})
     set(_manifest plugins/${_standard}/plugin.toml)
     file(STRINGS ${_manifest} _manifest_version LIMIT_COUNT 1 REGEX "^version = \"[^\"]*\"$")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_manifest})
@@ -561,8 +563,7 @@ install(FILES $<TARGET_FILE:anvil_script_profiler> plugins/anvil-script-profiler
     plugins/anvil-script-profiler/symbols.toml plugins/anvil-script-profiler/settings.toml
     DESTINATION anvil/plugins/anvil-script-profiler COMPONENT anvil)
 # Their plugin translations (design §5.4).
-foreach(_standard anvil-game anvil-overlay anvil-log-throttle anvil-map anvil-script anvil-inspector
-    anvil-script-profiler)
+foreach(_standard ${ANVIL_STANDARD_PLUGINS})
     install(DIRECTORY plugins/${_standard}/translations DESTINATION anvil/plugins/${_standard} COMPONENT anvil)
 endforeach()
 install(FILES LICENSE README.md DESTINATION anvil/docs COMPONENT anvil)

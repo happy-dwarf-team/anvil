@@ -3,6 +3,7 @@
 #include "benchmark_tab.hpp"
 #include "cli/game.hpp"
 #include "core/discovery.hpp"
+#include "core/last_start.hpp"
 #include "core/plugin_translation.hpp"
 #include "core/settings.hpp"
 #include "game.hpp"
@@ -11,6 +12,7 @@
 #include "plugin_zip.hpp"
 #include "plugins_snapshot.hpp"
 #include "ui/plugin_model.hpp"
+#include "ui/plugins_view.hpp"
 
 #include <windows.h>
 
@@ -55,7 +57,7 @@ public:
     // (its English name, "" for none) and the plugin to select.
     bool settled() const { return !pending_.valid() && (game_.empty() || snapshot_.has_value()); }
     void show_tab(std::string name) { forced_tab_ = std::move(name); }
-    void select_plugin(std::string id) { selected_ = std::move(id); }
+    void select_plugin(std::string id) { plugins_tab_.selected = std::move(id); }
 
 private:
     // What the worker reads from the game folder.
@@ -64,6 +66,7 @@ private:
         std::optional<Installation> installation;
         std::optional<cli::GameReport> report;  // when the anvil folder exists
         AnvilSettings anvil_toml;
+        std::optional<LastStart> last_start;  // what the last start used (ADR 0013, point 8)
         std::vector<std::string> crashes;
     };
     struct PendingPlan {
@@ -115,31 +118,18 @@ private:
     void check_zip(ZipArchive zip, std::string name, const CatalogPlugin* pin);
     void downloaded(ZipDownload download);
     void install_zip();
-    // The Plugins tab (plugins_tab.cpp): the list, the selected plugin's
-    // detail with its modules and settings, and the confirmations.
-    struct Confirm {
-        std::string title;
-        std::string button;
-        std::vector<std::string> lines;
-        std::vector<anvil::ui::Edit> edits;
-        std::string remove_folder;  // in anvil/plugins: Remove instead of edits
-    };
+    // The Plugins tab (plugins_tab.cpp): drawn by anvil::ui::PluginsTab
+    // (src/ui/plugins_view.hpp) with this app as its host.
+    struct PluginsHost;
+    friend struct PluginsHost;
     void rebuild_plugins();
     void plugins_take_effect();  // the game started from game_: it loads what the files hold now
     size_t plugin_index(std::string_view id) const;  // SIZE_MAX when not in plugins_
-    void draw_plugin_list();
-    void draw_plugin_detail(size_t i);
-    void draw_where(size_t i, std::string_view module, const anvil::ui::Switches& saved, const anvil::ui::Offers& offers,
-                    bool without_off, bool disabled);
-    void draw_module(size_t i, size_t m, bool disabled);
-    void draw_settings_of(size_t i, std::string_view module, bool disabled);
-    void draw_setting(size_t i, size_t s, bool disabled);
+    void draw_setting_control(size_t i, size_t s, bool disabled);
+    void draw_plugins_confirm();
     void draw_mod_approval(size_t i);
-    void draw_confirm_modal();
     void apply_edits(const std::vector<anvil::ui::Edit>& edits);
     void save_plugin_settings(size_t i);
-    void ask_edits(std::string title, std::string button, std::vector<anvil::ui::Edit> edits);
-    void ask_turn_on(const anvil::ui::Chain& chain);
     void ask_remove(const std::string& folder);
     void show_message(std::string title, std::string text);
     void failed(const std::string& what, const std::string& error, bool access_denied);
@@ -181,12 +171,8 @@ private:
 
     // The Plugins tab's model, rebuilt from each snapshot; its sources point into snapshot_->report.
     std::optional<PluginsSnapshot> plugins_;
-    std::string selected_;  // plugin id
-    std::string find_;
-    unsigned chips_ = 0;    // anvil::ui::Chip bits
+    anvil::ui::PluginsTab plugins_tab_;  // the selection, the search, the chips, the confirmation
     std::map<std::string, std::string> setting_texts_;  // "<plugin>/<setting>": string and key settings as typed
-    std::optional<Confirm> confirm_;
-    bool open_confirm_ = false;
     // A text of the plugin in `folder` in the player's language from its
     // translations/ (design §5.4), or `english` itself. Each file is read
     // once per language.

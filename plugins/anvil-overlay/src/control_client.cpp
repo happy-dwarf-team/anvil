@@ -41,6 +41,7 @@ template <typename Text> ModuleRow module_row(const AnvilControlModule& m, Text&
     row.name = text_or_empty(text(m.name));
     row.description = text_or_empty(text(m.description));
     row.state = text_or_empty(m.state);
+    if (m.size > offsetof(AnvilControlModule, group)) row.group = text_or_empty(text(m.group));
     row.gameplay = m.affects_gameplay != 0;
     row.offers_ironman = m.offers_ironman != 0;
     row.offers_multiplayer = m.offers_multiplayer != 0;
@@ -97,6 +98,10 @@ std::vector<PluginRow> ControlClient::plugins() const {
             row.awaiting_approval = p.awaiting_approval != 0;
         }
         if (p.size > offsetof(AnvilControlPlugin, reason_message)) row.why = anvil::i18n::parse(text_or_empty(p.reason_message));
+        if (p.size > offsetof(AnvilControlPlugin, offers_multiplayer)) {
+            row.offers_ironman = p.offers_ironman != 0;
+            row.offers_multiplayer = p.offers_multiplayer != 0;
+        }
         if (has_modules(service_)) {
             const uint32_t count = service_->module_count(row.id.c_str());
             for (uint32_t k = 0; k < count; ++k) {
@@ -298,6 +303,37 @@ std::string ControlClient::revoke_mod_plugin(const ModRow& plugin) const {
     AnvilControlResult out{};
     out.size = sizeof(out);
     return result_text(service_->revoke_mod_plugin(plugin.index, &out), out);
+}
+
+bool ControlClient::has_switches() const {
+    return service_ != nullptr && service_->size >= offsetof(AnvilControlService, requirement) + sizeof(void*);
+}
+
+std::optional<SwitchRow> ControlClient::switch_state(const std::string& key, uint32_t which) const {
+    if (!has_switches()) return std::nullopt;
+    AnvilControlSwitch s{};
+    s.size = sizeof(s);
+    if (service_->switch_state(key.c_str(), which, &s) == 0) return std::nullopt;
+    return SwitchRow{s.this_start != 0, s.next_start != 0, s.can_set != 0, text_or_empty(s.refusal)};
+}
+
+std::string ControlClient::switch_set(const std::string& key, uint32_t which, bool on) const {
+    if (!has_switches()) return anvil::i18n::tr("this Anvil cannot change switches in the game");
+    AnvilControlResult out{};
+    out.size = sizeof(out);
+    return result_text(service_->switch_set(key.c_str(), which, on ? 1 : 0, nullptr, &out), out);
+}
+
+std::vector<Requirement> ControlClient::requirements(const std::string& plugin) const {
+    std::vector<Requirement> rows;
+    if (!has_switches()) return rows;
+    for (uint32_t i = 0;; ++i) {
+        AnvilControlRequirement r{};
+        r.size = sizeof(r);
+        if (service_->requirement(plugin.c_str(), i, &r) == 0) break;
+        rows.push_back({text_or_empty(r.id), text_or_empty(r.version), r.optional != 0, r.implied != 0});
+    }
+    return rows;
 }
 
 std::vector<std::string> split_list(const std::string& text) {
