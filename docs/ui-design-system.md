@@ -101,6 +101,9 @@ All of them pass through `ScaleAllSizes`, as today.
   it for its page titles, at 1.18 times the text, with the CJK fonts merged into it as into
   the text's font (their regular weight stands in); plugin names, the heading of the detail,
   group headings and the title of a dialog may follow.
+- **Consolas** (`consola.ttf`, also in Windows) at 15 px for logs, crash reports and the
+  benchmark's JSON, with the CJK fonts merged into it; the Log page draws a warning's and an
+  error's glyph in a gutter before the line, and its chips filter to those levels.
 - No uppercase labels: the strings are translated, and uppercase does not exist in CJK.
 
 ## Components
@@ -129,7 +132,7 @@ with its own colours and spacings.
 | **Tag and chip** | Pills with a hairline. The "changes the game" tag carries the warning colour only in its word and outline. An active filter chip is ember at 16 % with an ember outline. |
 | **Banner** | `raised`, as high as its contents, with a 3 px left bar in the state colour and the state's glyph (§ Status; a dot for information) before its first line; the text stays `text` and wraps under itself, not under the glyph. Its actions sit inside it, after the text. Every notice of a page is one: a warning, a refusal, an update, a crash. |
 | **State row** | A glyph and one line beside it, outside a banner: a state that is no exception ("You have the latest release", "No crash reports"). |
-| **Card** | `panel` with a `line` hairline, as high as its contents: one thing to choose among several (a game copy on the first start; the Catalog's entries). |
+| **Card** | `panel` with a `line` hairline, as high as its contents: one thing to choose among several (a game copy on the first start; the Catalog's entries). A Catalog card is drawn like a list entry: the state's glyph in its own column, the name in semibold with the version and its tags, what it does, its state, then Install or Update as a secondary button (a page of several cards has no primary) and its links as text buttons. |
 | **Facts** | Names in `text_weak` in a column of their own and values in `text` beside them ("Anvil 1.22.0", "eu4.exe", "Folder"). |
 | **Dialog** | `raised`, rounded 8, the screen dimmed by `ModalWindowDimBg` at 66 %, no title bar: the title in semibold inside. The buttons sit in a row at the right in Windows' order, the primary first and Cancel last; notices inside it are banners. |
 | **Overlay window** | `window` at 97 % opacity, rounded 8, a 2 px ember line at the top of its title bar instead of the blue title bar. |
