@@ -99,6 +99,14 @@ pre.toml .chg{color:var(--info)}
 .switcher button{background:#111;color:#fff;border-radius:999px;width:30px;height:30px;padding:0;font-size:15px}
 .switcher button:hover{background:#333}
 .switcher .lbl{min-width:0;text-align:center;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lhdr{padding:5px 8px;background:var(--hdr);cursor:pointer;font-size:13px;border-bottom:1px solid var(--bl)}
+.mrow{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
+.mdesc{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:12px;color:var(--weak);margin:2px 0 0 22px}
+.gsep{display:flex;align-items:center;gap:8px;margin:14px 0 4px;color:#ddd;cursor:pointer}
+.gsep::after{content:"";flex:1;border-top:1px solid var(--bs);order:2}
+.gsep .acts{order:3}
+.note{font-size:12px;color:var(--weak);margin:4px 0}
+.seg.small button{padding:1px 8px;font-size:12px}
 @media (max-width:720px){.split{grid-template-columns:1fr}.row .nm{min-width:0}}
 </style>
 </head>
@@ -132,7 +140,19 @@ pre.toml .chg{color:var(--info)}
 // ---- real data: plugin.toml and settings.toml of the team's plugins (read 2026-11-14) ----------
 // `module` on a setting is the PROPOSED key; here it is guessed from the setting's name
 // (Bellows: a setting named as its module or prefixed by it; Smithy: by its group). Variant 0 ignores it.
-const PLUGINS = [
+let PLUGINS = [
+ {
+  "id": "anvil-game",
+  "name": "Anvil game",
+  "version": "1.22.0",
+  "gameplay": false,
+  "ironman": false,
+  "mp": false,
+  "standard": true,
+  "desc": "Standard plugin: game readiness, a frame event, work on the main thread, the game date and its events, read-only provinces, countries, units, rulers, flags and variables, a session event with ironman and multiplayer, which Anvil uses to suspend gameplay plugins, and the unit panel's commands for gameplay plugins.",
+  "modules": [],
+  "deps": []
+ },
  {
   "id": "anvil-overlay",
   "name": "Anvil overlay",
@@ -142,7 +162,10 @@ const PLUGINS = [
   "mp": false,
   "standard": true,
   "desc": "Standard plugin: in-game notifications about skipped plugins, the previous crash, safe mode, ironman, multiplayer and, opt-in, a newer Anvil release, a badge with Anvil's version in the main menu, and a panel (Ctrl+Shift+F12 or a click on the badge) with the status, the crash report, the log and every plugin's settings.",
-  "modules": []
+  "modules": [],
+  "deps": [
+   "anvil-game"
+  ]
  },
  {
   "id": "anvil-inspector",
@@ -153,18 +176,11 @@ const PLUGINS = [
   "mp": false,
   "standard": true,
   "desc": "Standard plugin for modders: a window of the overlay with the flags, variables and timed modifiers of the province whose view is open, of its owner and of your country, with their rulers, heirs and consorts. It only reads, and it is off until you turn it on.",
-  "modules": []
- },
- {
-  "id": "anvil-game",
-  "name": "Anvil game",
-  "version": "1.22.0",
-  "gameplay": false,
-  "ironman": false,
-  "mp": false,
-  "standard": true,
-  "desc": "Standard plugin: game readiness, a frame event, work on the main thread, the game date and its events, read-only provinces, countries, units, rulers, flags and variables, a session event with ironman and multiplayer, which Anvil uses to suspend gameplay plugins, and the unit panel's commands for gameplay plugins.",
-  "modules": []
+  "modules": [],
+  "deps": [
+   "anvil-game",
+   "anvil-overlay"
+  ]
  },
  {
   "id": "anvil-map",
@@ -175,7 +191,11 @@ const PLUGINS = [
   "mp": false,
   "standard": true,
   "desc": "Standard plugin: map modes from plugins, with a button on the minimap's list, a colour for each province and lines in the province's tooltip.",
-  "modules": []
+  "modules": [],
+  "deps": [
+   "anvil-game",
+   "mei"
+  ]
  },
  {
   "id": "anvil-script",
@@ -186,7 +206,8 @@ const PLUGINS = [
   "mp": false,
   "standard": true,
   "desc": "Standard plugin: gameplay plugins add effects of their own to the game's script language, which mods use in events, decisions and scripted effects, and mods ask has_dlc = \"anvil:<id>\" whether a plugin acts.",
-  "modules": []
+  "modules": [],
+  "deps": []
  },
  {
   "id": "anvil-script-profiler",
@@ -197,7 +218,11 @@ const PLUGINS = [
   "mp": false,
   "standard": true,
   "desc": "Standard plugin for modders: a window of the overlay that times the game's triggers and effects by the event, decision, on_action, casus belli, triggered modifier or mission they belong to, and writes the results to a CSV file. It hooks nothing until you start a measurement, and the game runs slower while it measures.",
-  "modules": []
+  "modules": [],
+  "deps": [
+   "anvil-game",
+   "anvil-overlay"
+  ]
  },
  {
   "id": "anvil-log-throttle",
@@ -208,7 +233,10 @@ const PLUGINS = [
   "mp": false,
   "standard": true,
   "desc": "Standard plugin: a line that repeats in the game's error.log is written a few times, then counted, with a report of the count every minute and when the game closes the log; for modders, a panel of the script errors with their counts (off by default).",
-  "modules": []
+  "modules": [],
+  "deps": [
+   "anvil-overlay"
+  ]
  },
  {
   "id": "bellows",
@@ -427,6 +455,9 @@ const PLUGINS = [
     "mp": false,
     "def": false
    }
+  ],
+  "deps": [
+   "anvil-game"
   ]
  },
  {
@@ -502,6 +533,10 @@ const PLUGINS = [
     "mp": true,
     "def": true
    }
+  ],
+  "deps": [
+   "anvil-game",
+   "anvil-overlay"
   ]
  },
  {
@@ -513,7 +548,8 @@ const PLUGINS = [
   "mp": false,
   "standard": false,
   "desc": "Better interface at a raised GUI scale: the country views keep their large layout at GUI scale 1.2, and tooltip text can be drawn at twice the resolution for double-resolution fonts. A port of two europagiga features by guge (MIT).",
-  "modules": []
+  "modules": [],
+  "deps": []
  },
  {
   "id": "sieve",
@@ -524,7 +560,8 @@ const PLUGINS = [
   "mp": false,
   "standard": false,
   "desc": "Keeps Anbennar's racial pop icons off the trade map mode, where they cover the map and slow it down. A port of a europagiga feature by guge (MIT).",
-  "modules": []
+  "modules": [],
+  "deps": []
  },
  {
   "id": "hoard",
@@ -535,7 +572,11 @@ const PLUGINS = [
   "mp": false,
   "standard": false,
   "desc": "Keeps your last autosaves and the last save of each sitting, per campaign.",
-  "modules": []
+  "modules": [],
+  "deps": [
+   "anvil-game",
+   "anvil-overlay"
+  ]
  },
  {
   "id": "lodestone",
@@ -546,7 +587,10 @@ const PLUGINS = [
   "mp": false,
   "standard": false,
   "desc": "Trade links turn during a campaign: the richer end of a link starts to pull trade toward itself.",
-  "modules": []
+  "modules": [],
+  "deps": [
+   "anvil-game"
+  ]
  },
  {
   "id": "mei",
@@ -557,7 +601,8 @@ const PLUGINS = [
   "mp": false,
   "standard": false,
   "desc": "Chinese, Japanese and Korean text for a translation mod: UTF-8 and EU4DLL encodings, fonts, line breaks, pinyin search and typing. A port of EU4 Unicode Patch by VulonLok.",
-  "modules": []
+  "modules": [],
+  "deps": []
  },
  {
   "id": "tongs",
@@ -568,10 +613,14 @@ const PLUGINS = [
   "mp": true,
   "standard": false,
   "desc": "Control EU4 from scripts and agents: a local command pipe that reads the state of a running game and, when allowed, uses its keyboard and mouse and runs console commands.",
-  "modules": []
+  "modules": [],
+  "deps": [
+   "anvil-game",
+   "anvil-map"
+  ]
  }
 ];
-const SETTINGS = {
+let SETTINGS = {
  "anvil-overlay": [
   {
    "name": "panel_key",
@@ -2298,11 +2347,129 @@ function variantC(){
   return h;
 }
 
+// ---- Variant B2: B, second iteration --------------------------------------------------
+// Bellows as proposed for 3.0: the module is the feature's only switch. A mode setting loses "off";
+// "verify" becomes a per-module check, mimalloc's "startup" a scope; plain on/off settings (the
+// diagnostic profiles, verifypath_session) become modules; each module gets the group of its old setting (proposed
+// `group` key in [[modules]]).
+const BELLOWS_TODAY = {p: JSON.parse(JSON.stringify(PLUGINS.find(p => p.id === 'bellows'))), s: JSON.parse(JSON.stringify(SETTINGS.bellows))};
+const BELLOWS_3 = (() => {
+  const p = JSON.parse(JSON.stringify(BELLOWS_TODAY.p)), out = [], groupOf = {};
+  for (const s of BELLOWS_TODAY.s){
+    const mod = p.modules.find(m => m.id === s.name);
+    if (mod){
+      groupOf[mod.id] = s.group;
+      const vals = (s.values || []).map(v => v[0]);
+      if (vals.includes('verify')) out.push({name: s.name + '_verify', type:'bool', label:"Check against the game's own code", def:false, group:'', module:mod.id, restart:true,
+        desc:"Also runs the game's own code and counts differences in the log. Slower; for checking correctness."});
+      else if (vals.includes('startup')) out.push({name:'mimalloc_scope', type:'enum', label:'Use it', def:'startup', group:'', module:mod.id, restart:true,
+        values:[['startup','Until the main menu'], ['on','For the whole game session']]});
+      continue;
+    }
+    // A plain on/off setting of its own (a profile, verifypath_session) is a feature: a module.
+    const onoff = s.type === 'enum' && !s.module && s.values.every(v => v[0] === 'on' || v[0] === 'off');
+    if (onoff){
+      p.modules.push({id:s.name, name:s.label, desc:s.desc, gameplay:false, def:s.def === 'on', group:s.group});
+      continue;
+    }
+    out.push(s);
+  }
+  for (const m of p.modules) if (!m.group) m.group = groupOf[m.id] || '';
+  p.version = '3.0.0 (proposed)';
+  return {p, s:out};
+})();
+function useBellows(v3){
+  const b = v3 ? BELLOWS_3 : BELLOWS_TODAY;
+  PLUGINS = PLUGINS.map(p => p.id === 'bellows' ? JSON.parse(JSON.stringify(b.p)) : p);
+  SETTINGS = {...SETTINGS, bellows: JSON.parse(JSON.stringify(b.s))};
+  ui.bellows3 = v3;
+}
+const ADVANCED = g => g === 'Diagnostics' || g === 'Advanced';
+const groupOpen = (key, g) => ADVANCED(g) ? ui.open.has(key) : !ui.open.has(key);
+const dependents = p => PLUGINS.filter(x => (x.deps || []).includes(p.id) && pluginOn(toml, x)).map(x => x.name);
+function b2Summary(p){
+  const mods = items().filter(i => i.mod && i.plugin === p);
+  if (mods.length){
+    const on = mods.filter(i => isOn(toml, i)).length, g = mods.filter(i => i.gameplay).length;
+    return `${mods.length} modules, ${on} on${g ? `, ${g} change the game` : ''}`;
+  }
+  return p.gameplay ? 'changes the game' : (SETTINGS[p.id] ? `${SETTINGS[p.id].length} settings` : 'no settings');
+}
+function b2Entry(p, sel){
+  const anyPending = items().some(i => i.plugin === p && isPending(i)) || (SETTINGS[p.id] || []).some(s => setPending(p.id, s));
+  return `<div class="li ${sel === p.id ? 'sel' : ''}" data-act="select" data-key="${CTX}:${p.id}">
+    <div class="mrow"><span>${esc(p.name)} <span class="weak">${esc(p.version)}</span></span><span style="font-size:12px">${stateWord(item(p.id))}</span></div>
+    <div class="weak" style="font-size:12px">${b2Summary(p)}${anyPending ? ' &middot; <span class="pending">&#9679; next start</span>' : ''}</div></div>`;
+}
+function b2Settings(pid, moduleId, disabled, offNote){
+  const list = settingsOf(pid, moduleId);
+  const normal = list.filter(s => !ADVANCED(s.group)), adv = list.filter(s => ADVANCED(s.group));
+  let h = '';
+  let group = null;
+  for (const s of normal){
+    if (s.group && s.group !== group && !moduleId){ group = s.group; h += `<div class="note" style="color:#ccc;margin-top:8px">${esc(group)}</div>`; }
+    h += control(pid, s, disabled);
+  }
+  if (adv.length){
+    const key = `${CTX}:adv:${pid}:${moduleId}`, open = ui.open.has(key);
+    h += `<button class="expander" data-act="toggle" data-key="${esc(key)}">${open ? '&#9662;' : '&#9656;'} Advanced (${adv.length})</button>`;
+    if (open) h += adv.map(s => control(pid, s, disabled)).join('');
+  }
+  return h ? `<div class="setbox">${disabled && offNote ? `<div class="note">${offNote}</div>` : ''}${h}</div>` : '';
+}
+function b2Module(it, pOn){
+  const on = isOn(toml, it), n = settingsOf(it.plugin.id, it.mod.id).length;
+  const sw = it.gameplay ? '' : cb('', on, 'on', it.key, {disabled: !pOn, title: pOn ? '' : 'Its plugin is off.'});
+  let h = `<div class="mod" style="padding:6px 0"><div class="mrow"><span>${sw} ${esc(it.name)}${tag(it)}</span>
+    <span>${inGame() ? stateWord(it) : ''} ${pend(it)} ${expander(it.key, n)}</span></div>
+    <div class="mdesc" title="${esc(it.mod.desc)}">${esc(it.mod.desc)}</div>`;
+  if (it.gameplay) h += `<div style="margin:6px 0 0 22px">${segment(it, !pOn)}<div class="note">${pOn ? whereText(it) : 'Off with its plugin.'}</div></div>`;
+  if (ui.open.has(openKey(it.key))) h += `<div style="margin-left:22px">${b2Settings(it.plugin.id, it.mod.id, !on, offNoteFor(it))}</div>`;
+  return h + '</div>';
+}
+function variantB2(){
+  const sel = inGame() ? ui.oselected : ui.selected;
+  const ours = PLUGINS.filter(p => !p.standard), std = PLUGINS.filter(p => p.standard);
+  const stdKey = `${CTX}:std`, stdOpen = ui.open.has(stdKey) || std.some(p => p.id === sel);
+  const stdOn = std.filter(p => pluginOn(toml, p)).length;
+  const list = ours.map(p => b2Entry(p, sel)).join('')
+    + `<div class="lhdr" data-act="toggle" data-key="${stdKey}">${stdOpen ? '&#9662;' : '&#9656;'} Comes with Anvil <span class="weak">&middot; ${std.length} plugins, ${stdOn} on</span></div>`
+    + (stdOpen ? std.map(p => b2Entry(p, sel)).join('') : '');
+  const p = PLUGINS.find(x => x.id === sel), pi = item(p.id), pOn = pluginOn(toml, p);
+  const deps = dependents(p);
+  let d = `<div class="mrow"><div style="font-size:16px">${esc(p.name)} <span class="weak" style="font-size:13px">${esc(p.version)} &middot; ${esc(p.id)}${p.standard ? ' &middot; comes with Anvil' : ''}</span></div><div>${removeBtn(p)}</div></div>
+    <div class="note" style="font-size:13px">${esc(p.desc)}</div>`;
+  if (p.id === 'bellows') d += `<div style="margin:6px 0"><span class="seg small">
+      <button class="${ui.bellows3 ? '' : 'cur'}" data-act="bellows" data-key="0">Bellows 1.8 as it is</button>
+      <button class="${ui.bellows3 ? 'cur' : ''}" data-act="bellows" data-key="1">Proposed for 3.0</button></span></div>`;
+  d += `<div style="margin:10px 0 4px">${cb('On', pOn, 'on', p.id)} ${pend(pi)} ${inGame() ? stateWord(pi) : ''}</div>`;
+  if (deps.length) d += `<div class="note">Needed by ${esc(deps.join(', '))}. Turning it off stops them too.</div>`;
+  if (p.gameplay && !p.modules.length) d += `<div style="margin:8px 0">Where it runs ${tag(pi)}<div style="margin-top:4px">${segment(pi, !pOn)}</div><div class="note">${whereText(pi)}</div></div>`;
+  const general = b2Settings(p.id, null, !pOn, 'The plugin is off; its settings are kept.');
+  if (general) d += `<div class="section">Settings</div>${general}`;
+  if (p.modules.length){
+    if (p.modules.some(m => m.gameplay)) d += `<p class="note">${POLICY}</p>`;
+    const groups = [];
+    for (const m of p.modules){ const g = m.group || ''; let e = groups.find(x => x.g === g); if (!e){ e = {g, its:[]}; groups.push(e); } e.its.push(item(p.id + '.' + m.id)); }
+    for (const {g, its} of groups){
+      const key = `${CTX}:grp:${p.id}:${g}`, open = groupOpen(key, g), on = its.filter(i => isOn(toml, i)).length;
+      d += `<div class="gsep"><span data-act="toggle" data-key="${esc(key)}">${open ? '&#9662;' : '&#9656;'} ${esc(g || 'Modules')} <span class="weak">&middot; ${on} of ${its.length} on</span></span>
+        <span class="acts"><button class="small" data-act="groupon" data-key="${esc(p.id + '|' + g)}" data-on="1" ${pOn ? '' : 'disabled'}>All on</button>
+        <button class="small" data-act="groupon" data-key="${esc(p.id + '|' + g)}" data-on="0" ${pOn ? '' : 'disabled'}>All off</button></span></div>`;
+      if (open) d += its.map(it => b2Module(it, pOn)).join('');
+    }
+  }
+  return `<div class="split"><div class="list">${list}</div><div class="detail">${d}</div></div>`;
+}
+
 // ---- the two apps --------------------------------------------------------------------
-const VARIANTS = {'0':['Today', variant0], A:['Matrix table', variantA], B:['List and detail, one choice per module', variantB], C:['By game mode', variantC]};
-const KEYS = ['0', 'A', 'B', 'C'];
-let variant = (new URLSearchParams(location.search).get('variant') || '0').toUpperCase();
-if (!VARIANTS[variant]) variant = '0';
+const VARIANTS = {'0':['Today', variant0], A:['Matrix table', variantA], B:['List and detail, one choice per module', variantB],
+                  C:['By game mode', variantC], B2:['B, second iteration', variantB2]};
+const KEYS = ['0', 'B', 'B2'];   // A and C stay reachable with ?variant=A or ?variant=C
+let variant = (new URLSearchParams(location.search).get('variant') || 'B2').toUpperCase();
+if (!VARIANTS[variant]) variant = 'B2';
+ui.selected = ui.oselected = 'bellows';
+useBellows(true);
 const today = () => variant === '0';
 
 function pendingBar(){
@@ -2393,6 +2560,11 @@ function act(el){
   }
   else if (a === 'select'){ const [c, id] = k.split(':'); if (c === 'overlay') ui.oselected = id; else ui.selected = id; }
   else if (a === 'mode'){ const [c, m] = k.split(':'); if (c === 'overlay') ui.omode = m; else ui.mode = m; }
+  else if (a === 'bellows') useBellows(k === '1');
+  else if (a === 'groupon'){
+    const [pid, g] = k.split('|'), on = el.dataset.on === '1';
+    for (const it of items().filter(i => i.mod && i.plugin.id === pid && (i.mod.group || '') === g)) setOn(it, on);
+  }
   else if (a === 'tab') ui.tab = k;
   else if (a === 'otab') ui.otab = k;
   else if (a === 'opick') ui.osettings = k;
