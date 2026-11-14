@@ -307,9 +307,13 @@ void ManagerApp::draw() {
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
     // With a scrollbar: a tab can be taller than the window, and nothing else would show that it goes on.
+    // The window is the whole client area, so it has no border or rounded corners of its own.
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::Begin("Anvil Manager", nullptr,
                  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
+    ImGui::PopStyleVar(2);
     if (!package_) {
         colored_wrapped(kBad, trf("This AnvilManager.exe is broken: {0}. Download it again from {1}.", {package_error_, kReleasesUrl}));
         ImGui::End();
@@ -321,7 +325,7 @@ void ManagerApp::draw() {
         draw_first_run();
     } else if (!snapshot_) {
         weak(tr("Reading the game folder..."));
-    } else if (ImGui::BeginTabBar("tabs")) {
+    } else if (ImGui::BeginTabBar("tabs", ImGuiTabBarFlags_DrawSelectedOverline)) {
         // While a benchmark series runs, the other tabs are dimmed and locked.
         const bool locked = benchmark_.busy();
         // A tab's id stays English, so the open tab stays open when the language changes.
@@ -539,7 +543,11 @@ void ManagerApp::draw_anvil_tab() {
     if (unknown_dll) ImGui::Checkbox(tr("Replace the other version.dll"), &replace_foreign_dll_);
     const bool nothing = inst.intact() && inst.dll_version == version && inst.manager_current;
     ImGui::BeginDisabled(nothing || (unknown_dll && !replace_foreign_dll_));
-    if (ImGui::Button((label + "###install").c_str())) start_plan(false);
+    // Installing is the view's one primary action; Repair stays a plain button.
+    const bool install = !inst.legacy.empty() || inst.dll != Installation::Dll::Anvil || inst.dll_version != version;
+    if (install ? primary_button((label + "###install").c_str()) : ImGui::Button((label + "###install").c_str())) {
+        start_plan(false);
+    }
     ImGui::EndDisabled();
     if (nothing) {
         ImGui::SameLine();
@@ -1010,7 +1018,7 @@ void ManagerApp::draw_approve_modal() {
         colored_wrapped(kBad, trf("Anvil would still skip it: {0}", {i18n::text(offered.skip_why)}));
     }
     ImGui::Spacing();
-    if (ImGui::Button(tr("Approve"))) {
+    if (primary_button(tr("Approve"))) {
         std::string error;
         if (!approve_shown_plugin(game_, eu4_user_dir(game_), *snapshot_->report, p, error)) {
             ImGui::CloseCurrentPopup();
@@ -1176,7 +1184,7 @@ void ManagerApp::draw_settings_tab() {
     }
     ImGui::Spacing();
     ImGui::BeginDisabled(!editor.dirty);
-    if (ImGui::Button(tr("Save"))) save_settings();
+    if (primary_button(tr("Save"))) save_settings();
     ImGui::SameLine();
     if (ImGui::Button(tr("Undo changes"))) {
         const auto& plugins = snapshot_->report->plugins;
@@ -1661,7 +1669,7 @@ void ManagerApp::draw_download_modal() {
                      "what anvil check finds.",
                      {plugin.zip.sha256}));
     ImGui::Spacing();
-    if (ImGui::Button(tr("Download"))) {
+    if (primary_button(tr("Download"))) {
         download_pending_ = std::async(std::launch::async, download_pinned_zip, plugin);
         ImGui::CloseCurrentPopup();
     }
@@ -1726,7 +1734,7 @@ void ManagerApp::draw_zip_modal() {
     }
     ImGui::Spacing();
     ImGui::BeginDisabled(!can_install || read_only());
-    if (ImGui::Button(tr("Install"))) {
+    if (primary_button(tr("Install"))) {
         ImGui::CloseCurrentPopup();
         install_zip();
     }
