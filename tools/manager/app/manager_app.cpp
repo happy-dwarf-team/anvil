@@ -13,6 +13,7 @@
 #include "sidebar.hpp"
 #include "start_menu.hpp"
 #include "ui.hpp"
+#include "ui/log_view.hpp"
 #include "ui/plugin_widgets.hpp"
 #include "ui/settings_order.hpp"
 
@@ -1059,16 +1060,7 @@ void ManagerApp::draw_crashes_tab() {
 
 void ManagerApp::set_log_text(std::string text) {
     log_text_ = std::move(text);
-    log_lines_.clear();
-    std::string_view rest = log_text_;
-    while (!rest.empty()) {
-        const size_t end = rest.find('\n');
-        std::string_view line = rest.substr(0, end);
-        rest = end == std::string_view::npos ? std::string_view() : rest.substr(end + 1);
-        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
-        const auto level = log_line_level(line);
-        log_lines_.push_back({line, level ? static_cast<int>(*level) : -1});
-    }
+    log_lines_ = anvil::ui::split_log(log_text_);
 }
 
 void ManagerApp::draw_log_tab() {
@@ -1119,49 +1111,10 @@ void ManagerApp::draw_log_tab() {
     if (text_button(tr("Open an Anvil issue"))) open_url("https://github.com/happy-dwarf-team/anvil/issues/new/choose");
     end_card();
 
-    // The levels a log line can be filtered to, with their counts; the report has none.
-    size_t warnings = 0, errors = 0;
-    for (const LogLine& l : log_lines_) {
-        warnings += l.level == ANVIL_LOG_WARNING ? 1 : 0;
-        errors += l.level == ANVIL_LOG_ERROR ? 1 : 0;
-    }
-    if (warnings + errors > 0 || log_warnings_ || log_errors_) {
-        ImGui::Spacing();
-        if (chip((trf("Warnings ({0})", {std::to_string(warnings)}) + "##warnings").c_str(), log_warnings_)) log_warnings_ = !log_warnings_;
-        ImGui::SameLine();
-        if (chip((trf("Errors ({0})", {std::to_string(errors)}) + "##errors").c_str(), log_errors_)) log_errors_ = !log_errors_;
-    }
-    const bool filtering = log_warnings_ || log_errors_;
-    std::vector<size_t> rows;
-    rows.reserve(log_lines_.size());
-    for (size_t i = 0; i < log_lines_.size(); ++i) {
-        const int level = log_lines_[i].level;
-        if (!filtering || (log_warnings_ && level == ANVIL_LOG_WARNING) || (log_errors_ && level == ANVIL_LOG_ERROR)) rows.push_back(i);
-    }
-
-    // The lines in the monospace font, a warning's and an error's glyph in a gutter.
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ::anvil::ui::kPanel);
-    ImGui::BeginChild("lines", ImVec2(0, 0), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
-    ImGui::PopStyleColor();
-    begin_mono();
-    const float line = ImGui::GetTextLineHeight();
-    const float gutter = line + ImGui::GetStyle().ItemInnerSpacing.x * 2;
-    ImGuiListClipper clipper;
-    clipper.Begin(static_cast<int>(rows.size()));
-    while (clipper.Step()) {
-        for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
-            const LogLine& l = log_lines_[rows[static_cast<size_t>(i)]];
-            const ImVec2 at = ImGui::GetCursorScreenPos();
-            if (l.level == ANVIL_LOG_WARNING || l.level == ANVIL_LOG_ERROR) {
-                anvil::ui::draw_glyph(ImGui::GetWindowDrawList(), at, line,
-                                      l.level == ANVIL_LOG_ERROR ? anvil::ui::Glyph::CannotLoad : anvil::ui::Glyph::Attention);
-            }
-            ImGui::SetCursorScreenPos(ImVec2(at.x + gutter, at.y));
-            ImGui::TextUnformatted(l.text.data(), l.text.data() + l.text.size());
-        }
-    }
-    end_mono();
-    ImGui::EndChild();
+    // The lines, filtered by the level chips; the report has no levels and so no chips.
+    ImGui::Spacing();
+    anvil::ui::log_chips(log_lines_, log_filter_);
+    anvil::ui::log_lines("lines", log_lines_, log_filter_, false);
 }
 
 std::string ManagerApp::make_problem_report() const {

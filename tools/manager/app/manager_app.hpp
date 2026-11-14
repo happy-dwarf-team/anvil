@@ -12,6 +12,7 @@
 #include "platform.hpp"
 #include "plugin_zip.hpp"
 #include "plugins_snapshot.hpp"
+#include "ui/log_view.hpp"
 #include "ui/plugin_model.hpp"
 #include "ui/plugins_view.hpp"
 
@@ -194,13 +195,8 @@ private:
     std::map<std::string, std::optional<CrashSummary>> crash_summaries_;  // the crash list's, read once each
     std::string crash_text_;
     std::string log_text_;
-    // log_text_ in lines with each one's level (an AnvilLogLevel, -1 for none), rebuilt by set_log_text.
-    struct LogLine {
-        std::string_view text;
-        int level = -1;
-    };
-    std::vector<LogLine> log_lines_;
-    bool log_warnings_ = false, log_errors_ = false;  // the Log page's level chips
+    std::vector<anvil::ui::LogLine> log_lines_;  // log_text_ in lines, rebuilt by set_log_text
+    anvil::ui::LogFilter log_filter_;            // the Log page's level chips
 
     // The catalog (ADR 0002): the Manager's own list until the player fetches main's.
     std::optional<Catalog> catalog_;

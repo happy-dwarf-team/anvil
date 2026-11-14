@@ -67,6 +67,13 @@ inline void strong(const char* text) {
     if (g_title_font != nullptr) ImGui::PopFont();
 }
 
+// The same, wrapped: a notice's title.
+inline void strong_wrapped(const char* text) {
+    if (g_title_font != nullptr) ImGui::PushFont(g_title_font, ImGui::GetFontSize());
+    ImGui::TextWrapped("%s", text);
+    if (g_title_font != nullptr) ImGui::PopFont();
+}
+
 // Text in the monospace font between these two: a log or a report.
 inline void begin_mono() {
     ImGui::PushFont(g_mono_font, g_mono_font != nullptr ? g_mono_font->LegacySize : ImGui::GetFontSize());
