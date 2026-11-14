@@ -39,6 +39,12 @@ void reset_result(AnvilControlResult* out) {
     out->size = sizeof(*out);
 }
 
+// ADR 0013, point 14: a setting that counts, in a multiplayer session.
+AnvilResult locked(AnvilControlResult* out) {
+    copy_error(out, "locked in a multiplayer game");
+    return ANVIL_ERROR_WRONG_PHASE;
+}
+
 AnvilResult finish_change(const PluginSettings::Change& change, AnvilControlResult* out) {
     if (out != nullptr) {
         out->applied = change.applied ? 1 : 0;
@@ -51,14 +57,21 @@ AnvilResult finish_change(const PluginSettings::Change& change, AnvilControlResu
 
 // ---- the C table ---------------------------------------------------------------
 
+// Only as far as the caller's `size` says, since fields are appended (1.23).
+// Before 1.23 the core filled the whole struct whatever its `size`, so a
+// caller that leaves it 0 still gets all of it.
+template <typename T> uint32_t caller_size(const T* out) {
+    return out->size == 0 ? static_cast<uint32_t>(sizeof(T)) : std::min<uint32_t>(out->size, sizeof(T));
+}
+
 void svc_status(AnvilControlStatus* out) {
     if (out == nullptr) return;
-    if (g_control == nullptr) {
-        *out = AnvilControlStatus{};
-        out->size = sizeof(*out);
-        return;
-    }
-    g_control->status(*out);
+    const uint32_t size = caller_size(out);
+    AnvilControlStatus full{};
+    full.size = sizeof(full);
+    if (g_control != nullptr) g_control->status(full);
+    std::memcpy(out, &full, size);
+    out->size = size;
 }
 
 // Fills the caller's struct only as far as its `size` says (an overlay built
@@ -97,9 +110,8 @@ uint32_t svc_setting_count(const char* plugin_id) {
 int svc_setting_info(const char* plugin_id, AnvilSetting setting, AnvilControlSetting* out) {
     if (plugin_id == nullptr || out == nullptr) return 0;
     // Only as far as the caller's `size` says, since fields are appended
-    // (1.23). Before 1.23 the core filled the whole struct whatever its
-    // `size`, so a caller that left it 0 gets the fields of 1.22.
-    if (out->size == 0) out->size = offsetof(AnvilControlSetting, module);
+    // (1.23); a caller that leaves it 0 gets all of it, as before.
+    out->size = caller_size(out);
     return fill_sized(out, [&](AnvilControlSetting& full) { return g_control->setting_info(plugin_id, setting, full); });
 }
 
@@ -141,6 +153,7 @@ AnvilResult svc_setting_set(const char* plugin_id, AnvilSetting setting, const A
         return ANVIL_ERROR_NOT_FOUND;
     }
     if (value == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (g_control->setting_locked(plugin_id, setting)) return locked(out);
     SettingValue v;
     v.integer = value->integer;
     v.real = value->real;
@@ -157,6 +170,7 @@ AnvilResult svc_setting_set_text(const char* plugin_id, AnvilSetting setting, co
         return ANVIL_ERROR_NOT_FOUND;
     }
     if (text == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (g_control->setting_locked(plugin_id, setting)) return locked(out);
     return finish_change(s->set_text(setting, text), out);
 }
 
@@ -167,6 +181,7 @@ AnvilResult svc_setting_reset(const char* plugin_id, AnvilSetting setting, Anvil
         copy_error(out, "no such plugin");
         return ANVIL_ERROR_NOT_FOUND;
     }
+    if (g_control->setting_locked(plugin_id, setting)) return locked(out);
     return finish_change(s->reset(setting), out);
 }
 
@@ -448,28 +463,69 @@ void Control::status(AnvilControlStatus& out) const {
             out.multiplayer = session->multiplayer ? 1 : 0;
         }
     }
+    out.settings_locked = out.multiplayer;
     if (!done || sources_.plugins == nullptr) return;
     out.loaded = static_cast<uint32_t>(sources_.plugins->count(Outcome::Kind::loaded));
     out.failed = static_cast<uint32_t>(sources_.plugins->count(Outcome::Kind::failed));
     std::vector<std::string> active;
+    // A multiplayer game started now (ADR 0013, point 14): the handles this
+    // start's allow_multiplayer keeps acting in such a session.
+    std::vector<std::string> multiplayer;
+    const GameplayOptIns opt_ins{sources_.allow_ironman, sources_.allow_multiplayer};
     for (size_t i = 0; i < resolved; ++i) {
         const PluginRecord& p = sources_.plugins->at(i);
         const Outcome* o = p.outcome();
         if (o == nullptr || o->kind != Outcome::Kind::loaded) continue;
         // One line for the plugin's own handle and one per module that
-        // affects gameplay and acts now (ADR 0011): "<plugin>.<module> <version>".
-        const std::string version = p.manifest().version.to_string();
+        // affects gameplay and acts now (ADR 0011): "<plugin>.<module> <version>",
+        // with the values of its settings that count (ADR 0013).
         const auto acting = [&](const AnvilPlugin& h) {
             return h.affects_gameplay && (sources_.policy == nullptr || !sources_.policy->suspended(h.owner));
         };
-        if (acting(*p.handle())) active.push_back(p.id() + " " + version);
+        const auto in_multiplayer = [&](const Manifest& m) {
+            return m.affects_gameplay && suspension_reason(m, SessionMode{false, true}, opt_ins).empty();
+        };
+        if (acting(*p.handle())) active.push_back(hash_line(p, p.id(), nullptr));
+        if (in_multiplayer(p.manifest())) multiplayer.push_back(hash_line(p, p.id(), nullptr));
         for (const auto& m : p.modules()) {
-            if (m.handle != nullptr && acting(*m.handle)) active.push_back(m.key + " " + version);
+            if (m.handle == nullptr) continue;
+            if (acting(*m.handle)) active.push_back(hash_line(p, m.key, m.declared));
+            if (in_multiplayer(module_manifest(p.manifest(), *m.declared))) {
+                multiplayer.push_back(hash_line(p, m.key, m.declared));
+            }
         }
     }
     out.gameplay_active = static_cast<uint32_t>(active.size());
     const std::string hash = plugin_set_hash(std::move(active));
     std::snprintf(out.gameplay_hash, sizeof(out.gameplay_hash), "%s", hash.c_str());
+    const std::string next = plugin_set_hash(std::move(multiplayer));
+    std::snprintf(out.next_game_hash, sizeof(out.next_game_hash), "%s", next.c_str());
+}
+
+std::string Control::hash_line(const PluginRecord& p, const std::string& key, const Module* module) const {
+    std::string line = key + " " + p.manifest().version.to_string();
+    const PluginSettings& values = p.settings();
+    std::vector<std::string> counted;
+    for (const Setting& s : values.schema().settings) {
+        if (s.module != (module != nullptr ? module->id : std::string()) || !setting_counts(s, p.manifest())) continue;
+        if (const auto v = values.current(s.id)) counted.push_back(s.name + "=" + setting_text(s, *v));
+    }
+    std::sort(counted.begin(), counted.end());
+    for (const auto& c : counted) line += " " + c;
+    return line;
+}
+
+bool Control::multiplayer_session() const {
+    if (sources_.policy == nullptr) return false;
+    const auto session = sources_.policy->session();
+    return session && session->multiplayer;
+}
+
+bool Control::setting_locked(std::string_view plugin_id, AnvilSetting setting) const {
+    if (!multiplayer_session()) return false;
+    const PluginRecord* p = loadable(plugin_id);
+    const Setting* d = p == nullptr ? nullptr : p->settings().schema().get(setting);
+    return d != nullptr && setting_counts(*d, p->manifest());
 }
 
 bool Control::plugin(uint32_t index, AnvilControlPlugin& out) const {
@@ -752,6 +808,8 @@ bool Control::setting_info(std::string_view plugin_id, AnvilSetting setting, Anv
         if (!d->module.empty() && modules[i].id == d->module) out.module = static_cast<int32_t>(i);
     }
     out.advanced = d->advanced ? 1 : 0;
+    out.counts = setting_counts(*d, p->manifest()) ? 1 : 0;
+    out.locked = out.counts && multiplayer_session() ? 1 : 0;
     return true;
 }
 

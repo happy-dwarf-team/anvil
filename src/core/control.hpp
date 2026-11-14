@@ -116,6 +116,10 @@ public:
 
     // setting_info of a resolved plugin, with the index of its module.
     bool setting_info(std::string_view plugin_id, AnvilSetting setting, AnvilControlSetting& out) const;
+    // ADR 0013, point 14: a multiplayer session runs, and the setting counts
+    // for the game, so the overlay may not change it.
+    bool multiplayer_session() const;
+    bool setting_locked(std::string_view plugin_id, AnvilSetting setting) const;
 
     // Switches and opt-ins for the next start (ADR 0013, point 7): `key` is a
     // plugin id of this start or "<plugin>.<module>" of a resolved plugin,
@@ -152,6 +156,9 @@ private:
         std::set<std::string, std::less<>> ironman, multiplayer, enabled_modules, disabled_modules;
     };
     bool state_of(const Target& t, uint32_t which, AnvilControlSwitch& out) const;  // mutex_ held
+    // The hash line of a handle (ADR 0013): "<key> <version>" and the values
+    // in effect of the owner's settings that count, names sorted.
+    std::string hash_line(const PluginRecord& p, const std::string& key, const Module* module) const;
 
     ControlSources sources_;
     std::vector<std::string> versions_;  // by plugin index; "" for a skipped one

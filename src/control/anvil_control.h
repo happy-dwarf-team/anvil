@@ -7,7 +7,7 @@
  * its handle, for anvil-script (ADR 0008); since 1.20 the plugins' own texts
  * in the player's language (ADR 0010); since 1.22 the plugins' modules (ADR
  * 0011); since 1.23 the settings of modules, the writes of switches and
- * opt-ins and the record of the last start (ADR 0013).
+ * opt-ins, the record of the last start and the multiplayer lock (ADR 0013).
  * Fields and functions are only appended: a caller checks `size` before it
  * reads a later one.
  *
@@ -52,8 +52,21 @@ typedef struct AnvilControlStatus {
     /* Loaded plugins with affects_gameplay = true that act now (not suspended). */
     uint32_t gameplay_active;
     /* A hash of the active gameplay plugin set (ids and versions), for
-     * players to compare by hand in multiplayer; "" when there are none. */
+     * players to compare by hand in multiplayer; "" when there are none.
+     * Since 1.23 each line also holds the values in effect of the owner's
+     * settings that count (AnvilControlSetting.counts), names sorted:
+     * "lodestone 1.2.0 cooldown_months=24 flip_ratio=1.5". */
     char gameplay_hash[20];
+    /* Appended in 1.23 (ADR 0013, point 14). The code of a multiplayer game
+     * started now: gameplay_hash as a multiplayer session would compute it,
+     * from this start's allow_multiplayer and the values in effect; "" when
+     * nothing would act. Shown outside a session ("Multiplayer code for a game
+     * started now"); in a session gameplay_hash is the session's code. */
+    char next_game_hash[20];
+    /* A multiplayer session runs: the settings that count are locked
+     * (AnvilControlSetting.locked; the setting calls refuse them). Ironman
+     * alone locks nothing. */
+    int settings_locked;
 } AnvilControlStatus;
 
 typedef struct AnvilControlPlugin {
@@ -166,6 +179,8 @@ typedef struct AnvilControlSetting {
     /* Appended in 1.23 (ADR 0013). */
     int32_t module;    /* the module() index it belongs to (settings.toml `module`); -1: the plugin's */
     int advanced;      /* folded behind "Advanced (n)" */
+    int counts;        /* counts for the game: in the multiplayer code, locked in a multiplayer session */
+    int locked;        /* counts and a multiplayer session runs now: the setting calls refuse it */
 } AnvilControlSetting;
 
 /* Which value setting_value gives. */
@@ -249,7 +264,8 @@ typedef struct AnvilControlService {
     /* Check, save in anvil/data/<id>/settings.toml, and for restart = false
      * apply and run the plugin's callbacks on this thread. NOT_FOUND for an
      * unknown plugin, NOT_DECLARED for an unknown setting, INVALID_ARGUMENT
-     * for a value that does not fit. */
+     * for a value that does not fit; since 1.23 WRONG_PHASE, with "locked in
+     * a multiplayer game" in `error`, for a setting that is locked. */
     AnvilResult (*setting_set)(const char *plugin_id, AnvilSetting setting, const AnvilControlValue *value,
                                AnvilControlResult *out);
     AnvilResult (*setting_set_text)(const char *plugin_id, AnvilSetting setting, const char *text,
