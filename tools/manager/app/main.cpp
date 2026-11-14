@@ -5,6 +5,11 @@
 //   AnvilManager.exe [--game <EU4 folder>]
 //   AnvilManager.exe --check-package          exit code 0 when the package and the catalog it carries are sound
 //   AnvilManager.exe --remove-after-exit <exe> <pid>   (internal: the uninstall's last step)
+//   AnvilManager.exe --screenshot <dir> --game <folder> [--lang <code>] [--scale <percent>]
+//                    [--tab <name>] [--select <plugin>] [--build <id>]
+//       ADR 0013, point 13: draws each tab (or only <name>) in a hidden window,
+//       writes <dir>/<tab>.png and exits; it reads the folder and writes nothing
+//       else. --build takes a fixture's eu4.exe for that game build.
 #include "core/log.hpp"
 #include "core/playset.hpp"
 #include "i18n/cjk_font.hpp"
@@ -17,12 +22,16 @@
 #include <d3d11.h>
 #include <objbase.h>
 #include <shellapi.h>
+#include <wincodec.h>
 #include <windowsx.h>
 
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
 
+#include <algorithm>
+#include <cctype>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
@@ -59,7 +68,7 @@ struct Graphics {
         D3D_FEATURE_LEVEL level{};
         HRESULT result = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2,
                                                        D3D11_SDK_VERSION, &desc, &swap_chain, &device, &level, &context);
-        if (result == DXGI_ERROR_UNSUPPORTED) {  // no GPU driver: the software rasterizer
+        if (FAILED(result)) {  // no GPU driver (a CI runner, a VM): the software rasterizer
             result = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, levels, 2,
                                                    D3D11_SDK_VERSION, &desc, &swap_chain, &device, &level, &context);
         }
@@ -297,6 +306,80 @@ int check_package() {
     return product && product->name == "Anvil" && product->version == ANVIL_VERSION ? 0 : 1;
 }
 
+// The back buffer as a PNG, through WIC; false when any step fails.
+bool write_png(Graphics& graphics, const fs::path& file) {
+    ID3D11Texture2D* back = nullptr;
+    if (FAILED(graphics.swap_chain->GetBuffer(0, IID_PPV_ARGS(&back)))) return false;
+    D3D11_TEXTURE2D_DESC desc{};
+    back->GetDesc(&desc);
+    desc.Usage = D3D11_USAGE_STAGING;
+    desc.BindFlags = 0;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    desc.MiscFlags = 0;
+    ID3D11Texture2D* staging = nullptr;
+    bool ok = SUCCEEDED(graphics.device->CreateTexture2D(&desc, nullptr, &staging));
+    std::vector<uint8_t> pixels;
+    if (ok) {
+        graphics.context->CopyResource(staging, back);
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        ok = SUCCEEDED(graphics.context->Map(staging, 0, D3D11_MAP_READ, 0, &mapped));
+        if (ok) {
+            // RGBA to opaque BGRA, the PNG encoder's own format.
+            pixels.resize(static_cast<size_t>(desc.Width) * desc.Height * 4);
+            for (UINT y = 0; y < desc.Height; ++y) {
+                const auto* row = static_cast<const uint8_t*>(mapped.pData) + static_cast<size_t>(y) * mapped.RowPitch;
+                uint8_t* out = pixels.data() + static_cast<size_t>(y) * desc.Width * 4;
+                for (UINT x = 0; x < desc.Width; ++x) {
+                    out[x * 4 + 0] = row[x * 4 + 2];
+                    out[x * 4 + 1] = row[x * 4 + 1];
+                    out[x * 4 + 2] = row[x * 4 + 0];
+                    out[x * 4 + 3] = 255;
+                }
+            }
+            graphics.context->Unmap(staging, 0);
+        }
+        staging->Release();
+    }
+    back->Release();
+    if (!ok) return false;
+
+    IWICImagingFactory* factory = nullptr;
+    IWICStream* stream = nullptr;
+    IWICBitmapEncoder* encoder = nullptr;
+    IWICBitmapFrameEncode* frame = nullptr;
+    WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
+    ok = SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory))) &&
+         SUCCEEDED(factory->CreateStream(&stream)) && SUCCEEDED(stream->InitializeFromFilename(file.c_str(), GENERIC_WRITE)) &&
+         SUCCEEDED(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder)) &&
+         SUCCEEDED(encoder->Initialize(stream, WICBitmapEncoderNoCache)) && SUCCEEDED(encoder->CreateNewFrame(&frame, nullptr)) &&
+         SUCCEEDED(frame->Initialize(nullptr)) && SUCCEEDED(frame->SetSize(desc.Width, desc.Height)) &&
+         SUCCEEDED(frame->SetPixelFormat(&format)) && format == GUID_WICPixelFormat32bppBGRA &&
+         SUCCEEDED(frame->WritePixels(desc.Height, desc.Width * 4, static_cast<UINT>(pixels.size()), pixels.data())) &&
+         SUCCEEDED(frame->Commit()) && SUCCEEDED(encoder->Commit());
+    if (frame != nullptr) frame->Release();
+    if (encoder != nullptr) encoder->Release();
+    if (stream != nullptr) stream->Release();
+    if (factory != nullptr) factory->Release();
+    return ok;
+}
+
+// The screenshot mode's options (the top of this file).
+struct ShotOptions {
+    fs::path out;
+    std::string tab;     // English name; "" for every tab
+    std::string select;  // plugin id
+    std::string build;
+    int scale = 100;
+};
+
+// The tabs in their order, by the English names their ids use.
+constexpr const char* kShotTabs[] = {"Anvil", "Catalog", "Plugins", "Benchmark", "Crashes", "Log", "About"};
+
+std::string lower(std::string text) {
+    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return text;
+}
+
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
@@ -309,14 +392,27 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     std::vector<std::wstring> args(argv, argv + argc);
     LocalFree(argv);
     fs::path game;
+    std::optional<ShotOptions> shot;
+    const auto shot_options = [&]() -> ShotOptions& {
+        if (!shot) shot.emplace();
+        return *shot;
+    };
     for (size_t i = 1; i < args.size(); ++i) {
         if (args[i] == L"--check-package") return check_package();
         if (args[i] == L"--remove-after-exit" && i + 2 < args.size()) {
             return run_remove_after_exit(args[i + 1], static_cast<DWORD>(std::wcstoul(args[i + 2].c_str(), nullptr, 10)));
         }
         if (args[i] == L"--game" && i + 1 < args.size()) game = args[++i];
+        if (args[i] == L"--screenshot" && i + 1 < args.size()) shot_options().out = args[++i];
+        if (args[i] == L"--tab" && i + 1 < args.size()) shot_options().tab = anvil::narrow(args[++i]);
+        if (args[i] == L"--select" && i + 1 < args.size()) shot_options().select = anvil::narrow(args[++i]);
+        if (args[i] == L"--build" && i + 1 < args.size()) shot_options().build = anvil::narrow(args[++i]);
+        if (args[i] == L"--scale" && i + 1 < args.size()) shot_options().scale = std::max(50, _wtoi(args[++i].c_str()));
+        // The language goes through ANVIL_LANGUAGE, which every later choice of it honours.
+        if (args[i] == L"--lang" && i + 1 < args.size()) SetEnvironmentVariableW(L"ANVIL_LANGUAGE", args[++i].c_str());
     }
-    remove_stale_copies();
+    if (shot && shot->out.empty()) return 2;
+    if (!shot) remove_stale_copies();
     // The language of EU4's settings, then Steam's or Windows' CJK (#158, lab#93);
     // ManagerApp follows the chosen game folder later.
     anvil::i18n::set_language(anvil::i18n::choose_manager_language(anvil::eu4_user_dir(game)).language);
@@ -341,12 +437,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
             get_dpi(monitor, 0, &dpi_x, &dpi_y);
         }
     }
-    g_scale = dpi_x / 96.0f;
-    const HWND window = CreateWindowExW(0, window_class.lpszClassName, L"Anvil Manager", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
-                                        CW_USEDEFAULT, static_cast<int>(1040 * g_scale), static_cast<int>(720 * g_scale),
-                                        nullptr, nullptr, instance, nullptr);
+    g_scale = shot ? shot->scale / 100.0f : dpi_x / 96.0f;
+    // The screenshot mode's window is a hidden popup: its client area is the whole window.
+    const HWND window = CreateWindowExW(0, window_class.lpszClassName, L"Anvil Manager", shot ? WS_POPUP : WS_OVERLAPPEDWINDOW,
+                                        shot ? 0 : CW_USEDEFAULT, shot ? 0 : CW_USEDEFAULT, static_cast<int>(1040 * g_scale),
+                                        static_cast<int>(720 * g_scale), nullptr, nullptr, instance, nullptr);
     if (window == nullptr) return 1;
-    g_scale = GetDpiForWindow(window) / 96.0f;
+    if (!shot) g_scale = GetDpiForWindow(window) / 96.0f;
 
     Graphics graphics;
     if (!graphics.create(window)) {
@@ -355,9 +452,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         return 1;
     }
     g_graphics = &graphics;
-    DragAcceptFiles(window, TRUE);
-    ShowWindow(window, show);
-    UpdateWindow(window);
+    if (!shot) {
+        DragAcceptFiles(window, TRUE);
+        ShowWindow(window, show);
+        UpdateWindow(window);
+    }
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -368,8 +467,29 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     ImGui_ImplWin32_Init(window);
     ImGui_ImplDX11_Init(graphics.device, graphics.context);
 
-    auto app = std::make_unique<ManagerApp>(window, std::move(package), package_error, game);
+    std::optional<ManagerApp::Screenshot> screenshot;
+    if (shot) screenshot = ManagerApp::Screenshot{shot->build};
+    auto app = std::make_unique<ManagerApp>(window, std::move(package), package_error, game, screenshot);
     g_app = app.get();
+
+    // The screenshot mode: the tabs to draw, each given frames to settle after
+    // the folder is read; 60 s at most for the whole.
+    std::vector<std::string> shot_tabs;
+    if (shot) {
+        std::error_code ec;
+        fs::create_directories(shot->out, ec);
+        if (!shot->tab.empty()) {
+            shot_tabs.push_back(shot->tab);
+        } else {
+            shot_tabs.assign(std::begin(kShotTabs), std::end(kShotTabs));
+        }
+        app->show_tab(shot_tabs.front());
+        if (!shot->select.empty()) app->select_plugin(shot->select);
+    }
+    const auto shot_started = std::chrono::steady_clock::now();
+    size_t shot_index = 0;
+    int shot_frames = 0;
+    int shot_failed = 0;
 
     bool done = false;
     while (!done) {
@@ -406,6 +526,23 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         graphics.context->OMSetRenderTargets(1, &graphics.target, nullptr);
         graphics.context->ClearRenderTargetView(graphics.target, clear);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        if (shot) {
+            // Five frames after the folder is read: tab bars, child sizes and wrapping settle.
+            shot_frames = app->settled() ? shot_frames + 1 : 0;
+            if (shot_frames >= 5) {
+                const fs::path file = shot->out / anvil::widen(lower(shot_tabs[shot_index]) + ".png");
+                if (!write_png(graphics, file)) ++shot_failed;
+                shot_frames = 0;
+                if (++shot_index == shot_tabs.size()) break;
+                app->show_tab(shot_tabs[shot_index]);
+            }
+            if (std::chrono::steady_clock::now() - shot_started > std::chrono::seconds(60)) {
+                shot_failed = 100;
+                break;
+            }
+            graphics.swap_chain->Present(0, 0);
+            continue;
+        }
         graphics.occluded = graphics.swap_chain->Present(1, 0) == DXGI_STATUS_OCCLUDED;
         if (app->should_close()) DestroyWindow(window);
     }
@@ -417,5 +554,5 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     ImGui::DestroyContext();
     g_graphics = nullptr;
     CoUninitialize();
-    return 0;
+    return shot_failed == 0 ? 0 : 1;
 }

@@ -157,9 +157,12 @@ menu" on its Anvil tab makes that one click, and uninstalling removes the entry.
   [ADR 0002](docs/adr/0002-manager-plugin-catalog.md) and
   [ADR 0006](docs/adr/0006-catalog-check-at-start.md).
 - It installs a plugin from its release zip after checking it against your
-  `eu4.exe`, and edits plugin settings.
-- On its Mods tab it approves and revokes plugins that come with enabled mods
-  (Anvil 1.3 and later), checking that the mod still has the version shown.
+  `eu4.exe`. Its Plugins tab lists your plugins, the ones that come with
+  enabled mods and the ones that come with Anvil; for each it turns the plugin
+  and its modules on or off, says where each runs (ironman, multiplayer) and
+  edits its settings (Anvil 1.23 and later, [ADR 0013](docs/adr/0013-module-settings-and-overlay-writes.md)).
+- It approves and revokes plugins that come with enabled mods (Anvil 1.3 and
+  later), checking that the mod still has the version shown.
 - On its Benchmark tab (Anvil 1.5 and later) it measures how long the game
   takes to start without a plugin and with it, in a series of starts that quit
   by themselves, and shows the result with cold starts apart. The report is

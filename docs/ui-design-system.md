@@ -187,7 +187,8 @@ truncation and compact labels.
 
 ## Rollout
 
-Two steps, decided on 2026-11-14 so that the look ships in Anvil 1.23.0:
+Two steps, both in Anvil 1.23.0 (decided on 2026-11-14: the whole of ADR 0013 ships in
+1.23.0, so the player sees the new style and the new Plugins tab in one release):
 
 1. **Anvil 1.23.0: the style.** `use_dark_colors()` in `src/ui/imgui_colors.hpp` becomes
    `use_anvil_style()`: the colours and the style variables above, the named colours (`kGood`,
@@ -195,10 +196,11 @@ Two steps, decided on 2026-11-14 so that the look ships in Anvil 1.23.0:
    `primary_button()` for the main actions there are today (Approve, Install, Download, Save,
    Restart now). The Manager and the overlay call it in place of their own style lines.
    ui-guidelines §3 says the colours are defined once there; only the values change.
-2. **Anvil 1.24.0, with the view model of ADR 0013:** what needs the new list and detail, so
-   the player sees it once: the plugin toggle, the status glyphs, the two-line list entries,
-   the detail header, and Segoe UI Semibold next to Segoe UI (it needs the CJK fonts merged
-   into it too).
+2. **With the view model of ADR 0013:** what needs the new list and detail: the plugin
+   toggle, the status glyphs, the two-line list entries, the detail header and the "where it
+   runs" segmented control, drawn by `src/ui/plugin_widgets.hpp` for both apps. Segoe UI
+   Semibold next to Segoe UI (it needs the CJK fonts merged into it too) waits for a later
+   release.
 
 Each step's pull request has screenshots before and after (ui-guidelines §7).
 

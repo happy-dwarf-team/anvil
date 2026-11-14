@@ -235,6 +235,28 @@ jobs:
           name: anvil-manager-${{ github.sha }}
           path: dist/anvil-manager/AnvilManager.exe
 
+      # The screenshot mode (ADR 0013, point 13): every tab of the Manager drawn
+      # from a fixture folder in English, German and Japanese at 100 % and 150 %,
+      # for the checklist of a pull request that changes the UI (ui-guidelines §7).
+      - name: Manager screenshots
+        shell: pwsh
+        run: |
+          python -I tools/manager/screenshots/fixture.py build manager-fixture
+          $game = (Resolve-Path manager-fixture/game).Path
+          foreach ($lang in 'en', 'de', 'ja') {
+            foreach ($scale in 100, 150) {
+              $manager = Start-Process build/tools/manager/Release/AnvilManager.exe -Wait -PassThru -ArgumentList @(
+                '--screenshot', "manager-screenshots/$lang-$scale", '--game', "`"$game`"",
+                '--build', 'eu4-1.37.5-steam-win64', '--lang', $lang, '--scale', $scale, '--select', 'tuning')
+              if ($manager.ExitCode -ne 0) { throw "AnvilManager.exe --screenshot $lang $scale failed ($($manager.ExitCode))" }
+            }
+          }
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: anvil-manager-screenshots-${{ github.sha }}
+          path: manager-screenshots/
+
       # SDK archive for plugin authors (design §16): headers, anvil.exe and the
       # AnvilPlugin CMake package. Built from the same build as the package above.
       - name: Package SDK

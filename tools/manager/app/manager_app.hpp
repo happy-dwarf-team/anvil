@@ -9,6 +9,8 @@
 #include "install.hpp"
 #include "platform.hpp"
 #include "plugin_zip.hpp"
+#include "plugins_snapshot.hpp"
+#include "ui/plugin_model.hpp"
 
 #include <windows.h>
 
@@ -17,10 +19,15 @@
 #include <future>
 #include <map>
 #include <optional>
+#include <string_view>
 #include <string>
 #include <vector>
 
 namespace anvil::manager {
+
+// Where a plugin from a mod comes from, and what it waits for or does, in the player's words.
+std::string mod_source(const cli::GameModPlugin& p);
+std::string mod_state_text(const cli::GameModPlugin& p);
 
 // The Manager's window contents (design §15, issue #59): one ImGui frame per
 // draw(). Everything that reads the game folder at length (hashes, anvil
@@ -28,12 +35,27 @@ namespace anvil::manager {
 // nothing that changes the folder is offered.
 class ManagerApp {
 public:
-    ManagerApp(HWND window, std::optional<Package> package, std::string package_error, std::filesystem::path game);
+    // The screenshot mode (ADR 0013, point 13): the window is drawn from the
+    // game folder as it is, and nothing is written or fetched: no manager.toml,
+    // no release check. `build`, when set, is the game build eu4.exe is taken
+    // for, so a fixture folder needs no real eu4.exe.
+    struct Screenshot {
+        std::string build;
+    };
+
+    ManagerApp(HWND window, std::optional<Package> package, std::string package_error, std::filesystem::path game,
+               std::optional<Screenshot> screenshot = std::nullopt);
 
     void draw();
     // A file dropped on the window: a plugin zip.
     void dropped(const std::filesystem::path& file);
     bool should_close() const { return close_; }
+
+    // For the screenshot mode: the game folder is read; the tab to show
+    // (its English name, "" for none) and the plugin to select.
+    bool settled() const { return !pending_.valid() && (game_.empty() || snapshot_.has_value()); }
+    void show_tab(std::string name) { forced_tab_ = std::move(name); }
+    void select_plugin(std::string id) { selected_ = std::move(id); }
 
 private:
     // What the worker reads from the game folder.
@@ -47,17 +69,6 @@ private:
     struct PendingPlan {
         bool uninstall = false;
         Plan plan;
-    };
-    struct SettingsEditor {
-        std::string plugin;  // id
-        std::filesystem::path folder;  // the plugin's, for its translations
-        std::filesystem::path player_file;
-        SettingsFile schema;
-        std::vector<SettingValue> values;
-        std::vector<std::string> texts;  // string and key settings, as edited
-        std::vector<std::string> warnings;
-        std::string error;
-        bool dirty = false;
     };
 
     // What catalog_status needs from the snapshot.
@@ -85,8 +96,6 @@ private:
     void draw_anvil_tab();
     void draw_catalog_tab();
     void draw_plugins_tab();
-    void draw_mods_tab();
-    void draw_settings_tab();
     void draw_benchmark_tab();
     void draw_crashes_tab();
     void draw_log_tab();
@@ -106,11 +115,31 @@ private:
     void check_zip(ZipArchive zip, std::string name, const CatalogPlugin* pin);
     void downloaded(ZipDownload download);
     void install_zip();
-    void edit_list(const std::string& key, const std::string& id, bool listed);
-    void draw_modules(const Manifest& manifest);
-    void set_module(const std::string& key, bool on_by_default, bool on);
-    void open_settings(const cli::GamePlugin& plugin);
-    void save_settings();
+    // The Plugins tab (plugins_tab.cpp): the list, the selected plugin's
+    // detail with its modules and settings, and the confirmations.
+    struct Confirm {
+        std::string title;
+        std::string button;
+        std::vector<std::string> lines;
+        std::vector<anvil::ui::Edit> edits;
+        std::string remove_folder;  // in anvil/plugins: Remove instead of edits
+    };
+    void rebuild_plugins();
+    size_t plugin_index(std::string_view id) const;  // SIZE_MAX when not in plugins_
+    void draw_plugin_list();
+    void draw_plugin_detail(size_t i);
+    void draw_where(size_t i, std::string_view module, const anvil::ui::Switches& saved, const anvil::ui::Offers& offers,
+                    bool without_off, bool disabled);
+    void draw_module(size_t i, size_t m, bool disabled);
+    void draw_settings_of(size_t i, std::string_view module, bool disabled);
+    void draw_setting(size_t i, size_t s, bool disabled);
+    void draw_mod_approval(size_t i);
+    void draw_confirm_modal();
+    void apply_edits(const std::vector<anvil::ui::Edit>& edits);
+    void save_plugin_settings(size_t i);
+    void ask_edits(std::string title, std::string button, std::vector<anvil::ui::Edit> edits);
+    void ask_turn_on(const anvil::ui::Chain& chain);
+    void ask_remove(const std::string& folder);
     void show_message(std::string title, std::string text);
     void failed(const std::string& what, const std::string& error, bool access_denied);
     std::string make_problem_report() const;
@@ -149,7 +178,14 @@ private:
     std::optional<PluginZipCheck> zip_check_;
     bool zip_anyway_ = false;
 
-    std::optional<SettingsEditor> editor_;
+    // The Plugins tab's model, rebuilt from each snapshot; its sources point into snapshot_->report.
+    std::optional<PluginsSnapshot> plugins_;
+    std::string selected_;  // plugin id
+    std::string find_;
+    unsigned chips_ = 0;    // anvil::ui::Chip bits
+    std::map<std::string, std::string> setting_texts_;  // "<plugin>/<setting>": string and key settings as typed
+    std::optional<Confirm> confirm_;
+    bool open_confirm_ = false;
     // A text of the plugin in `folder` in the player's language from its
     // translations/ (design §5.4), or `english` itself. Each file is read
     // once per language.
@@ -181,8 +217,9 @@ private:
     bool open_approve_ = false;
     std::optional<cli::GameModPlugin> approve_;  // the plugin from a mod the approval modal asks about
     bool close_after_message_ = false;
-    bool show_settings_tab_ = false;
     bool show_catalog_tab_ = false;
+    std::optional<Screenshot> screenshot_;
+    std::string forced_tab_;  // the screenshot mode's tab
     bool log_previous_ = false;
     bool log_report_ = false;   // the Log tab shows the problem report, which is in the clipboard
     bool report_copied_ = false;

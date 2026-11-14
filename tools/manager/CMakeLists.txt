@@ -40,13 +40,14 @@ add_library(anvil_manager_core STATIC
     src/json.cpp
     src/mods.cpp
     src/plugin_zip.cpp
+    src/plugins_snapshot.cpp
     src/problem_report.cpp
     src/start_menu.cpp
     src/zip.cpp)
 target_include_directories(anvil_manager_core PUBLIC src)
 # wbemuuid, ole32, oleaut32: the antivirus names from Security Center (WMI).
 # shell32, uuid: the Start menu shortcut.
-target_link_libraries(anvil_manager_core PUBLIC anvil_tool anvil_i18n anvil_net PRIVATE anvil_miniz advapi32 wbemuuid ole32 oleaut32 shell32 uuid)
+target_link_libraries(anvil_manager_core PUBLIC anvil_tool anvil_i18n anvil_net anvil_ui_model PRIVATE anvil_miniz advapi32 wbemuuid ole32 oleaut32 shell32 uuid)
 if(MSVC)
     target_compile_options(anvil_manager_core PRIVATE /W4 /WX)
 endif()
@@ -98,12 +99,13 @@ add_executable(anvil_manager WIN32
     app/benchmark_tab.cpp
     app/main.cpp
     app/manager_app.cpp
+    app/plugins_tab.cpp
     app/platform.cpp
     app/AnvilManager.manifest
     ${CMAKE_CURRENT_BINARY_DIR}/manager.rc
     ${ANVIL_CJK_FONTS_RC})
 add_dependencies(anvil_manager anvil_manager_package)
-target_link_libraries(anvil_manager PRIVATE anvil_manager_core anvil_manager_imgui d3d11 dxgi winhttp shell32 ole32)
+target_link_libraries(anvil_manager PRIVATE anvil_manager_core anvil_manager_imgui d3d11 dxgi winhttp shell32 ole32 windowscodecs)
 set_target_properties(anvil_manager PROPERTIES OUTPUT_NAME AnvilManager)
 if(MSVC)
     target_compile_options(anvil_manager PRIVATE /W4 /WX)

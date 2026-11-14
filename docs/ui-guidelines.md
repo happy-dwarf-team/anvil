@@ -312,5 +312,7 @@ How a plugin's manifest makes this UI work. `anvil check` enforces what it can.
 - [ ] Dependencies: what stops with a plugin is named; turning on a chain asks first.
 - [ ] Changed settings show their default; a reset of more than one value confirms.
 - [ ] Screenshots before and after, in English, German and one CJK language, at 100 % and
-      150 % scaling, from the screenshot mode (`AnvilManager.exe --screenshot`, ADR 0013);
-      until it exists, by hand.
+      150 % scaling, from the screenshot mode (`AnvilManager.exe --screenshot`, ADR 0013).
+      CI keeps the Manager's as the artefact `anvil-manager-screenshots-<sha>`, drawn from
+      the folder `tools/manager/screenshots/fixture.py` lays out; the overlay's are taken in
+      the game until its test host exists.
