@@ -248,6 +248,18 @@ void gameplay_tests() {
         CHECK(w.patched(0x400) && !policy.suspended(late));
     });
 
+    run("gameplay: set_opt_ins replaces the player's opt-ins (the retired settings of ADR 0013)", [] {
+        World w;
+        GameplayPolicy policy(*w.changes, w.bus, {}, w.sink());
+        policy.subscribe();
+        policy.set_opt_ins(GameplayOptIns{{"optin"}, {}});
+        const OwnerId optin = w.plugin("optin", 0x200);
+        policy.add(gameplay("optin", "allow_ironman = \"opt-in\"\n"), optin);
+        w.session(ANVIL_GAME_SESSION_STARTED, true, false);
+        CHECK(!policy.suspended(optin) && w.patched(0x200));
+        w.session(ANVIL_GAME_SESSION_ENDED, true, false);
+    });
+
     run("gameplay: a session event without a valid payload is ignored", [] {
         World w;
         GameplayPolicy policy(*w.changes, w.bus, {}, w.sink());

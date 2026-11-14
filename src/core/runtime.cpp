@@ -655,13 +655,12 @@ void startup_impl(const std::filesystem::path& game_dir) {
             r.approved_hash = it->second;
         }
         r.data_dir = g_runtime->anvil_dir / "data" / m.id;
-        // Retired settings move into disabled_modules once, before the
-        // modules are resolved, so a module the player had off stays off
-        // (ADR 0013, point 4).
+        // Retired settings move into the module's switch and opt-ins once,
+        // before the modules are resolved, so the player's choice holds at
+        // this start (ADR 0013, point 4).
         if (r.settings && !r.settings->retired.empty()) {
             for (const RetiredMoveNote& note : move_retired_settings(m, *r.settings, r.data_dir / "settings.toml",
-                                                                     g_runtime->anvil_dir / "anvil.toml",
-                                                                     settings.disabled_modules)) {
+                                                                     g_runtime->anvil_dir / "anvil.toml", settings)) {
                 Log::instance().write(note.level, m.id, note.message);
             }
         }
@@ -670,6 +669,9 @@ void startup_impl(const std::filesystem::path& game_dir) {
         r.manifest = std::move(m);
         to_load.push_back(std::move(r));
     }
+    // The opt-ins as the retired settings left them, before the plugin set
+    // gives the policy its plugins.
+    g_runtime->policy->set_opt_ins(GameplayOptIns{settings.allow_ironman, settings.allow_multiplayer});
     PluginSet::Dependencies deps;
     deps.context = &g_runtime->context;
     deps.policy = g_runtime->policy.get();

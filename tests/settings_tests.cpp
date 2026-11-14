@@ -222,6 +222,11 @@ void module_settings_tests() {
                             "settings.toml: retired old: module 'gone' is not declared in plugin.toml [[modules]]" &&
               line == 2);
         CHECK(r.file && contains(settings_module_error(*r.file, manifest(plugin_toml("flat")), line), "which has no [[modules]]"));
+        // An opt-in the module does not offer (flows offers multiplayer only).
+        r = parse_settings_text("[retired.old]\nmodule = \"flows\"\nmultiplayer = [true]\n\n[retired.older]\nmodule = \"flows\"\nironman = [true]\n");
+        CHECK(r.file && settings_module_error(*r.file, m, line) ==
+                            "settings.toml: retired older: ironman needs module 'flows' to offer allow_ironman = \"opt-in\" in plugin.toml" &&
+              line == 5);
 
         const auto error = [](const std::string& text, const std::string& part, uint32_t at) {
             const SettingsFileResult bad = parse_settings_text(text);
@@ -230,8 +235,13 @@ void module_settings_tests() {
             return ok;
         };
         CHECK(error("[retired.old]\noff = [false]\n", "retired old: missing 'module'", 1));
-        CHECK(error("[retired.old]\nmodule = \"m\"\n", "retired old: missing 'off'", 1));
+        // Each list is optional: with none the values are only removed.
+        CHECK(parse_settings_text("[retired.old]\nmodule = \"m\"\n").file.has_value());
         CHECK(error("[retired.old]\nmodule = \"m\"\noff = []\n", "off must be a non-empty array", 3));
+        CHECK(error("[retired.old]\nmodule = \"m\"\non = true\n", "on must be a non-empty array", 3));
+        CHECK(error("[retired.old]\nmodule = \"m\"\nironman = [{ a = 1 }]\n", "each of ironman must be a bool", 3));
+        CHECK(error("[retired.old]\nmodule = \"m\"\noff = [\"no\", 0]\non = [\"yes\", 0.0]\n",
+                    "retired old: a value cannot be in both off and on: 0", 1));
         CHECK(error("[retired.old]\nmodule = \"m\"\noff = [[1]]\n", "each of off must be a bool", 3));
         CHECK(error("[retired.old]\nmodule = \"m\"\noff = [1]\nlabel = \"x\"\n", "retired old: unknown key 'label'", 4));
         CHECK(error("[retired.Old]\nmodule = \"m\"\noff = [1]\n", "the name must match", 1));
@@ -290,9 +300,9 @@ void module_settings_tests() {
         const auto toml = dir / "anvil.toml";
         write(toml, "# the player's\nenabled_modules = [\"other.thing\"]\n");
         write(player, "flows_mode = \"off\"\ncooldown_months = 12\n");
-        std::vector<std::string> disabled;
-        auto notes = move_retired_settings(m, *r.file, player, toml, disabled);
-        CHECK(disabled == std::vector<std::string>{"lode.flows"});
+        AnvilSettings lists;
+        auto notes = move_retired_settings(m, *r.file, player, toml, lists);
+        CHECK(lists.disabled_modules == std::vector<std::string>{"lode.flows"});
         CHECK(read(toml) == "# the player's\nenabled_modules = [\"other.thing\"]\ndisabled_modules = [\"lode.flows\"]\n");
         CHECK(read(player) == "cooldown_months = 12\n");
         CHECK(notes.size() == 2 && notes[0].level == ANVIL_LOG_INFO &&
@@ -301,42 +311,118 @@ void module_settings_tests() {
         CHECK(notes.size() == 2 &&
               notes[1].message == "removed the retired setting(s) flows_mode = \"off\" from settings.toml");
         // Once: the next start finds nothing to move.
-        CHECK(move_retired_settings(m, *r.file, player, toml, disabled).empty() && disabled.size() == 1);
+        CHECK(move_retired_settings(m, *r.file, player, toml, lists).empty() && lists.disabled_modules.size() == 1);
         // The module is off at this start through the list the loader reads.
-        AnvilSettings start;
-        start.disabled_modules = disabled;
-        CHECK(!module_enabled(start, "lode.flows", true));
+        CHECK(!module_enabled(lists, "lode.flows", true));
 
         // A value not in `off`: removed, the module keeps its switch.
         write(player, "flows_mode = \"on\"\n");
-        disabled.clear();
+        lists = {};
         std::filesystem::remove(toml);
-        notes = move_retired_settings(m, *r.file, player, toml, disabled);
-        CHECK(disabled.empty() && !std::filesystem::exists(toml) && !std::filesystem::exists(player));
+        notes = move_retired_settings(m, *r.file, player, toml, lists);
+        CHECK(lists.disabled_modules.empty() && !std::filesystem::exists(toml) && !std::filesystem::exists(player));
         CHECK(notes.size() == 1 && contains(notes[0].message, "flows_mode = \"on\"") &&
               contains(notes[0].message, "the file is removed"));
 
         // Listed already: no second entry, the value still goes.
         write(player, "flows_mode = false\n");
-        disabled = {"lode.flows"};
-        notes = move_retired_settings(m, *r.file, player, toml, disabled);
-        CHECK(disabled.size() == 1 && !std::filesystem::exists(player) && !std::filesystem::exists(toml));
-        CHECK(!notes.empty() && contains(notes[0].message, "it is in disabled_modules already"));
+        lists.disabled_modules = {"lode.flows"};
+        notes = move_retired_settings(m, *r.file, player, toml, lists);
+        CHECK(lists.disabled_modules.size() == 1 && !std::filesystem::exists(player) && !std::filesystem::exists(toml));
+        CHECK(!notes.empty() && contains(notes[0].message, "meant module lode.flows off; anvil.toml has it so already"));
 
         // anvil.toml cannot be written (it does not parse): the player's file stays for the next start.
         write(toml, "disabled_modules = [\n");
         write(player, "flows_mode = \"off\"\n");
-        disabled.clear();
-        notes = move_retired_settings(m, *r.file, player, toml, disabled);
-        CHECK(disabled.empty() && read(player) == "flows_mode = \"off\"\n" && notes.size() == 1 &&
-              notes[0].level == ANVIL_LOG_WARNING && contains(notes[0].message, "the value stays for the next start"));
+        lists = {};
+        notes = move_retired_settings(m, *r.file, player, toml, lists);
+        CHECK(lists.disabled_modules.empty() && read(player) == "flows_mode = \"off\"\n" && notes.size() == 1 &&
+              notes[0].level == ANVIL_LOG_WARNING && contains(notes[0].message, "the values stay for the next start"));
 
         // A player's file that does not parse: a warning, nothing changes.
         write(player, "flows_mode = \n");
-        notes = move_retired_settings(m, *r.file, player, dir / "none.toml", disabled);
+        notes = move_retired_settings(m, *r.file, player, dir / "none.toml", lists);
         CHECK(notes.size() == 1 && notes[0].level == ANVIL_LOG_WARNING && read(player) == "flows_mode = \n");
         // No player's file: nothing.
-        CHECK(move_retired_settings(m, *r.file, dir / "missing.toml", toml, disabled).empty());
+        CHECK(move_retired_settings(m, *r.file, dir / "missing.toml", toml, lists).empty());
+    });
+
+    run("settings: retired values turn a module on and allow it, by the rule of the module switch", [] {
+        const std::string extra = std::string(kModular) +
+                                  "\n[[modules]]\nid = \"extra\"\nname = \"Extra\"\naffects_gameplay = true\n"
+                                  "allow_ironman = \"opt-in\"\nallow_multiplayer = \"opt-in\"\ndefault = false\n";
+        const Manifest m = manifest(extra);
+        const SettingsFileResult r = parse_settings_text(R"toml([retired.extra_mode]
+module = "extra"
+off = ["off"]
+on = ["on", "verify"]
+
+[retired.extra_ironman]
+module = "extra"
+ironman = [true]
+
+[retired.extra_multiplayer]
+module = "extra"
+multiplayer = [true]
+
+[retired.flows_switch]
+module = "flows"
+on = [true]
+off = [false]
+
+[retired.old_note]
+module = "extra"
+)toml");
+        uint32_t line = 0;
+        CHECK(r.file && settings_module_error(*r.file, m, line).empty());
+        if (!r.file) return;
+        const auto dir = scratch("retire-on");
+        const auto player = dir / "data" / "lode" / "settings.toml";
+        const auto toml = dir / "anvil.toml";
+
+        // On (off by default: into enabled_modules), allowed in ironman; false
+        // is in no list of extra_multiplayer and a name with no list goes too.
+        // flows was off by the player's anvil.toml: the retired value wins.
+        write(toml, "# mine\ndisabled_modules = [\"lode.flows\"]\n");
+        write(player, "extra_mode = \"verify\"\nextra_ironman = true\nextra_multiplayer = false\nold_note = \"x\"\nflows_switch = true\n");
+        AnvilSettings lists = read_anvil_settings(toml);
+        auto notes = move_retired_settings(m, *r.file, player, toml, lists);
+        CHECK(lists.enabled_modules == std::vector<std::string>{"lode.extra"} &&
+              lists.allow_ironman == std::vector<std::string>{"lode.extra"} && lists.allow_multiplayer.empty() &&
+              lists.disabled_modules.empty());
+        const AnvilSettings written = read_anvil_settings(toml);
+        CHECK(written.enabled_modules == lists.enabled_modules && written.allow_ironman == lists.allow_ironman &&
+              written.disabled_modules.empty() && read(toml).starts_with("# mine\n"));
+        CHECK(module_enabled(lists, "lode.extra", false) && module_enabled(lists, "lode.flows", true));
+        CHECK(!std::filesystem::exists(player));
+        CHECK(notes.size() == 4 &&
+              notes[0].message == "retired setting extra_mode = \"verify\" (settings.toml line 1) meant module lode.extra on: "
+                                  "added it to enabled_modules in anvil.toml, on from this start" &&
+              notes[1].message == "retired setting extra_ironman = true (settings.toml line 2) meant module lode.extra "
+                                  "allowed in ironman: added it to allow_ironman in anvil.toml, allowed in ironman from this start" &&
+              notes[2].message == "retired setting flows_switch = true (settings.toml line 5) meant module lode.flows on: "
+                                  "took it out of disabled_modules in anvil.toml, on from this start" &&
+              contains(notes[3].message, "removed the retired setting(s) extra_mode = \"verify\", extra_ironman = true, "
+                                         "extra_multiplayer = false, old_note = \"x\", flows_switch = true"));
+
+        // Off again (off by default: out of enabled_modules, never into
+        // disabled_modules); a module on by default goes into disabled_modules.
+        write(player, "extra_mode = \"off\"\nflows_switch = false\n");
+        notes = move_retired_settings(m, *r.file, player, toml, lists);
+        CHECK(lists.enabled_modules.empty() && lists.disabled_modules == std::vector<std::string>{"lode.flows"} &&
+              lists.allow_ironman == std::vector<std::string>{"lode.extra"});
+        CHECK(!notes.empty() && contains(notes[0].message, "meant module lode.extra off: took it out of enabled_modules"));
+        // As it is already: no write, an info line, the value still goes.
+        const std::string before = read(toml);
+        write(player, "extra_mode = \"off\"\nextra_ironman = true\n");
+        notes = move_retired_settings(m, *r.file, player, toml, lists);
+        CHECK(read(toml) == before && !std::filesystem::exists(player) && notes.size() == 3 &&
+              contains(notes[0].message, "lode.extra off; anvil.toml has it so already") &&
+              contains(notes[1].message, "lode.extra allowed in ironman; anvil.toml has it so already"));
+        // On again: back into enabled_modules.
+        write(player, "extra_mode = \"on\"\n");
+        move_retired_settings(m, *r.file, player, toml, lists);
+        CHECK(lists.enabled_modules == std::vector<std::string>{"lode.extra"});
     });
 
     run("last-start.toml: written, read back, unknown keys and other formats (ADR 0013, point 8)", [] {

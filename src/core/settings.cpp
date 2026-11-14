@@ -11,6 +11,7 @@
 #include <fstream>
 #include <set>
 #include <sstream>
+#include <tuple>
 
 namespace anvil {
 namespace {
@@ -19,7 +20,7 @@ const std::set<std::string_view> kTopKeys = {"setting", "retired"};
 const std::set<std::string_view> kSettingKeys = {"type",  "default", "min",    "max",      "step",
                                                  "values", "label",  "description", "group", "restart",
                                                  "module", "advanced", "affects_gameplay"};
-const std::set<std::string_view> kRetiredKeys = {"module", "off"};
+const std::set<std::string_view> kRetiredKeys = {"module", "off", "on", "ironman", "multiplayer"};
 const std::set<std::string_view> kOptionKeys = {"name", "label"};
 
 struct Fail {
@@ -292,7 +293,7 @@ Setting parse_setting(const std::string& name, const toml::node& node, uint32_t 
     return s;
 }
 
-// A scalar of `off`: bool, int, float or string.
+// A scalar of a retired setting's list: bool, int, float or string.
 std::optional<RetiredValue> retired_value(const toml::node& node) {
     RetiredValue v;
     if (const auto* b = node.as_boolean()) {
@@ -313,12 +314,48 @@ std::optional<RetiredValue> retired_value(const toml::node& node) {
     return v;
 }
 
+// Two values of a retired list are the same: the same TOML type, except that
+// an int and a float compare as numbers.
+bool retired_same(const RetiredValue& a, const RetiredValue& b) {
+    using Kind = RetiredValue::Kind;
+    const auto number = [](const RetiredValue& x) { return x.kind == Kind::Int ? static_cast<double>(x.integer) : x.real; };
+    const auto numeric = [](Kind k) { return k == Kind::Int || k == Kind::Float; };
+    if (numeric(a.kind) && numeric(b.kind)) {
+        return a.kind == Kind::Int && b.kind == Kind::Int ? a.integer == b.integer : number(a) == number(b);
+    }
+    if (a.kind != b.kind) return false;
+    return a.kind == Kind::String ? a.text == b.text : a.integer == b.integer;
+}
+
+bool retired_in(const std::vector<RetiredValue>& list, const RetiredValue& v) {
+    return std::any_of(list.begin(), list.end(), [&](const RetiredValue& o) { return retired_same(o, v); });
+}
+
+std::string retired_text(const RetiredValue& v) {
+    switch (v.kind) {
+        case RetiredValue::Kind::Bool: return v.integer != 0 ? "true" : "false";
+        case RetiredValue::Kind::Int: return std::to_string(v.integer);
+        case RetiredValue::Kind::Float: {
+            std::ostringstream out;
+            out << v.real;
+            return out.str();
+        }
+        case RetiredValue::Kind::String: return "\"" + v.text + "\"";
+    }
+    return {};
+}
+
+bool retired_matches(const std::vector<RetiredValue>& list, const toml::node& node) {
+    const auto v = retired_value(node);
+    return v && retired_in(list, *v);
+}
+
 RetiredSetting parse_retired(const std::string& name, const toml::node& node, uint32_t table_line) {
     const auto* table = node.as_table();
     if (table == nullptr) throw Fail{"must be a table"};
     RetiredSetting r;
     r.name = name;
-    bool has_module = false, has_off = false;
+    bool has_module = false;
     for (const auto& [key, item, line] : in_file_order(*table)) {
         at_line(line, [&] {
             if (!kRetiredKeys.contains(key)) throw Fail{"unknown key '" + key + "'"};
@@ -328,36 +365,25 @@ RetiredSetting parse_retired(const std::string& name, const toml::node& node, ui
                 has_module = true;
                 return;
             }
+            std::vector<RetiredValue>& list = key == "off" ? r.off : key == "on" ? r.on : key == "ironman" ? r.ironman : r.multiplayer;
             const auto* array = item->as_array();
             if (array == nullptr || array->empty()) {
-                throw Fail{"off must be a non-empty array of the values that meant off, such as [\"off\", false]"};
+                throw Fail{key + " must be a non-empty array of the values that meant it, such as [\"" +
+                           (key == "off" ? std::string("off") : std::string("on")) + "\", " +
+                           (key == "off" ? "false" : "true") + "]"};
             }
             for (const auto& value : *array) {
                 auto v = retired_value(value);
-                if (!v) throw Fail{"each of off must be a bool, an integer, a number or a string", line_of(value.source())};
-                r.off.push_back(std::move(*v));
+                if (!v) throw Fail{"each of " + key + " must be a bool, an integer, a number or a string", line_of(value.source())};
+                list.push_back(std::move(*v));
             }
-            has_off = true;
         });
     }
     if (!has_module) throw Fail{"missing 'module' (the [[modules]] id whose switch replaces the setting)", table_line};
-    if (!has_off) throw Fail{"missing 'off' (the values that turn the module off)", table_line};
+    for (const RetiredValue& v : r.on) {
+        if (retired_in(r.off, v)) throw Fail{"a value cannot be in both off and on: " + retired_text(v), table_line};
+    }
     return r;
-}
-
-bool retired_matches(const RetiredSetting& r, const toml::node& node) {
-    const auto v = retired_value(node);
-    if (!v) return false;
-    using Kind = RetiredValue::Kind;
-    const auto number = [](const RetiredValue& x) { return x.kind == Kind::Int ? static_cast<double>(x.integer) : x.real; };
-    const auto numeric = [](Kind k) { return k == Kind::Int || k == Kind::Float; };
-    return std::any_of(r.off.begin(), r.off.end(), [&](const RetiredValue& o) {
-        if (numeric(o.kind) && numeric(v->kind)) {
-            return o.kind == Kind::Int && v->kind == Kind::Int ? o.integer == v->integer : number(o) == number(*v);
-        }
-        if (o.kind != v->kind) return false;
-        return o.kind == Kind::String ? o.text == v->text : o.integer == v->integer;
-    });
 }
 
 // ---- key names ------------------------------------------------------------------
@@ -451,9 +477,18 @@ std::string settings_module_error(const SettingsFile& file, const Manifest& mani
         }
     }
     for (const auto& r : file.retired) {
-        if (!declared(r.module)) {
+        const auto m = std::find_if(manifest.modules.begin(), manifest.modules.end(), [&](const Module& x) { return x.id == r.module; });
+        if (m == manifest.modules.end()) {
             line = r.module_line;
             return problem("retired " + r.name, r.module);
+        }
+        for (const auto& [list, key, offered] : {std::tuple{&r.ironman, "ironman", m->allow_ironman == Allow::OptIn},
+                                                 std::tuple{&r.multiplayer, "multiplayer", m->allow_multiplayer == Allow::OptIn}}) {
+            if (!list->empty() && !offered) {
+                line = r.line;
+                return "settings.toml: retired " + r.name + ": " + key + " needs module '" + r.module +
+                       "' to offer allow_" + key + " = \"opt-in\" in plugin.toml";
+            }
         }
     }
     return {};
@@ -799,7 +834,10 @@ std::optional<RetiredMove> plan_retired_move(const SettingsFile& schema, std::st
         item.module = r->module;
         item.value = node_text(*node);
         item.line = line;
-        item.turns_off = retired_matches(*r, *node);
+        item.turns_off = retired_matches(r->off, *node);
+        item.turns_on = retired_matches(r->on, *node);
+        item.allows_ironman = retired_matches(r->ironman, *node);
+        item.allows_multiplayer = retired_matches(r->multiplayer, *node);
         move.items.push_back(std::move(item));
         drop.emplace_back(line, std::max(line, static_cast<uint32_t>(node->source().end.line)));
         expected.erase(name);
