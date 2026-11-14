@@ -149,6 +149,104 @@ mark{background:rgba(245,184,66,.35);color:inherit;border-radius:2px;padding:0 1
 .cb.mixed .box::after{content:"";width:8px;height:2px;background:var(--check)}
 .more{font-size:12px;color:#aaa;margin:4px 0 0 22px;border-left:2px solid var(--bl);padding-left:8px}
 .mdesc.full{display:block;-webkit-line-clamp:unset;overflow:visible}
+/* ---- Skin "Forge": the proposed design system (docs/ui-design-system.md). Warm graphite surfaces, one ember
+   accent for what the player acts on (selection, focus, the main action), the state colours unchanged in meaning.
+   Every value maps to an ImGui style colour or variable; nothing here needs a custom widget except the status glyphs. */
+body.forge{
+  --bg0:#0d0c0b; --win:#121110; --child:#181716; --raise:#1f1d1b; --frame:#242220; --frame-h:#2e2b28; --frame-a:#38342f;
+  --line:#2c2926; --bs:#4a4540; --bl:#2c2926; --text:#ece8e1; --weak:#a39e96; --dim:#8a857e;
+  --ember:#e8853d; --ember-h:#f09a57; --ember-t:rgba(232,133,61,.16); --ember-tt:rgba(232,133,61,.28); --on-ember:#1a1209;
+  --check:var(--ember); --sel:var(--ember-t); --hdr:#1f1d1b; --rowalt:rgba(255,255,255,.03);
+  --btn:#2a2724; --btn-h:#36322e;
+  --good:#6cc48a; --warn:#e5c04b; --bad:#ef6a5e; --info:#7aa7e0;
+  background:var(--bg0);
+}
+.forge .app{background:var(--win);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.forge .titlebar,.forge .gametitle{background:var(--bg0);color:var(--weak);border-bottom:1px solid var(--line)}
+.forge .titlebar>span:first-child::before{content:"";display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--ember);margin-right:8px;vertical-align:1px}
+.forge .gamebar{border-bottom:1px solid var(--line)}
+/* Tabs: flat text, the current one carries an ember overline-style bar (ImGuiCol_TabSelectedOverline). */
+.forge .tabs{border-bottom:1px solid var(--line);gap:4px}
+.forge .tab{background:transparent;color:var(--weak);border-radius:4px 4px 0 0;padding:6px 12px;box-shadow:inset 0 -2px 0 transparent}
+.forge .tab[data-act]:hover{background:var(--raise);color:var(--text)}
+.forge .tab.cur{background:var(--raise);color:var(--text);box-shadow:inset 0 -2px 0 var(--ember)}
+.forge .tab .warn{color:var(--warn)}
+/* Buttons: secondary by default, one primary (ember) per view, quiet text buttons for "More" and "Clear". */
+.forge button{background:var(--btn);border:1px solid var(--bs);border-radius:4px;padding:4px 12px}
+.forge button:hover:not(:disabled){background:var(--btn-h);border-color:#5c564f}
+.forge button.small{padding:1px 8px}
+.forge button.primary,.forge [data-act="confirmOk"],.forge [data-act="start"],.forge [data-act="askApprove"]{background:var(--ember);border-color:var(--ember);color:var(--on-ember);font-weight:600}
+.forge button.primary:hover:not(:disabled),.forge [data-act="confirmOk"]:hover,.forge [data-act="start"]:hover,.forge [data-act="askApprove"]:hover{background:var(--ember-h)}
+.forge [data-act="confirmCancel"]{background:var(--btn) !important}
+.forge .expander{border:0;background:none;color:var(--info);padding:0 4px}
+.forge .expander:hover:not(:disabled){background:rgba(122,167,224,.12)}
+.forge :focus-visible{outline:2px solid var(--ember);outline-offset:2px;border-radius:3px}
+/* Checkbox: a framed box, ember when on, with a tick (ImGui draws its own tick in CheckMark). */
+.forge .cb .box{background:var(--frame);border:1px solid var(--bs);border-radius:3px}
+.forge .cb:hover .box{background:var(--frame-h);border-color:#5c564f}
+.forge .cb.on .box{background:var(--ember);border-color:var(--ember)}
+.forge .cb.on .box::after{width:4px;height:8px;background:none;border:solid var(--on-ember);border-width:0 2px 2px 0;border-radius:0;transform:rotate(45deg) translate(-1px,-1px)}
+.forge .cb.dis:hover .box{background:var(--frame);border-color:var(--bs)}
+.forge .held .cb.on .box{background:#6b5440;border-color:#6b5440}
+/* Segmented choices: a track, the chosen segment raised and outlined in ember. */
+.forge .seg,.forge .modes{background:var(--frame);border:1px solid var(--bs);border-radius:5px;padding:2px;gap:2px}
+.forge .seg button,.forge .modes button{background:transparent;border:1px solid transparent;border-radius:3px}
+.forge .seg button:hover:not(:disabled),.forge .modes button:hover:not(:disabled){background:var(--frame-h)}
+.forge .seg button.cur,.forge .modes button.cur{background:var(--ember-tt);border-color:var(--ember);color:var(--text)}
+/* Inputs. */
+.forge select,.forge input{background:var(--frame);border:1px solid var(--bs);border-radius:4px;padding:3px 8px}
+.forge select:hover,.forge input:hover{border-color:#5c564f}
+.forge .find input{padding:5px 10px}
+/* List and detail: panels on the window, the selection a tinted row with an ember bar. */
+.forge .list,.forge .detail{background:var(--child);border:1px solid var(--line);border-radius:6px}
+.forge .li{border-bottom:1px solid var(--line);padding:8px 10px 8px 12px;box-shadow:inset 3px 0 0 transparent}
+.forge .li:hover{background:var(--raise)}
+.forge .li.sel{background:var(--ember-t);box-shadow:inset 3px 0 0 var(--ember)}
+.forge .li .mrow>span:first-child{font-weight:600}
+.forge .lhdr{background:transparent;color:var(--weak);font-size:12px;letter-spacing:.04em;padding:10px 10px 4px;border-bottom:1px solid var(--line)}
+.forge .lhdr:hover{color:var(--text)}
+.forge .detail{padding:0 16px 12px}
+.forge .detail>.mrow:first-child{position:sticky;top:0;z-index:2;background:var(--child);padding:12px 0 8px;margin-bottom:2px;border-bottom:1px solid var(--line)}
+.forge .detail>.mrow:first-child>div:first-child{font-weight:600}
+.forge .gsep{color:var(--text);font-weight:600;margin:18px 0 6px}
+.forge .gsep::after,.forge .sep::after{border-top-color:var(--line)}
+.forge .mod{border-bottom:1px solid var(--line)}
+.forge .mod.hit{box-shadow:inset 3px 0 0 var(--ember)}
+.forge .setbox{border-left-color:var(--line)}
+.forge mark{background:var(--ember-tt);color:var(--text);box-shadow:0 1px 0 var(--ember)}
+/* Status: a word and a glyph of its own shape, so state never rests on colour (ui-guidelines §3). */
+.forge .li .mrow>span:last-child>span::before{display:inline-block;width:1.1em;text-align:center}
+.forge .li .mrow>span:last-child>.good::before{content:"\2713"}
+.forge .li .mrow>span:last-child>.weak::before{content:"\25CB"}
+.forge .li .mrow>span:last-child>.warn::before{content:"\25B2";font-size:10px;vertical-align:1px}
+.forge .li .mrow>span:last-child>.bad::before{content:"\2715"}
+/* Tags and chips: pills with a hairline, the state colour only on the word. */
+.forge .tag{border-radius:999px;border-color:rgba(229,192,75,.45);background:rgba(229,192,75,.07);padding:0 8px}
+.forge .chg{border-radius:999px;border-color:var(--bs);color:var(--weak);padding:0 7px}
+.forge .chip{border-radius:999px;border-color:var(--bs);background:transparent;color:var(--weak);padding:2px 10px}
+.forge .chip:hover:not(:disabled){background:var(--raise);color:var(--text)}
+.forge .chip.on{background:var(--ember-t);border-color:var(--ember);color:var(--text)}
+.forge .chip.on .n{color:var(--text)}
+/* Banners: a left bar in the state colour, the surface barely tinted. */
+.forge .banner{background:var(--raise);border:1px solid var(--line);border-left:3px solid var(--info);border-radius:4px;padding:8px 12px}
+.forge .banner.warn,.forge .banner.amber{background:rgba(229,192,75,.06);border-color:var(--line);border-left-color:var(--warn);color:var(--text)}
+.forge .banner.warn>b:first-child{color:var(--warn)}
+.forge .banner .facts{background:var(--child);border:1px solid var(--line);border-radius:4px;padding:8px 10px;margin:10px 0}
+/* Dialog. */
+.forge .modal{background:rgba(5,4,3,.66)}
+.forge .dlg{background:var(--raise);border:1px solid var(--bs);border-radius:8px;overflow:hidden;box-shadow:0 16px 40px rgba(0,0,0,.6)}
+.forge .dlg .dt{background:transparent;border-bottom:1px solid var(--line);color:var(--weak)}
+.forge .dlg .db>div:first-child{font-weight:600}
+.forge .dlg .da{flex-direction:row-reverse;justify-content:flex-start}
+/* The overlay: an opaque panel over the map, an ember line instead of a blue title bar. */
+.forge .owin{background:rgba(18,17,16,.97);border:1px solid var(--bs);border-radius:8px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.55)}
+.forge .otitle{background:var(--bg0);border-top:2px solid var(--ember);color:var(--weak);padding:5px 10px}
+.forge .otitle>span:first-child{color:var(--text);font-weight:600}
+.forge pre.toml{background:var(--bg0);border-color:var(--line);border-radius:6px}
+.forge .cap{color:var(--dim)}
+.forge ::-webkit-scrollbar-thumb{background-color:#3d3935}
+.forge ::-webkit-scrollbar-thumb:hover{background-color:#5c564f}
+.forge ::-webkit-scrollbar-thumb:active{background-color:var(--ember)}
 @media (max-width:720px){.split{grid-template-columns:1fr}.row .nm{min-width:0}}
 </style>
 </head>
@@ -2976,6 +3074,7 @@ const VARIANTS = {'0':['Today', variant0], A:['Matrix table', variantA], B:['Lis
 const KEYS = ['0', 'B4', 'B5'];   // A, B, C, B2 and B3 stay reachable with ?variant=...
 let variant = (new URLSearchParams(location.search).get('variant') || 'B5').toUpperCase();
 if (!VARIANTS[variant]) variant = 'B5';
+let skin = new URLSearchParams(location.search).get('skin') === 'today' ? 'today' : 'forge';   // the proposed design system by default
 ui.selected = ui.oselected = 'bellows';
 useBellows(bellowsDefault(variant));
 useMods(variant === 'B5');
@@ -3052,7 +3151,9 @@ function render(){
   m.innerHTML = dialog();
   document.getElementById('toml').innerHTML = tomlText();
   document.getElementById('switcher').innerHTML = `<button data-act="prev" aria-label="Previous variant">&larr;</button>
-    <span class="lbl">${variant} (${esc(VARIANTS[variant][0])})</span><button data-act="next" aria-label="Next variant">&rarr;</button>`;
+    <span class="lbl">${variant} (${esc(VARIANTS[variant][0])})</span><button data-act="next" aria-label="Next variant">&rarr;</button>
+    <button data-act="skin" style="width:auto;padding:0 12px;font-size:12px" title="Switch between today's colours and the proposed Forge design system">Skin: ${skin === 'forge' ? 'Forge' : 'today'}</button>`;
+  document.body.classList.toggle('forge', skin === 'forge');
 }
 
 // ---- actions --------------------------------------------------------------------------
@@ -3076,6 +3177,7 @@ function act(el){
   const a = el.dataset.act, k = el.dataset.key;
   if (a === 'prev') return go(-1);
   if (a === 'next') return go(1);
+  if (a === 'skin'){ skin = skin === 'forge' ? 'today' : 'forge'; const u = new URL(location.href); u.searchParams.set('skin', skin); history.replaceState(null, '', u); return render(); }
   if (a === 'on'){ const it = item(k); setOn(it, !isOn(toml, it)); }
   else if (a === 'allow'){ const it = item(k), m = el.dataset.mode; setAllowed(it, m, !allowed(toml, it, m)); }
   else if (a === 'where'){
