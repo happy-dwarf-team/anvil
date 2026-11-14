@@ -2,8 +2,9 @@
 
 #include <anvil/anvil_plugin.h>
 
+#include "core/log_line.hpp"
+
 #include <filesystem>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -34,11 +35,6 @@ public:
 private:
     Log() = default;
 };
-
-// The level of a line of anvil.log as Log::write formats it: "[   12.3 ms]", the
-// level in five characters, then "[source] message". For the Manager's Log page;
-// nothing for a line of another shape.
-std::optional<AnvilLogLevel> log_line_level(std::string_view line);
 
 void log_info(std::string_view message);
 void log_warning(std::string_view message);
