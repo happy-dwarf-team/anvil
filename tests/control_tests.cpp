@@ -560,6 +560,66 @@ default = false
         fs::remove_all(dir);
     });
 
+    run("control: a module that is on shares its plugin's failed outcome, also before anvil_plugin_load ran", [] {
+        const fs::path dir = fresh_dir("anvil-control-module-failed");
+        TestStart start;
+        const std::string modules = "[[modules]]\nid = \"on\"\nname = \"On\"\naffects_gameplay = false\n\n"
+                                    "[[modules]]\nid = \"off\"\nname = \"Off\"\naffects_gameplay = false\ndefault = false\n";
+        const fs::path probe = mod_probe_dir() / "mod-probe.dll";
+        add_plugin(start, "missing", false, modules, dir / "data");  // LoadLibrary fails
+        add_plugin(start, "needs", true, "[[dependencies]]\nid = \"missing\"\n\n" + modules, dir / "data");  // its dependency failed
+        anvil::ResolvedPlugin& copy = start.add(plugin_toml("copy", modules, "1.2.3"), mod_probe_dir());
+        copy.manifest.entry = narrow(probe.wstring());
+        copy.approved_hash = std::string(64, '0');  // the approved copy changed
+        wchar_t kernel32[MAX_PATH] = {};
+        GetModuleFileNameW(GetModuleHandleW(L"kernel32.dll"), kernel32, MAX_PATH);
+        add_plugin(start, "no-export", true, modules, dir / "data").manifest.entry = narrow(std::wstring(kernel32));  // no export
+        add_plugin(start, "fine", true, modules, dir / "data");
+        add_plugin(start, "later", true, modules, dir / "data");  // its load has not run
+        start.make();
+        for (const char* id : {"missing", "needs", "copy", "no-export", "fine"}) start.load(id);
+        for (const char* id : {"missing", "needs", "copy", "no-export"}) {
+            const anvil::Outcome* o = start.plugin(id).outcome();
+            CHECK(o != nullptr && o->kind == anvil::Outcome::Kind::failed && start.plugin(id).dll() == nullptr);
+        }
+        CHECK(start.plugin("needs").outcome()->why.code == "dependency_failed" &&
+              start.plugin("copy").outcome()->reason.starts_with("its approved copy changed") &&
+              start.plugin("no-export").outcome()->reason == "the entry DLL does not export anvil_plugin_load");
+        ControlSources sources;
+        sources.anvil_dir = dir / "anvil";
+        sources.plugins = &start.set();
+        Control control(sources);
+        const AnvilControlService& svc = *control.service();
+        AnvilControlModule entry{};
+        entry.size = sizeof(entry);
+        AnvilControlPlugin p{};
+        p.size = sizeof(p);
+
+        // Before the loading is done every module that is on is pending.
+        CHECK(svc.module("needs", 0, &entry) == 1 && std::string(entry.state) == "pending");
+        CHECK(svc.module("needs", 1, &entry) == 1 && std::string(entry.state) == "disabled");
+        CHECK(svc.plugin_of(start.module("needs", "needs.on"), &p) == 1 && std::string(p.state) == "pending");
+        control.loading_done();
+
+        // A plugin that failed, at any step: its module that is on failed with it,
+        // the one that is off stays disabled.
+        for (const char* id : {"missing", "needs", "copy", "no-export"}) {
+            const std::string key = std::string(id) + ".on";
+            CHECK(svc.module(id, 0, &entry) == 1 && std::string(entry.key) == key && entry.enabled == 1 &&
+                  std::string(entry.state) == "failed");
+            CHECK(svc.module(id, 1, &entry) == 1 && entry.enabled == 0 && std::string(entry.state) == "disabled");
+            CHECK(svc.plugin_of(start.module(id, key), &p) == 1 && std::string(p.id) == key && std::string(p.state) == "failed");
+            CHECK(svc.plugin_of(start.handle(id), &p) == 1 && std::string(p.state) == "failed");
+        }
+        // One that loaded, and one whose load has not run.
+        CHECK(svc.module("fine", 0, &entry) == 1 && std::string(entry.state) == "loaded");
+        CHECK(svc.plugin_of(start.module("fine", "fine.on"), &p) == 1 && std::string(p.state) == "loaded");
+        CHECK(svc.module("later", 0, &entry) == 1 && std::string(entry.state) == "pending");
+        CHECK(svc.plugin_of(start.module("later", "later.on"), &p) == 1 && std::string(p.state) == "pending");
+        CHECK(svc.module("later", 1, &entry) == 1 && std::string(entry.state) == "disabled");
+        fs::remove_all(dir);
+    });
+
     run("control: plugins in mods, approved and revoked for the next start", [] {
         const fs::path dir = fresh_dir("anvil-control-mods");
         const fs::path anvil = dir / "eu4" / "anvil";

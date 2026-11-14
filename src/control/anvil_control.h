@@ -123,7 +123,10 @@ typedef struct AnvilControlModule {
     int offers_multiplayer;  /* allow_multiplayer = "opt-in" */
     int on_by_default;       /* `default` */
     /* A resolved plugin's module at this start; for a plugin in a mod all 0/"". */
-    const char *state;       /* "pending" | "loaded" | "failed" | "disabled" (off by the player) */
+    /* "disabled" when it is off (by the player or `default`); when it is on,
+     * its plugin's outcome: "pending" | "loaded" | "failed" (any way the
+     * plugin failed, also before anvil_plugin_load ran). */
+    const char *state;
     int enabled;             /* on at this start (anvil.toml, `default`) */
     int suspended;           /* taken out of the current session (design §13) */
 } AnvilControlModule;
