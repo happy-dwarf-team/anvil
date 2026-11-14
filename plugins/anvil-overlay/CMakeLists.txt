@@ -23,6 +23,7 @@ add_library(anvil_overlay_imgui STATIC
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
     ${imgui_SOURCE_DIR}/imgui_tables.cpp
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_dx9.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp)
 target_include_directories(anvil_overlay_imgui PUBLIC ${imgui_SOURCE_DIR})
@@ -36,12 +37,18 @@ set_target_properties(anvil_overlay_imgui PROPERTIES COMPILE_WARNING_AS_ERROR OF
 set(ANVIL_OVERLAY_IMGUI_LICENSE ${imgui_SOURCE_DIR}/LICENSE.txt CACHE INTERNAL "")
 
 anvil_add_plugin(anvil_overlay SOURCES src/plugin.cpp src/ui.cpp src/notices.cpp src/control_client.cpp src/panels.cpp
-    src/release.cpp src/input.cpp)
+    src/release.cpp src/input.cpp src/plugins_model.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../../src/ui/plugins_view.cpp)
 target_include_directories(anvil_overlay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../src/control)
+# The Plugins tab: the view model and the drawing the Manager shares (ADR 0013,
+# point 9), and which plugins come with Anvil.
+if(DEFINED ANVIL_STANDARD_PLUGINS)
+    list(JOIN ANVIL_STANDARD_PLUGINS ", " _anvil_standard_plugins)
+    target_compile_definitions(anvil_overlay PRIVATE ANVIL_OVERLAY_STANDARD_PLUGINS="${_anvil_standard_plugins}")
+endif()
 # anvil_net: the opt-in release check it shares with the Manager. Its DLLs are
 # delay-loaded, so the static imports stay KERNEL32 and USER32; winhttp.dll is
 # loaded from System32 before the first call (src/ui.cpp).
-target_link_libraries(anvil_overlay PRIVATE anvil_overlay_imgui anvil_i18n anvil_net delayimp)
+target_link_libraries(anvil_overlay PRIVATE anvil_overlay_imgui anvil_i18n anvil_net anvil_ui_model delayimp)
 target_link_options(anvil_overlay PRIVATE /DELAYLOAD:winhttp.dll /DELAYLOAD:shell32.dll /DELAYLOAD:ole32.dll)
 target_sources(anvil_overlay PRIVATE ${ANVIL_CJK_FONTS_RC})
 target_compile_definitions(anvil_overlay PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)

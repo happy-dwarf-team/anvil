@@ -123,7 +123,8 @@ std::string read_file(const fs::path& file) {
 std::set<std::string> catalog_keys(const fs::path& root) {
     std::set<std::string> keys;
     for (const fs::path dir : {root / "plugins" / "anvil-overlay" / "src", root / "tools" / "manager" / "app",
-                               root / "tools" / "manager" / "src", root / "src" / "net"}) {
+                               root / "tools" / "manager" / "src", root / "src" / "net",
+                               root / "src" / "ui"}) {
         for (const auto& entry : fs::directory_iterator(dir)) {
             if (entry.path().extension() != ".cpp" && entry.path().extension() != ".hpp") continue;
             for (std::string& text : marked_texts(read_file(entry.path()))) keys.insert(std::move(text));
@@ -352,7 +353,7 @@ int main(int argc, char** argv) {
     const std::set<std::string> keys = catalog_keys(root);
     run("the sources mark their texts", [&] {
         CHECK(keys.size() > 300);
-        CHECK(keys.contains("Disable at next start") && keys.contains("Install a plugin from a zip...") &&
+        CHECK(keys.contains("Approve...") && keys.contains("Install a plugin from a zip...") &&
               keys.contains("{0} plugins were not loaded"));
     });
 

@@ -189,6 +189,12 @@ const ModuleSnap* find_module(const PluginSnap& plugin, std::string_view id);
 LoadState load_state(const Snapshot& snapshot, const PluginSnap& plugin);
 PluginView view(const Snapshot& snapshot, const PluginSnap& plugin);
 
+// A module in the overlay's game, from what is in effect (the overlay's
+// "two states", ui-guidelines §5): it runs, it is off, it is off with its
+// plugin, or it is kept out of this ironman or multiplayer game.
+enum class InGame { Runs, Off, OffWithPlugin, KeptOutOfIronman, KeptOutOfMultiplayer };
+InGame module_in_game(const Snapshot& snapshot, const PluginSnap& plugin, const ModuleSnap& module);
+
 // Changes that wait for the next start: switches, opt-ins and approvals, and
 // settings whose saved value is not in effect. A change is counted where it
 // was made: a plugin turned off is one change, not one per module.

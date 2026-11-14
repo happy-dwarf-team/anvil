@@ -259,6 +259,7 @@ void ManagerApp::refresh() {
             snapshot.report = cli::check_game(options);
         }
         snapshot.anvil_toml = read_anvil_settings(game / "anvil" / "anvil.toml");
+        snapshot.last_start = read_last_start(game / "anvil" / "data" / "anvil" / "last-start.toml");
         snapshot.crashes = crash_report_names(game / "anvil" / "crashes");
         return snapshot;
     });
@@ -287,7 +288,9 @@ void ManagerApp::poll() {
         downloaded(download_pending_.get());
     }
     const auto now = steady_clock::now();
-    if (!game_.empty() && now - running_checked_ > 1500ms) {
+    // The screenshot mode draws the folder alone: another game running on this machine would change the
+    // picture and show its private path.
+    if (!game_.empty() && !screenshot_ && now - running_checked_ > 1500ms) {
         running_checked_ = now;
         const bool was = running_;
         GameProcesses processes = game_processes(game_);
@@ -297,7 +300,8 @@ void ManagerApp::poll() {
             launcher_opened_ = false;  // the note did its job
             anvil_missed_ = false;
             if (processes.here_started != 0) running_started_ = processes.here_started;
-            if (!was) plugins_take_effect();
+            // Without a record of the last start, this start loads what the files hold now.
+            if (!was && snapshot_ && !snapshot_->last_start) plugins_take_effect();
         }
         if (was && !running_) {
             // Anvil opens anvil.log first thing once Windows loads its version.dll: a game that ended without
@@ -1148,7 +1152,7 @@ void ManagerApp::draw_modals() {
     draw_zip_modal();
     draw_download_modal();
     draw_approve_modal();
-    draw_confirm_modal();
+    draw_plugins_confirm();
 
     next_modal(36);
     if (ImGui::BeginPopupModal((message_title_ + "###message").c_str(), nullptr, ImGuiWindowFlags_NoSavedSettings)) {

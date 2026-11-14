@@ -100,6 +100,8 @@ add_executable(anvil_manager WIN32
     app/main.cpp
     app/manager_app.cpp
     app/plugins_tab.cpp
+    # The Plugins tab both apps draw; each compiles it with its own Dear ImGui.
+    ${PROJECT_SOURCE_DIR}/src/ui/plugins_view.cpp
     app/platform.cpp
     app/AnvilManager.manifest
     ${CMAKE_CURRENT_BINARY_DIR}/manager.rc

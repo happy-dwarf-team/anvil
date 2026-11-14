@@ -6,11 +6,13 @@
 #include "i18n/cjk_font.hpp"
 #include "notices.hpp"
 #include "overlay.hpp"
+#include "plugins_model.hpp"
 #include "release.hpp"
 #include "ui/imgui_colors.hpp"
-#include "ui/settings_order.hpp"
+#include "ui/plugins_view.hpp"
 
 #include <imgui.h>
+#include <misc/cpp/imgui_stdlib.h>
 #include <backends/imgui_impl_dx9.h>
 #include <backends/imgui_impl_win32.h>
 #include <objbase.h>
@@ -18,6 +20,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <chrono>
@@ -43,7 +46,7 @@ using anvil::i18n::N_;
 using anvil::i18n::tr;
 using anvil::i18n::trf;
 
-enum class Tab { None, Status, Mods, Settings, Crash, Log };
+enum class Tab { None, Plugins, Crash, Log };
 
 struct ShownNotice {
     Notice notice;
@@ -82,7 +85,6 @@ struct Ui {
     AnvilControlStatus status{};
     std::vector<PluginRow> plugins;
     std::vector<ModRow> mods;
-    std::string confirm_approve;  // the mod plugin (id/mod) whose approval waits for a second click
     bool confirm_restart = false;  // "Restart game..." was clicked; the confirmation is shown
     std::vector<std::string> warnings;
     bool crash_loaded = false;
@@ -93,8 +95,12 @@ struct Ui {
     bool log_scroll = false;
     Tab requested_tab = Tab::None;
 
-    // Settings editor
-    std::string selected_plugin;
+    // The Plugins tab (ADR 0013): the view model, rebuilt with the caches, and
+    // the tab's selection, search and filters.
+    std::optional<OverlayPlugins> model;
+    bool model_stale = false;  // a write since: read it again before the next frame draws it
+    anvil::ui::PluginsTab plugins_tab;
+    // Settings being edited
     std::map<std::string, std::string> text_edits;
     std::map<std::string, double> number_edits;
     std::string record_plugin;
@@ -142,31 +148,6 @@ void weak_wrapped(const std::string& text) {
     ImGui::PopStyleColor();
 }
 
-// What a module (ADR 0011) does to the game and which opt-ins it offers.
-std::string module_summary(const ModuleRow& m) {
-    const std::string name = m.name.empty() ? m.key : m.name + " (" + m.key + ")";
-    if (!m.gameplay) return trf("{0}: does not change the game.", {name});
-    if (m.offers_ironman && m.offers_multiplayer) {
-        return trf("{0}: changes the game; you can allow it in ironman and multiplayer.", {name});
-    }
-    if (m.offers_ironman) return trf("{0}: changes the game; you can allow it in ironman, not in multiplayer.", {name});
-    if (m.offers_multiplayer) return trf("{0}: changes the game; you can allow it in multiplayer, not in ironman.", {name});
-    return trf("{0}: changes the game; suspended in ironman and multiplayer.", {name});
-}
-
-// A plugin's modules as its plugin.toml declares them, for the approval.
-void declared_modules(const std::vector<ModuleRow>& modules) {
-    if (modules.empty()) return;
-    wrapped(trf("Modules ({0}); one approval covers all of them:", {std::to_string(modules.size())}));
-    ImGui::Indent();
-    for (const ModuleRow& mod : modules) {
-        ImGui::Bullet();
-        ImGui::SameLine();
-        wrapped(module_summary(mod) + (mod.on_by_default ? "" : " " + std::string(tr("Off until you turn it on."))));
-    }
-    ImGui::Unindent();
-}
-
 void copy_to_clipboard(const std::string& text) {
     Ui& u = ui();
     u.copy = text;
@@ -191,8 +172,17 @@ void refresh(bool force) {
     u.plugins = control.plugins();
     u.mods = control.mod_plugins();
     u.warnings = control.warnings();
+    static const std::vector<std::string> standard = standard_plugin_ids();
+    u.model = build_overlay_plugins(control, u.status, u.plugins, u.mods, standard);
+    u.model_stale = false;
     load_crash();
     u.refreshed = now;
+    // After an approval nothing may wait any more: the notice goes.
+    if (std::none_of(u.mods.begin(), u.mods.end(), [](const ModRow& m) { return m.waiting(); })) {
+        for (ShownNotice& shown : u.start) {
+            if (shown.notice.id == "approvals") shown.closed = true;
+        }
+    }
 }
 
 void disable_plugin(const std::string& id) {
@@ -718,20 +708,6 @@ void draw_panel_switches() {
     ImGui::NewLine();
 }
 
-// ---- widgets -------------------------------------------------------------------------
-
-void help_marker(const char* text) {
-    if (text == nullptr || *text == '\0') return;
-    ImGui::SameLine();
-    ImGui::TextDisabled("(?)");
-    if (ImGui::BeginItemTooltip()) {
-        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
-        ImGui::TextUnformatted(text);
-        ImGui::PopTextWrapPos();
-        ImGui::EndTooltip();
-    }
-}
-
 // ---- notices -------------------------------------------------------------------------
 
 void run_action(const Notice& notice, const NoticeAction& action) {
@@ -748,10 +724,18 @@ void run_action(const Notice& notice, const NoticeAction& action) {
     case NoticeAction::Type::OpenPanel: break;
     }
     s.panel_open.store(true);
-    ui().requested_tab = notice.id == "crash" || (notice.id == "safe-mode" && ui().crash) ? Tab::Crash
-                         : notice.id == "approvals"                                ? Tab::Mods
-                                                                                   : Tab::Status;
+    Ui& u = ui();
+    u.requested_tab = notice.id == "crash" || (notice.id == "safe-mode" && u.crash) ? Tab::Crash : Tab::Plugins;
     refresh(true);
+    // The approvals notice opens the first plugin that waits for one.
+    if (notice.id == "approvals" && u.model) {
+        for (const anvil::ui::PluginSnap& p : u.model->model.plugins) {
+            if ((p.blocked == anvil::ui::Blocked::WaitsForApproval && !p.approved) || !p.update_waits.empty()) {
+                u.plugins_tab.selected = p.id;
+                break;
+            }
+        }
+    }
 }
 
 void draw_notice(const Notice& notice, bool* closed, float& y, int index) {
@@ -902,16 +886,6 @@ std::string session_text(const AnvilControlStatus& s) {
     return trf(mode, {std::to_string(s.gameplay_active), s.gameplay_hash});
 }
 
-// A plugin's state word in the table.
-const char* state_word(const std::string& state) {
-    if (state == "loaded") return tr("loaded");
-    if (state == "failed") return tr("failed");
-    if (state == "skipped") return tr("skipped");
-    if (state == "pending") return tr("pending");
-    if (state == "disabled") return tr("disabled");
-    return state.c_str();
-}
-
 // The game's own restart through anvil-game (ADR 0012), after a confirmation
 // that says what happens to a running campaign. Hidden with an anvil-game that
 // has no restart().
@@ -959,7 +933,8 @@ void draw_restart() {
     if (ImGui::Button((std::string(tr("Cancel")) + "##restart").c_str())) u.confirm_restart = false;
 }
 
-void draw_status() {
+// The lines above the list: Anvil, the game, the restart and what the start left.
+void draw_status_lines() {
     Ui& u = ui();
     const AnvilControlStatus& s = u.status;
     line(trf("Anvil {0}, game build {1}", {s.anvil_version ? s.anvil_version : "?", s.game_build ? s.game_build : tr("unknown")}));
@@ -975,108 +950,30 @@ void draw_status() {
         ImGui::SameLine();
         if (ImGui::SmallButton((std::string(tr("Copy link")) + "##release").c_str())) copy_to_clipboard(u.latest->url);
     }
-    if (s.session) line(session_text(s));
+    if (s.session) {
+        wrapped(session_text(s));
+    } else if (s.size > offsetof(AnvilControlStatus, next_game_hash) && s.next_game_hash[0] != '\0') {
+        // ADR 0013, point 14: what the players of a multiplayer game started now compare.
+        weak_wrapped(trf("Multiplayer code for a game started now: {0}", {std::string(s.next_game_hash)}));
+    }
     draw_restart();
     if (!s.loading_done) weak(tr("Plugins are still loading."));
-    line(trf("{0} loaded, {1} failed, {2} skipped",
-             {std::to_string(s.loaded), std::to_string(s.failed), std::to_string(s.skipped)}));
-
-    const ImGuiTableFlags flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable |
-                                  ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp;
-    const float warnings_height = u.warnings.empty() ? 0.0f : ImGui::GetFrameHeightWithSpacing() * 6.0f;
     bool any_panel = false;
     shared().panels.each([&](AnvilPanel&) { any_panel = true; });
     if (any_panel) draw_panel_switches();
-    if (ImGui::BeginTable("plugins", 5, flags, ImVec2(0.0f, -warnings_height - ImGui::GetFrameHeightWithSpacing()))) {
-        ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn(tr("Plugin"), ImGuiTableColumnFlags_WidthStretch, 1.2f);
-        ImGui::TableSetupColumn(tr("Version"), ImGuiTableColumnFlags_WidthStretch, 0.6f);
-        ImGui::TableSetupColumn(tr("State"), ImGuiTableColumnFlags_WidthStretch, 0.6f);
-        ImGui::TableSetupColumn(tr("Details"), ImGuiTableColumnFlags_WidthStretch, 2.4f);
-        // As wide as its button, which runs longer in some languages than in English.
-        const float button = ImGui::CalcTextSize(tr("Disable at next start")).x + ImGui::GetStyle().FramePadding.x * 2.0f;
-        ImGui::TableSetupColumn(tr("Next start"), ImGuiTableColumnFlags_WidthFixed,
-                                std::max(button, ImGui::CalcTextSize(tr("Next start")).x));
-        ImGui::TableHeadersRow();
-        for (const PluginRow& p : u.plugins) {
-            ImGui::PushID(p.id.c_str());
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(p.id.c_str());
-            if (!p.name.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", p.name.c_str());
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(p.version.c_str());
-            ImGui::TableNextColumn();
-            const ImVec4 color = p.state == "loaded" ? kGreen : p.state == "failed" ? kRed : kAmber;
-            colored(color, state_word(p.state));
-            ImGui::TableNextColumn();
-            std::vector<std::string> details;
-            // A skipped one's reason names its mod already.
-            if (!p.mod.empty() && p.state != "skipped") details.push_back(trf("from mod '{0}'", {p.mod}));
-            if (!p.reason.empty()) details.push_back(p.reason_text());
-            if (p.suspended) details.push_back(tr("suspended in this game"));
-            if (p.gameplay) details.push_back(tr("changes the game"));
-            std::string text;
-            for (const std::string& d : details) text += (text.empty() ? "" : "; ") + d;
-            wrapped(text);
-            ImGui::TableNextColumn();
-            if (p.disabled_next) {
-                weak(tr("disabled"));
-            } else if (ImGui::SmallButton(tr("Disable at next start"))) {
-                disable_plugin(p.id);
-            }
-            // Its modules (ADR 0011), one row each, under the plugin. The
-            // Manager switches them; here they show what this start does.
-            for (const ModuleRow& m : p.modules) {
-                ImGui::TableNextRow();
-                ImGui::TableNextColumn();
-                ImGui::Indent();
-                ImGui::TextUnformatted(m.key.c_str());
-                if (!m.name.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", m.name.c_str());
-                ImGui::Unindent();
-                ImGui::TableNextColumn();
-                ImGui::TableNextColumn();
-                if (m.state == "disabled") {
-                    weak(state_word(m.state));
-                } else {
-                    colored(m.state == "loaded" ? kGreen : m.state == "failed" ? kRed : kAmber, state_word(m.state));
-                }
-                ImGui::TableNextColumn();
-                std::string module_details;
-                if (m.suspended) module_details = tr("suspended in this game");
-                if (m.gameplay) module_details += (module_details.empty() ? "" : "; ") + std::string(tr("changes the game"));
-                wrapped(module_details);
-                ImGui::TableNextColumn();
-            }
-            ImGui::PopID();
-        }
-        ImGui::EndTable();
-    }
-    if (!u.warnings.empty()) {
-        line(trf("Warnings ({0})", {std::to_string(u.warnings.size())}));
-        if (ImGui::BeginChild("warnings", ImVec2(0.0f, warnings_height - ImGui::GetFrameHeightWithSpacing()),
-                              ImGuiChildFlags_Borders)) {
+    if (!u.warnings.empty() && ImGui::TreeNode((trf("Warnings ({0})", {std::to_string(u.warnings.size())}) + "###warnings").c_str())) {
+        if (ImGui::BeginChild("warnings", ImVec2(0.0f, ImGui::GetTextLineHeightWithSpacing() * 5.0f), ImGuiChildFlags_Borders)) {
             for (const std::string& w : u.warnings) ImGui::TextWrapped("%s", w.c_str());
         }
         ImGui::EndChild();
+        ImGui::TreePop();
     }
 }
 
 // ---- plugins in mods (design §14) ---------------------------------------------------
 
-std::string mod_key(const ModRow& m) { return m.id + "/" + m.mod; }
-
 std::string mod_source(const ModRow& m) {
     return trf("mod '{0}' ({1})", {m.mod, m.workshop_id.empty() ? std::string(tr("local mod")) : trf("Workshop {0}", {m.workshop_id})});
-}
-
-// After an approval or a revocation: the panel and the notice show what is left.
-void mods_changed() {
-    refresh(true);
-    const bool any_waiting = std::any_of(ui().mods.begin(), ui().mods.end(), [](const ModRow& m) { return m.waiting(); });
-    for (ShownNotice& shown : ui().start) {
-        if (shown.notice.id == "approvals" && !any_waiting) shown.closed = true;
-    }
 }
 
 void approve(const ModRow& m) {
@@ -1086,8 +983,7 @@ void approve(const ModRow& m) {
     } else {
         say(trf("Cannot approve {0}: {1}", {m.id, error}), true);
     }
-    ui().confirm_approve.clear();
-    mods_changed();
+    ui().model_stale = true;
 }
 
 void revoke(const ModRow& m) {
@@ -1097,7 +993,7 @@ void revoke(const ModRow& m) {
     } else {
         say(trf("Cannot revoke {0}: {1}", {m.id, error}), true);
     }
-    mods_changed();
+    ui().model_stale = true;
 }
 
 const char* state_text(const ModRow& m) {
@@ -1111,106 +1007,90 @@ const char* state_text(const ModRow& m) {
     return tr("cannot be approved");
 }
 
-void draw_mods() {
-    Ui& u = ui();
-    if (u.mods.empty()) {
-        wrapped(tr("No enabled mod in the playset has plugins (anvil/<id>/ in the mod's folder)."));
-        return;
-    }
-    wrapped(tr("Plugins from mods are native code: they run with the game's permissions and can do anything "
-               "your Windows account can. Approve only plugins whose authors you trust. An approval covers "
-               "these exact files (their hash); an update waits for a new approval. Approved plugins load "
-               "from the next start, from Anvil's own copy."));
-    ImGui::Separator();
-    if (ImGui::BeginChild("mods", ImVec2(0.0f, 0.0f))) {
-        for (const ModRow& m : u.mods) {
-            ImGui::PushID(mod_key(m).c_str());
-            const ImVec4 color = m.approved_next || m.state == "approved" ? kGreen
-                                 : m.state == "invalid" || m.revoked_next ? kRed
-                                                                          : kAmber;
-            const std::string header = m.id + (m.version.empty() ? "" : " " + m.version) + "  -  " + mod_source(m);
-            const bool open = ImGui::CollapsingHeader(header.c_str(), m.waiting() ? ImGuiTreeNodeFlags_DefaultOpen : 0);
-            ImGui::SameLine();
-            colored(color, state_text(m));
-            if (open) {
-                ImGui::Indent();
-                if (!m.name.empty()) line(trf("Name: {0}", {m.name}));
-                if (!m.authors.empty()) wrapped(trf("Authors: {0}", {m.authors}));
-                if (!m.description.empty()) wrapped(m.description);
-                const bool module_gameplay =
-                    std::any_of(m.modules.begin(), m.modules.end(), [](const ModuleRow& mod) { return mod.gameplay; });
-                if (m.gameplay || module_gameplay) {
-                    ImGui::PushStyleColor(ImGuiCol_Text, kAmber);
-                    wrapped(tr("Changes the game (affects_gameplay): suspended in ironman and multiplayer unless you allow it."));
-                    ImGui::PopStyleColor();
-                } else {
-                    wrapped(tr("Does not change the game's simulation (affects_gameplay = false)."));
-                }
-                declared_modules(m.modules);
-                line(trf("Game addresses (symbols): {0}", {std::to_string(m.symbols)}));
-                wrapped(trf("Hash: {0}", {m.hash.empty() ? "-" : m.hash}));
-                if (!m.repository.empty()) wrapped(trf("Source: {0}", {m.repository}));
-                if (!m.approved_hash.empty()) {
-                    wrapped(trf("Approved: {0} on {1} (hash {2})",
-                                {m.approved_version, m.approved_date.substr(0, 10), m.approved_hash.substr(0, 8)}));
-                }
-                wrapped(m.reason_text());
-                if (m.can_approve && !m.approved_next) {
-                    if (u.confirm_approve == mod_key(m)) {
-                        ImGui::PushStyleColor(ImGuiCol_Text, kAmber);
-                        wrapped(trf("Approve native code from {0}? It loads from the next start.", {mod_source(m)}));
-                        ImGui::PopStyleColor();
-                        if (anvil::ui::primary_button(tr("Approve"))) approve(m);
-                        ImGui::SameLine();
-                        if (ImGui::Button(tr("Cancel"))) u.confirm_approve.clear();
-                    } else if (ImGui::Button(m.state == "update-pending" ? tr("Approve the update...") : tr("Approve..."))) {
-                        u.confirm_approve = mod_key(m);
-                    }
-                }
-                if (m.can_revoke) {
-                    if (m.can_approve && !m.approved_next) ImGui::SameLine();
-                    if (ImGui::Button(tr("Revoke the approval"))) revoke(m);
-                }
-                ImGui::Unindent();
-            }
-            ImGui::PopID();
-        }
-    }
-    ImGui::EndChild();
-}
+// ---- the Plugins tab (ADR 0013, ui-guidelines §5) ------------------------------------
+//
+// src/ui/plugins_view.cpp draws it from the view model, as the Manager does;
+// the overlay writes through anvil.control. A write only marks the model stale:
+// the view holds references into it until the frame ends, and the next frame
+// reads it again.
 
 std::string edit_key(const std::string& plugin, AnvilSetting setting) {
     return plugin + "/" + std::to_string(setting);
 }
 
-void apply_result(const std::string& error, const std::string& what) {
-    if (error.empty()) {
-        say(what, false);
-    } else {
-        say(error, true);
+void report(const std::string& error) {
+    if (!error.empty()) say(error, true);
+    ui().model_stale = true;
+}
+
+// A value as anvil.control writes it ("true", an option's name, "Ctrl+F12") as the player reads it.
+std::string shown_setting_value(const OverlaySetting& o, const std::string& value) {
+    switch (o.info.type) {
+    case ANVIL_CONTROL_SETTING_BOOL: return value == "true" ? tr("on") : value == "false" ? tr("off") : value;
+    case ANVIL_CONTROL_SETTING_ENUM:
+        for (const auto& [name, label] : o.options) {
+            if (name == value) return label.empty() ? name : label;
+        }
+        return value;
+    case ANVIL_CONTROL_SETTING_KEY: return value.empty() ? std::string(tr("no key")) : value;
+    default: return value;
     }
 }
 
-void draw_setting(const std::string& plugin, AnvilSetting id, const AnvilControlSetting& info) {
-    Shared& s = shared();
+// The model's edits through anvil.control: switches and opt-ins into anvil.toml
+// for the next start, settings into the player's file (and at once when they can).
+void apply_edits(const std::vector<anvil::ui::Edit>& edits) {
     Ui& u = ui();
-    const ControlClient& control = s.control;
-    const std::string current = control.setting_value(plugin, id, ANVIL_CONTROL_VALUE_CURRENT);
-    const std::string saved = control.setting_value(plugin, id, ANVIL_CONTROL_VALUE_SAVED);
-    const std::string fallback = control.setting_value(plugin, id, ANVIL_CONTROL_VALUE_DEFAULT);
+    const ControlClient& control = shared().control;
+    if (!u.model) return;
+    for (const anvil::ui::Edit& e : edits) {
+        std::string error;
+        if (e.kind == anvil::ui::Edit::Kind::Switch) {
+            const uint32_t which = e.which == anvil::ui::Which::On        ? ANVIL_CONTROL_SWITCH_ON
+                                   : e.which == anvil::ui::Which::Ironman ? ANVIL_CONTROL_SWITCH_IRONMAN
+                                                                          : ANVIL_CONTROL_SWITCH_MULTIPLAYER;
+            error = control.switch_set(e.key(), which, e.on);
+        } else {
+            const auto& plugins = u.model->model.plugins;
+            for (size_t i = 0; i < plugins.size(); ++i) {
+                if (plugins[i].id != e.plugin) continue;
+                for (size_t s = 0; s < plugins[i].settings.size(); ++s) {
+                    if (plugins[i].settings[s].name != e.setting) continue;
+                    const AnvilSetting id = u.model->sources[i].settings[s].id;
+                    error = e.value == plugins[i].settings[s].default_value ? control.reset(e.plugin, id)
+                                                                            : control.set_text(e.plugin, id, e.value);
+                    u.text_edits.erase(edit_key(e.plugin, id));
+                }
+            }
+        }
+        if (!error.empty()) {
+            report(error);
+            return;
+        }
+    }
+    u.model_stale = true;
+}
+
+// A setting's control, labelled, as the panel's editor drew it before 1.23.
+void setting_control(size_t i, size_t s) {
+    Shared& sh = shared();
+    Ui& u = ui();
+    if (!u.model || i >= u.model->sources.size() || s >= u.model->sources[i].settings.size()) return;
+    const ControlClient& control = sh.control;
+    const OverlaySetting& o = u.model->sources[i].settings[s];
+    const std::string& plugin = u.model->model.plugins[i].id;
+    const std::string& saved = u.model->model.plugins[i].settings[s].saved;
+    const char* label = u.model->model.plugins[i].settings[s].label.c_str();
+    const AnvilSetting id = o.id;
+    const AnvilControlSetting& info = o.info;
     const std::string key = edit_key(plugin, id);
-    const char* label = info.label;
-    const float width = 220.0f * scale();
-    ImGui::PushID(static_cast<int>(id));
-    const auto applied = [&](const std::string& error) {
-        apply_result(error, trf(info.restart ? N_("{0}: saved; applies at the next start") : N_("{0}: applied"), {label}));
-    };
+    const float width = ImGui::GetFontSize() * 12.0f;
     switch (info.type) {
     case ANVIL_CONTROL_SETTING_BOOL: {
         bool value = saved == "true";
         if (ImGui::Checkbox(label, &value)) {
             AnvilControlValue v{value ? 1 : 0, 0.0, nullptr};
-            applied(control.set(plugin, id, v));
+            report(control.set(plugin, id, v));
         }
         break;
     }
@@ -1236,23 +1116,22 @@ void draw_setting(const std::string& plugin, AnvilSetting id, const AnvilControl
         if (changed) u.number_edits[key] = value;
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             AnvilControlValue v{static_cast<int64_t>(value), value, nullptr};
-            applied(control.set(plugin, id, v));
             u.number_edits.erase(key);
+            report(control.set(plugin, id, v));
         }
         break;
     }
     case ANVIL_CONTROL_SETTING_ENUM: {
-        const auto options = control.setting_options(plugin, id);
         int selected = -1;
-        for (size_t i = 0; i < options.size(); ++i) {
-            if (options[i].first == saved) selected = static_cast<int>(i);
+        for (size_t k = 0; k < o.options.size(); ++k) {
+            if (o.options[k].first == saved) selected = static_cast<int>(k);
         }
         ImGui::SetNextItemWidth(width);
-        if (ImGui::BeginCombo(label, selected >= 0 ? options[static_cast<size_t>(selected)].second.c_str() : saved.c_str())) {
-            for (size_t i = 0; i < options.size(); ++i) {
-                if (ImGui::Selectable(options[i].second.c_str(), static_cast<int>(i) == selected)) {
-                    AnvilControlValue v{static_cast<int64_t>(i), 0.0, nullptr};
-                    applied(control.set(plugin, id, v));
+        if (ImGui::BeginCombo(label, selected >= 0 ? o.options[static_cast<size_t>(selected)].second.c_str() : saved.c_str())) {
+            for (size_t k = 0; k < o.options.size(); ++k) {
+                if (ImGui::Selectable(o.options[k].second.c_str(), static_cast<int>(k) == selected)) {
+                    AnvilControlValue v{static_cast<int64_t>(k), 0.0, nullptr};
+                    report(control.set(plugin, id, v));
                 }
             }
             ImGui::EndCombo();
@@ -1263,27 +1142,25 @@ void draw_setting(const std::string& plugin, AnvilSetting id, const AnvilControl
         auto it = u.text_edits.find(key);
         if (it == u.text_edits.end()) it = u.text_edits.emplace(key, saved).first;
         std::string& text = it->second;
-        char buffer[1024];
-        std::snprintf(buffer, sizeof(buffer), "%s", text.c_str());
         ImGui::SetNextItemWidth(width * 1.5f);
-        const bool enter = ImGui::InputText(label, buffer, sizeof(buffer), ImGuiInputTextFlags_EnterReturnsTrue);
-        text = buffer;
+        const bool enter = ImGui::InputText(label, &text, ImGuiInputTextFlags_EnterReturnsTrue);
         if (enter || ImGui::IsItemDeactivatedAfterEdit()) {
-            if (text != saved) applied(control.set_text(plugin, id, text));
+            const std::string value = text;
             u.text_edits.erase(key);
+            if (value != saved) report(control.set_text(plugin, id, value));
         } else if (!ImGui::IsItemActive()) {
             text = saved;
         }
         break;
     }
     case ANVIL_CONTROL_SETTING_KEY: {
-        const bool recording = s.recording_key.load() && u.record_plugin == plugin && u.record_setting == id;
-        const std::string shown = recording ? tr("Press a key (Esc cancels)") : saved.empty() ? tr("(none)") : saved;
+        const bool recording = sh.recording_key.load() && u.record_plugin == plugin && u.record_setting == id;
+        const std::string shown = recording ? tr("Press a key (Esc cancels)") : saved.empty() ? tr("no key") : saved;
         if (ImGui::Button((shown + "##key").c_str(), ImVec2(width, 0.0f)) && !recording) {
             u.record_plugin = plugin;
             u.record_setting = id;
-            s.recorded_key.store(-1);
-            s.recording_key.store(true);
+            sh.recorded_key.store(-1);
+            sh.recording_key.store(true);
         }
         ImGui::SameLine();
         ImGui::TextUnformatted(label);
@@ -1291,7 +1168,7 @@ void draw_setting(const std::string& plugin, AnvilSetting id, const AnvilControl
             ImGui::SameLine();
             if (ImGui::SmallButton(tr("Clear"))) {
                 AnvilControlValue v{0, 0.0, nullptr};
-                applied(control.set(plugin, id, v));
+                report(control.set(plugin, id, v));
             }
         }
         break;
@@ -1300,65 +1177,96 @@ void draw_setting(const std::string& plugin, AnvilSetting id, const AnvilControl
         ImGui::Text("%s: %s", label, saved.c_str());
         break;
     }
-    help_marker(info.description);
-    if (current != saved) {
-        // restart = true: the saved value waits for the next start. Otherwise
-        // an ANVIL_<ID>_<NAME> variable overrides it until the next change.
-        ImGui::SameLine();
-        weak_wrapped(trf(info.restart ? N_("(now {0}; applies at the next start)") : N_("(now {0}, from the environment)"), {current}));
-    }
-    if (saved != fallback) {
-        ImGui::SameLine();
-        if (ImGui::SmallButton(tr("Reset"))) applied(control.reset(plugin, id));
-    }
-    ImGui::PopID();
 }
 
-void draw_settings() {
+struct OverlayHost final : anvil::ui::PluginsHost {
+    const OverlaySource& source(size_t i) const { return ui().model->sources[i]; }
+    const anvil::ui::PluginSnap& plugin(size_t i) const { return ui().model->model.plugins[i]; }
+
+    // Until every plugin was processed, what the core reports is not complete.
+    bool read_only() const override { return !ui().status.loading_done; }
+    void apply(const std::vector<anvil::ui::Edit>& edits) override { apply_edits(edits); }
+    bool known(size_t i) const override { return source(i).known; }
+    std::string switch_refusal(size_t i) const override {
+        if (source(i).refusal == "needed") return tr("The overlay needs it, so it stays on here; turn it off in Anvil Manager.");
+        return {};
+    }
+    void draw_setting_control(size_t i, size_t s, bool /*disabled*/) override { setting_control(i, s); }
+    std::string shown_value(size_t i, size_t s, const std::string& value) const override {
+        const OverlaySource& src = source(i);
+        return s < src.settings.size() ? shown_setting_value(src.settings[s], value) : value;
+    }
+    bool in_game() const override { return true; }
+
+    void draw_facts(size_t i) override {
+        Ui& u = ui();
+        const OverlaySource& src = source(i);
+        if (!src.mod || *src.mod >= u.mods.size()) {
+            weak_wrapped(trf("id {0}", {plugin(i).id}));
+            return;
+        }
+        const ModRow& m = u.mods[*src.mod];
+        weak_wrapped(m.authors.empty() ? trf("id {0}", {m.id}) : trf("id {0}, by {1}", {m.id, m.authors}));
+        weak_wrapped(trf("from {0}", {mod_source(m)}));
+        const bool good = (m.state == "approved" && m.loaded) || m.approved_next;
+        const bool waits = m.state == "pending" || m.state == "update-pending" || m.state == "conflict";
+        ImGui::PushStyleColor(ImGuiCol_Text, good ? kGreen : waits ? kAmber : kRed);
+        wrapped(state_text(m));
+        ImGui::PopStyleColor();
+        if (!good && !m.reason_text().empty()) weak_wrapped(m.reason_text());
+        if (!m.repository.empty()) weak_wrapped(trf("Source: {0}", {m.repository}));
+        if (!m.approved_hash.empty()) {
+            weak_wrapped(trf("Approved: {0} on {1} (hash {2})",
+                             {m.approved_version, m.approved_date.substr(0, 10), m.approved_hash.substr(0, 8)}));
+        }
+        const bool approvable = m.can_approve && !m.approved_next;
+        if (approvable &&
+            anvil::ui::primary_button(m.state == "update-pending" ? tr("Approve the update...") : tr("Approve..."))) {
+            anvil::ui::Confirm c;
+            c.title = plugin(i).name + " " + m.version;
+            c.button = tr("Approve");
+            c.lines = {trf("Approve native code from {0}? It loads from the next start.", {mod_source(m)}),
+                       tr("Plugins from mods are native code: they run with the game's permissions and can do anything "
+                          "your Windows account can. Approve only plugins whose authors you trust. An approval covers "
+                          "these exact files (their hash); an update waits for a new approval. Approved plugins load "
+                          "from the next start, from Anvil's own copy."),
+                       trf("Game addresses (symbols): {0}", {std::to_string(m.symbols)}),
+                       trf("Hash: {0}", {m.hash.empty() ? "-" : m.hash})};
+            c.action = [m] { approve(m); };
+            u.plugins_tab.ask(std::move(c));
+        }
+        if (m.can_revoke) {
+            if (approvable) ImGui::SameLine();
+            if (ImGui::Button(tr("Revoke the approval"))) revoke(m);
+        }
+    }
+
+    void draw_notes(size_t i) override {
+        Ui& u = ui();
+        const anvil::ui::PluginSnap& p = plugin(i);
+        if (p.blocked == anvil::ui::Blocked::Failed && !p.blocked_reason.empty()) {
+            ImGui::PushStyleColor(ImGuiCol_Text, kRed);
+            wrapped(p.blocked_reason);
+            ImGui::PopStyleColor();
+        }
+        const OverlaySource& src = source(i);
+        if (src.row && *src.row < u.plugins.size() && u.plugins[*src.row].suspended) weak_wrapped(tr("suspended in this game"));
+        for (const std::string& w : shared().control.setting_warnings(p.id)) {
+            ImGui::PushStyleColor(ImGuiCol_Text, kAmber);
+            wrapped(w);
+            ImGui::PopStyleColor();
+        }
+    }
+};
+
+void draw_plugins() {
     Ui& u = ui();
-    const ControlClient& control = shared().control;
-    std::vector<const PluginRow*> with_settings;
-    for (const PluginRow& p : u.plugins) {
-        if (p.settings > 0) with_settings.push_back(&p);
-    }
-    if (with_settings.empty()) {
-        weak(tr("No plugin declares settings."));
-        return;
-    }
-    if (u.selected_plugin.empty() ||
-        std::none_of(with_settings.begin(), with_settings.end(), [&](const PluginRow* p) { return p->id == u.selected_plugin; })) {
-        u.selected_plugin = with_settings.front()->id;
-    }
-    const float footer = ImGui::GetFrameHeightWithSpacing() * 1.5f;
-    if (ImGui::BeginChild("plugins", ImVec2(180.0f * scale(), -footer), ImGuiChildFlags_Borders)) {
-        for (const PluginRow* p : with_settings) {
-            if (ImGui::Selectable(p->id.c_str(), p->id == u.selected_plugin)) u.selected_plugin = p->id;
-        }
-    }
-    ImGui::EndChild();
-    ImGui::SameLine();
-    if (ImGui::BeginChild("editor", ImVec2(0.0f, -footer), ImGuiChildFlags_Borders)) {
-        const uint32_t count = control.setting_count(u.selected_plugin);
-        std::vector<std::pair<AnvilSetting, AnvilControlSetting>> settings;
-        std::vector<std::string_view> groups;
-        for (AnvilSetting id = 0; id < count; ++id) {
-            const auto info = control.setting_info(u.selected_plugin, id);
-            if (!info) continue;
-            settings.emplace_back(id, *info);
-            groups.emplace_back(info->group != nullptr ? info->group : "");
-        }
-        std::string_view group;
-        for (const std::size_t i : anvil::ui::settings_display_order(groups)) {
-            if (groups[i] != group) {
-                group = groups[i];
-                ImGui::SeparatorText(std::string(group).c_str());
-            }
-            draw_setting(u.selected_plugin, settings[i].first, settings[i].second);
-        }
-        for (const std::string& w : control.setting_warnings(u.selected_plugin)) ImGui::TextColored(kAmber, "%s", w.c_str());
-    }
-    ImGui::EndChild();
-    weak(trf("Values are saved in {0}.", {"anvil\\data\\" + u.selected_plugin + "\\settings.toml"}));
+    draw_status_lines();
+    if (!u.model) return;
+    OverlayHost host;
+    u.plugins_tab.draw_waiting(u.model->model);
+    u.plugins_tab.draw_pending(u.model->model, host);
+    u.plugins_tab.draw_panes(u.model->model, host);
 }
 
 void draw_crash() {
@@ -1428,7 +1336,7 @@ void draw_log() {
 void draw_panel() {
     Shared& s = shared();
     Ui& u = ui();
-    refresh(false);
+    refresh(u.model_stale);
     const float k = scale();
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
@@ -1449,14 +1357,14 @@ void draw_panel() {
                     ImGui::EndTabItem();
                 }
             };
-            tab(N_("Status"), Tab::Status, draw_status);
-            tab(N_("Mods"), Tab::Mods, draw_mods);
-            tab(N_("Settings"), Tab::Settings, draw_settings);
+            tab(N_("Plugins"), Tab::Plugins, draw_plugins);
             tab(N_("Crash report"), Tab::Crash, draw_crash);
             tab(N_("Log"), Tab::Log, draw_log);
             u.requested_tab = Tab::None;
             ImGui::EndTabBar();
         }
+        OverlayHost host;
+        u.plugins_tab.draw_confirm(host);
     }
     ImGui::End();
     if (!open) s.panel_open.store(false);
@@ -1481,7 +1389,7 @@ void ui_frame(IDirect3DDevice9* device) {
     if (const int64_t recorded = s.recorded_key.exchange(-1); recorded >= 0) {
         if (recorded > 0 && !u.record_plugin.empty()) {
             AnvilControlValue v{recorded, 0.0, nullptr};
-            apply_result(s.control.set(u.record_plugin, u.record_setting, v), tr("Key saved"));
+            report(s.control.set(u.record_plugin, u.record_setting, v));
         }
         u.record_plugin.clear();
     }

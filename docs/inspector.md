@@ -14,9 +14,9 @@ errors panel of `anvil-log-throttle` ([script-errors-panel.md](script-errors-pan
 ## Turning it on
 
 - The setting **Inspector window** (`window`, default off, applies at once) of anvil-inspector, in the
-  overlay's settings tab or the Manager's.
-- On: the window opens, at every start too. Once closed, its switch is in the **Status** tab of the Anvil
-  panel, like every plugin's window.
+  overlay's Plugins tab or the Manager's.
+- On: the window opens, at every start too. Once closed, its switch is above the list of the **Plugins**
+  tab of the Anvil panel, like every plugin's window.
 - Off: the window hides. With the setting off from the start the plugin starts no thread, queues no work
   and subscribes to no event: it costs nothing in a frame or a game day.
 - It needs `anvil-game` and `anvil-overlay` (required dependencies). On OpenGL nothing is drawn. With an

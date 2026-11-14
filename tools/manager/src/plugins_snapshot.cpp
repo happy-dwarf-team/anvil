@@ -50,6 +50,7 @@ void fill_from_manifest(mui::PluginSnap& p, PluginSource& source, const Manifest
         s.id = mod.id;
         s.name = mod.name.empty() ? mod.id : text(m.folder, mod.name);
         s.description = mod.description.empty() ? std::string() : text(m.folder, mod.description);
+        s.group = mod.group.empty() ? std::string() : text(m.folder, mod.group);
         s.changes_game = mod.affects_gameplay;
         s.default_on = mod.enabled_by_default;
         s.offers = {mod.allow_ironman == Allow::OptIn, mod.allow_multiplayer == Allow::OptIn};
@@ -82,6 +83,9 @@ void fill_settings(mui::PluginSnap& p, PluginSource& source, const fs::path& gam
         s.label = setting.label.empty() ? setting.name : text(m.folder, setting.label);
         s.description = setting.description.empty() ? std::string() : text(m.folder, setting.description);
         s.group = setting.group.empty() ? std::string() : text(m.folder, setting.group);
+        s.module = setting.module;
+        s.advanced = setting.advanced;
+        s.counts = setting_counts(setting, m);
         s.restart = setting.restart;
         s.default_value = value_text(setting, setting.default_value);
         s.saved = value_text(setting, value);
@@ -157,6 +161,36 @@ PluginsSnapshot build_plugins_snapshot(const fs::path& game_dir, const cli::Game
         out.sources.push_back(std::move(source));
     }
     return out;
+}
+
+void apply_last_start(PluginsSnapshot& snapshot, const LastStart& last) {
+    AnvilSettings lists;
+    lists.disabled_plugins = last.disabled_plugins;
+    lists.allow_ironman = last.allow_ironman;
+    lists.allow_multiplayer = last.allow_multiplayer;
+    lists.enabled_modules = last.enabled_modules;
+    lists.disabled_modules = last.disabled_modules;
+    for (mui::PluginSnap& p : snapshot.model.plugins) {
+        p.in_effect = {!listed(lists.disabled_plugins, p.id), listed(lists.allow_ironman, p.id), listed(lists.allow_multiplayer, p.id)};
+        if (p.origin == mui::Origin::FromMod) {
+            p.approved_in_effect = std::any_of(last.approvals.begin(), last.approvals.end(),
+                                               [&](const LastStart::Approval& a) { return a.id == p.id; });
+        }
+        for (mui::ModuleSnap& m : p.modules) {
+            const std::string key = p.id + "." + m.id;
+            m.in_effect = {module_enabled(lists, key, m.default_on), listed(lists.allow_ironman, key), listed(lists.allow_multiplayer, key)};
+        }
+        // The record has the values of each plugin that resolved; one that did not keeps its own.
+        const auto values = last.settings.find(p.id);
+        for (mui::SettingSnap& s : p.settings) {
+            if (values == last.settings.end()) {
+                s.in_effect = s.saved;
+                continue;
+            }
+            const auto value = values->second.find(s.name);
+            s.in_effect = value != values->second.end() ? value->second : s.saved;
+        }
+    }
 }
 
 bool apply_setting_edit(PluginSource& source, const mui::Edit& edit, std::string& error) {

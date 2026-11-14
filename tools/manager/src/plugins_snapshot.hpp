@@ -7,6 +7,7 @@
 
 #include "cli/game.hpp"
 #include "core/discovery.hpp"
+#include "core/last_start.hpp"
 #include "core/manifest.hpp"
 #include "core/settings.hpp"
 #include "ui/plugin_model.hpp"
@@ -51,5 +52,9 @@ std::string value_text(const Setting& setting, const SettingValue& value);
 // Applies one setting edit of the model to `source`'s values: the edit's
 // value is the canonical text of the default or of a value it already knows.
 bool apply_setting_edit(PluginSource& source, const anvil::ui::Edit& edit, std::string& error);
+
+// What is in effect, from the record of the last start (ADR 0013, point 8):
+// its anvil.toml lists, its approvals and its settings' values.
+void apply_last_start(PluginsSnapshot& snapshot, const LastStart& last);
 
 }  // namespace anvil::manager

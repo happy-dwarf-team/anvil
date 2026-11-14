@@ -16,6 +16,7 @@ namespace overlay {
 struct ModuleRow {
     std::string key, name, description;  // name and description in the player's language
     std::string state;                    // resolved plugins: "loaded", "disabled", ...; "" in a mod
+    std::string group;                    // [[modules]] `group` in the player's language (1.23), "" for none
     bool gameplay = false;
     bool offers_ironman = false;
     bool offers_multiplayer = false;
@@ -36,6 +37,8 @@ struct PluginRow {
     bool awaiting_approval = false;  // skipped until the player approves it
     anvil::i18n::Message why;        // `reason` by code; empty from a core before 1.7
     std::vector<ModuleRow> modules;  // [[modules]], in plugin.toml order
+    bool offers_ironman = false;     // plugin.toml offers the opt-in for the plugin's own handle (1.23)
+    bool offers_multiplayer = false;
 
     // The reason in the player's language.
     std::string reason_text() const { return why.empty() ? reason : anvil::i18n::text(why); }
@@ -63,6 +66,22 @@ struct ModRow {
     bool waiting() const {
         return can_approve && !approved_next && (state == "pending" || state == "update-pending" || state == "conflict");
     }
+};
+
+// A switch or an opt-in of a plugin or module (ADR 0013, Anvil 1.23).
+struct SwitchRow {
+    bool this_start = false;
+    bool next_start = false;
+    bool can_set = false;
+    std::string refusal;  // "needed", "not-offered" or ""
+};
+
+// A [[dependencies]] entry, then the implied anvil-game (Anvil 1.23).
+struct Requirement {
+    std::string id;
+    std::string version;
+    bool optional = false;
+    bool implied = false;
 };
 
 struct CrashInfo {
@@ -115,6 +134,14 @@ public:
     std::vector<ModRow> mod_plugins() const;
     std::string approve_mod_plugin(const ModRow& plugin) const;  // with the hash it shows
     std::string revoke_mod_plugin(const ModRow& plugin) const;
+
+    // Anvil 1.23 (ADR 0013): switches and opt-ins, dependencies, the
+    // modules, settings and dependencies of plugins that are off.
+    bool has_switches() const;
+    // `key` is a plugin id or "<plugin>.<module>"; `which` ANVIL_CONTROL_SWITCH_*.
+    std::optional<SwitchRow> switch_state(const std::string& key, uint32_t which) const;
+    std::string switch_set(const std::string& key, uint32_t which, bool on) const;  // "" on success, otherwise why
+    std::vector<Requirement> requirements(const std::string& plugin) const;
 
 private:
     const AnvilControlService* service_;
