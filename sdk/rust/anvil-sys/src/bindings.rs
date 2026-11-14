@@ -1419,9 +1419,7 @@ pub struct AnvilGamePlayer {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    [
-        "Size of AnvilGamePlayer",
-    ][::core::mem::size_of::<AnvilGamePlayer>() - 20usize];
+    ["Size of AnvilGamePlayer"][::core::mem::size_of::<AnvilGamePlayer>() - 20usize];
     [
         "Alignment of AnvilGamePlayer",
     ][::core::mem::align_of::<AnvilGamePlayer>() - 4usize];
