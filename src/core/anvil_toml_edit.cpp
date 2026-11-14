@@ -339,6 +339,26 @@ std::optional<std::string> with_disabled_plugin(std::string_view text, std::stri
 
 bool set_plugin_listed(const std::filesystem::path& file, std::string_view key, std::string_view id, bool listed,
                        std::string& error) {
+    return set_listed(file, {ListEdit{std::string(key), std::string(id), listed}}, error);
+}
+
+std::vector<ListEdit> module_switch_edits(std::string_view key, bool on, bool on_by_default) {
+    const std::string id(key);
+    if (on) {
+        std::vector<ListEdit> edits{{"disabled_modules", id, false}};
+        if (!on_by_default) edits.push_back({"enabled_modules", id, true});
+        return edits;
+    }
+    if (on_by_default) return {{"disabled_modules", id, true}};
+    return {{"enabled_modules", id, false}};
+}
+
+bool set_module_switch(const std::filesystem::path& file, std::string_view key, bool on, bool on_by_default,
+                       std::string& error) {
+    return set_listed(file, module_switch_edits(key, on, on_by_default), error);
+}
+
+bool set_listed(const std::filesystem::path& file, const std::vector<ListEdit>& edits, std::string& error) {
     std::string text;
     const HANDLE in = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                   nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -360,9 +380,12 @@ bool set_plugin_listed(const std::filesystem::path& file, std::string_view key, 
         error = "cannot open " + narrow(file.wstring()) + " (error " + std::to_string(code) + ")";
         return false;
     }
-    const std::optional<std::string> edited = with_plugin_listed(text, key, id, listed, error);
-    if (!edited) return false;
-    if (*edited == text && (in != INVALID_HANDLE_VALUE || !listed)) return true;  // nothing to change
+    std::optional<std::string> edited = text;
+    for (const ListEdit& e : edits) {
+        edited = with_plugin_listed(*edited, e.key, e.id, e.listed, error);
+        if (!edited) return false;
+    }
+    if (*edited == text) return true;  // nothing to change (a missing file stays missing)
 
     std::error_code ignored;
     std::filesystem::create_directories(file.parent_path(), ignored);

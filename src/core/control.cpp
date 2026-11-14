@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cstdio>
+#include <cstddef>
 #include <cstring>
 
 namespace anvil {
@@ -19,6 +20,11 @@ namespace {
 Control* g_control = nullptr;
 
 constexpr size_t kTailBytes = 64 * 1024;
+
+// The overlay does not turn itself or what it needs off (ADR 0013, point 7).
+constexpr const char* kOverlayId = "anvil-overlay";
+const char* kNeeded = "needed";
+const char* kNotOffered = "not-offered";
 
 void copy_error(AnvilControlResult* out, const std::string& error) {
     if (out == nullptr) return;
@@ -89,24 +95,12 @@ uint32_t svc_setting_count(const char* plugin_id) {
 }
 
 int svc_setting_info(const char* plugin_id, AnvilSetting setting, AnvilControlSetting* out) {
-    const PluginSettings* s = settings_of(plugin_id);
-    const Setting* d = s == nullptr ? nullptr : s->schema().get(setting);
-    if (d == nullptr || out == nullptr) return 0;
-    *out = AnvilControlSetting{};
-    out->size = sizeof(*out);
-    out->name = d->name.c_str();
-    out->label = d->label.c_str();
-    out->description = d->description.c_str();
-    out->group = d->group.c_str();
-    out->type = static_cast<uint32_t>(d->type);
-    out->restart = d->restart ? 1 : 0;
-    const bool is_int = d->type == SettingType::Int;
-    const auto number = [&](const SettingValue& v) { return is_int ? static_cast<double>(v.integer) : v.real; };
-    if (d->min) out->has_min = 1, out->min = number(*d->min);
-    if (d->max) out->has_max = 1, out->max = number(*d->max);
-    if (d->step) out->has_step = 1, out->step = number(*d->step);
-    out->options = static_cast<uint32_t>(d->options.size());
-    return 1;
+    if (plugin_id == nullptr || out == nullptr) return 0;
+    // Only as far as the caller's `size` says, since fields are appended
+    // (1.23). Before 1.23 the core filled the whole struct whatever its
+    // `size`, so a caller that left it 0 gets the fields of 1.22.
+    if (out->size == 0) out->size = offsetof(AnvilControlSetting, module);
+    return fill_sized(out, [&](AnvilControlSetting& full) { return g_control->setting_info(plugin_id, setting, full); });
 }
 
 int svc_setting_option(const char* plugin_id, AnvilSetting setting, uint32_t index, const char** name,
@@ -268,6 +262,29 @@ int svc_mod_plugin_module(uint32_t index, uint32_t module, AnvilControlModule* o
     return fill_sized(out, [&](AnvilControlModule& full) { return g_control->mod_plugin_module(index, module, full); });
 }
 
+int svc_switch_state(const char* key, uint32_t which, AnvilControlSwitch* out) {
+    if (key == nullptr) return 0;
+    return fill_sized(out, [&](AnvilControlSwitch& full) { return g_control->switch_state(key, which, full); });
+}
+
+AnvilResult svc_switch_set(const char* key, uint32_t which, int on, AnvilControlSwitch* state, AnvilControlResult* out) {
+    reset_result(out);
+    if (g_control == nullptr || key == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
+    std::string error;
+    const AnvilResult r = g_control->switch_set(key, which, on != 0, error);
+    if (out != nullptr) out->saved = r == ANVIL_OK ? 1 : 0;
+    copy_error(out, error);
+    if (state != nullptr) svc_switch_state(key, which, state);
+    return r;
+}
+
+int svc_last_start(AnvilControlSink sink, void* context) {
+    if (g_control == nullptr || sink == nullptr || g_control->last_start().empty()) return 0;
+    const std::string& text = g_control->last_start();
+    sink(context, text.data(), text.size());
+    return 1;
+}
+
 const AnvilControlService kService{
     sizeof(AnvilControlService),
     svc_status,
@@ -296,6 +313,9 @@ const AnvilControlService kService{
     svc_module,
     svc_mod_plugin_module_count,
     svc_mod_plugin_module,
+    svc_switch_state,
+    svc_switch_set,
+    svc_last_start,
 };
 
 // The reason as a message for the overlay (i18n::serialize).
@@ -335,6 +355,26 @@ Control::Control(ControlSources sources) : sources_(std::move(sources)) {
         }
     }
     disabled_next_.insert(sources_.disabled.begin(), sources_.disabled.end());
+    start_.ironman.insert(sources_.allow_ironman.begin(), sources_.allow_ironman.end());
+    start_.multiplayer.insert(sources_.allow_multiplayer.begin(), sources_.allow_multiplayer.end());
+    start_.enabled_modules.insert(sources_.enabled_modules.begin(), sources_.enabled_modules.end());
+    start_.disabled_modules.insert(sources_.disabled_modules.begin(), sources_.disabled_modules.end());
+    next_ = start_;
+    // anvil-overlay and every plugin it depends on, also optionally (today
+    // anvil-game): the overlay is where the player turns things back on.
+    if (sources_.plugins != nullptr) {
+        std::vector<std::string> todo{kOverlayId};
+        while (!todo.empty()) {
+            const std::string id = std::move(todo.back());
+            todo.pop_back();
+            if (!needed_.insert(id).second) continue;
+            if (const PluginRecord* p = sources_.plugins->find(id)) {
+                for (const Dependency& d : p->manifest().dependencies) {
+                    if (!d.implied) todo.push_back(d.id);
+                }
+            }
+        }
+    }
     if (sources_.mods != nullptr) {
         for (const TrustEntry& e : sources_.mods->trust.entries) bindings_[e.id] = {e.mod, e.hash};
         for (const ModPlugin& p : sources_.mods->plugins) {
@@ -445,6 +485,8 @@ bool Control::plugin(uint32_t index, AnvilControlPlugin& out) const {
         out.issues = m.issues.c_str();
         out.early = m.phase == Phase::Early ? 1 : 0;
         out.affects_gameplay = m.affects_gameplay ? 1 : 0;
+        out.offers_ironman = m.allow_ironman == Allow::OptIn ? 1 : 0;
+        out.offers_multiplayer = m.allow_multiplayer == Allow::OptIn ? 1 : 0;
         out.settings = static_cast<uint32_t>(p.settings().size());
         const Outcome* o = loading_done_.load(std::memory_order_acquire) ? p.outcome() : nullptr;
         out.state = outcome_name(o);
@@ -662,7 +704,9 @@ void fill_declared(const Module& m, const char* key, AnvilControlModule& out) {
     out.offers_multiplayer = m.allow_multiplayer == Allow::OptIn ? 1 : 0;
     out.on_by_default = m.enabled_by_default ? 1 : 0;
     out.state = "";
+    out.group = m.group.c_str();
 }
+
 
 }  // namespace
 
@@ -682,6 +726,147 @@ bool Control::module(std::string_view plugin_id, uint32_t index, AnvilControlMod
                                                                 : "pending";
     out.suspended = sources_.policy != nullptr && m.handle != nullptr && sources_.policy->suspended(m.handle->owner) ? 1 : 0;
     return true;
+}
+
+bool Control::setting_info(std::string_view plugin_id, AnvilSetting setting, AnvilControlSetting& out) const {
+    const PluginRecord* p = loadable(plugin_id);
+    const Setting* d = p == nullptr ? nullptr : p->settings().schema().get(setting);
+    if (d == nullptr) return false;
+    out = AnvilControlSetting{};
+    out.size = sizeof(out);
+    out.name = d->name.c_str();
+    out.label = d->label.c_str();
+    out.description = d->description.c_str();
+    out.group = d->group.c_str();
+    out.type = static_cast<uint32_t>(d->type);
+    out.restart = d->restart ? 1 : 0;
+    const bool is_int = d->type == SettingType::Int;
+    const auto number = [&](const SettingValue& v) { return is_int ? static_cast<double>(v.integer) : v.real; };
+    if (d->min) out.has_min = 1, out.min = number(*d->min);
+    if (d->max) out.has_max = 1, out.max = number(*d->max);
+    if (d->step) out.has_step = 1, out.step = number(*d->step);
+    out.options = static_cast<uint32_t>(d->options.size());
+    out.module = -1;
+    const auto& modules = p->manifest().modules;
+    for (size_t i = 0; i < modules.size(); ++i) {
+        if (!d->module.empty() && modules[i].id == d->module) out.module = static_cast<int32_t>(i);
+    }
+    out.advanced = d->advanced ? 1 : 0;
+    return true;
+}
+
+// ---- switches and opt-ins (ADR 0013, point 7) -------------------------------------
+
+std::optional<Control::Target> Control::target(std::string_view key) const {
+    if (sources_.plugins == nullptr) return std::nullopt;
+    const size_t dot = key.find('.');
+    if (dot == std::string_view::npos) {
+        const PluginRecord* p = sources_.plugins->find(key);
+        if (p == nullptr) return std::nullopt;
+        return Target{p, nullptr, std::string(key)};
+    }
+    const PluginRecord* p = loadable(key.substr(0, dot));
+    if (p == nullptr) return std::nullopt;
+    for (const Module& m : p->manifest().modules) {
+        if (m.id == key.substr(dot + 1)) return Target{p, &m, std::string(key)};
+    }
+    return std::nullopt;
+}
+
+bool Control::state_of(const Target& t, uint32_t which, AnvilControlSwitch& out) const {
+    out = AnvilControlSwitch{};
+    out.size = sizeof(out);
+    out.refusal = "";
+    if (which == ANVIL_CONTROL_SWITCH_ON) {
+        if (t.module == nullptr) {
+            out.this_start = std::find(sources_.disabled.begin(), sources_.disabled.end(), t.key) == sources_.disabled.end();
+            out.next_start = !disabled_next_.contains(t.key);
+            out.can_set = !(out.next_start && needed_.contains(t.key));
+            if (!out.can_set) out.refusal = kNeeded;
+        } else {
+            const auto on = [&](const Lists& l) {
+                return !l.disabled_modules.contains(t.key) && (t.module->enabled_by_default || l.enabled_modules.contains(t.key));
+            };
+            out.this_start = on(start_);
+            out.next_start = on(next_);
+            out.can_set = 1;
+        }
+        return true;
+    }
+    if (which != ANVIL_CONTROL_SWITCH_IRONMAN && which != ANVIL_CONTROL_SWITCH_MULTIPLAYER) return false;
+    const bool ironman = which == ANVIL_CONTROL_SWITCH_IRONMAN;
+    const Manifest& m = t.plugin->manifest();
+    const Allow allow = t.module != nullptr ? (ironman ? t.module->allow_ironman : t.module->allow_multiplayer)
+                                            : (ironman ? m.allow_ironman : m.allow_multiplayer);
+    const auto& start = ironman ? start_.ironman : start_.multiplayer;
+    const auto& next = ironman ? next_.ironman : next_.multiplayer;
+    out.this_start = start.contains(t.key);
+    out.next_start = next.contains(t.key);
+    // An opt-in plugin.toml does not offer can still be taken out.
+    out.can_set = allow == Allow::OptIn || out.next_start;
+    if (!out.can_set) out.refusal = kNotOffered;
+    return true;
+}
+
+bool Control::switch_state(std::string_view key, uint32_t which, AnvilControlSwitch& out) const {
+    const auto t = target(key);
+    if (!t) return false;
+    std::lock_guard lock(mutex_);
+    return state_of(*t, which, out);
+}
+
+AnvilResult Control::switch_set(std::string_view key, uint32_t which, bool on, std::string& error) {
+    const auto t = target(key);
+    if (!t) {
+        error = "no plugin or module '" + std::string(key) + "' at this start";
+        return ANVIL_ERROR_NOT_FOUND;
+    }
+    const std::filesystem::path file = sources_.anvil_dir / "anvil.toml";
+    std::lock_guard lock(mutex_);
+    AnvilControlSwitch now{};
+    if (!state_of(*t, which, now)) {
+        error = "unknown switch " + std::to_string(which);
+        return ANVIL_ERROR_INVALID_ARGUMENT;
+    }
+    if ((now.next_start != 0) == on) return ANVIL_OK;
+    if (!now.can_set) {
+        if (std::string_view(now.refusal) == kNeeded) {
+            error = "the overlay needs " + t->key + "; turn it off in Anvil Manager";
+            return ANVIL_ERROR_UNSUPPORTED;
+        }
+        error = t->key + " does not offer that opt-in (plugin.toml)";
+        return ANVIL_ERROR_NOT_DECLARED;
+    }
+    std::vector<ListEdit> edits;
+    const char* what = "";
+    if (which == ANVIL_CONTROL_SWITCH_ON && t->module == nullptr) {
+        edits.push_back({"disabled_plugins", t->key, !on});
+        what = on ? "is turned on from the next start" : "is turned off from the next start";
+    } else if (which == ANVIL_CONTROL_SWITCH_ON) {
+        edits = module_switch_edits(t->key, on, t->module->enabled_by_default);
+        what = on ? "is turned on from the next start" : "is turned off from the next start";
+    } else {
+        const bool ironman = which == ANVIL_CONTROL_SWITCH_IRONMAN;
+        edits.push_back({ironman ? "allow_ironman" : "allow_multiplayer", t->key, on});
+        what = ironman ? (on ? "is allowed in ironman from the next start" : "is no longer allowed in ironman from the next start")
+                       : (on ? "is allowed in multiplayer from the next start"
+                             : "is no longer allowed in multiplayer from the next start");
+    }
+    if (!set_listed(file, edits, error)) {
+        Log::instance().write(ANVIL_LOG_WARNING, "anvil", "cannot change " + t->key + " in anvil.toml: " + error);
+        return ANVIL_ERROR_INTERNAL;
+    }
+    for (const ListEdit& e : edits) {
+        auto* list = e.key == "disabled_plugins"   ? &disabled_next_
+                     : e.key == "allow_ironman"    ? &next_.ironman
+                     : e.key == "allow_multiplayer" ? &next_.multiplayer
+                     : e.key == "enabled_modules"  ? &next_.enabled_modules
+                                                   : &next_.disabled_modules;
+        if (e.listed) list->insert(e.id);
+        else if (const auto it = list->find(e.id); it != list->end()) list->erase(it);
+    }
+    Log::instance().write(ANVIL_LOG_INFO, "anvil", t->key + " " + what + " (anvil.toml)");
+    return ANVIL_OK;
 }
 
 uint32_t Control::mod_plugin_module_count(uint32_t index) const {

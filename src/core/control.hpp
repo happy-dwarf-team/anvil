@@ -37,6 +37,14 @@ struct ControlSources {
     const PluginSet* plugins = nullptr;
     const GameplayPolicy* policy = nullptr;  // may be null
     std::vector<std::string> disabled;       // disabled_plugins at this start
+    // The other lists of anvil.toml as this start read them (after the move
+    // of retired settings, ADR 0013): the opt-ins and the module switches.
+    std::vector<std::string> allow_ironman;
+    std::vector<std::string> allow_multiplayer;
+    std::vector<std::string> enabled_modules;
+    std::vector<std::string> disabled_modules;
+    // anvil/data/anvil/last-start.toml as this start wrote it; "" when none.
+    std::string last_start;
     bool safe_mode = false;
     unsigned unfinished_starts = 0;
     // The newest crash report written before this start ("": none). Read at
@@ -106,6 +114,19 @@ public:
     uint32_t mod_plugin_module_count(uint32_t index) const;
     bool mod_plugin_module(uint32_t index, uint32_t module, AnvilControlModule& out) const;
 
+    // setting_info of a resolved plugin, with the index of its module.
+    bool setting_info(std::string_view plugin_id, AnvilSetting setting, AnvilControlSetting& out) const;
+
+    // Switches and opt-ins for the next start (ADR 0013, point 7): `key` is a
+    // plugin id of this start or "<plugin>.<module>" of a resolved plugin,
+    // `which` an ANVIL_CONTROL_SWITCH_*.
+    bool switch_state(std::string_view key, uint32_t which, AnvilControlSwitch& out) const;
+    AnvilResult switch_set(std::string_view key, uint32_t which, bool on, std::string& error);
+    const std::string& last_start() const { return sources_.last_start; }
+    // anvil-overlay and the plugins it needs, by id: the overlay does not
+    // turn them off.
+    bool needed_by_overlay(std::string_view plugin_id) const { return needed_.contains(plugin_id); }
+
 private:
     struct CrashCache {
         CrashSummary summary;
@@ -118,6 +139,20 @@ private:
     // A plugin of this start that Anvil loads, by id.
     const PluginRecord* loadable(std::string_view plugin_id) const;
 
+    // What a switch key names: a plugin of this start, and for a module key
+    // the module of a resolved plugin.
+    struct Target {
+        const PluginRecord* plugin = nullptr;
+        const Module* module = nullptr;  // null: the plugin's own switch
+        std::string key;
+    };
+    std::optional<Target> target(std::string_view key) const;
+    // The lists of anvil.toml: as this start read them, and now.
+    struct Lists {
+        std::set<std::string, std::less<>> ironman, multiplayer, enabled_modules, disabled_modules;
+    };
+    bool state_of(const Target& t, uint32_t which, AnvilControlSwitch& out) const;  // mutex_ held
+
     ControlSources sources_;
     std::vector<std::string> versions_;  // by plugin index; "" for a skipped one
     // The reasons as messages (i18n::serialize), by plugin index: the skipped
@@ -126,6 +161,9 @@ private:
     std::atomic<bool> loading_done_{false};
     mutable std::mutex mutex_;
     std::set<std::string, std::less<>> disabled_next_;  // under mutex_
+    Lists start_;                                       // fixed
+    Lists next_;                                        // under mutex_
+    std::set<std::string, std::less<>> needed_;         // fixed
     bool crash_loaded_ = false;                         // under mutex_
     std::unique_ptr<CrashCache> crash_;                 // under mutex_, then fixed
 
