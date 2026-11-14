@@ -48,6 +48,8 @@ struct SettingSnap {
     std::string default_value;
     std::string saved;        // the player's file
     std::string in_effect;    // the running game's value, else the last start's
+    std::string overridden;   // in the game: the value in effect when an environment
+                              // variable overrides the saved one; "" for none
 };
 
 struct ModuleSnap {

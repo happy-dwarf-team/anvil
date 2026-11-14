@@ -99,6 +99,12 @@ void fill_settings(const ControlClient& control, mui::PluginSnap& p, OverlaySour
         s.default_value = control.setting_value(p.id, id, ANVIL_CONTROL_VALUE_DEFAULT);
         s.saved = control.setting_value(p.id, id, ANVIL_CONTROL_VALUE_SAVED);
         s.in_effect = control.setting_value(p.id, id, ANVIL_CONTROL_VALUE_CURRENT);
+        // A setting that applies at once differs from the saved one only by an
+        // environment override, which waits for nothing: "Undo them" would save it.
+        if (!s.restart && s.in_effect != s.saved) {
+            s.overridden = std::move(s.in_effect);
+            s.in_effect = s.saved;
+        }
         p.settings.push_back(std::move(s));
         source.settings.push_back(std::move(o));
     }

@@ -30,6 +30,17 @@ void colored_wrapped(const ImVec4& color, const std::string& text) {
 
 void weak(const std::string& text) { ImGui::TextDisabled("%s", text.c_str()); }
 
+// SameLine for an item `width` wide, or a new line when the rest of this one is
+// shorter (a setting row in the overlay's narrow panel).
+void same_line_if_fits(float width) {
+    ImGui::SameLine();
+    if (ImGui::GetContentRegionAvail().x < width) ImGui::NewLine();
+}
+
+float text_width(const std::string& text) { return ImGui::CalcTextSize(text.c_str()).x; }
+
+float button_width(const char* label) { return text_width(label) + ImGui::GetStyle().FramePadding.x * 2; }
+
 void weak_wrapped(const std::string& text) {
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
     wrapped(text);
@@ -578,23 +589,26 @@ void PluginsTab::draw_setting(const Snapshot& model, size_t i, size_t s, bool di
         ImGui::PopTextWrapPos();
         ImGui::EndTooltip();
     }
+    // What follows wraps to its own line when the panel is too narrow for it.
+    const float gap = ImGui::GetStyle().ItemSpacing.x;
     if (host.in_game()) {
         // Settings apply at once in the game unless they say otherwise (ui-guidelines §3).
-        if (locked) {
-            ImGui::SameLine();
-            weak(tr("locked in a multiplayer game"));
-        } else if (snap.restart) {
-            ImGui::SameLine();
-            weak(tr("next start"));
+        if (locked || snap.restart) {
+            const std::string note = locked ? tr("locked in a multiplayer game") : tr("next start");
+            same_line_if_fits(text_width(note));
+            weak(note);
         }
-        if (setting_pending(snap)) {
-            ImGui::SameLine();
-            ImGui::TextColored(kInfo, "%s", trf("now: {0}", {host.shown_value(i, s, snap.in_effect)}).c_str());
+        const bool pending = setting_pending(snap);
+        if (pending || !snap.overridden.empty()) {
+            const std::string now = trf("now: {0}", {host.shown_value(i, s, pending ? snap.in_effect : snap.overridden)});
+            same_line_if_fits(text_width(now));
+            ImGui::TextColored(kInfo, "%s", now.c_str());
         }
     }
     if (setting_changed(snap)) {
-        ImGui::SameLine();
-        ImGui::TextColored(kInfo, "%s", trf("changed · default: {0}", {host.shown_value(i, s, snap.default_value)}).c_str());
+        const std::string changed = trf("changed · default: {0}", {host.shown_value(i, s, snap.default_value)});
+        same_line_if_fits(text_width(changed) + gap + button_width(tr("Reset")));
+        ImGui::TextColored(kInfo, "%s", changed.c_str());
         ImGui::SameLine();
         ImGui::BeginDisabled(disabled || locked);
         if (ImGui::SmallButton(tr("Reset"))) host.apply(reset_setting(p, snap.name));
