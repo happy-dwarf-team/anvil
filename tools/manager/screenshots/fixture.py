@@ -142,6 +142,17 @@ write(crashes / "2026-11-10_18-30-02.json", json.dumps({
     "before_game_ready": True}, indent=2))
 write(crashes / "2026-11-10_18-30-02.txt", "Anvil crash report (fixture)\nException: 0xC0000005 at eu4.exe+0x4b1f33\n")
 
+# A log in the layout Anvil writes, with a warning and an error for the Log page's levels.
+write(game / "anvil" / "anvil.log", "".join(f"[{ms:9.1f} ms] {level:<5} [{source}] {text}\r\n" for ms, level, source, text in [
+    (0.4, "info", "anvil", "Anvil 1.23.0 in eu4.exe (eu4-1.37.5-steam-win64)"),
+    (3.1, "info", "anvil", "6 plugins found, 1 off"),
+    (12.8, "info", "tuning", "loaded 2 of 4 modules"),
+    (13.0, "WARN", "anvil", "broken: plugin.toml does not parse: missing api"),
+    (13.2, "info", "camera", "zoom speed 1.0"),
+    (4210.6, "ERROR", "trade-ledger", "needs ledger-lib, which is off"),
+    (5120.3, "info", "anvil-game", "ready"),
+]))
+
 plugin(user / "mod" / "fixture-mod" / "anvil" / "sieges", "sieges", "Siege overview", '''description = "A list of every siege the player's armies hold."
 affects_gameplay = false
 ''')

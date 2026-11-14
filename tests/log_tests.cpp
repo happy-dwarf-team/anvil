@@ -55,6 +55,25 @@ int main() {
         CHECK(now.find("after it quit") != std::string::npos);
         CHECK(now.find("before open") < now.find("after it quit"));
         CHECK(read(dir / "anvil.prev.log") == "old process\r\n");
+
+        // The Manager's Log page reads each line's level back from what write() wrote.
+        log.write(ANVIL_LOG_INFO, "test", "level info");
+        log.write(ANVIL_LOG_WARNING, "test", "level warning");
+        log.write(ANVIL_LOG_ERROR, "test", "level error ms] WARN  inside");
+        std::istringstream lines(read(file));
+        int seen = 0;
+        for (std::string line; std::getline(lines, line);) {
+            const auto level = anvil::log_line_level(line);
+            for (const auto& [text, want] : {std::pair{"level info", ANVIL_LOG_INFO}, std::pair{"level warning", ANVIL_LOG_WARNING},
+                                             std::pair{"level error", ANVIL_LOG_ERROR}}) {
+                if (line.find(text) == std::string::npos) continue;
+                CHECK(level == want);
+                ++seen;
+            }
+        }
+        CHECK(seen == 3);
+        CHECK(!anvil::log_line_level("old process"));
+        CHECK(!anvil::log_line_level("[ not a time ] WARN  x"));
     });
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

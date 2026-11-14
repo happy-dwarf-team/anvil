@@ -187,6 +187,8 @@ void load_fonts(float scale) {
     }
     // Page titles (docs/ui-design-system.md, "Shell"): Segoe UI Semibold, or the text's font.
     anvil::ui::g_title_font = add(L"seguisb.ttf", 17.0f * 1.18f * scale);
+    // Logs and crash reports: Consolas, or the text's font.
+    anvil::ui::g_mono_font = add(L"consola.ttf", 15.0f * scale);
     anvil::ui::use_anvil_style();
     ImGui::GetStyle().ScaleAllSizes(scale);
 }

@@ -239,12 +239,7 @@ void PluginsTab::draw_list(const Snapshot& model, PluginsHost& host) {
         }
         first = false;
         ImGui::PushID(static_cast<int>(c.chip));
-        if (on) {
-            ImGui::PushStyleColor(ImGuiCol_Button, with_alpha(kEmber, 0.28f));
-            ImGui::PushStyleColor(ImGuiCol_Border, kEmber);
-        }
-        if (ImGui::SmallButton(label.c_str())) chips ^= c.chip;
-        if (on) ImGui::PopStyleColor(2);
+        if (chip(label.c_str(), on)) chips ^= c.chip;
         ImGui::PopID();
     }
 

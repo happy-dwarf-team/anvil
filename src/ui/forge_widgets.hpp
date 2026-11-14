@@ -1,7 +1,7 @@
 // The components of Forge (docs/ui-design-system.md, "Components") that every
 // view of the Manager and the overlay shares beyond the Plugins tab's own
-// controls (plugin_widgets.hpp): banners, text buttons, tags, cards, facts,
-// state rows, titles and the dialog's frame. A view draws a state, an action or
+// controls (plugin_widgets.hpp): banners, text buttons, tags, chips, cards,
+// facts, state rows, titles, the monospace text and the dialog's frame. A view draws a state, an action or
 // a dialog with these, not with its own colours and spacings.
 #pragma once
 
@@ -20,6 +20,9 @@ namespace anvil::ui {
 // The titles' font, Segoe UI Semibold with the CJK fonts merged into it; null
 // where the app has none (the overlay), and the text's font at a larger size stands in.
 inline ImFont* g_title_font = nullptr;
+// Logs and reports: Consolas with the CJK fonts merged into it; null where the
+// app has none, and the text's font stands in.
+inline ImFont* g_mono_font = nullptr;
 
 // The four states a banner or a state row says (docs/ui-guidelines.md §3).
 enum class Tone { Good, Warn, Bad, Info };
@@ -57,6 +60,30 @@ inline void title(const char* text) {
     ImGui::Dummy(ImVec2(0, ImGui::GetStyle().ItemSpacing.y));
 }
 
+// A name in semibold at the text's size: a list entry's or a card's.
+inline void strong(const char* text) {
+    if (g_title_font != nullptr) ImGui::PushFont(g_title_font, ImGui::GetFontSize());
+    ImGui::TextUnformatted(text);
+    if (g_title_font != nullptr) ImGui::PopFont();
+}
+
+// Text in the monospace font between these two: a log or a report.
+inline void begin_mono() {
+    ImGui::PushFont(g_mono_font, g_mono_font != nullptr ? g_mono_font->LegacySize : ImGui::GetFontSize());
+}
+inline void end_mono() { ImGui::PopFont(); }
+
+// A filter chip: a small pill that toggles, ember while on. True when clicked.
+inline bool chip(const char* label, bool on) {
+    if (on) {
+        ImGui::PushStyleColor(ImGuiCol_Button, with_alpha(kEmber, 0.28f));
+        ImGui::PushStyleColor(ImGuiCol_Border, kEmber);
+    }
+    const bool clicked = ImGui::SmallButton(label);
+    if (on) ImGui::PopStyleColor(2);
+    return clicked;
+}
+
 // A secondary action that is a link rather than a step: "Page", "Copy",
 // "Open the folder". Info text, no frame until hovered.
 inline bool text_button(const char* label) {
@@ -91,6 +118,16 @@ inline void state_row(Glyph glyph, const std::string& text, const ImVec4& color 
     draw_glyph(ImGui::GetWindowDrawList(), ImGui::GetCursorScreenPos(), line, glyph);
     ImGui::Indent(indent);
     ImGui::PushStyleColor(ImGuiCol_Text, color);
+    ImGui::TextWrapped("%s", text.c_str());
+    ImGui::PopStyleColor();
+    ImGui::Unindent(indent);
+}
+
+// A weak line under a state row, aligned with its text: what to do about it.
+inline void state_note(const std::string& text) {
+    const float indent = ImGui::GetTextLineHeight() + ImGui::GetStyle().ItemInnerSpacing.x * 2;
+    ImGui::Indent(indent);
+    ImGui::PushStyleColor(ImGuiCol_Text, kTextWeak);
     ImGui::TextWrapped("%s", text.c_str());
     ImGui::PopStyleColor();
     ImGui::Unindent(indent);

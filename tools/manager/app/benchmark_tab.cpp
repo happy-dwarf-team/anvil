@@ -50,24 +50,6 @@ std::string text_of(const Json& v) {
 // `one` and `many` hold {0} for the number.
 std::string plural(int64_t n, const char* one, const char* many) { return trf(n == 1 ? one : many, {std::to_string(n)}); }
 
-// A ✓ or ✕ drawn in the line's height (the font has neither glyph).
-void mark(bool ok, bool blocks) {
-    const float h = ImGui::GetTextLineHeight();
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    ImDrawList* draw = ImGui::GetWindowDrawList();
-    const ImU32 color = ImGui::GetColorU32(ok ? kGood : blocks ? kBad : kWarn);
-    const float t = std::max(1.5f, h * 0.12f);
-    if (ok) {
-        draw->AddLine(ImVec2(p.x + h * 0.15f, p.y + h * 0.55f), ImVec2(p.x + h * 0.4f, p.y + h * 0.8f), color, t);
-        draw->AddLine(ImVec2(p.x + h * 0.4f, p.y + h * 0.8f), ImVec2(p.x + h * 0.85f, p.y + h * 0.25f), color, t);
-    } else {
-        draw->AddLine(ImVec2(p.x + h * 0.2f, p.y + h * 0.25f), ImVec2(p.x + h * 0.8f, p.y + h * 0.85f), color, t);
-        draw->AddLine(ImVec2(p.x + h * 0.8f, p.y + h * 0.25f), ImVec2(p.x + h * 0.2f, p.y + h * 0.85f), color, t);
-    }
-    ImGui::Dummy(ImVec2(h, h));
-    ImGui::SameLine();
-}
-
 // Chips that wrap at the end of the line.
 void chip(const std::string& label, const ImVec4& color, bool& first, float right_edge) {
     const ImGuiStyle& style = ImGui::GetStyle();
@@ -127,7 +109,8 @@ void dot_strip(const Json& warm, const std::string& without, const std::string& 
     const float x0 = origin.x + label_w, x1 = origin.x + width - 8;
     const auto x_of = [&](double ms) { return x0 + static_cast<float>((ms - lo) / (hi - lo)) * (x1 - x0); };
     const ImU32 weak_color = ImGui::GetColorU32(ImGuiCol_TextDisabled);
-    const ImU32 colors[2] = {ImGui::GetColorU32(ImVec4(0.65f, 0.70f, 0.78f, 1.0f)), ImGui::GetColorU32(ImVec4(0.45f, 0.66f, 0.98f, 1.0f))};
+    // Without the plugin in the weak text's colour, with it in ember: Forge's tokens, not colours of their own.
+    const ImU32 colors[2] = {ImGui::GetColorU32(::anvil::ui::kTextWeak), ImGui::GetColorU32(::anvil::ui::kEmber)};
     int row = 0;
     for (const char* arm : {"without", "with"}) {
         const float y = origin.y + row_h * (static_cast<float>(row) + 0.5f);
@@ -178,7 +161,10 @@ void BenchmarkTab::draw(const BenchmarkContext& context) {
         reset();
     }
     poll(context);
+    // On the page's own background, as the other pages are.
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
     ImGui::BeginChild("benchmark");
+    ImGui::PopStyleColor();
     switch (screen_) {
     case Screen::Setup: draw_setup(context); break;
     case Screen::Running: draw_running(); break;
@@ -201,13 +187,13 @@ void BenchmarkTab::draw_setup(const BenchmarkContext& context) {
                "Nothing in your saves, mods or anvil.toml changes."));
     ImGui::Spacing();
     if (context.report == nullptr || !context.report->cannot_check.empty()) {
-        colored_wrapped(kWarn, tr("Install Anvil on the Anvil page first: the benchmark runs with Anvil and its plugins."));
+        banner("no-anvil", Tone::Info, tr("Install Anvil on the Anvil page first: the benchmark runs with Anvil and its plugins."));
         draw_kept(context);
         return;
     }
     const std::vector<ComparablePlugin> plugins = comparable_plugins(*context.report);
     if (plugins.empty()) {
-        colored_wrapped(kWarn, tr("No plugin to compare: turn one on, or approve one, on the Plugins page."));
+        banner("no-plugin", Tone::Info, tr("No plugin to compare: turn one on, or approve one, on the Plugins page."));
         draw_kept(context);
         return;
     }
@@ -217,50 +203,63 @@ void BenchmarkTab::draw_setup(const BenchmarkContext& context) {
     }
     if (checked_report_ != context.report || checked_plugin_ != plugin_) check(context);
 
-    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16);
-    if (ImGui::BeginCombo((std::string(tr("Compare")) + "###compare").c_str(), plugin_.c_str())) {
-        for (const ComparablePlugin& p : plugins) {
-            const std::string label = p.id + " " + p.version + (p.source == "workshop" ? " (Workshop)" : "");
-            if (ImGui::Selectable(label.c_str(), p.id == plugin_)) plugin_ = p.id;
+    // The series' two choices as facts: the plugin compared and the warm starts per arm.
+    if (begin_facts("series")) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextDisabled("%s", tr("Compare"));
+        ImGui::TableNextColumn();
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16);
+        if (ImGui::BeginCombo("##compare", plugin_.c_str())) {
+            for (const ComparablePlugin& p : plugins) {
+                const std::string label = p.id + " " + p.version + (p.source == "workshop" ? " (Workshop)" : "");
+                if (ImGui::Selectable(label.c_str(), p.id == plugin_)) plugin_ = p.id;
+            }
+            ImGui::EndCombo();
         }
-        ImGui::EndCombo();
-    }
-    ImGui::TextUnformatted(tr("Valid warm starts per arm:"));
-    for (const int t : kTargets) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextDisabled("%s", tr("Valid warm starts per arm:"));
+        ImGui::TableNextColumn();
+        const std::string labels[] = {std::to_string(kTargets[0]), std::to_string(kTargets[1]), std::to_string(kTargets[2])};
+        const char* names[] = {labels[0].c_str(), labels[1].c_str(), labels[2].c_str()};
+        const bool enabled[] = {true, true, true};
+        const int current = static_cast<int>(std::find(std::begin(kTargets), std::end(kTargets), target_) - std::begin(kTargets));
+        if (const int chosen = ::anvil::ui::segmented("target", names, enabled, nullptr, 3, current, false); chosen >= 0) {
+            target_ = kTargets[chosen];
+        }
         ImGui::SameLine();
-        if (ImGui::RadioButton(std::to_string(t).c_str(), target_ == t)) target_ = t;
+        weak(trf("about {0} starts, about {1} minutes",
+                 {std::to_string(2 * target_), std::to_string((2 * target_ * kSecondsPerStart + 59) / 60)}));
+        end_facts();
     }
-    ImGui::SameLine();
-    weak(trf("about {0} starts, about {1} minutes",
-             {std::to_string(2 * target_), std::to_string((2 * target_ * kSecondsPerStart + 59) / 60)}));
 
+    // The checks as states: a tick, or the problem's glyph and what fixes it under it.
     ImGui::Spacing();
     ImGui::SeparatorText(tr("Before the series"));
     for (const SetupCheck& c : checks_) {
-        mark(c.ok, c.blocks);
-        ImGui::TextUnformatted(c.text.c_str());
-        if (!c.ok) {
-            ImGui::SameLine();
-            weak(c.fix);
-        }
+        state_row(c.ok ? ::anvil::ui::Glyph::On : c.blocks ? ::anvil::ui::Glyph::CannotLoad : ::anvil::ui::Glyph::Attention, c.text);
+        if (!c.ok) state_note(c.fix);
     }
     ImGui::Spacing();
     wrapped(tr("Please leave the computer alone while the series runs. Keyboard and mouse use is recorded next to "
                "each start and shown with the result."));
     ImGui::Spacing();
     ImGui::BeginDisabled(!checks_pass(checks_) || checks_.empty());
-    if (ImGui::Button(tr("Start the series"))) start(context);
+    if (primary_button(tr("Start the series"))) start(context);
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button(tr("Check again"))) check(context);
+    if (text_button(tr("Check again"))) check(context);
     draw_kept(context);
 }
 
 void BenchmarkTab::draw_kept(const BenchmarkContext& context) {
     if (!kept_) kept_ = kept_reports(benchmarks_dir(context.game));
     ImGui::Spacing();
-    if (!ImGui::CollapsingHeader((trf("Kept reports ({0})", {std::to_string(kept_->size())}) + "###kept").c_str())) return;
-    if (ImGui::Button(tr("Open the folder"))) open_folder(benchmarks_dir(context.game));
+    ImGui::SeparatorText(trf("Kept reports ({0})", {std::to_string(kept_->size())}).c_str());
+    if (text_button(tr("Open the folder"))) open_folder(benchmarks_dir(context.game));
     if (kept_->empty()) {
         weak_wrapped(tr("No reports yet. Each series keeps its report here; the last 10 are kept."));
         return;
@@ -485,7 +484,7 @@ void BenchmarkTab::draw_running() {
                "running start still quits by itself."));
     ImGui::Spacing();
     if (p.stopping) {
-        colored_wrapped(kWarn, tr("Stopping: this start finishes and quits cleanly, then the series ends."));
+        banner("stopping", Tone::Warn, tr("Stopping: this start finishes and quits cleanly, then the series ends."));
     } else if (ImGui::Button(tr("Stop"))) {
         runner_->stop();
     }
@@ -499,8 +498,8 @@ void BenchmarkTab::draw_result() {
             return;
         }
         // The series ended before its first start.
-        colored_wrapped(kWarn, std::string(tr("The series ended before a start ran.")) + " " + series_note_);
-        if (ImGui::Button(tr("New series"))) reset();
+        banner("ended", Tone::Warn, std::string(tr("The series ended before a start ran.")) + " " + series_note_);
+        if (primary_button(tr("New series"))) reset();
         return;
     }
     const Json& r = *report_;
@@ -508,10 +507,12 @@ void BenchmarkTab::draw_result() {
     const Json& result = r["result"];
     const std::string without = arm_words("without"), with = arm_words("with");
     if (series["state"].as_string() == "complete") {
-        colored_wrapped(kGood, tr("Series complete."));
+        state_row(::anvil::ui::Glyph::On, tr("Series complete."));
     } else {
-        colored_wrapped(kWarn, trf("Series stopped: {0}", {stop_reason_text(series["stop_reason"].as_string())}));
-        if (from_series_ && !series_note_.empty()) weak(series_note_);
+        begin_banner("stopped", Tone::Warn);
+        wrapped(trf("Series stopped: {0}", {stop_reason_text(series["stop_reason"].as_string())}));
+        if (from_series_ && !series_note_.empty()) weak_wrapped(series_note_);
+        end_banner(Tone::Warn);
     }
     weak_wrapped(trf("{0}, {1} of {2} extra starts used, target {3} valid warm starts per arm.",
              {plural(static_cast<int64_t>(r["starts"].items().size()), N_("{0} start"), N_("{0} starts")),
@@ -555,7 +556,7 @@ void BenchmarkTab::draw_result() {
                                                        signed_difference(d["ms"].as_number(), d["percent"].as_number())});
         if (d["ranges_overlap"].as_bool()) {
             ImGui::TextUnformatted(line.c_str());
-            colored_wrapped(kWarn, tr("Ranges overlap: the difference is uncertain."));
+            state_row(::anvil::ui::Glyph::Attention, tr("Ranges overlap: the difference is uncertain."));
         } else {
             colored_wrapped(d["ms"].as_number() < 0 ? kGood : kBad, line);
         }
@@ -618,14 +619,14 @@ void BenchmarkTab::draw_result() {
     weak_wrapped(trf("Not measured: {0}.", {join(missing)}));
 
     ImGui::Spacing();
-    if (ImGui::Button(tr("Review the report and send..."))) screen_ = Screen::Preview;
+    if (primary_button(tr("Review the report and send..."))) screen_ = Screen::Preview;
     ImGui::SameLine();
     if (ImGui::Button(from_series_ ? tr("New series") : tr("Back"))) reset();
     if (!report_file_.empty()) {
         ImGui::SameLine();
         weak(trf("Kept as {0}", {u8(report_file_.filename())}));
     }
-    if (!keep_error_.empty()) colored_wrapped(kWarn, trf("The report could not be kept: {0}", {keep_error_}));
+    if (!keep_error_.empty()) banner("keep", Tone::Bad, trf("The report could not be kept: {0}", {keep_error_}));
 }
 
 void BenchmarkTab::draw_preview() {
@@ -773,7 +774,8 @@ void BenchmarkTab::draw_preview() {
         }
         const Json& entry = r["starts"].items()[static_cast<size_t>(shown - 1)]["plugins"][plugin];
         if (!entry["done"].as_bool()) {
-            colored_wrapped(kWarn, trf("In this start {0} had not finished when the game quit: values it set later are missing.", {plugin}));
+            state_row(::anvil::ui::Glyph::Attention,
+                      trf("In this start {0} had not finished when the game quit: values it set later are missing.", {plugin}));
         }
         if (entry["learning"].is_string()) weak(trf("Learning: {0}", {entry["learning"].as_string()}));
         std::string group = "\x01";
@@ -803,7 +805,9 @@ void BenchmarkTab::draw_preview() {
 
     ImGui::Spacing();
     if (ImGui::CollapsingHeader((std::string(tr("Show the JSON")) + "###json-header").c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+        begin_mono();
         ImGui::InputTextMultiline("##json", &report_text_, ImVec2(-1, ImGui::GetTextLineHeight() * 18), ImGuiInputTextFlags_ReadOnly);
+        end_mono();
         weak_wrapped(tr("These are exactly the bytes kept on this computer, sent and copied."));
     }
     draw_send();
@@ -815,16 +819,16 @@ void BenchmarkTab::draw_send() {
     ImGui::Spacing();
     ImGui::BeginDisabled(sent_ || sending_.valid());
     const std::string send = sent_ ? std::string(tr("Sent")) : sending_.valid() ? std::string(tr("Sending...")) : trf("Send ({0})", {size});
-    if (ImGui::Button((send + "###send").c_str())) sending_ = std::async(std::launch::async, post_report, report_text_);
+    if (primary_button((send + "###send").c_str())) sending_ = std::async(std::launch::async, post_report, report_text_);
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button((trf("Copy ({0})", {size}) + "###copy").c_str())) {
+    if (text_button((trf("Copy ({0})", {size}) + "###copy").c_str())) {
         copy_outcome_ = copy_to_clipboard(window_, report_text_) ? tr("Copied. Paste it into an issue or a message.")
                                                                  : tr("The clipboard could not be opened.");
     }
     if (!send_outcome_.empty()) {
-        if (send_failed_) colored_wrapped(kWarn, send_outcome_);
-        else colored_wrapped(kGood, send_outcome_);
+        if (send_failed_) banner("send", Tone::Bad, send_outcome_);
+        else state_row(::anvil::ui::Glyph::On, send_outcome_);
     }
     if (!copy_outcome_.empty()) weak(copy_outcome_);
     ImGui::Spacing();
@@ -832,7 +836,7 @@ void BenchmarkTab::draw_send() {
                      "address for rate limiting; it is not stored. The server adds only the day it received the report, "
                      "and keeps reports for 24 months. To have this report deleted, send its series id {0} to {1}.",
                      {(*report_)["series_id"].as_string(), kPrivacyAddress}));
-    if (ImGui::SmallButton(tr("The privacy note"))) open_url(kPrivacyUrl);
+    if (text_button(tr("The privacy note"))) open_url(kPrivacyUrl);
 }
 
 }  // namespace anvil::manager

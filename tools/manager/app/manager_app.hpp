@@ -144,6 +144,7 @@ private:
     void show_message(std::string title, std::string text);
     void failed(const std::string& what, const std::string& error, bool access_denied);
     std::string make_problem_report() const;
+    void set_log_text(std::string text);
 
     HWND window_;
     std::optional<Package> package_;
@@ -193,6 +194,13 @@ private:
     std::map<std::string, std::optional<CrashSummary>> crash_summaries_;  // the crash list's, read once each
     std::string crash_text_;
     std::string log_text_;
+    // log_text_ in lines with each one's level (an AnvilLogLevel, -1 for none), rebuilt by set_log_text.
+    struct LogLine {
+        std::string_view text;
+        int level = -1;
+    };
+    std::vector<LogLine> log_lines_;
+    bool log_warnings_ = false, log_errors_ = false;  // the Log page's level chips
 
     // The catalog (ADR 0002): the Manager's own list until the player fetches main's.
     std::optional<Catalog> catalog_;
