@@ -107,6 +107,9 @@ pre.toml .chg{color:var(--info)}
 .gsep .acts{order:3}
 .note{font-size:12px;color:var(--weak);margin:4px 0}
 .seg.small button{padding:1px 8px;font-size:12px}
+.cb.mixed .box::after{content:"";width:8px;height:2px;background:var(--check)}
+.more{font-size:12px;color:#aaa;margin:4px 0 0 22px;border-left:2px solid var(--bl);padding-left:8px}
+.mdesc.full{display:block;-webkit-line-clamp:unset;overflow:visible}
 @media (max-width:720px){.split{grid-template-columns:1fr}.row .nm{min-width:0}}
 </style>
 </head>
@@ -2378,12 +2381,74 @@ const BELLOWS_3 = (() => {
   p.version = '3.0.0 (proposed)';
   return {p, s:out};
 })();
-function useBellows(v3){
-  const b = v3 ? BELLOWS_3 : BELLOWS_TODAY;
+// Bellows 3.0, second draft (variant B3): the lab tools become ONE Diagnostics module (timing profiles
+// and the checks against the game's own code as its settings), the modules get short names and a
+// one-line description of what the player gains (DRAFT WORDING, from the 1.8 descriptions), and the
+// 1.8 text stays one click away ("More"), where the README would carry it.
+const SHORT = {
+  mimalloc:['Faster memory allocator', 'A faster allocator (mimalloc) for the game, until the main menu or for the whole session.'],
+  open_warmup:['File warm-up', 'Opens the files the game needs ahead of it. Helps most on the first start after a reboot.'],
+  ram_prefetch:['RAM prefetch', 'Unpacks the DLC archives the game needs into RAM in the background.'],
+  verifypath_listing:['Path check cache', "Answers the game's file path checks from folder listings."],
+  listing_lookup:['Missing-file lookups', 'Answers "is this file here?" from folder listings. Helps big mod sets such as Anbennar.'],
+  exists_index:['File existence index', 'Answers the modifier icons\' "does this file exist" check faster.'],
+  trigger_intern:['Trigger profile lookup', 'Faster trigger lookups at the end of loading.'],
+  metascript_subst:['Parameter substitution', 'Fills $parameters$ in scripted effects and triggers in one pass.'],
+  metascript_blocks:['Conditional blocks', 'Resolves [[parameter]] blocks in one pass. Big gain on mods with large scripted effects.'],
+  attr_cache:['Missing-file cache', 'Remembers missing files during start-up. A small gain, about 0.1 s.'],
+  token_dict_cache:['Keyword cache', "Caches the script reader's keyword lookups."],
+  verifypath_session:['Path checks after start-up', 'Keeps the path check cache after the main menu, so a save loads about 1.8 s sooner.'],
+  range_witness:['Country range check', 'Answers the country range check from the last province in range. Same answers.'],
+  frame_pacing:['Frame pacing at speed 5', 'Draws fewer frames at speed 5 while you do nothing; a year passes about 10% sooner.'],
+  pops_pacing:['Online service pacing', 'Runs the Paradox online-service checks less often at speed 5. Not in multiplayer.'],
+  never_throttle:['Full speed while minimized', 'Keeps speed 5 at full pace while the game is minimized. Single player; uses more CPU.'],
+  modifier_merge:['Modifier merge index', 'Merges large modifier lists with an index; a year at speed 5 passes about 5% sooner.'],
+  port_table:['Port table', "Builds each country's nearest-port table from its list of ports. Same table."],
+  province_modifier_view:['Province modifier view', 'Reads province modifiers in place instead of copying them. Same values.'],
+  army_search_memo:['AI army search memo', "Remembers each army's facts in the AI's daily army search. Same answers."],
+  save_compress:['Save compression', "Compresses saves faster; the file is byte for byte the game's."],
+  transfer_skip:['Skip transfer compression', 'In single player, skips compressing a save for a multiplayer transfer nobody receives.'],
+  history_add:['Dated lists while loading', 'Adds dated history entries without rescanning the list. Same list.'],
+  checksum_defer:['Checksum after the databases', "Starts the game's checksum after the databases load; about 1 s off a big mod set's start."],
+};
+const BELLOWS_3B = (() => {
+  const p = JSON.parse(JSON.stringify(BELLOWS_TODAY.p)), out = [], checks = [], groupOf = {};
+  for (const s of BELLOWS_TODAY.s){
+    const mod = p.modules.find(m => m.id === s.name);
+    if (mod){
+      groupOf[mod.id] = s.group;
+      const vals = (s.values || []).map(v => v[0]);
+      if (vals.includes('verify')) checks.push({name: s.name + '_check', type:'bool', label:'Check: ' + (SHORT[mod.id] ? SHORT[mod.id][0] : mod.name), def:false,
+        group:'Advanced', module:'diagnostics', restart:true});
+      if (vals.includes('startup')) out.push({name:'mimalloc_scope', type:'enum', label:'Use it', def:'startup', group:'', module:mod.id, restart:true,
+        values:[['startup','Until the main menu'], ['on','For the whole game session']]});
+      continue;
+    }
+    if (s.group === 'Diagnostics'){ out.push({name:s.name, type:'bool', label:s.label, def:false, group:'', module:'diagnostics', restart:true, desc:s.desc}); continue; }
+    if (s.name === 'verifypath_session'){ p.modules.push({id:s.name, name:s.label, desc:s.desc, gameplay:false, def:true, group:'Loading'}); continue; }
+    if (s.name === 'save_compress_parallel'){ out.push({name:s.name, type:'bool', label:'Compress on several threads', def:false, group:'', module:'save_compress', restart:true}); continue; }
+    out.push(s);
+  }
+  p.modules.push({id:'diagnostics', name:'Diagnostics', gameplay:false, def:false, group:'For testing',
+    desc:"Lab tools: timing profiles and checks against the game's own code. Slower; for testing Bellows."});
+  for (const m of p.modules){
+    if (!m.group) m.group = groupOf[m.id] || '';
+    if (SHORT[m.id]){ m.details = m.desc; [m.name, m.desc] = SHORT[m.id]; }
+  }
+  // Groups show in the order of their first module, so 3.0 would list its modules in this order.
+  const ORDER = ['Start-up', 'Loading', 'Simulation', 'Saving', 'For testing'];
+  p.modules.sort((a, b) => ORDER.indexOf(a.group) - ORDER.indexOf(b.group));
+  p.version = '3.0.0 (draft 2)';
+  return {p, s: out.concat(checks)};
+})();
+function useBellows(which){
+  const b = which === 'v3b' ? BELLOWS_3B : which === 'v3' ? BELLOWS_3 : BELLOWS_TODAY;
   PLUGINS = PLUGINS.map(p => p.id === 'bellows' ? JSON.parse(JSON.stringify(b.p)) : p);
   SETTINGS = {...SETTINGS, bellows: JSON.parse(JSON.stringify(b.s))};
-  ui.bellows3 = v3;
+  ui.bellows = which;
+  ui.bellows3 = which !== 'today';
 }
+const bellowsDefault = v => v === 'B3' ? 'v3b' : v === 'B2' ? 'v3' : 'today';
 const ADVANCED = g => g === 'Diagnostics' || g === 'Advanced';
 const groupOpen = (key, g) => ADVANCED(g) ? ui.open.has(key) : !ui.open.has(key);
 const dependents = p => PLUGINS.filter(x => (x.deps || []).includes(p.id) && pluginOn(toml, x)).map(x => x.name);
@@ -2440,8 +2505,8 @@ function variantB2(){
   let d = `<div class="mrow"><div style="font-size:16px">${esc(p.name)} <span class="weak" style="font-size:13px">${esc(p.version)} &middot; ${esc(p.id)}${p.standard ? ' &middot; comes with Anvil' : ''}</span></div><div>${removeBtn(p)}</div></div>
     <div class="note" style="font-size:13px">${esc(p.desc)}</div>`;
   if (p.id === 'bellows') d += `<div style="margin:6px 0"><span class="seg small">
-      <button class="${ui.bellows3 ? '' : 'cur'}" data-act="bellows" data-key="0">Bellows 1.8 as it is</button>
-      <button class="${ui.bellows3 ? 'cur' : ''}" data-act="bellows" data-key="1">Proposed for 3.0</button></span></div>`;
+      <button class="${ui.bellows3 ? '' : 'cur'}" data-act="bellows" data-key="today">Bellows 1.8 as it is</button>
+      <button class="${ui.bellows3 ? 'cur' : ''}" data-act="bellows" data-key="v3">Proposed for 3.0</button></span></div>`;
   d += `<div style="margin:10px 0 4px">${cb('On', pOn, 'on', p.id)} ${pend(pi)} ${inGame() ? stateWord(pi) : ''}</div>`;
   if (deps.length) d += `<div class="note">Needed by ${esc(deps.join(', '))}. Turning it off stops them too.</div>`;
   if (p.gameplay && !p.modules.length) d += `<div style="margin:8px 0">Where it runs ${tag(pi)}<div style="margin-top:4px">${segment(pi, !pOn)}</div><div class="note">${whereText(pi)}</div></div>`;
@@ -2462,14 +2527,75 @@ function variantB2(){
   return `<div class="split"><div class="list">${list}</div><div class="detail">${d}</div></div>`;
 }
 
+// ---- Variant B3: B, third iteration ---------------------------------------------------
+// The settings of a module that is ON are shown under it at once (its advanced ones behind a click);
+// a module that is OFF folds them into "Settings (n), kept". A group header carries a tri-state switch
+// for the whole group, so the common case needs no expanding; a plugin with more than 12 modules starts
+// with its groups folded. A description is never clipped; longer text sits behind "More".
+function b3Module(it, pOn){
+  const on = isOn(toml, it), n = settingsOf(it.plugin.id, it.mod.id).length;
+  const sw = it.gameplay ? '' : cb('', on, 'on', it.key, {disabled: !pOn, title: pOn ? '' : 'Its plugin is off.'});
+  const moreKey = `${CTX}:more:${it.key}`;
+  let h = `<div class="mod" style="padding:6px 0"><div class="mrow"><span>${sw} ${esc(it.name)}${tag(it)}</span>
+    <span>${inGame() ? stateWord(it) : ''} ${pend(it)}</span></div>
+    <div class="mdesc full">${esc(it.mod.desc)}${it.mod.details ? ` <button class="expander" data-act="toggle" data-key="${esc(moreKey)}">${ui.open.has(moreKey) ? 'Less' : 'More'}</button>` : ''}</div>
+    ${it.mod.details && ui.open.has(moreKey) ? `<div class="more">${esc(it.mod.details)}</div>` : ''}`;
+  if (it.gameplay) h += `<div style="margin:6px 0 0 22px">${segment(it, !pOn)}<div class="note">${pOn ? whereText(it) : 'Off with its plugin.'}</div></div>`;
+  if (n){
+    if (on) h += `<div style="margin-left:22px">${b2Settings(it.plugin.id, it.mod.id, false)}</div>`;
+    else {
+      const key = openKey(it.key);
+      h += `<div style="margin-left:22px"><button class="expander" data-act="toggle" data-key="${esc(key)}">${ui.open.has(key) ? '&#9662;' : '&#9656;'} Settings (${n}), kept while it is off</button>
+        ${ui.open.has(key) ? b2Settings(it.plugin.id, it.mod.id, true, '') : ''}</div>`;
+    }
+  }
+  return h + '</div>';
+}
+function variantB3(){
+  const sel = inGame() ? ui.oselected : ui.selected;
+  const ours = PLUGINS.filter(p => !p.standard), std = PLUGINS.filter(p => p.standard);
+  const stdKey = `${CTX}:std`, stdOpen = ui.open.has(stdKey) || std.some(p => p.id === sel);
+  const list = ours.map(p => b2Entry(p, sel)).join('')
+    + `<div class="lhdr" data-act="toggle" data-key="${stdKey}">${stdOpen ? '&#9662;' : '&#9656;'} Comes with Anvil <span class="weak">&middot; ${std.length} plugins, ${std.filter(p => pluginOn(toml, p)).length} on</span></div>`
+    + (stdOpen ? std.map(p => b2Entry(p, sel)).join('') : '');
+  const p = PLUGINS.find(x => x.id === sel), pi = item(p.id), pOn = pluginOn(toml, p), deps = dependents(p);
+  let d = `<div class="mrow"><div style="font-size:16px">${esc(p.name)} <span class="weak" style="font-size:13px">${esc(p.version)} &middot; ${esc(p.id)}${p.standard ? ' &middot; comes with Anvil' : ''}</span></div><div>${removeBtn(p)}</div></div>
+    <div class="note" style="font-size:13px">${esc(p.desc)}</div>`;
+  if (p.id === 'bellows') d += `<div style="margin:6px 0"><span class="seg small">
+      <button class="${ui.bellows === 'today' ? 'cur' : ''}" data-act="bellows" data-key="today">Bellows 1.8 as it is</button>
+      <button class="${ui.bellows === 'v3b' ? 'cur' : ''}" data-act="bellows" data-key="v3b">Proposed for 3.0</button></span></div>`;
+  d += `<div style="margin:10px 0 4px">${cb('On', pOn, 'on', p.id)} ${pend(pi)} ${inGame() ? stateWord(pi) : ''}</div>`;
+  if (deps.length) d += `<div class="note">Needed by ${esc(deps.join(', '))}. Turning it off stops them too.</div>`;
+  if (p.gameplay && !p.modules.length) d += `<div style="margin:8px 0">Where it runs ${tag(pi)}<div style="margin-top:4px">${segment(pi, !pOn)}</div><div class="note">${whereText(pi)}</div></div>`;
+  const general = b2Settings(p.id, null, !pOn, 'The plugin is off; its settings are kept.');
+  if (general) d += `<div class="section">Settings</div>${general}`;
+  if (p.modules.length){
+    if (p.modules.some(m => m.gameplay)) d += `<p class="note">${POLICY}</p>`;
+    const groups = [];
+    for (const m of p.modules){ const g = m.group || ''; let e = groups.find(x => x.g === g); if (!e){ e = {g, its:[]}; groups.push(e); } e.its.push(item(p.id + '.' + m.id)); }
+    const foldAll = p.modules.length > 12;
+    for (const {g, its} of groups){
+      const key = `${CTX}:grp3:${p.id}:${g}`, toggled = ui.open.has(key), open = foldAll ? toggled : !toggled;
+      const on = its.filter(i => isOn(toml, i)).length, all = on === its.length, none = on === 0;
+      const tri = `<span class="cb${all ? ' on' : none ? '' : ' mixed'}${pOn ? '' : ' dis'}" role="checkbox" aria-checked="${all ? 'true' : none ? 'false' : 'mixed'}" tabindex="0"
+        ${pOn ? `data-act="groupcb" data-key="${esc(p.id + '|' + g)}"` : ''} title="${all ? 'Turn the whole group off' : 'Turn the whole group on'}"><span class="box"></span></span>`;
+      const pendN = its.filter(isPending).length;
+      d += `<div class="gsep">${tri}<span data-act="toggle" data-key="${esc(key)}" style="cursor:pointer">${open ? '&#9662;' : '&#9656;'} ${esc(g || 'Modules')}
+        <span class="weak">&middot; ${on} of ${its.length} on</span>${pendN ? ` <span class="pending">&#9679; ${pendN} at the next start</span>` : ''}</span></div>`;
+      if (open) d += its.map(it => b3Module(it, pOn)).join('');
+    }
+  }
+  return `<div class="split"><div class="list">${list}</div><div class="detail">${d}</div></div>`;
+}
+
 // ---- the two apps --------------------------------------------------------------------
 const VARIANTS = {'0':['Today', variant0], A:['Matrix table', variantA], B:['List and detail, one choice per module', variantB],
-                  C:['By game mode', variantC], B2:['B, second iteration', variantB2]};
-const KEYS = ['0', 'B', 'B2'];   // A and C stay reachable with ?variant=A or ?variant=C
-let variant = (new URLSearchParams(location.search).get('variant') || 'B2').toUpperCase();
-if (!VARIANTS[variant]) variant = 'B2';
+                  C:['By game mode', variantC], B2:['B, second iteration', variantB2], B3:['B, third iteration', variantB3]};
+const KEYS = ['0', 'B2', 'B3'];   // A, B and C stay reachable with ?variant=A, B or C
+let variant = (new URLSearchParams(location.search).get('variant') || 'B3').toUpperCase();
+if (!VARIANTS[variant]) variant = 'B3';
 ui.selected = ui.oselected = 'bellows';
-useBellows(true);
+useBellows(bellowsDefault(variant));
 const today = () => variant === '0';
 
 function pendingBar(){
@@ -2537,7 +2663,8 @@ function render(){
 
 // ---- actions --------------------------------------------------------------------------
 function go(step){
-  variant = KEYS[(KEYS.indexOf(variant) + step + KEYS.length) % KEYS.length];
+  variant = KEYS[(Math.max(0, KEYS.indexOf(variant)) + step + KEYS.length) % KEYS.length];
+  useBellows(bellowsDefault(variant));
   const u = new URL(location.href); u.searchParams.set('variant', variant); history.replaceState(null, '', u);
   render();
 }
@@ -2560,7 +2687,12 @@ function act(el){
   }
   else if (a === 'select'){ const [c, id] = k.split(':'); if (c === 'overlay') ui.oselected = id; else ui.selected = id; }
   else if (a === 'mode'){ const [c, m] = k.split(':'); if (c === 'overlay') ui.omode = m; else ui.mode = m; }
-  else if (a === 'bellows') useBellows(k === '1');
+  else if (a === 'bellows') useBellows(k);
+  else if (a === 'groupcb'){
+    const [pid, g] = k.split('|'), its = items().filter(i => i.mod && i.plugin.id === pid && (i.mod.group || '') === g);
+    const allOn = its.every(i => isOn(toml, i));
+    for (const it of its) setOn(it, !allOn);
+  }
   else if (a === 'groupon'){
     const [pid, g] = k.split('|'), on = el.dataset.on === '1';
     for (const it of items().filter(i => i.mod && i.plugin.id === pid && (i.mod.group || '') === g)) setOn(it, on);
