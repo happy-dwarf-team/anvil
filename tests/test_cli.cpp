@@ -352,8 +352,16 @@ int main(int argc, char** argv) {
             "\n[[modules]]\nid = \"act\"\nname = \"Act\"\naffects_gameplay = true\nallow_ironman = \"opt-in\"\n"
             "default = false\n";
         write(dir / "plugin.toml", plugin_toml("modular", "anvil = \">=1.22.0\"\n" + modules));
+        // Module names are texts to translate: the warning of a plugin without translations is not this test's.
+        const auto own = [](const CheckReport& r) {
+            std::vector<Problem> out;
+            for (const auto& w : r.warnings) {
+                if (!contains(w.file, "translations")) out.push_back(w);
+            }
+            return out;
+        };
         const auto ok = fx.check(dir, false);
-        CHECK(ok.exit_code == kExitOk && ok.warnings.empty());
+        CHECK(ok.exit_code == kExitOk && own(ok).empty());
         const std::string text = format_report(ok, Format::Text);
         CHECK(contains(text, "module modular.look: Look (does not affect gameplay, on by default)\n"));
         CHECK(contains(text, "module modular.act: Act (affects gameplay, ironman opt-in, off by default)\n"));
@@ -367,11 +375,11 @@ int main(int argc, char** argv) {
         for (const std::string range : {"anvil = \">=1.20.0\"\n", "anvil = \"^1.0\"\n", ""}) {
             write(dir / "plugin.toml", plugin_toml("modular", range + modules));
             const auto old = fx.check(dir, false);
-            CHECK(old.exit_code == kExitOk && old.warnings.size() == 1);
-            CHECK(!old.warnings.empty() && contains(old.warnings[0].message, "declare anvil = \">=1.22.0\""));
+            CHECK(old.exit_code == kExitOk && own(old).size() == 1);
+            CHECK(!own(old).empty() && contains(own(old)[0].message, "declare anvil = \">=1.22.0\""));
         }
         write(dir / "plugin.toml", plugin_toml("modular", "anvil = \">=2.0.0\"\n" + modules));
-        CHECK(fx.check(dir, false).warnings.empty());
+        CHECK(own(fx.check(dir, false)).empty());
         write(dir / "plugin.toml", plugin_toml("modular", "anvil = \">=1.0.0\"\n"));
         CHECK(fx.check(dir, false).warnings.empty());  // no modules, no warning
     });

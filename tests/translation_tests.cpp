@@ -95,6 +95,21 @@ void translation_tests() {
         const auto texts = plugin_texts(m, &s);
         const std::vector<std::string> expected = {"A plugin.", "Mode", "What the plugin does.", "General", "Off", "On", "Other"};
         CHECK(texts == expected);
+        // A module's name, description and group, each once (ADR 0011, 0013).
+        Module drill;
+        drill.id = "drill";
+        drill.name = "Drill";
+        drill.description = "Drills armies.";
+        drill.group = "General";
+        Module look = drill;
+        look.id = "look";
+        look.name = "Look";
+        look.description.clear();
+        m.modules = {drill, look};
+        const std::vector<std::string> with_modules = {"A plugin.", "Drill", "Drills armies.", "General", "Look",
+                                                       "Mode", "What the plugin does.", "Off", "On", "Other"};
+        CHECK(plugin_texts(m, &s) == with_modules);
+        m.modules.clear();
         m.description.clear();
         CHECK(plugin_texts(m, nullptr).empty());
     });
