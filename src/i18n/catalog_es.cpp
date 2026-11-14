@@ -831,6 +831,8 @@ extern const Translation kSpanish[] = {
      "Tiempo"},
     {"Too many starts did not count, more than the extra starts allow.",
      "Demasiados inicios no contaron, más de los que permiten los inicios adicionales."},
+    {"Tools",
+     "Herramientas"},
     {"Turn it on, or approve it, on the Plugins tab.",
      "Actívalo o apruébalo en la pestaña Plugins."},
     {"Turn on {0} plugin(s)",

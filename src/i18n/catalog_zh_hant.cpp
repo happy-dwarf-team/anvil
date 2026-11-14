@@ -832,6 +832,8 @@ extern const Translation kTraditionalChinese[] = {
      "時間"},
     {"Too many starts did not count, more than the extra starts allow.",
      "不計入的啟動太多，超過了額外啟動次數的允許範圍。"},
+    {"Tools",
+     "工具"},
     {"Turn it on, or approve it, on the Plugins tab.",
      "在「插件」分頁上開啟或核准它。"},
     {"Turn on {0} plugin(s)",

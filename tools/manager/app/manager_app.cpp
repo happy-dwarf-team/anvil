@@ -10,14 +10,17 @@
 #include "i18n/translate.hpp"
 #include "mods.hpp"
 #include "problem_report.hpp"
+#include "sidebar.hpp"
 #include "start_menu.hpp"
 #include "ui.hpp"
+#include "ui/plugin_widgets.hpp"
 #include "ui/settings_order.hpp"
 
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <span>
 #include <string_view>
@@ -31,6 +34,10 @@ using namespace ui;
 using i18n::N_;
 using i18n::tr;
 using i18n::trf;
+using ::anvil::ui::glyph_item;
+using ::anvil::ui::kBackground;
+using ::anvil::ui::kLine;
+using ::anvil::ui::kOnEmber;
 
 // The `language` setting of the overlay in that game folder, when it names one.
 std::optional<i18n::Language> overlay_language(const fs::path& game) {
@@ -94,6 +101,23 @@ std::string fitted(const std::string& text, float width) {
         if (ImGui::CalcTextSize(cut.c_str()).x <= width) return cut;
     }
     return text;
+}
+
+// A page's title: Segoe UI Semibold, a size above the text (docs/ui-design-system.md, "Shell").
+void page_title(const char* title) {
+    ImFont* font = g_title_font;
+    ImGui::PushFont(font, font != nullptr ? font->LegacySize : ImGui::GetFontSize() * 1.18f);
+    ImGui::TextUnformatted(title);
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(0, ImGui::GetStyle().ItemSpacing.y));
+}
+
+// The game's version in a known build's id ("eu4-1.37.5-steam-win64" gives "1.37.5"); the id itself otherwise.
+std::string build_version(const std::string& build) {
+    constexpr std::string_view prefix = "eu4-";
+    if (!build.starts_with(prefix)) return build;
+    const size_t end = build.find('-', prefix.size());
+    return build.substr(prefix.size(), end == std::string::npos ? std::string::npos : end - prefix.size());
 }
 
 bool is_standard(const Package& package, const std::string& id) {
@@ -330,112 +354,70 @@ void ManagerApp::draw() {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
-    // With a scrollbar: a tab can be taller than the window, and nothing else would show that it goes on.
-    // The window is the whole client area, so it has no border or rounded corners of its own.
+    // The window is the whole client area, so it has no border or rounded corners of its own;
+    // the sidebar and the page fill it, and the page scrolls on its own.
+    const ImVec2 padding = ImGui::GetStyle().WindowPadding;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::Begin("Anvil Manager", nullptr,
                  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove |
-                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
-    ImGui::PopStyleVar(2);
+                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollbar |
+                     ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleVar(3);
+    // The sidebar only once there is a game to start and pages to show.
+    const bool shell = package_ && !game_.empty() && !(snapshot_ && !snapshot_->folder.error.empty());
+    if (shell) {
+        // Below about 900 px at 100 % the sidebar folds to a rail of icons, so the
+        // Plugins list and its detail keep their room (docs/ui-design-system.md, "Shell").
+        const float font = ImGui::GetFontSize();
+        const bool rail = viewport->WorkSize.x < font * 53.0f;
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, kBackground);
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, std::round(10 * font / 17.0f)));
+        ImGui::BeginChild("sidebar", ImVec2(std::round(font * (rail ? 3.3f : 11.8f)), 0), ImGuiChildFlags_AlwaysUseWindowPadding,
+                          ImGuiWindowFlags_NoScrollbar);
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor();
+        draw_sidebar(rail);
+        ImGui::EndChild();
+        // Its edge: one line of the separators' colour.
+        const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+        ImGui::GetWindowDrawList()->AddLine(ImVec2(max.x - 0.5f, min.y), ImVec2(max.x - 0.5f, max.y), ImGui::GetColorU32(kLine));
+        ImGui::SameLine(0, 0);
+    }
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(std::round(padding.x * 1.5f), std::round(padding.y * 1.25f)));
+    ImGui::BeginChild("page", ImVec2(0, 0), ImGuiChildFlags_AlwaysUseWindowPadding);
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor();
     if (!package_) {
+        page_title("Anvil Manager " ANVIL_VERSION);
         colored_wrapped(kBad, trf("This AnvilManager.exe is broken: {0}. Download it again from {1}.", {package_error_, kReleasesUrl}));
-        ImGui::End();
-        return;
-    }
-    draw_game_bar();
-    ImGui::Separator();
-    if (game_.empty() || (snapshot_ && !snapshot_->folder.error.empty())) {
+    } else if (!shell) {
+        page_title("Anvil Manager " ANVIL_VERSION);
         draw_first_run();
-    } else if (!snapshot_) {
-        weak(tr("Reading the game folder..."));
-    } else if (ImGui::BeginTabBar("tabs", ImGuiTabBarFlags_DrawSelectedOverline)) {
-        // While a benchmark series runs, the other tabs are dimmed and locked.
-        const bool locked = benchmark_.busy();
-        // A tab's id stays English, so the open tab stays open when the language changes.
-        const auto label = [](const char* name) { return std::string(tr(name)) + "###" + name; };
-        // The screenshot mode's tab, chosen once.
-        const auto pick = [&](const char* name) -> ImGuiTabItemFlags {
-            return forced_tab_ == name ? ImGuiTabItemFlags_SetSelected : 0;
-        };
-        const auto tab = [&](const char* name, ImGuiTabItemFlags flags, void (ManagerApp::*body)()) {
-            ImGui::BeginDisabled(locked);
-            const bool open = ImGui::BeginTabItem(label(name).c_str(), nullptr, locked ? 0 : flags | pick(name));
-            ImGui::EndDisabled();
-            if (!open) return;
-            (this->*body)();
-            ImGui::EndTabItem();
-        };
-        tab(N_("Anvil"), 0, &ManagerApp::draw_anvil_tab);
-        {
-            // The number of updates rides on the label (ADR 0006); the id stays "Catalog".
-            const size_t updates = catalog_updates_here().size();
-            const std::string name = std::string(tr("Catalog")) + (updates > 0 ? " (" + std::to_string(updates) + ")" : "");
-            ImGui::BeginDisabled(locked);
-            // The Plugins tab, drawn after this one, asks for it in the frame before.
-            const bool open = ImGui::BeginTabItem((name + "###Catalog").c_str(), nullptr,
-                                                  !locked && show_catalog_tab_ ? ImGuiTabItemFlags_SetSelected : pick("Catalog"));
-            show_catalog_tab_ = false;
-            ImGui::EndDisabled();
-            if (open) {
-                draw_catalog_tab();
-                ImGui::EndTabItem();
-            }
-        }
-        {
-            // What waits for the player's approval rides on the label (ui-guidelines §5); the id stays "Plugins".
-            const size_t waiting = plugins_ ? anvil::ui::to_approve(plugins_->model) : 0;
-            const std::string name = waiting > 0 ? trf("Plugins ({0} to approve)", {std::to_string(waiting)}) : std::string(tr("Plugins"));
-            ImGui::BeginDisabled(locked);
-            const bool open = ImGui::BeginTabItem((name + "###Plugins").c_str(), nullptr, pick("Plugins"));
-            ImGui::EndDisabled();
-            if (open) {
-                draw_plugins_tab();
-                ImGui::EndTabItem();
-            }
-        }
-        if (ImGui::BeginTabItem(label(N_("Benchmark")).c_str(), nullptr, locked ? ImGuiTabItemFlags_SetSelected : pick("Benchmark"))) {
-            draw_benchmark_tab();
-            ImGui::EndTabItem();
-        }
-        tab(N_("Crashes"), 0, &ManagerApp::draw_crashes_tab);
-        tab(N_("Log"), 0, &ManagerApp::draw_log_tab);
-        tab(N_("About"), 0, &ManagerApp::draw_about_tab);
-        ImGui::EndTabBar();
-        forced_tab_.clear();
+    } else {
+        draw_page();
     }
+    ImGui::EndChild();
     draw_modals();
     ImGui::End();
 }
 
-void ManagerApp::draw_game_bar() {
-    ImGui::Text("Anvil Manager %s", ANVIL_VERSION);
-    if (game_.empty()) return;
-    ImGui::SameLine();
-    weak("|");
-    ImGui::SameLine();
-    // The path gives way, so that Change and Play EU4 stay in the window.
+void ManagerApp::draw_sidebar(bool rail) {
+    const float px = ImGui::GetFontSize() / 17.0f;
+    const float pad = std::round((rail ? 8 : 12) * px);
     const ImGuiStyle& style = ImGui::GetStyle();
-    const char* play = tr("Play EU4");
-    const float play_width = ImGui::CalcTextSize(play).x + style.FramePadding.x * 4;
-    const float change_width = ImGui::CalcTextSize(tr("Change...")).x + style.FramePadding.x * 2;
-    const std::string folder = u8(game_);
-    const std::string shown = fitted(folder, ImGui::GetContentRegionAvail().x - play_width - change_width - style.ItemSpacing.x * 3);
-    ImGui::TextUnformatted(shown.c_str());
-    if (shown != folder && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", folder.c_str());
-    ImGui::SameLine();
-    ImGui::BeginDisabled(running_ || benchmark_.busy());
-    if (ImGui::SmallButton(tr("Change..."))) {
-        if (const auto dir = pick_folder(window_, game_)) choose_game(*dir);
-    }
-    ImGui::EndDisabled();
 
-    ImGui::SameLine();
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - play_width));
+    // Play EU4: the window's main action, on top of everything else.
     const bool no_game = snapshot_ && !snapshot_->folder.error.empty();  // nothing here to start
+    ImGui::SetCursorPosX(pad);
     ImGui::BeginDisabled(running_ || no_game || benchmark_.busy());
     const fs::path gog_start = gog_ ? gog_program(game_) : fs::path();
-    if (ImGui::Button((std::string(play) + "###play").c_str(), ImVec2(play_width, 0))) {
+    const std::string play = rail ? std::string("###play") : std::string(tr("Play EU4")) + "###play";
+    const float play_width = ImGui::GetContentRegionAvail().x - pad;
+    if (primary_button(play.c_str(), ImVec2(play_width, ImGui::GetFrameHeight() + style.FramePadding.y))) {
         const bool started = launch_game(gog_start);
         launcher_opened_ = started && gog_;
         if (!started && gog_) {
@@ -444,21 +426,133 @@ void ManagerApp::draw_game_bar() {
             show_message(tr("Steam did not start"), tr("Windows could not open steam://rungameid/236850. Is Steam installed?"));
         }
     }
+    if (rail) {
+        const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+        draw_play_glyph(ImGui::GetWindowDrawList(), ImVec2((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f),
+                        ImGui::GetTextLineHeight() * 0.62f, ImGui::GetColorU32(kOnEmber));
+    }
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("%s", gog_ ? tr("Opens the Paradox launcher, as GOG does. Press Play there.") : tr("Starts the game through Steam"));
+        const char* tip = gog_ ? tr("Opens the Paradox launcher, as GOG does. Press Play there.") : tr("Starts the game through Steam");
+        if (rail) {
+            ImGui::SetTooltip("%s\n%s", tr("Play EU4"), tip);
+        } else {
+            ImGui::SetTooltip("%s", tip);
+        }
     }
 
-    if (snapshot_ && snapshot_->folder.error.empty()) {
-        if (snapshot_->folder.build.empty()) {
-            colored_wrapped(kWarn, tr("eu4.exe is not a build Anvil knows (EU4 updated?): plugins that need game "
-                                      "addresses are skipped, the others load."));
-            if (snapshot_->folder.gog) {
-                colored_wrapped(kWarn, i18n::text(i18n::Message("build_unknown_gog", {known_gog_version()})));
-                if (!snapshot_->folder.gog_version.empty()) weak(trf("GOG calls this version {0}.", {snapshot_->folder.gog_version}));
-            }
-        } else {
-            weak("eu4.exe: " + snapshot_->folder.build);
+    // The game: its store and build, the folder in the tooltip, and Change...
+    const std::string folder = u8(game_);
+    const std::string build = snapshot_ && snapshot_->folder.error.empty() ? snapshot_->folder.build : std::string();
+    const std::string about_folder = build.empty() ? folder : folder + "\neu4.exe: " + build;
+    ImGui::BeginDisabled(running_ || benchmark_.busy());
+    if (rail) {
+        ImGui::SetCursorPosX(pad);
+        if (ImGui::Button("...###change", ImVec2(ImGui::GetContentRegionAvail().x - pad, 0))) {
+            if (const auto dir = pick_folder(window_, game_)) choose_game(*dir);
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("%s\n%s", tr("Change..."), about_folder.c_str());
+        }
+    } else {
+        ImGui::SetCursorPosX(pad);
+        const std::string where = std::string(gog_ ? "GOG" : "Steam") + (build.empty() ? "" : " " + build_version(build));
+        weak(where);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", about_folder.c_str());
+        if (snapshot_ && snapshot_->folder.error.empty() && build.empty()) {
+            ImGui::SameLine();
+            glyph_item(anvil::ui::Glyph::Attention);  // a build Anvil does not know: the page says more
+        }
+        const char* change = tr("Change...");
+        const float change_width = ImGui::CalcTextSize(change).x + style.FramePadding.x * 2;
+        ImGui::SameLine();
+        if (ImGui::GetContentRegionAvail().x - pad < change_width) {
+            ImGui::NewLine();
+            ImGui::SetCursorPosX(pad);
+        }
+        if (ImGui::SmallButton(change)) {
+            if (const auto dir = pick_folder(window_, game_)) choose_game(*dir);
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", about_folder.c_str());
+    }
+    ImGui::Dummy(ImVec2(0, std::round(8 * px)));
+
+    // The pages: what a player uses, then the tools, and About at the bottom.
+    // While a benchmark series runs, every page but Benchmark is locked.
+    const bool locked = benchmark_.busy();
+    if (locked) page_ = "Benchmark";
+    const size_t updates = snapshot_ ? catalog_updates_here().size() : 0;
+    const size_t waiting = plugins_ ? anvil::ui::to_approve(plugins_->model) : 0;
+    const auto entry = [&](NavEntry e) {
+        ImGui::BeginDisabled(locked && std::string_view(e.id) != "Benchmark");
+        if (nav_item(e, page_ == e.id, rail)) page_ = e.id;
+        ImGui::EndDisabled();
+    };
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, std::round(2 * px)));
+    entry({N_("Anvil"), NavIcon::Anvil});
+    // What waits for the player rides on the entry (ui-guidelines §5): plugins
+    // to approve, and updates in the catalog (ADR 0006).
+    entry({N_("Plugins"), NavIcon::Plugins, waiting, true,
+           waiting > 0 ? trf("Plugins ({0} to approve)", {std::to_string(waiting)}) : std::string()});
+    entry({N_("Catalog"), NavIcon::Catalog, updates, false,
+           updates > 0 && rail ? std::string(tr("Catalog")) + " (" + std::to_string(updates) + ")" : std::string()});
+    if (rail) {
+        ImGui::Dummy(ImVec2(0, std::round(4 * px)));
+        const ImVec2 at = ImGui::GetCursorScreenPos();
+        const float w = ImGui::GetContentRegionAvail().x;
+        ImGui::GetWindowDrawList()->AddLine(ImVec2(at.x + pad, at.y), ImVec2(at.x + w - pad, at.y), ImGui::GetColorU32(kLine));
+        ImGui::Dummy(ImVec2(0, std::round(5 * px)));
+    } else {
+        ImGui::Dummy(ImVec2(0, std::round(8 * px)));
+        ImGui::SetCursorPosX(pad);
+        weak(tr("Tools"));
+    }
+    entry({N_("Benchmark"), NavIcon::Benchmark});
+    entry({N_("Crashes"), NavIcon::Crashes});
+    entry({N_("Log"), NavIcon::Log});
+    // About sits at the bottom when the window is tall enough, else right after the tools.
+    const float bottom = ImGui::GetWindowHeight() - style.WindowPadding.y - nav_item_height();
+    if (ImGui::GetCursorPosY() < bottom) ImGui::SetCursorPosY(bottom);
+    entry({N_("About"), NavIcon::About});
+    ImGui::PopStyleVar();
+}
+
+void ManagerApp::draw_page() {
+    draw_notices();
+    page_title(tr(page_.c_str()));
+    if (!snapshot_) {
+        weak(tr("Reading the game folder..."));
+        return;
+    }
+    if (page_ == "Catalog") {
+        draw_catalog_tab();
+    } else if (page_ == "Plugins") {
+        draw_plugins_tab();
+    } else if (page_ == "Benchmark") {
+        draw_benchmark_tab();
+    } else if (page_ == "Crashes") {
+        draw_crashes_tab();
+    } else if (page_ == "Log") {
+        draw_log_tab();
+    } else if (page_ == "About") {
+        draw_about_tab();
+    } else {
+        page_ = "Anvil";
+        draw_anvil_tab();
+    }
+}
+
+// What concerns every page: the game's build, a game that runs, a series that runs.
+void ManagerApp::draw_notices() {
+    const float before = ImGui::GetCursorPosY();
+    if (snapshot_ && snapshot_->folder.error.empty() && snapshot_->folder.build.empty()) {
+        colored_wrapped(kWarn, tr("eu4.exe is not a build Anvil knows (EU4 updated?): plugins that need game "
+                                  "addresses are skipped, the others load."));
+        if (snapshot_->folder.gog) {
+            colored_wrapped(kWarn, i18n::text(i18n::Message("build_unknown_gog", {known_gog_version()})));
+            if (!snapshot_->folder.gog_version.empty()) weak(trf("GOG calls this version {0}.", {snapshot_->folder.gog_version}));
         }
     }
     if (launcher_opened_ && !running_) {
@@ -482,6 +576,11 @@ void ManagerApp::draw_game_bar() {
     if (anvil_missed_ && !running_ && !benchmark_.busy()) {
         colored_wrapped(kWarn, tr("The game ran, but Anvil did not load."));
         if (ImGui::SmallButton(tr("What to check"))) open_url(kTroubleshootingUrl);
+    }
+    if (ImGui::GetCursorPosY() > before) {
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
     }
 }
 

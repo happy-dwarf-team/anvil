@@ -428,9 +428,9 @@ notice: `anvil-overlay` does not change for the benchmark.
   discarded or the input mark.
 - The request to leave the computer alone, and **Stop**, which then reads
   "Stopping: this start finishes and quits cleanly, then the series ends."
-- While a series runs the game bar says a benchmark is running; **Play EU4**
-  and **Change…** are disabled, and the other tabs are dimmed and locked until
-  the series ends.
+- While a series runs a notice at the top of the page says a benchmark is
+  running; **Play EU4** and **Change…** are disabled, and the sidebar's other
+  pages are dimmed and locked until the series ends.
 
 ### 3. Result
 

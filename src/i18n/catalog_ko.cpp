@@ -832,6 +832,8 @@ extern const Translation kKorean[] = {
      "시간"},
     {"Too many starts did not count, more than the extra starts allow.",
      "집계되지 않는 실행이 너무 많아 추가 실행 한도를 넘었습니다."},
+    {"Tools",
+     "도구"},
     {"Turn it on, or approve it, on the Plugins tab.",
      "플러그인 탭에서 켜거나 승인하세요."},
     {"Turn on {0} plugin(s)",

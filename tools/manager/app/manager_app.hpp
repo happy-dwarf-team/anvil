@@ -53,10 +53,12 @@ public:
     void dropped(const std::filesystem::path& file);
     bool should_close() const { return close_; }
 
-    // For the screenshot mode: the game folder is read; the tab to show
-    // (its English name, "" for none) and the plugin to select.
+    // For the screenshot mode: the game folder is read; the page to show (its
+    // English name, as the sidebar's entries use) and the plugin to select.
     bool settled() const { return !pending_.valid() && (game_.empty() || snapshot_.has_value()); }
-    void show_tab(std::string name) { forced_tab_ = std::move(name); }
+    void show_tab(std::string name) {
+        if (!name.empty()) page_ = std::move(name);
+    }
     void select_plugin(std::string id) { plugins_tab_.selected = std::move(id); }
 
 private:
@@ -95,7 +97,11 @@ private:
     bool read_only() const;
     bool anvil_installed() const;  // the snapshot found Anvil's version.dll in game_
 
-    void draw_game_bar();
+    // The shell (docs/ui-design-system.md, "Shell"): the sidebar with Play EU4
+    // and the pages, then the page with the notices that concern every page.
+    void draw_sidebar(bool rail);
+    void draw_notices();
+    void draw_page();
     void draw_anvil_tab();
     void draw_catalog_tab();
     void draw_plugins_tab();
@@ -204,9 +210,8 @@ private:
     bool open_approve_ = false;
     std::optional<cli::GameModPlugin> approve_;  // the plugin from a mod the approval modal asks about
     bool close_after_message_ = false;
-    bool show_catalog_tab_ = false;
     std::optional<Screenshot> screenshot_;
-    std::string forced_tab_;  // the screenshot mode's tab
+    std::string page_ = "Anvil";  // the page shown, by its English name
     bool log_previous_ = false;
     bool log_report_ = false;   // the Log tab shows the problem report, which is in the clipboard
     bool report_copied_ = false;

@@ -832,6 +832,8 @@ extern const Translation kJapanese[] = {
      "時間"},
     {"Too many starts did not count, more than the extra starts allow.",
      "集計されない起動が多すぎ、追加起動の上限を超えました。"},
+    {"Tools",
+     "ツール"},
     {"Turn it on, or approve it, on the Plugins tab.",
      "「プラグイン」タブで有効にするか承認してください。"},
     {"Turn on {0} plugin(s)",

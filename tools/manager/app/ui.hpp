@@ -17,6 +17,9 @@ inline constexpr ImVec4 kWarn = ::anvil::ui::kWarn;
 inline constexpr ImVec4 kBad = ::anvil::ui::kBad;
 using ::anvil::ui::primary_button;
 
+// The page titles' font (main.cpp, load_fonts); null when Windows lacks Segoe UI Semibold.
+inline ImFont* g_title_font = nullptr;
+
 inline std::string u8(const std::filesystem::path& path) {
     const auto text = path.u8string();
     return std::string(text.begin(), text.end());
