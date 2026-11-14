@@ -111,7 +111,7 @@ All of them pass through `ScaleAllSizes`, as today.
 | **Secondary button** | `frame` with a `border` outline. Everything else, Cancel included. |
 | **Text button** | No frame, `info` text: "More", "Clear", "Reset settings (2)...", "Revoke approval...". |
 | **Plugin toggle** | A 36 × 20 track (in font units: about 2.1 × 1.2 lines) with a round knob and the word "On" or "Off" in semibold after it; ember track and `on_ember` knob when on, a `frame` track with a `border` outline when off. Only the plugin's own switch uses it, in the detail's header. |
-| **Checkbox** | An outlined box; on, it is filled with ember with an `on_ember` tick. When its plugin is off, the fill is a muted brown (`#6b5440`), so the choice stays visible but reads as held (ui-guidelines §5). |
+| **Checkbox** | An outlined box; on, an ember tick (`CheckMark`) on an ember-tinted box (`CheckboxSelectedBg`, `#5b3e28`: ember at 28 % over `frame`). ImGui draws a radio button's dot in `CheckMark` on `FrameBg` too, so the tick stays light rather than dark on a filled box (as the prototype drew it). When its plugin is off, the checkbox is disabled and keeps its tick, so the choice stays visible but reads as held (ui-guidelines §5). |
 | **Segmented control** | A `frame` track with a 2 px inset; the chosen segment is ember at 28 % with an ember outline. |
 | **Input and combo** | `frame` with a `border` outline that brightens on hover; the caret is ember (`InputTextCursor`). |
 | **List row** | Two lines, always (ui-guidelines §5): a status glyph in a column of its own, the name in semibold and an `info` dot when something waits; under it one phrase in 12 px, in `text_weak` for a summary and in the state colour for an exception. Hover `raised`; the selection is ember at 16 % with a 3 px ember bar at its left edge. |
@@ -187,14 +187,20 @@ truncation and compact labels.
 
 ## Rollout
 
-- `use_dark_colors()` in `src/ui/imgui_colors.hpp` becomes `use_anvil_style()`: the colours
-  above, the style variables above, and the named colours (`good`, `warn`, `bad`, `info`,
-  `weak`, `ember`) as constants the two apps share. ui-guidelines §3 says they are defined
-  once there; only the values change.
-- The Manager and the overlay call it in place of `use_dark_colors()` and drop their own
-  style lines, and both load Segoe UI Semibold next to Segoe UI.
-- One pull request with screenshots before and after (ui-guidelines §7), together with the
-  view model of ADR 0013 or right after it, so the player sees one change of look rather than two.
+Two steps, decided on 2026-11-14 so that the look ships in Anvil 1.23.0:
+
+1. **Anvil 1.23.0: the style.** `use_dark_colors()` in `src/ui/imgui_colors.hpp` becomes
+   `use_anvil_style()`: the colours and the style variables above, the named colours (`kGood`,
+   `kWarn`, `kBad`, `kInfo`, `kEmber` and the surfaces) as constants the two apps share, and
+   `primary_button()` for the main actions there are today (Approve, Install, Download, Save,
+   Restart now). The Manager and the overlay call it in place of their own style lines.
+   ui-guidelines §3 says the colours are defined once there; only the values change.
+2. **Anvil 1.24.0, with the view model of ADR 0013:** what needs the new list and detail, so
+   the player sees it once: the plugin toggle, the status glyphs, the two-line list entries,
+   the detail header, and Segoe UI Semibold next to Segoe UI (it needs the CJK fonts merged
+   into it too).
+
+Each step's pull request has screenshots before and after (ui-guidelines §7).
 
 ## Decided
 
