@@ -217,8 +217,8 @@ std::vector<SetupCheck> setup_checks(const SetupFacts& f) {
     using i18n::trf;
     out.push_back({f.installed_anvil.empty() ? std::string(tr("Anvil is not installed")) : trf("Anvil {0} is installed", {f.installed_anvil}),
                    new_enough, true,
-                   trf("Install this Manager's Anvil on the Anvil tab (the benchmark needs Anvil {0} or newer).", {kBenchmarkAnvil})});
-    out.push_back({tr("anvil-game loads"), f.anvil_game_loads, true, tr("Repair Anvil on the Anvil tab.")});
+                   trf("Install this Manager's Anvil on the Anvil page (the benchmark needs Anvil {0} or newer).", {kBenchmarkAnvil})});
+    out.push_back({tr("anvil-game loads"), f.anvil_game_loads, true, tr("Repair Anvil on the Anvil page.")});
     if (f.needs_steam) {
         out.push_back({f.steam_running ? tr("Steam is running") : tr("Steam is not running"), f.steam_running, true,
                        tr("Start Steam and sign in: the game starts with Steam, as you usually play.")});
@@ -229,10 +229,10 @@ std::vector<SetupCheck> setup_checks(const SetupFacts& f) {
                    tr("Start EU4 once with Play EU4 and reach the menu: that start is the safe one, the next is normal.")});
     const std::string id = f.plugin.empty() ? std::string(tr("The compared plugin")) : f.plugin;
     out.push_back({f.comparable ? trf("{0} {1} is enabled and loads", {id, f.comparable->version}) : trf("{0} does not load", {id}),
-                   f.comparable.has_value(), true, tr("Turn it on, or approve it, on the Plugins tab.")});
+                   f.comparable.has_value(), true, tr("Turn it on, or approve it, on the Plugins page.")});
     const bool pending = f.comparable && f.comparable->update_pending;
     out.push_back({pending ? trf("A Workshop update of {0} waits for approval", {id}) : std::string(tr("No Workshop update waits for approval")),
-                   !pending, true, tr("Approve or keep the update on the Plugins tab first.")});
+                   !pending, true, tr("Approve or keep the update on the Plugins page first.")});
     out.push_back({f.on_battery ? tr("Running on battery: starts may be slower") : tr("Plugged in"), !f.on_battery, false,
                    tr("Plug the computer in for times like your usual ones.")});
     return out;

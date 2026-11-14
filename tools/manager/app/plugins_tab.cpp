@@ -108,27 +108,37 @@ struct ManagerApp::PluginsHost final : mui::PluginsHost {
         const mui::PluginSnap& p = app.plugins_->model.plugins[i];
         const PluginSource& src = source(i);
         const cli::GameReport& report = *app.snapshot_->report;
+        // What needs a look, each in its banner: what anvil check finds, overlaps, the settings file.
+        std::vector<std::string> warnings;
         if (!src.folder.empty()) {
             for (const cli::GamePlugin& gp : report.plugins) {
                 if (gp.folder != src.folder) continue;
                 for (const cli::Problem& problem : problems_shown(gp.report)) {
                     // The reason it cannot load already says it.
                     if (p.blocked == mui::Blocked::CannotLoad && p.blocked_reason.find(problem.message) != std::string::npos) continue;
-                    colored_wrapped(kWarn, problem.message);
+                    warnings.push_back(problem.message);
                 }
             }
         }
         for (const cli::OverlapWarning& warning : report.warnings) {
-            if (warning.plugin == p.id || warning.other == p.id) colored_wrapped(kWarn, warning.message);
+            if (warning.plugin == p.id || warning.other == p.id) warnings.push_back(warning.message);
+        }
+        for (const std::string& warning : src.settings_warnings) warnings.push_back(trf("Ignored in your file: {0}", {warning}));
+        if (!src.settings_error.empty()) banner("settings-error", Tone::Bad, src.settings_error);
+        if (!warnings.empty()) {
+            begin_banner("warnings", Tone::Warn);
+            for (const std::string& warning : warnings) wrapped(warning);
+            end_banner(Tone::Warn);
         }
         const std::vector<const CatalogPlugin*> updates = app.catalog_updates_here();
         if (const auto update = std::find_if(updates.begin(), updates.end(), [&](const CatalogPlugin* c) { return c->id == p.id; });
             update != updates.end()) {
-            colored_wrapped(kGood, trf("{0} is available in the Catalog tab.", {(*update)->version}));
-            if (ImGui::SmallButton(tr("Open the Catalog tab"))) app.page_ = "Catalog";
+            begin_banner("update", Tone::Info);
+            ImGui::TextUnformatted(trf("{0} is available in the Catalog.", {(*update)->version}).c_str());
+            ImGui::SameLine();
+            if (text_button(tr("Open the Catalog"))) app.page_ = "Catalog";
+            end_banner(Tone::Info);
         }
-        if (!src.settings_error.empty()) colored_wrapped(kBad, src.settings_error);
-        for (const std::string& warning : src.settings_warnings) colored_wrapped(kWarn, trf("Ignored in your file: {0}", {warning}));
     }
 
     // From mods: shown with its playset's warnings even when it has no plugins.
@@ -143,8 +153,12 @@ struct ManagerApp::PluginsHost final : mui::PluginsHost {
         if (counts.waits_for_approval > 0) summary += ", " + trf("{0} waiting for approval", {std::to_string(counts.waits_for_approval)});
         if (counts.cannot_load > 0) summary += ", " + trf("{0} cannot load", {std::to_string(counts.cannot_load)});
         weak_wrapped(summary);
-        if (!report.playset_found) colored_wrapped(kWarn, trf("No dlc_load.json in {0}: no mods are enabled.", {report.user_dir}));
-        for (const std::string& w : report.mod_warnings) colored_wrapped(kWarn, w);
+        if (!report.playset_found || !report.mod_warnings.empty()) {
+            begin_banner("playset", Tone::Warn);
+            if (!report.playset_found) wrapped(trf("No dlc_load.json in {0}: no mods are enabled.", {report.user_dir}));
+            for (const std::string& w : report.mod_warnings) wrapped(w);
+            end_banner(Tone::Warn);
+        }
     }
 };
 
@@ -213,32 +227,38 @@ void ManagerApp::draw_plugins_tab() {
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button(tr("Open the plugins folder"))) open_folder(game_ / "anvil" / "plugins");
+    if (text_button(tr("Open the plugins folder"))) open_folder(game_ / "anvil" / "plugins");
     ImGui::SameLine();
     ImGui::BeginDisabled(pending_.valid());
-    if (ImGui::Button(tr("Check again"))) refresh();
+    if (text_button(tr("Check again"))) refresh();
     ImGui::EndDisabled();
+    // The hint follows the buttons where it fits, else it takes the next line.
+    const char* hint = tr("You can also drop a plugin zip on this window.");
     ImGui::SameLine();
-    weak(tr("You can also drop a plugin zip on this window."));
+    if (ImGui::CalcTextSize(hint).x > ImGui::GetContentRegionAvail().x) ImGui::NewLine();
+    weak(hint);
 
+    ImGui::Spacing();
     if (!report) {
-        wrapped(tr("Anvil is not installed in this folder: no plugins load."));
+        banner("no-anvil", Tone::Info, tr("Anvil is not installed in this folder: no plugins load."));
         return;
     }
     if (!report->cannot_check.empty()) {
-        colored_wrapped(kBad, trf("Cannot check the plugins: {0}", {report->cannot_check}));
+        banner("cannot-check", Tone::Bad, trf("Cannot check the plugins: {0}", {report->cannot_check}));
         return;
     }
     if (!plugins_) rebuild_plugins();
     if (!plugins_) return;
-    for (const cli::Problem& problem : report->problems) {
-        colored_wrapped(kBad, u8(fs::path(widen(problem.file)).filename()) + ": " + problem.message);
+    if (!report->problems.empty()) {
+        begin_banner("problems", Tone::Bad);
+        for (const cli::Problem& problem : report->problems) wrapped(u8(fs::path(widen(problem.file)).filename()) + ": " + problem.message);
+        end_banner(Tone::Bad);
     }
-    if (!report->enabled) colored_wrapped(kWarn, tr("anvil.toml says enabled = false: no plugin loads."));
+    if (!report->enabled) banner("disabled", Tone::Warn, tr("anvil.toml says enabled = false: no plugin loads."));
     if (snapshot_->installation && !snapshot_->installation->installed()) {
-        colored_wrapped(kWarn, tr("version.dll is not Anvil's or missing: nothing below loads until Anvil is installed."));
+        banner("not-installed", Tone::Warn, tr("version.dll is not Anvil's or missing: nothing below loads until Anvil is installed."));
     }
-    if (running_) colored_wrapped(kWarn, tr("The game is running: change plugins in the game's overlay, or here after it closes."));
+    if (running_) banner("running", Tone::Warn, tr("The game is running: change plugins in the game's overlay, or here after it closes."));
 
     PluginsHost host(*this);
     const mui::Snapshot& model = plugins_->model;
@@ -335,10 +355,18 @@ void ManagerApp::draw_mod_approval(size_t i) {
     weak_wrapped(trf("from {0}", {mod_source(m)}));
     const bool good = m.state == "approved" && m.status == "loaded";
     const bool waits = m.state == "pending" || m.state == "update-pending" || m.state == "conflict";
-    colored_wrapped(good ? kGood : waits ? kWarn : kBad, mod_state_text(m));
-    if (!good) weak_wrapped(m.why.code.empty() && m.why.text.empty() ? m.reason : i18n::text(m.why));
-    if (!m.others.empty()) weak_wrapped(trf("Other mods with this id: {0}", {join(m.others)}));
-    for (const cli::Problem& problem : problems_shown(m.offered())) colored_wrapped(kWarn, problem.message);
+    if (good) {
+        state_row(anvil::ui::Glyph::On, mod_state_text(m));
+        if (!m.others.empty()) weak_wrapped(trf("Other mods with this id: {0}", {join(m.others)}));
+    }
+    const Tone tone = waits ? Tone::Warn : Tone::Bad;
+    if (!good) {
+        begin_banner("mod-state", tone);
+        wrapped(mod_state_text(m));
+        weak_wrapped(m.why.code.empty() && m.why.text.empty() ? m.reason : i18n::text(m.why));
+        if (!m.others.empty()) weak_wrapped(trf("Other mods with this id: {0}", {join(m.others)}));
+    }
+    for (const cli::Problem& problem : problems_shown(m.offered())) wrapped(problem.message);
     ImGui::BeginDisabled(read_only());
     if (can_approve_shown(m)) {
         if (mui::primary_button(m.state == "update-pending" ? tr("Approve the update...") : tr("Approve..."))) {
@@ -353,6 +381,7 @@ void ManagerApp::draw_mod_approval(size_t i) {
         refresh();
     }
     ImGui::EndDisabled();
+    if (!good) end_banner(tone);
 }
 
 void ManagerApp::save_plugin_settings(size_t i) {

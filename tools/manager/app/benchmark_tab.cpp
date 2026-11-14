@@ -201,13 +201,13 @@ void BenchmarkTab::draw_setup(const BenchmarkContext& context) {
                "Nothing in your saves, mods or anvil.toml changes."));
     ImGui::Spacing();
     if (context.report == nullptr || !context.report->cannot_check.empty()) {
-        colored_wrapped(kWarn, tr("Install Anvil on the Anvil tab first: the benchmark runs with Anvil and its plugins."));
+        colored_wrapped(kWarn, tr("Install Anvil on the Anvil page first: the benchmark runs with Anvil and its plugins."));
         draw_kept(context);
         return;
     }
     const std::vector<ComparablePlugin> plugins = comparable_plugins(*context.report);
     if (plugins.empty()) {
-        colored_wrapped(kWarn, tr("No plugin to compare: turn one on, or approve one, on the Plugins tab."));
+        colored_wrapped(kWarn, tr("No plugin to compare: turn one on, or approve one, on the Plugins page."));
         draw_kept(context);
         return;
     }

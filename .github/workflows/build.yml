@@ -256,6 +256,13 @@ jobs:
             '--screenshot', 'manager-screenshots/en-100-narrow', '--game', "`"$game`"",
             '--build', 'eu4-1.37.5-steam-win64', '--lang', 'en', '--scale', 100, '--select', 'tuning', '--width', 820)
           if ($manager.ExitCode -ne 0) { throw "AnvilManager.exe --screenshot narrow failed ($($manager.ExitCode))" }
+          # The Anvil page's dialogs over the page, in English.
+          foreach ($dialog in 'install', 'uninstall') {
+            $manager = Start-Process build/tools/manager/Release/AnvilManager.exe -Wait -PassThru -ArgumentList @(
+              '--screenshot', 'manager-screenshots/en-100', '--game', "`"$game`"", '--build', 'eu4-1.37.5-steam-win64',
+              '--lang', 'en', '--scale', 100, '--tab', 'Anvil', '--dialog', $dialog)
+            if ($manager.ExitCode -ne 0) { throw "AnvilManager.exe --screenshot --dialog $dialog failed ($($manager.ExitCode))" }
+          }
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
