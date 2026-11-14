@@ -235,7 +235,7 @@ jobs:
           name: anvil-manager-${{ github.sha }}
           path: dist/anvil-manager/AnvilManager.exe
 
-      # The screenshot mode (ADR 0013, point 13): every tab of the Manager drawn
+      # The screenshot mode (ADR 0013, point 13): every page of the Manager drawn
       # from a fixture folder in English, German and Japanese at 100 % and 150 %,
       # for the checklist of a pull request that changes the UI (ui-guidelines §7).
       - name: Manager screenshots
@@ -251,6 +251,11 @@ jobs:
               if ($manager.ExitCode -ne 0) { throw "AnvilManager.exe --screenshot $lang $scale failed ($($manager.ExitCode))" }
             }
           }
+          # A narrow window: the sidebar folds to its rail of icons.
+          $manager = Start-Process build/tools/manager/Release/AnvilManager.exe -Wait -PassThru -ArgumentList @(
+            '--screenshot', 'manager-screenshots/en-100-narrow', '--game', "`"$game`"",
+            '--build', 'eu4-1.37.5-steam-win64', '--lang', 'en', '--scale', 100, '--select', 'tuning', '--width', 820)
+          if ($manager.ExitCode -ne 0) { throw "AnvilManager.exe --screenshot narrow failed ($($manager.ExitCode))" }
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

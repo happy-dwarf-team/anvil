@@ -832,6 +832,8 @@ extern const Translation kSimplifiedChinese[] = {
      "时间"},
     {"Too many starts did not count, more than the extra starts allow.",
      "不计入的启动太多，超过了额外启动次数的允许范围。"},
+    {"Tools",
+     "工具"},
     {"Turn it on, or approve it, on the Plugins tab.",
      "在“插件”标签页上开启或批准它。"},
     {"Turn on {0} plugin(s)",

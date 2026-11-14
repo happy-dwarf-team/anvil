@@ -1,8 +1,8 @@
 # Forge: a design system for the Manager and the overlay (proposal)
 
-Status: proposal, 2026-11-14; its accent and the overlay's look are decided (§ Decided).
-Nothing here is built. The skin was tried as "Skin: Forge" on the
-throwaway page `tools/manager/prototype/module-switches.html` of the branch
+Status: decided in parts (§ Decided). The style, the Plugins tab's components and the
+Manager's shell (§ Shell) ship in Anvil 1.23.0 (§ Rollout); the rest is a proposal. The skin
+was tried as "Skin: Forge" on the throwaway page `tools/manager/prototype/module-switches.html` of the branch
 `prototype/module-switches` (variant B5; the button in the bottom bar switches between today's
 colours and Forge). It changes how things look, not the rules: [ui-guidelines.md](ui-guidelines.md)
 still says what is shown and when.
@@ -97,16 +97,19 @@ All of them pass through `ScaleAllSizes`, as today.
 
 - **Segoe UI at 17 px, as today**, and the CJK fonts as today. Windows ships it, so the
   installer does not grow and the CJK fallbacks keep matching it.
-- **Segoe UI Semibold** (`seguisb.ttf`, also in Windows) as a second font for plugin names,
-  the heading of the detail, group headings and the title of a dialog. One more font in the
-  atlas, loaded with the same glyph ranges; for CJK the regular font stands in.
+- **Segoe UI Semibold** (`seguisb.ttf`, also in Windows) as a second font. The Manager loads
+  it for its page titles, at 1.18 times the text, with the CJK fonts merged into it as into
+  the text's font (their regular weight stands in); plugin names, the heading of the detail,
+  group headings and the title of a dialog may follow.
 - No uppercase labels: the strings are translated, and uppercase does not exist in CJK.
 
 ## Components
 
 | Component | Forge |
 |---|---|
-| **Tabs** | Flat text in `text_weak`; the current tab is `raised` with an ember overline (`TabSelectedOverline`) and `text`. A tab that needs attention keeps its count ("Plugins · 2 to approve"). |
+| **Sidebar entry** (Manager) | A line icon and the page's name, the full width of the sidebar; hover and selection as a list row (ember at 16 % with a 3 px ember bar). What waits on the page is a pill at the right: "▲ 2" in `warn` for plugins to approve, "● 1" in `info` for catalog updates, its meaning in the tooltip. |
+| **Tabs** (overlay) | Flat text in `text_weak`; the current tab is `raised` with an ember overline (`TabSelectedOverline`) and `text`. A tab that needs attention keeps its count ("Plugins · 2 to approve"). |
+| **Page title** (Manager) | Segoe UI Semibold at 1.18 times the text, `text`, at the top of the page under its notices. |
 | **Primary button** | Ember with `on_ember` semibold text. One per view: "Start EU4", the confirm button of a dialog, "Approve...". |
 | **Secondary button** | `frame` with a `border` outline. Everything else, Cancel included. |
 | **Text button** | No frame, `info` text: "More", "Clear", "Reset settings (2)...", "Revoke approval...". |
@@ -138,6 +141,38 @@ at the text height, so no font has to carry them:
 | waits for approval, update waits, kept out of this game | triangle | `warn` |
 | cannot load | cross | `bad` |
 | waits for the next start | filled dot | `info` |
+
+## Shell
+
+Decided on 2026-11-14 as variant B1 of the throwaway page
+`tools/manager/prototype/app-shell.html` (branch `prototype/app-shell`), built in
+`tools/manager/app/main.cpp`, `manager_app.cpp` and `sidebar.cpp`.
+
+- **The system's title bar, in Forge's colours.** The Manager keeps the Windows caption,
+  so snapping, the system menu and the caption buttons behave as everywhere else. It asks
+  for the caption's dark mode (Windows 10 20H1 and later) and, on Windows 11, for the
+  caption in `window` with `text` and a `line` border (`DwmSetWindowAttribute` 35, 36, 34)
+  and round corners, so the title bar and the window read as one surface. The window class
+  carries the anvil icon (`app/anvil.ico`, the mark of anvil-website's favicon) for the
+  caption, the taskbar and Alt+Tab, and a `window` background, so no white shows before the
+  first frame or while resizing. A caption drawn by the app (borderless, its own buttons)
+  was rejected: it loses Snap Layouts and accessibility for little gain.
+- **A sidebar replaces the seven tabs.** 11.8 font sizes wide on `background`, a `line` at
+  its edge. On top the primary button "Play EU4", under it the game in `text_weak` ("Steam
+  1.37.5", the folder and the `eu4.exe` build in its tooltip) with "Change...". Then the
+  pages a player uses (Anvil, Plugins, Catalog), the heading "Tools" over Benchmark, Crashes
+  and Log, and About at the bottom. Each entry has a line icon drawn with `ImDrawList` (no
+  font needs it, as with the status glyphs).
+- **A rail when narrow.** Below 53 font sizes of width (about 900 px at 100 %) the sidebar
+  folds to 3.3 font sizes: the icons alone with their names in tooltips, a play triangle
+  for Play EU4, "..." for Change, a line instead of the heading and the counts as corner
+  glyphs. The Plugins list and detail keep their room down to the window's minimum of 720 px.
+- **The page.** It scrolls on its own. It starts with the notices that concern every page
+  (a build Anvil does not know, the game running, a benchmark series running, Anvil not
+  loaded at the last start), then the page title. While a series runs, every entry but
+  Benchmark is disabled.
+- **Before the shell**, while no game folder is chosen or it cannot be read, the page fills
+  the window with "Anvil Manager" and its version as its title.
 
 ## UX changes that come with it
 
@@ -198,9 +233,12 @@ Two steps, both in Anvil 1.23.0 (decided on 2026-11-14: the whole of ADR 0013 sh
    ui-guidelines §3 says the colours are defined once there; only the values change.
 2. **With the view model of ADR 0013:** what needs the new list and detail: the plugin
    toggle, the status glyphs, the two-line list entries, the detail header and the "where it
-   runs" segmented control, drawn by `src/ui/plugin_widgets.hpp` for both apps. Segoe UI
-   Semibold next to Segoe UI (it needs the CJK fonts merged into it too) waits for a later
-   release.
+   runs" segmented control, drawn by `src/ui/plugin_widgets.hpp` for both apps.
+3. **The shell B1** (decided on 2026-11-14, also for 1.23.0), in three pull requests: the
+   caption, the icon and the sidebar with Segoe UI Semibold for page titles (§ Shell); the
+   Manager's other pages in Forge's components (banners for notices, cards in the Catalog,
+   a segmented control for the benchmark, levels in the log); the overlay's badge, notices,
+   crash report and log.
 
 Each step's pull request has screenshots before and after (ui-guidelines §7).
 
@@ -208,3 +246,7 @@ Each step's pull request has screenshots before and after (ui-guidelines §7).
 
 - The accent is ember (`#e8853d`), as in the prototype (2026-11-14).
 - The overlay looks like the Manager, not like the game's own interface (2026-11-14).
+- The Manager's shell is B1 (2026-11-14): the system's title bar in Forge's colours with the
+  anvil icon, and a sidebar with Play EU4 on top that folds to a rail when narrow (§ Shell).
+  Not chosen: B2, a 72 px rail with names under the icons and the game in a header above the
+  page, and B3, a 230 px sidebar with a state line under each entry.

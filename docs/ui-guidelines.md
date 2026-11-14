@@ -46,6 +46,14 @@ order: what does this do to my game, is it on now, and when does my change take 
 
 ## 2. Layout
 
+- **The Manager is a sidebar and a page.** Its window keeps the system's title bar, drawn in
+  the Manager's own colours, and its icon. A sidebar on the left holds "Play EU4" on top,
+  the game it starts, the pages a player uses (Anvil, Plugins, Catalog), the tools under
+  their heading (Benchmark, Crashes, Log) and About at the bottom; the page beside it starts
+  with the notices that concern every page and its title. Below about 53 font sizes of
+  width the sidebar folds to a rail of icons, each named in its tooltip. The overlay keeps
+  its tabs: it is a panel in the game, not a window of its own. The shell is described in
+  [ui-design-system.md](ui-design-system.md), "Shell".
 - **One column, one kind of content.** In a table, a state column holds the state word and
   its reason; switches have their own column, actions their own. A cell that collects a
   state, problems, an update note and a row of checkboxes is a sign the row needs columns or
@@ -224,8 +232,10 @@ settled it is variant B5 of `tools/manager/prototype/module-switches.html` on th
 - There is no Mods tab: plugins from mods are a section of the Plugins list, headed by the
   playset ("3 plugins in 3 enabled mods, 2 wait for approval, 1 cannot load"), with a
   warning line above the list when the playset cannot be read.
-- **What waits for the player shows from anywhere.** The Plugins tab's label says "2 to
-  approve", and the tab opens with a line naming each plugin that waits, an update as
+- **What waits for the player shows from anywhere.** In the Manager the sidebar's Plugins
+  entry carries "▲ 2" in the warning colour, whose tooltip says "Plugins (2 to approve)"; in
+  the overlay the Plugins tab's label says "2 to approve". The page opens with a line naming
+  each plugin that waits, an update as
   "Trade Tweaks (update to 1.1.0)", each a button that selects it. The list entry of an
   update says "update waits for approval" and which version runs until then.
 - A plugin that cannot load (invalid, a conflict between mods, a local plugin with its id
@@ -314,5 +324,6 @@ How a plugin's manifest makes this UI work. `anvil check` enforces what it can.
 - [ ] Screenshots before and after, in English, German and one CJK language, at 100 % and
       150 % scaling, from the screenshot mode (`AnvilManager.exe --screenshot`, ADR 0013).
       CI keeps the Manager's as the artefact `anvil-manager-screenshots-<sha>`, drawn from
-      the folder `tools/manager/screenshots/fixture.py` lays out; the overlay's are taken in
-      the game until its test host exists.
+      the folder `tools/manager/screenshots/fixture.py` lays out, and one set in a narrow
+      window (`--width 820`) for the sidebar's rail; the overlay's are taken in the game until
+      its test host exists.

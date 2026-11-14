@@ -125,7 +125,7 @@ struct ManagerApp::PluginsHost final : mui::PluginsHost {
         if (const auto update = std::find_if(updates.begin(), updates.end(), [&](const CatalogPlugin* c) { return c->id == p.id; });
             update != updates.end()) {
             colored_wrapped(kGood, trf("{0} is available in the Catalog tab.", {(*update)->version}));
-            if (ImGui::SmallButton(tr("Open the Catalog tab"))) app.show_catalog_tab_ = true;
+            if (ImGui::SmallButton(tr("Open the Catalog tab"))) app.page_ = "Catalog";
         }
         if (!src.settings_error.empty()) colored_wrapped(kBad, src.settings_error);
         for (const std::string& warning : src.settings_warnings) colored_wrapped(kWarn, trf("Ignored in your file: {0}", {warning}));

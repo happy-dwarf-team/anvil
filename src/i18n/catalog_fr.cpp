@@ -831,6 +831,8 @@ extern const Translation kFrench[] = {
      "Temps"},
     {"Too many starts did not count, more than the extra starts allow.",
      "Trop de démarrages n'ont pas compté, plus que ne le permettent les démarrages supplémentaires."},
+    {"Tools",
+     "Outils"},
     {"Turn it on, or approve it, on the Plugins tab.",
      "Activez-le ou approuvez-le dans l'onglet Plugins."},
     {"Turn on {0} plugin(s)",

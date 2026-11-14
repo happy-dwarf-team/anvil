@@ -16,10 +16,12 @@
 #include "i18n/translate.hpp"
 #include "manager_app.hpp"
 #include "platform.hpp"
+#include "ui.hpp"
 #include "ui/imgui_colors.hpp"
 
 #include <windows.h>
 #include <d3d11.h>
+#include <dwmapi.h>
 #include <objbase.h>
 #include <shellapi.h>
 #include <wincodec.h>
@@ -136,22 +138,32 @@ void load_fonts(float scale) {
     io.Fonts->Clear();
     wchar_t windows[MAX_PATH] = {};
     GetWindowsDirectoryW(windows, MAX_PATH);
-    const fs::path font = fs::path(windows) / "Fonts" / "segoeui.ttf";
-    ImFontConfig config;
-    config.OversampleH = 2;
-    std::error_code ec;
-    const auto font_name = font.u8string();  // ImGui opens it as UTF-8
-    if (!fs::is_regular_file(font, ec) ||
-        io.Fonts->AddFontFromFileTTF(reinterpret_cast<const char*>(font_name.c_str()), 17.0f * scale, &config) == nullptr) {
-        ImFontConfig fallback;
-        fallback.SizePixels = 13.0f * scale;
-        io.Fonts->AddFontDefault(&fallback);
-    }
-    // Chinese, Japanese and Korean: the language's font, merged into the Latin
+    const fs::path fonts = fs::path(windows) / "Fonts";
+    // Chinese, Japanese and Korean: the language's font, merged into each Latin
     // one (i18n/cjk_font.hpp). ImGui rasterizes a glyph when a text first needs it.
     g_fonts_language = anvil::i18n::language();
     const anvil::i18n::FontData cjk = anvil::i18n::cjk_font(g_fonts_language);
-    if (cjk.size > 0) {
+    // Plugins' translations and the catalog's (design §5.4) use characters
+    // Anvil's subset lacks: the language's font of Windows covers them.
+    const wchar_t* system = nullptr;
+    switch (g_fonts_language) {
+    case anvil::i18n::Language::SimplifiedChinese: system = L"msyh.ttc"; break;
+    case anvil::i18n::Language::TraditionalChinese: system = L"msjh.ttc"; break;
+    case anvil::i18n::Language::Japanese: system = L"YuGothR.ttc"; break;
+    case anvil::i18n::Language::Korean: system = L"malgun.ttf"; break;
+    default: break;
+    }
+    const MappedFont mapped = cjk.size > 0 && system != nullptr ? map_system_font(fonts / system) : MappedFont{};
+    // A Latin font of Windows at `size`, the CJK ones merged into it; null when the file is missing.
+    const auto add = [&](const wchar_t* file, float size) -> ImFont* {
+        const fs::path path = fonts / file;
+        std::error_code ec;
+        if (!fs::is_regular_file(path, ec)) return nullptr;
+        ImFontConfig config;
+        config.OversampleH = 2;
+        const auto name = path.u8string();  // ImGui opens it as UTF-8
+        ImFont* font = io.Fonts->AddFontFromFileTTF(reinterpret_cast<const char*>(name.c_str()), size, &config);
+        if (font == nullptr || cjk.size == 0) return font;
         ImFontConfig merge;
         merge.MergeMode = true;
         merge.FontDataOwnedByAtlas = false;  // the exe's resource
@@ -160,25 +172,21 @@ void load_fonts(float scale) {
         // Source Han Sans fills more of its height with its ascent and
         // descent than Segoe UI, so the same size draws smaller ideographs.
         merge.GlyphOffset.y = 1.0f * scale;
-        io.Fonts->AddFontFromMemoryTTF(const_cast<void*>(cjk.data), static_cast<int>(cjk.size), 17.0f * 1.12f * scale,
-                                       &merge);
-        // Plugins' translations and the catalog's (design §5.4) use characters
-        // Anvil's subset lacks: the language's font of Windows covers them.
-        const wchar_t* system = nullptr;
-        switch (g_fonts_language) {
-        case anvil::i18n::Language::SimplifiedChinese: system = L"msyh.ttc"; break;
-        case anvil::i18n::Language::TraditionalChinese: system = L"msjh.ttc"; break;
-        case anvil::i18n::Language::Japanese: system = L"YuGothR.ttc"; break;
-        case anvil::i18n::Language::Korean: system = L"malgun.ttf"; break;
-        default: break;
-        }
-        const MappedFont mapped = system != nullptr ? map_system_font(fs::path(windows) / "Fonts" / system) : MappedFont{};
+        io.Fonts->AddFontFromMemoryTTF(const_cast<void*>(cjk.data), static_cast<int>(cjk.size), size * 1.12f, &merge);
         if (mapped.view != nullptr) {
             ImFontConfig windows_font = merge;
             windows_font.GlyphOffset.y = 0.0f;
-            io.Fonts->AddFontFromMemoryTTF(const_cast<void*>(mapped.view), mapped.size, 17.0f * scale, &windows_font);
+            io.Fonts->AddFontFromMemoryTTF(const_cast<void*>(mapped.view), mapped.size, size, &windows_font);
         }
+        return font;
+    };
+    if (add(L"segoeui.ttf", 17.0f * scale) == nullptr) {
+        ImFontConfig fallback;
+        fallback.SizePixels = 13.0f * scale;
+        io.Fonts->AddFontDefault(&fallback);
     }
+    // Page titles (docs/ui-design-system.md, "Shell"): Segoe UI Semibold, or the text's font.
+    anvil::manager::ui::g_title_font = add(L"seguisb.ttf", 17.0f * 1.18f * scale);
     anvil::ui::use_anvil_style();
     ImGui::GetStyle().ScaleAllSizes(scale);
 }
@@ -370,7 +378,26 @@ struct ShotOptions {
     std::string select;  // plugin id
     std::string build;
     int scale = 100;
+    int width = 1040;  // the window's width at 100 %: a narrower one shows the sidebar's rail
 };
+
+// The system's caption in Forge's colours (docs/ui-design-system.md, "Shell"):
+// its dark mode on Windows 10 20H1 and later, and on Windows 11 22000 and
+// later the caption in the client's own background, so the title bar and the
+// window read as one surface. Older builds ignore the attributes they lack.
+void style_caption(HWND window) {
+    constexpr DWORD kDarkMode = 20, kCorners = 33, kBorder = 34, kCaption = 35, kText = 36;
+    const BOOL dark = TRUE;
+    DwmSetWindowAttribute(window, kDarkMode, &dark, sizeof(dark));
+    const COLORREF caption = RGB(0x12, 0x11, 0x10);  // Forge `window`, the client's own background
+    const COLORREF text = RGB(0xec, 0xe8, 0xe1);     // Forge `text`
+    const COLORREF border = RGB(0x2c, 0x29, 0x26);   // Forge `line`
+    const int round = 2;                             // DWMWCP_ROUND
+    DwmSetWindowAttribute(window, kCaption, &caption, sizeof(caption));
+    DwmSetWindowAttribute(window, kText, &text, sizeof(text));
+    DwmSetWindowAttribute(window, kBorder, &border, sizeof(border));
+    DwmSetWindowAttribute(window, kCorners, &round, sizeof(round));
+}
 
 // The tabs in their order, by the English names their ids use.
 constexpr const char* kShotTabs[] = {"Anvil", "Catalog", "Plugins", "Benchmark", "Crashes", "Log", "About"};
@@ -408,6 +435,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         if (args[i] == L"--select" && i + 1 < args.size()) shot_options().select = anvil::narrow(args[++i]);
         if (args[i] == L"--build" && i + 1 < args.size()) shot_options().build = anvil::narrow(args[++i]);
         if (args[i] == L"--scale" && i + 1 < args.size()) shot_options().scale = std::max(50, _wtoi(args[++i].c_str()));
+        if (args[i] == L"--width" && i + 1 < args.size()) shot_options().width = std::max(720, _wtoi(args[++i].c_str()));
         // The language goes through ANVIL_LANGUAGE, which every later choice of it honours.
         if (args[i] == L"--lang" && i + 1 < args.size()) SetEnvironmentVariableW(L"ANVIL_LANGUAGE", args[++i].c_str());
     }
@@ -426,6 +454,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     window_class.lpfnWndProc = window_proc;
     window_class.hInstance = instance;
     window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    // No white flash before the first frame and while resizing.
+    window_class.hbrBackground = CreateSolidBrush(RGB(0x12, 0x11, 0x10));
+    // The icon of the title bar, the taskbar and Alt+Tab.
+    window_class.hIcon = static_cast<HICON>(LoadImageW(instance, L"ANVIL_ICON", IMAGE_ICON, 0, 0, LR_DEFAULTSIZE));
+    window_class.hIconSm = static_cast<HICON>(LoadImageW(instance, L"ANVIL_ICON", IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                                                         GetSystemMetrics(SM_CYSMICON), 0));
     window_class.lpszClassName = L"AnvilManager";
     RegisterClassExW(&window_class);
 
@@ -440,7 +474,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     g_scale = shot ? shot->scale / 100.0f : dpi_x / 96.0f;
     // The screenshot mode's window is a hidden popup: its client area is the whole window.
     const HWND window = CreateWindowExW(0, window_class.lpszClassName, L"Anvil Manager", shot ? WS_POPUP : WS_OVERLAPPEDWINDOW,
-                                        shot ? 0 : CW_USEDEFAULT, shot ? 0 : CW_USEDEFAULT, static_cast<int>(1040 * g_scale),
+                                        shot ? 0 : CW_USEDEFAULT, shot ? 0 : CW_USEDEFAULT, static_cast<int>((shot ? shot->width : 1040) * g_scale),
                                         static_cast<int>(720 * g_scale), nullptr, nullptr, instance, nullptr);
     if (window == nullptr) return 1;
     if (!shot) g_scale = GetDpiForWindow(window) / 96.0f;
@@ -453,6 +487,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     }
     g_graphics = &graphics;
     if (!shot) {
+        style_caption(window);
         DragAcceptFiles(window, TRUE);
         ShowWindow(window, show);
         UpdateWindow(window);
