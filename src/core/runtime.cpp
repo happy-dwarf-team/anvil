@@ -20,6 +20,7 @@
 #include "crash_history.hpp"
 #include "plugin_symbols.hpp"
 #include "resolver.hpp"
+#include "retired_move.hpp"
 #include "safe_mode.hpp"
 #include "seh_guard.hpp"
 #include "services.hpp"
@@ -348,7 +349,8 @@ void startup_impl(const std::filesystem::path& game_dir) {
         log_info("ANVIL_DISABLE=1: no plugins loaded");
         return;
     }
-    const AnvilSettings settings = read_anvil_settings(g_runtime->anvil_dir / "anvil.toml");
+    // Not const: the move of retired settings adds to disabled_modules (ADR 0013).
+    AnvilSettings settings = read_anvil_settings(g_runtime->anvil_dir / "anvil.toml");
     if (!settings.error.empty()) log_warning("anvil.toml ignored: " + settings.error);
     Log::instance().set_min_level(settings.log_level);
     if (!settings.enabled) {
@@ -507,6 +509,10 @@ void startup_impl(const std::filesystem::path& game_dir) {
         if (!m.settings.empty()) {
             SettingsFileResult parsed = load_settings(m.folder / m.settings);
             if (!parsed.file) return i18n::Message(parsed.error);
+            uint32_t line = 0;  // `module` names a [[modules]] id (ADR 0013)
+            if (std::string error = settings_module_error(*parsed.file, m, line); !error.empty()) {
+                return i18n::Message(error);
+            }
             declared_settings[m.folder.wstring()] = std::move(*parsed.file);
         }
         return i18n::Message();
@@ -646,6 +652,16 @@ void startup_impl(const std::filesystem::path& game_dir) {
             r.approved_hash = it->second;
         }
         r.data_dir = g_runtime->anvil_dir / "data" / m.id;
+        // Retired settings move into disabled_modules once, before the
+        // modules are resolved, so a module the player had off stays off
+        // (ADR 0013, point 4).
+        if (r.settings && !r.settings->retired.empty()) {
+            for (const RetiredMoveNote& note : move_retired_settings(m, *r.settings, r.data_dir / "settings.toml",
+                                                                     g_runtime->anvil_dir / "anvil.toml",
+                                                                     settings.disabled_modules)) {
+                Log::instance().write(note.level, m.id, note.message);
+            }
+        }
         // Its modules on or off at this start (anvil.toml, `default`; ADR 0011).
         for (const Module& mod : m.modules) r.modules_on.push_back(module_enabled(settings, module_key(m, mod), mod.enabled_by_default));
         r.manifest = std::move(m);

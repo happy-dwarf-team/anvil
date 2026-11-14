@@ -352,8 +352,16 @@ int main(int argc, char** argv) {
             "\n[[modules]]\nid = \"act\"\nname = \"Act\"\naffects_gameplay = true\nallow_ironman = \"opt-in\"\n"
             "default = false\n";
         write(dir / "plugin.toml", plugin_toml("modular", "anvil = \">=1.22.0\"\n" + modules));
+        // Module names are texts to translate: the warning of a plugin without translations is not this test's.
+        const auto own = [](const CheckReport& r) {
+            std::vector<Problem> out;
+            for (const auto& w : r.warnings) {
+                if (!contains(w.file, "translations")) out.push_back(w);
+            }
+            return out;
+        };
         const auto ok = fx.check(dir, false);
-        CHECK(ok.exit_code == kExitOk && ok.warnings.empty());
+        CHECK(ok.exit_code == kExitOk && own(ok).empty());
         const std::string text = format_report(ok, Format::Text);
         CHECK(contains(text, "module modular.look: Look (does not affect gameplay, on by default)\n"));
         CHECK(contains(text, "module modular.act: Act (affects gameplay, ironman opt-in, off by default)\n"));
@@ -367,13 +375,67 @@ int main(int argc, char** argv) {
         for (const std::string range : {"anvil = \">=1.20.0\"\n", "anvil = \"^1.0\"\n", ""}) {
             write(dir / "plugin.toml", plugin_toml("modular", range + modules));
             const auto old = fx.check(dir, false);
-            CHECK(old.exit_code == kExitOk && old.warnings.size() == 1);
-            CHECK(!old.warnings.empty() && contains(old.warnings[0].message, "declare anvil = \">=1.22.0\""));
+            CHECK(old.exit_code == kExitOk && own(old).size() == 1);
+            CHECK(!own(old).empty() && contains(own(old)[0].message, "declare anvil = \">=1.22.0\""));
         }
         write(dir / "plugin.toml", plugin_toml("modular", "anvil = \">=2.0.0\"\n" + modules));
-        CHECK(fx.check(dir, false).warnings.empty());
+        CHECK(own(fx.check(dir, false)).empty());
         write(dir / "plugin.toml", plugin_toml("modular", "anvil = \">=1.0.0\"\n"));
         CHECK(fx.check(dir, false).warnings.empty());  // no modules, no warning
+    });
+
+    run("check settings.toml: module, retired, the warnings of ADR 0013", [&] {
+        const fs::path dir = fx.plugin("lode", "");
+        const std::string head =
+            "settings = \"settings.toml\"\nanvil = \">=1.23.0\"\n"
+            "\n[[modules]]\nid = \"flows\"\nname = \"Flows\"\ngroup = \"Trade\"\naffects_gameplay = true\n"
+            "allow_multiplayer = \"opt-in\"\n";
+        write(dir / "plugin.toml", plugin_toml("lode", head));
+        const std::string ok_settings =
+            "[setting.flip_ratio]\ntype = \"float\"\ndefault = 1.5\nlabel = \"Flip\"\nmodule = \"flows\"\n"
+            "affects_gameplay = true\n"
+            "[setting.drill_key]\ntype = \"key\"\ndefault = \"F9\"\nlabel = \"Key\"\nmodule = \"flows\"\nadvanced = true\n"
+            "[retired.flows_mode]\nmodule = \"flows\"\noff = [\"off\"]\n";
+        write(dir / "settings.toml", ok_settings);
+        // The warnings of settings.toml and plugin.toml (the module's group asks for translations too).
+        const auto own = [](const CheckReport& r) {
+            std::vector<Problem> out;
+            for (const auto& w : r.warnings) {
+                if (!contains(w.file, "translations")) out.push_back(w);
+            }
+            return out;
+        };
+        const auto ok = fx.check(dir, false);
+        print_problems(ok);
+        CHECK(ok.exit_code == kExitOk && own(ok).empty() && ok.settings == 2);
+
+        // An undeclared module: an error at its line, and the loader's reason.
+        write(dir / "settings.toml", "[setting.a]\ntype = \"bool\"\ndefault = true\nlabel = \"A\"\nmodule = \"flow\"\n"
+                                     "affects_gameplay = false\n");
+        const auto bad = fx.check(dir, false);
+        CHECK(bad.exit_code == kExitProblems &&
+              has_problem(bad, 5, "setting a: module 'flow' is not declared in plugin.toml [[modules]]"));
+        CHECK(bad.skip_reason == "settings.toml: setting a: module 'flow' is not declared in plugin.toml [[modules]]");
+
+        // A setting named as a module, and one without affects_gameplay in a module that offers multiplayer.
+        write(dir / "settings.toml", "[setting.flows]\ntype = \"bool\"\ndefault = true\nlabel = \"Flows\"\n"
+                                     "affects_gameplay = false\n"
+                                     "[setting.cooldown]\ntype = \"int\"\ndefault = 24\nlabel = \"C\"\nmodule = \"flows\"\n");
+        const auto warned = own(fx.check(dir, false));
+        CHECK(warned.size() == 2);
+        if (warned.size() == 2) {
+            CHECK(warned[0].line == 1 && contains(warned[0].message, "has the name of module flows"));
+            CHECK(warned[1].line == 6 && contains(warned[1].message, "setting cooldown of module flows, which offers multiplayer"));
+        }
+
+        // The keys need Anvil 1.23.0.
+        write(dir / "plugin.toml", plugin_toml("lode", "settings = \"settings.toml\"\nanvil = \">=1.22.0\"\n"
+                                                       "\n[[modules]]\nid = \"flows\"\nname = \"Flows\"\naffects_gameplay = false\n"));
+        write(dir / "settings.toml", ok_settings);
+        const auto old = own(fx.check(dir, false));
+        CHECK(old.size() == 1);
+        CHECK(!old.empty() && contains(old[0].message, "'retired' (ADR 0013) needs Anvil 1.23.0") &&
+              contains(old[0].message, "declare anvil = \">=1.23.0\""));
     });
 
     run("check settings.toml: the schema at its line, and the loader's reason", [&] {

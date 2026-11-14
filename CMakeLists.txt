@@ -107,6 +107,7 @@ add_library(anvil_core STATIC
     src/core/plugin_hash.cpp
     src/core/plugin_translation.cpp
     src/core/resolver.cpp
+    src/core/retired_move.cpp
     src/core/settings.cpp
     src/core/symbols.cpp
     src/core/trust.cpp)

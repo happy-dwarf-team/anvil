@@ -1,5 +1,7 @@
 #pragma once
 
+#include "manifest.hpp"
+
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -50,13 +52,41 @@ struct Setting {
     // true: a new value applies at the next start; false: at once, and the
     // plugin may subscribe to changes.
     bool restart = true;
+    // ADR 0013. `module`: the [[modules]] id the setting belongs to (empty:
+    // the plugin's), checked against plugin.toml by settings_module_error.
+    std::string module;
+    uint32_t module_line = 0;  // of its `module` key
+    bool advanced = false;     // folded behind "Advanced (n)"
+    // As declared; setting_counts gives the rule in effect.
+    std::optional<bool> affects_gameplay;
+};
+
+// A value of a retired setting's `off`, as TOML wrote it.
+struct RetiredValue {
+    enum class Kind { Bool, Int, Float, String } kind = Kind::Bool;
+    int64_t integer = 0;  // bool (0 or 1) and int
+    double real = 0.0;
+    std::string text;
+};
+
+// [retired.<name>] (ADR 0013, point 4): a setting an earlier version had,
+// which the switch of `module` replaces. At the start the core moves a value
+// in `off` from the player's file into disabled_modules.
+struct RetiredSetting {
+    std::string name;
+    std::string module;
+    std::vector<RetiredValue> off;
+    uint32_t line = 0;         // of its [retired.<name>] table
+    uint32_t module_line = 0;  // of its `module` key
 };
 
 struct SettingsFile {
     std::vector<Setting> settings;  // in declaration order (index == id)
+    std::vector<RetiredSetting> retired;  // in file order
 
     const Setting* find(std::string_view name) const;
     const Setting* get(uint32_t id) const { return id < settings.size() ? &settings[id] : nullptr; }
+    const RetiredSetting* find_retired(std::string_view name) const;
 };
 
 struct SettingsFileResult {
@@ -69,6 +99,47 @@ struct SettingsFileResult {
 // keys that do not fit the type and a default outside the limits are errors.
 SettingsFileResult parse_settings_text(std::string_view text);
 SettingsFileResult load_settings(const std::filesystem::path& file);
+
+// The schema error of a `module` (of a setting or of a [retired.<name>]) that
+// is not an id of the plugin's [[modules]]; empty when every one is. `line` is
+// set to the line of that key. The loader skips the plugin for it, as for
+// any other schema error (ADR 0013, point 1).
+std::string settings_module_error(const SettingsFile& file, const Manifest& manifest, uint32_t& line);
+
+// Whether the setting counts for the game (ADR 0013, point 14): its owner
+// (its module, or the plugin's own handle) affects gameplay, and it does not
+// say affects_gameplay = false; a `key` setting counts only when it says
+// affects_gameplay = true.
+bool setting_counts(const Setting& setting, const Manifest& manifest);
+
+// The one-time move of retired settings (ADR 0013, point 4) on the text of
+// the player's file (anvil/data/<id>/settings.toml): every top-level value
+// named as a [retired.<name>] is removed; one that is in its `off` (the same
+// TOML type; an int and a float compare as numbers) also turns its module
+// off.
+struct RetiredMove {
+    struct Item {
+        std::string name;
+        std::string module;
+        std::string value;  // as the file wrote it, e.g. "off" or false
+        uint32_t line = 0;  // in the player's file
+        bool turns_off = false;
+    };
+    std::vector<Item> items;  // in file order; empty: nothing to do
+    // The file without them. Empty when nothing but comments and blank lines
+    // is left: then the file is removed, as write_player_settings does.
+    std::string text;
+};
+// nullopt with `error` when the text does not parse (the move waits; the
+// player's file is ignored as before) or the edit would not read back as the
+// same file without those values.
+std::optional<RetiredMove> plan_retired_move(const SettingsFile& schema, std::string_view player_text,
+                                             std::string& error);
+
+// Writes `text` to `file` through a temporary file in the same folder and
+// replaces it in one step; an empty `text` removes the file. False with
+// `error` on failure.
+bool replace_text_file(const std::filesystem::path& file, const std::string& text, std::string& error);
 
 // Why `value` is not valid for the setting (wrong type, out of range, not an
 // option, not a key); empty when it is.

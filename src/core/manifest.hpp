@@ -39,6 +39,9 @@ struct Module {
     std::string id;  // [a-z][a-z0-9_]*, max 32, unique in the plugin
     std::string name;
     std::string description;
+    // A subheading (ADR 0013, point 3), in the order of its first module;
+    // empty: none. It changes nothing but the drawing.
+    std::string group;
     bool affects_gameplay = false;
     Allow allow_ironman = Allow::No;
     Allow allow_multiplayer = Allow::No;

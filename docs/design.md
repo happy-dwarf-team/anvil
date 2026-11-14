@@ -144,13 +144,14 @@ version = "<2"
 id = "drill_all"                    # [a-z][a-z0-9_]*, max 32, unique in the plugin
 name = "Drill all selected armies"
 description = "..."                 # optional
+group = "Armies"                    # optional subheading (ADR 0013); 1.23.0
 affects_gameplay = true             # REQUIRED, as for the plugin
 allow_ironman = "opt-in"            # false | "opt-in"; only with affects_gameplay = true
 allow_multiplayer = "opt-in"
 default = true                      # on until the player chooses (anvil.toml)
 ```
 
-**Modules** ([ADR 0011](adr/0011-plugin-modules.md)). A plugin that bundles features of different kinds declares each as a module and acts for it through `host->module(self, "<id>", &out)`, a handle with its own owner in the change registry; the plugin's own `affects_gameplay` covers what it does through `self`. §13 applies to each handle by its own flags, and anvil.toml names a module `<plugin>.<module>`.
+**Modules** ([ADR 0011](adr/0011-plugin-modules.md)). A plugin that bundles features of different kinds declares each as a module and acts for it through `host->module(self, "<id>", &out)`, a handle with its own owner in the change registry; the plugin's own `affects_gameplay` covers what it does through `self`. §13 applies to each handle by its own flags, and anvil.toml names a module `<plugin>.<module>`. A module's `group` ([ADR 0013](adr/0013-module-settings-and-overlay-writes.md), 1.23.0) is a subheading in the order of its first module, like a setting's group; it changes nothing but the drawing, and it is translated like the plugin's other texts (§5.4).
 
 Unknown keys are errors ([Offline anvil check CLI and plugin CI](https://github.com/happy-dwarf-team/anvil/issues/23)). `game_builds` and `[[expect]]` are gone: a plugin without `symbols` runs on every build; with `symbols` it runs only on that file's `build`.
 
@@ -268,9 +269,26 @@ restart = false               # false: applies at once; the plugin may subscribe
 type = "key"
 default = "Ctrl+Shift+F12"
 label = "Panel key"
+
+[setting.flip_ratio]              # 1.23.0 (ADR 0013): a module's setting
+type = "float"
+default = 1.5
+label = "Flip ratio"
+module = "flows"                  # a [[modules]] id; without it the setting is the plugin's
+affects_gameplay = true           # counts in the multiplayer code; default: true, false for "key"
+advanced = false                  # true: folded behind "Advanced (n)"
+
+[retired.flows_mode]              # 1.23.0: a setting the switch of module "flows" replaced
+module = "flows"
+off = ["off", false]              # the player's values that meant the module was off
 ```
 
 - **Schema:** unknown keys are errors, as in the other files. Names match `[a-z][a-z0-9_]*` (max 64; they become identifiers in generated headers), and a setting's id (`AnvilSetting`) is its position in the file. `type`, `default` and `label` are required; `description` and `group` (empty: ungrouped) are optional, and `restart` defaults to `true`, the safe choice for a plugin that reads a value once. The overlay and the Manager show the ungrouped settings first, then each group once under its name, the groups in the order of their first setting in the file and the settings of a group in file order, so a group's settings need not stand together in the file.
+- **Settings of modules** ([ADR 0013](adr/0013-module-settings-and-overlay-writes.md), 1.23.0; a plugin that uses these keys declares `anvil = ">=1.23.0"`, since an older Anvil skips it for the unknown key):
+  - `module = "<id>"` names a module of the plugin's `[[modules]]`; any other id is a schema error, which skips the plugin and which `anvil check` reports at its line. The overlay and the Manager draw a module's settings under the module and the rest under the plugin; `group` stays a subheading inside either.
+  - `advanced = true` (default `false`) folds the setting behind "Advanced (n)" under its module or plugin: author and lab options.
+  - `affects_gameplay` says whether the setting changes the result of the game. A setting **counts** when its owner (its module, or the plugin itself) has `affects_gameplay = true` and the setting does not say `affects_gameplay = false`; a `key` setting counts only when it says `true`. The values of counting settings are in the multiplayer code and locked in a multiplayer session (§13). `anvil check` warns about a setting without the key in a plugin or module that offers multiplayer.
+  - `[retired.<name>]` with `module` and `off` (a non-empty array of bools, integers, numbers or strings) is a setting an earlier version had and that the module's switch replaces; its name must not be a setting's. The core moves the player's choice once (§11). `anvil check` warns about a setting whose name is a module's id: a second switch for the same feature.
 - **Types and values:** `bool`; `int` (64-bit) and `float` (finite; an integer is accepted) with optional `min`, `max` and `step` (the editor's increment, greater than 0, not a rule for values); `enum` with `values`, an array of `{ name, label }` (the label defaults to the name), whose `default` and stored values are option names; `string` (UTF-8, no NUL); `key`, a binding such as `"Ctrl+Shift+F12"` or `""` for none. `min`/`max` belong to `int` and `float` only, `values` to `enum` only, and `default` must satisfy the limits.
 - **Keys:** modifiers `Ctrl` (or `Control`), `Shift`, `Alt`, each at most once, then one key: `A`–`Z`, `0`–`9`, `F1`–`F24`, `Space`, `Enter`, `Escape`, `Tab`, `Backspace`, `Insert`, `Delete`, `Home`, `End`, `PageUp`, `PageDown`, the arrows (`Up`, `Down`, `Left`, `Right`), `Pause`, `PrintScreen`, `CapsLock`, `NumLock`, `ScrollLock`, `Numpad0`–`Numpad9`, `NumpadAdd`/`Subtract`/`Multiply`/`Divide`/`Decimal`, and the US-layout punctuation keys `Semicolon`, `Equals`, `Comma`, `Minus`, `Period`, `Slash`, `Backquote`, `LeftBracket`, `Backslash`, `RightBracket`, `Quote`; names are case-insensitive. The value a plugin reads is the Windows virtual-key code in bits 0–7 with `0x100` Shift, `0x200` Ctrl and `0x400` Alt, as the Win32 hot-key control encodes it.
 
@@ -457,6 +475,7 @@ The C ABI is [`include/anvil/anvil_plugin.h`](../include/anvil/anvil_plugin.h) (
   mode = "on"
   ```
 - An invalid value (wrong type, out of range, not an option, not a key) falls back to the default, with a warning in the log and the overlay; so does a name the plugin does not declare (ignored), and a file that does not parse leaves every setting at its default.
+- **Retired settings** ([ADR 0013](adr/0013-module-settings-and-overlay-writes.md), point 4, 1.23.0): at the start, after the plugin resolved and before its modules are, the core reads the player's file; a value of a `[retired.<name>]` that is in its `off` adds `<plugin>.<module>` to `disabled_modules` of `anvil.toml` (the edit of "disable at the next start", keeping the file's layout), so the module is off at that same start, and every value of a retired name is removed from the player's file (the file goes when nothing else is left). Both halves are logged in the plugin's name. `anvil.toml` is written first: when that fails, the value stays and the next start tries again. A player's file that does not parse is left alone, as above. This is the core's only write of `anvil.toml` at the start, before any plugin loads; a plugin never writes it.
 - `ANVIL_<ID>_<NAME>` environment variables override values for testing (the plugin id and the name in upper case, `-` as `_`), and Anvil logs each one: `true`/`false`/`1`/`0`, a decimal int, a number, an option's name, any string, a key binding. An invalid one is a warning and is ignored. An override changes what the plugin reads in this session, never the player's file.
 - The values are read once, before the plugin loads, and are always valid when the plugin sees them.
 - Plugins read validated values through generated accessors (§16): `cfg::<name>.get()` in C++; `host->setting_bool/int/float/string(self, CFG_<NAME>)` in C. `setting_int` also reads a bool (0/1), an enum (the option's index, `CFG_<NAME>_<OPTION>`) and a key (the code); `setting_float` an int; `setting_string` an enum (the option's name) and a key (`"Ctrl+F12"`). Any other combination, and an unknown id, reads 0, 0.0 or `""`. A string stays valid for the process.
