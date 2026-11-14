@@ -77,6 +77,7 @@ pub const ANVIL_GAME_RELATION_SUBSIDIES: u32 = 5;
 pub const ANVIL_GAME_RELATION_DEPENDENCY: u32 = 6;
 pub const ANVIL_GAME_RELATION_WARNING: u32 = 7;
 pub const ANVIL_GAME_DIPLOMACY_TRUCE: u32 = 1;
+pub const ANVIL_GAME_PLAYER_OBSERVER: u32 = 1;
 pub const ANVIL_GAME_WORLD_SERVICE: &[u8; 17] = b"anvil-game.world\0";
 pub const ANVIL_GAME_WORLD_SERVICE_VERSION: u32 = 1;
 pub const ANVIL_GAME_COMMAND_DRILL: u32 = 1;
@@ -1409,6 +1410,37 @@ const _: () = {
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct AnvilGamePlayer {
+    pub size: u32,
+    pub tag: AnvilGameTag,
+    pub own: AnvilGameTag,
+    pub observed: AnvilGameTag,
+    pub flags: u32,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AnvilGamePlayer"][::core::mem::size_of::<AnvilGamePlayer>() - 20usize];
+    [
+        "Alignment of AnvilGamePlayer",
+    ][::core::mem::align_of::<AnvilGamePlayer>() - 4usize];
+    [
+        "Offset of field: AnvilGamePlayer::size",
+    ][::core::mem::offset_of!(AnvilGamePlayer, size) - 0usize];
+    [
+        "Offset of field: AnvilGamePlayer::tag",
+    ][::core::mem::offset_of!(AnvilGamePlayer, tag) - 4usize];
+    [
+        "Offset of field: AnvilGamePlayer::own",
+    ][::core::mem::offset_of!(AnvilGamePlayer, own) - 8usize];
+    [
+        "Offset of field: AnvilGamePlayer::observed",
+    ][::core::mem::offset_of!(AnvilGamePlayer, observed) - 12usize];
+    [
+        "Offset of field: AnvilGamePlayer::flags",
+    ][::core::mem::offset_of!(AnvilGamePlayer, flags) - 16usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct AnvilGameWorldService {
     pub size: u32,
     pub player: ::core::option::Option<
@@ -1747,12 +1779,15 @@ pub struct AnvilGameWorldService {
             count: *mut u32,
         ) -> AnvilResult,
     >,
+    pub player_tags: ::core::option::Option<
+        unsafe extern "C" fn(out: *mut AnvilGamePlayer) -> AnvilResult,
+    >,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     [
         "Size of AnvilGameWorldService",
-    ][::core::mem::size_of::<AnvilGameWorldService>() - 392usize];
+    ][::core::mem::size_of::<AnvilGameWorldService>() - 400usize];
     [
         "Alignment of AnvilGameWorldService",
     ][::core::mem::align_of::<AnvilGameWorldService>() - 8usize];
@@ -1908,6 +1943,9 @@ const _: () = {
     [
         "Offset of field: AnvilGameWorldService::country_subjects",
     ][::core::mem::offset_of!(AnvilGameWorldService, country_subjects) - 384usize];
+    [
+        "Offset of field: AnvilGameWorldService::player_tags",
+    ][::core::mem::offset_of!(AnvilGameWorldService, player_tags) - 392usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

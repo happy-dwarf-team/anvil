@@ -2283,6 +2283,9 @@ int main(int argc, char** argv) {
         AnvilGameCountry c{};
         c.size = sizeof(c);
         CHECK(world->player(&tag) == ANVIL_ERROR_WRONG_PHASE && world->province_limit() == 0);
+        AnvilGamePlayer tags_outside{};
+        tags_outside.size = sizeof(tags_outside);
+        CHECK(world->player_tags(&tags_outside) == ANVIL_ERROR_WRONG_PHASE);
         std::int32_t outside = 0;
         CHECK(world->modifier_id("land_morale", &outside) == ANVIL_ERROR_WRONG_PHASE &&
               world->country_modifier("RUS", 0, &outside) == ANVIL_ERROR_WRONG_PHASE &&
@@ -2314,6 +2317,38 @@ int main(int argc, char** argv) {
             AnvilGameTag me{};
             CHECK(world->player(&me) == ANVIL_OK && std::strcmp(me.text, "RUS") == 0);
             CHECK(world->player(nullptr) == ANVIL_ERROR_INVALID_ARGUMENT);
+
+            // The player's tags: a normal game, observe mode, an observer without a country, a short struct.
+            CHECK(ANVIL_GAME_WORLD_HAS(world, player_tags));
+            AnvilGamePlayer tags{};
+            tags.size = sizeof(tags);
+            CHECK(world->player_tags(&tags) == ANVIL_OK && tags.size == sizeof(tags) && tags.flags == 0);
+            CHECK(std::strcmp(tags.tag.text, "RUS") == 0 && std::strcmp(tags.own.text, "RUS") == 0 &&
+                  tags.observed.text[0] == 0);
+            FakeWorld::set(game.root, 0x1E60, game_tag("O00", 2, 7));
+            FakeWorld::set(game.root, 0x1E68, game_tag("TUR", 1));
+            CHECK(world->player_tags(&tags) == ANVIL_OK && tags.flags == ANVIL_GAME_PLAYER_OBSERVER);
+            CHECK(std::strcmp(tags.tag.text, "TUR") == 0 && std::strcmp(tags.own.text, "O00") == 0 &&
+                  std::strcmp(tags.observed.text, "TUR") == 0);
+            CHECK(world->player(&me) == ANVIL_OK && std::strcmp(me.text, "TUR") == 0);
+            FakeWorld::set(game.root, 0x1E68, game_tag("---", 0, 0, 0));
+            CHECK(world->player_tags(&tags) == ANVIL_OK && tags.flags == ANVIL_GAME_PLAYER_OBSERVER);
+            CHECK(std::strcmp(tags.tag.text, "O00") == 0 && tags.observed.text[0] == 0);
+            // Another country of the player's own (the console's `tag`) with an observed tag left over: as stored.
+            FakeWorld::set(game.root, 0x1E60, game_tag("TUR", 1));
+            FakeWorld::set(game.root, 0x1E68, game_tag("RUS", 0));
+            CHECK(world->player_tags(&tags) == ANVIL_OK && tags.flags == 0 && std::strcmp(tags.tag.text, "TUR") == 0 &&
+                  std::strcmp(tags.observed.text, "RUS") == 0);
+            FakeWorld::set(game.root, 0x1E60, game_tag("RUS", 0));
+            FakeWorld::set(game.root, 0x1E68, game_tag("---", 0, 0, 0));
+            AnvilGamePlayer short_tags{};
+            short_tags.size = offsetof(AnvilGamePlayer, own);
+            std::memset(&short_tags.own, 0x5A, sizeof(short_tags.own));
+            CHECK(world->player_tags(&short_tags) == ANVIL_OK && short_tags.size == offsetof(AnvilGamePlayer, own) &&
+                  std::strcmp(short_tags.tag.text, "RUS") == 0 && short_tags.own.text[0] == 0x5A);
+            short_tags.size = 2;
+            CHECK(world->player_tags(&short_tags) == ANVIL_ERROR_INVALID_ARGUMENT);
+            CHECK(world->player_tags(nullptr) == ANVIL_ERROR_INVALID_ARGUMENT);
 
             AnvilGameProvince moskva{};
             moskva.size = sizeof(moskva);

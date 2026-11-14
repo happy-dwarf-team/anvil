@@ -536,6 +536,24 @@ typedef struct AnvilGameDiplomacyStatus {
     uint32_t flags;    /* ANVIL_GAME_DIPLOMACY_* */
 } AnvilGameDiplomacyStatus;
 
+/* --- Since anvil-game 1.23.0: the player's tags ----------------------------- */
+
+/* AnvilGamePlayer.flags */
+#define ANVIL_GAME_PLAYER_OBSERVER 0x1u /* `own` is the observer's pseudo-country: observe mode */
+
+/* The two tags the game keeps for the local player and the one it acts on.
+ * In a normal game `tag` and `own` are the player's country, also after the
+ * console's `tag` or a formed nation, and `observed` is "". In observe mode
+ * `own` is the observer's pseudo-country, ANVIL_GAME_PLAYER_OBSERVER is set,
+ * and `tag` is `observed`, the country watched, while there is one. */
+typedef struct AnvilGamePlayer {
+    uint32_t size;
+    AnvilGameTag tag;      /* the country the game treats as the player's: what player() answers */
+    AnvilGameTag own;      /* the player's own tag, as the game stores it ("" for none) */
+    AnvilGameTag observed; /* the observed country, as the game stores it ("" for none) */
+    uint32_t flags;        /* ANVIL_GAME_PLAYER_* */
+} AnvilGamePlayer;
+
 #define ANVIL_GAME_WORLD_SERVICE "anvil-game.world"
 #define ANVIL_GAME_WORLD_SERVICE_VERSION 1
 
@@ -753,6 +771,11 @@ typedef struct AnvilGameWorldService {
     AnvilResult (*country_overlord)(const char *tag, AnvilGameTag *out);
     /* Its direct subjects, in the game's order; their subjects are their own. */
     AnvilResult (*country_subjects)(const char *tag, AnvilGameTag *out, uint32_t capacity, uint32_t *count);
+    /* Since anvil-game 1.23.0. What player() answers and the two tags it is
+     * chosen from, by the same rule, read at once. It reads the same symbols
+     * as player(), so it is there wherever the service is. Set out->size;
+     * ANVIL_ERROR_INVALID_ARGUMENT for NULL or a size below `size`'s own. */
+    AnvilResult (*player_tags)(AnvilGamePlayer *out);
 } AnvilGameWorldService;
 
 /* Nonzero when `service` provides `field`. */

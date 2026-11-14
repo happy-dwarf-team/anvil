@@ -32,21 +32,22 @@ use crate::game::Date;
 use crate::host::Host;
 use crate::sys::{
     AnvilGameCountry, AnvilGameDate, AnvilGameDiplomacyStatus, AnvilGameFlag, AnvilGameMonarch,
-    AnvilGamePendingEvent, AnvilGameProvince, AnvilGameRelation, AnvilGameStatisticPoint,
-    AnvilGameTag, AnvilGameTimedModifier, AnvilGameUnit, AnvilGameUnitRef, AnvilGameWar,
-    AnvilGameWorldService, ANVIL_GAME_COUNTRY_OBSERVER, ANVIL_GAME_DIPLOMACY_TRUCE,
+    AnvilGamePendingEvent, AnvilGamePlayer, AnvilGameProvince, AnvilGameRelation,
+    AnvilGameStatisticPoint, AnvilGameTag, AnvilGameTimedModifier, AnvilGameUnit, AnvilGameUnitRef,
+    AnvilGameWar, AnvilGameWorldService, ANVIL_GAME_COUNTRY_OBSERVER, ANVIL_GAME_DIPLOMACY_TRUCE,
     ANVIL_GAME_MONARCH_CONSORT, ANVIL_GAME_MONARCH_FEMALE, ANVIL_GAME_MONARCH_HEIR,
     ANVIL_GAME_MONARCH_REGENCY, ANVIL_GAME_MONARCH_RULER, ANVIL_GAME_PENDING_HIDDEN,
-    ANVIL_GAME_PROVINCE_LAND, ANVIL_GAME_PROVINCE_WASTELAND, ANVIL_GAME_RELATION_ALLIANCE,
-    ANVIL_GAME_RELATION_DEPENDENCY, ANVIL_GAME_RELATION_GIVING_MILITARY_ACCESS,
-    ANVIL_GAME_RELATION_GUARANTEE, ANVIL_GAME_RELATION_MILITARY_ACCESS,
-    ANVIL_GAME_RELATION_ROYAL_MARRIAGE, ANVIL_GAME_RELATION_SUBSIDIES, ANVIL_GAME_RELATION_WARNING,
-    ANVIL_GAME_STATISTIC_INCOME, ANVIL_GAME_STATISTIC_INFLATION, ANVIL_GAME_STATISTIC_NATION_SIZE,
-    ANVIL_GAME_STATISTIC_SCORE, ANVIL_GAME_TIMED_HIDDEN, ANVIL_GAME_TIMED_NO_END,
-    ANVIL_GAME_TIMED_NO_START, ANVIL_GAME_TIMED_RULER, ANVIL_GAME_UNIT_ARMY, ANVIL_GAME_UNIT_NAVY,
-    ANVIL_GAME_VALUE_MANPOWER, ANVIL_GAME_VALUE_MONTHLY_INCOME, ANVIL_GAME_VALUE_PRESTIGE,
-    ANVIL_GAME_VALUE_STABILITY, ANVIL_GAME_VALUE_TREASURY, ANVIL_GAME_WAR_ATTACKERS,
-    ANVIL_GAME_WAR_DEFENDERS, ANVIL_GAME_WORLD_SERVICE_VERSION,
+    ANVIL_GAME_PLAYER_OBSERVER, ANVIL_GAME_PROVINCE_LAND, ANVIL_GAME_PROVINCE_WASTELAND,
+    ANVIL_GAME_RELATION_ALLIANCE, ANVIL_GAME_RELATION_DEPENDENCY,
+    ANVIL_GAME_RELATION_GIVING_MILITARY_ACCESS, ANVIL_GAME_RELATION_GUARANTEE,
+    ANVIL_GAME_RELATION_MILITARY_ACCESS, ANVIL_GAME_RELATION_ROYAL_MARRIAGE,
+    ANVIL_GAME_RELATION_SUBSIDIES, ANVIL_GAME_RELATION_WARNING, ANVIL_GAME_STATISTIC_INCOME,
+    ANVIL_GAME_STATISTIC_INFLATION, ANVIL_GAME_STATISTIC_NATION_SIZE, ANVIL_GAME_STATISTIC_SCORE,
+    ANVIL_GAME_TIMED_HIDDEN, ANVIL_GAME_TIMED_NO_END, ANVIL_GAME_TIMED_NO_START,
+    ANVIL_GAME_TIMED_RULER, ANVIL_GAME_UNIT_ARMY, ANVIL_GAME_UNIT_NAVY, ANVIL_GAME_VALUE_MANPOWER,
+    ANVIL_GAME_VALUE_MONTHLY_INCOME, ANVIL_GAME_VALUE_PRESTIGE, ANVIL_GAME_VALUE_STABILITY,
+    ANVIL_GAME_VALUE_TREASURY, ANVIL_GAME_WAR_ATTACKERS, ANVIL_GAME_WAR_DEFENDERS,
+    ANVIL_GAME_WORLD_SERVICE_VERSION,
 };
 use crate::text::{read_list, read_text, Tag};
 
@@ -403,6 +404,20 @@ pub struct Relation {
     pub start: Option<Date>,
     /// When it ends; `None` for most, which have no end date.
     pub end: Option<Date>,
+}
+
+/// The player's tags ([`World::player_tags`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlayerTags {
+    /// The country the game treats as the player's: what [`World::player`] answers.
+    pub tag: Option<Tag>,
+    /// The player's own tag as the game stores it: the observer's
+    /// pseudo-country in observe mode.
+    pub own: Option<Tag>,
+    /// The observed country as the game stores it.
+    pub observed: Option<Tag>,
+    /// `own` is the observer's pseudo-country: observe mode.
+    pub observer: bool,
 }
 
 /// What one country keeps about another ([`World::diplomacy_status`]).
@@ -1117,6 +1132,24 @@ impl World {
             |out, capacity, count| unsafe { f(text.as_ptr(), out, capacity, count) },
         )?;
         Ok(raw.iter().filter_map(Tag::from_raw).collect())
+    }
+
+    /// What [`World::player`] answers and the two tags it is chosen from, read
+    /// at once (anvil-game 1.23.0). In a normal game `tag` and `own` are the
+    /// player's country and `observed` is `None`; in observe mode `own` is the
+    /// observer's pseudo-country and `tag` the observed country while there is
+    /// one.
+    pub fn player_tags(&self) -> Result<PlayerTags> {
+        let f = function!(self.table, AnvilGameWorldService, player_tags)?;
+        let mut raw: AnvilGamePlayer = sized();
+        // SAFETY: `size` says how much it may write.
+        check(unsafe { f(&mut raw) }, || "world player_tags")?;
+        Ok(PlayerTags {
+            tag: Tag::from_raw(&raw.tag),
+            own: Tag::from_raw(&raw.own),
+            observed: Tag::from_raw(&raw.observed),
+            observer: raw.flags & ANVIL_GAME_PLAYER_OBSERVER != 0,
+        })
     }
 }
 

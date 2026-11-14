@@ -279,6 +279,9 @@ AnvilResult read_province_cores(const WorldLayout& l, std::int32_t id, std::vect
 AnvilResult read_country(const WorldLayout& l, std::string_view tag, AnvilGameCountry& out);
 AnvilResult read_country_provinces(const WorldLayout& l, std::string_view tag, std::vector<std::int32_t>& out);
 AnvilResult read_player(const WorldLayout& l, AnvilGameTag& out);
+// The effective tag (read_player's), the root's own and observed tags, and the
+// observer flag, from one read of the root.
+AnvilResult read_player_tags(const WorldLayout& l, AnvilGamePlayer& out);
 
 AnvilResult read_war_ids(const WorldLayout& l, std::vector<std::uint64_t>& out);
 AnvilResult read_war(const WorldLayout& l, std::uint64_t id, AnvilGameWar& out);

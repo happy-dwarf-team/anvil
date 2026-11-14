@@ -454,6 +454,13 @@ AnvilResult read_war_side(const WorldLayout& l, std::uint64_t id, std::uint32_t 
 }
 
 AnvilResult read_player(const WorldLayout& l, AnvilGameTag& out) {
+    AnvilGamePlayer p{};
+    const AnvilResult r = read_player_tags(l, p);
+    if (r == ANVIL_OK) out = p.tag;
+    return r;
+}
+
+AnvilResult read_player_tags(const WorldLayout& l, AnvilGamePlayer& out) {
     std::uintptr_t root = 0;
     std::uint64_t player = 0, observed = 0;
     if (!read_root(l, root) || !read(root + l.player, player) || !read(root + l.observed, observed)) {
@@ -461,7 +468,10 @@ AnvilResult read_player(const WorldLayout& l, AnvilGameTag& out) {
     }
     // The rule of every reader in the game (player_country).
     const bool observer = byte_of(player, l.tag_kind) == l.observer_kind;
-    out = tag_text(observer && byte_of(observed, l.tag_valid) != 0 ? observed : player, l);
+    out.own = tag_text(player, l);
+    out.observed = tag_text(observed, l);
+    out.tag = observer && byte_of(observed, l.tag_valid) != 0 ? out.observed : out.own;
+    out.flags = observer ? ANVIL_GAME_PLAYER_OBSERVER : 0u;
     return ANVIL_OK;
 }
 
