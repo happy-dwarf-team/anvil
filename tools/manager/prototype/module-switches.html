@@ -107,6 +107,9 @@ pre.toml .chg{color:var(--info)}
 .gsep .acts{order:3}
 .note{font-size:12px;color:var(--weak);margin:4px 0}
 .seg.small button{padding:1px 8px;font-size:12px}
+.held{opacity:.55}
+.held .cb.dis{opacity:1}
+.held .seg button:disabled{opacity:1}
 .cb.mixed .box::after{content:"";width:8px;height:2px;background:var(--check)}
 .more{font-size:12px;color:#aaa;margin:4px 0 0 22px;border-left:2px solid var(--bl);padding-left:8px}
 .mdesc.full{display:block;-webkit-line-clamp:unset;overflow:visible}
@@ -2062,6 +2065,8 @@ function isOn(t, it){
   if (!it.mod) return true;
   return !has(t,'disabled_modules',it.key) && (it.mod.def || has(t,'enabled_modules',it.key));
 }
+// The module's own switch, whatever its plugin does (B4 shows it greyed under an off plugin).
+const chosen = (t, it) => !it.mod || (!has(t,'disabled_modules',it.key) && (it.mod.def || has(t,'enabled_modules',it.key)));
 function setOn(it, on){
   if (!it.mod){ setListed('disabled_plugins', it.key, !on); return; }
   if (on){ setListed('disabled_modules', it.key, false); if (!it.mod.def) setListed('enabled_modules', it.key, true); }
@@ -2082,7 +2087,8 @@ function keptOut(t, it, s){
   }
   return '';
 }
-const sig = (t, it) => [isOn(t,it), allowed(t,it,'ironman'), allowed(t,it,'mp')].join();
+// A change is pending where it was made: a plugin's switch on the plugin, not again on each of its modules.
+const sig = (t, it) => [it.mod ? chosen(t,it) : pluginOn(t,it.plugin), allowed(t,it,'ironman'), allowed(t,it,'mp')].join();
 const isPending = it => sig(toml, it) !== sig(lastStart, it);
 function hash(keys){ let h = 2166136261; for (const c of keys.join('|')){ h ^= c.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; } return h.toString(16).padStart(8,'0'); }
 const valKey = (pid, s) => pid + '/' + s.name;
@@ -2107,6 +2113,7 @@ const inGame = () => CTX === 'overlay';
 // Manager: what the next start does. Overlay: what this game does, plus what changes at the next start.
 function stateWord(it){
   if (inGame()){
+    if (it.mod && !pluginOn(lastStart, it.plugin)) return '<span class="weak">off with its plugin in this game</span>';
     if (!isOn(lastStart, it)) return '<span class="weak">off in this game</span>';
     const r = keptOut(lastStart, it, SESSION);
     return r ? `<span class="warn">kept out of this game</span><div class="weak" style="font-size:12px">${r}</div>` : '<span class="good">on in this game</span>';
@@ -2262,14 +2269,14 @@ function whereChoices(it){
   return [{k:'off', l:'Off'}, {k:'normal', l:'Normal games'}, {k:'im', l:'+ Ironman', need:['ironman']},
           {k:'mp', l:'+ Multiplayer', need:['mp']}, {k:'all', l:'Everywhere', need:['ironman','mp']}];
 }
-function whereNow(it){
-  if (!isOn(toml, it)) return 'off';
+function whereNow(it, own = false){
+  if (!(own ? chosen(toml, it) : isOn(toml, it))) return 'off';
   if (!it.gameplay) return 'on';
   const i = allowed(toml, it, 'ironman'), m = allowed(toml, it, 'mp');
   return i && m ? 'all' : i ? 'im' : m ? 'mp' : 'normal';
 }
-function whereText(it){
-  const w = whereNow(it);
+function whereText(it, own = false){
+  const w = whereNow(it, own);
   if (w === 'off') return 'Does not load.';
   if (!it.gameplay) return 'Runs in every game; it does not change the game.';
   let t = {normal:'Runs in normal games. Kept out of ironman and multiplayer.', im:'Runs in normal and ironman games. Kept out of multiplayer.',
@@ -2278,8 +2285,8 @@ function whereText(it){
   if (locked.length) t += ` Its author keeps it out of ${locked.join(' and ')}.`;
   return t;
 }
-function segment(it, disabled){
-  const cur = whereNow(it);
+function segment(it, disabled, own = false){
+  const cur = whereNow(it, own);
   return `<div class="seg" role="radiogroup">${whereChoices(it).map(c => {
     const missing = (c.need || []).filter(m => !offers(it, m)), dis = disabled || missing.length > 0;
     const title = disabled ? 'Its plugin is off.' : missing.length ? `Its author keeps it out of ${missing.map(m => MODE[m]).join(' and ')}.` : '';
@@ -2448,23 +2455,23 @@ function useBellows(which){
   ui.bellows = which;
   ui.bellows3 = which !== 'today';
 }
-const bellowsDefault = v => v === 'B3' ? 'v3b' : v === 'B2' ? 'v3' : 'today';
+const bellowsDefault = v => v === 'B3' || v === 'B4' ? 'v3b' : v === 'B2' ? 'v3' : 'today';
 const ADVANCED = g => g === 'Diagnostics' || g === 'Advanced';
 const groupOpen = (key, g) => ADVANCED(g) ? ui.open.has(key) : !ui.open.has(key);
 const dependents = p => PLUGINS.filter(x => (x.deps || []).includes(p.id) && pluginOn(toml, x)).map(x => x.name);
-function b2Summary(p){
+function b2Summary(p, own = false){
   const mods = items().filter(i => i.mod && i.plugin === p);
   if (mods.length){
-    const on = mods.filter(i => isOn(toml, i)).length, g = mods.filter(i => i.gameplay).length;
+    const on = mods.filter(i => own ? chosen(toml, i) : isOn(toml, i)).length, g = mods.filter(i => i.gameplay).length;
     return `${mods.length} modules, ${on} on${g ? `, ${g} change the game` : ''}`;
   }
   return p.gameplay ? 'changes the game' : (SETTINGS[p.id] ? `${SETTINGS[p.id].length} settings` : 'no settings');
 }
-function b2Entry(p, sel){
+function b2Entry(p, sel, own = false){
   const anyPending = items().some(i => i.plugin === p && isPending(i)) || (SETTINGS[p.id] || []).some(s => setPending(p.id, s));
   return `<div class="li ${sel === p.id ? 'sel' : ''}" data-act="select" data-key="${CTX}:${p.id}">
     <div class="mrow"><span>${esc(p.name)} <span class="weak">${esc(p.version)}</span></span><span style="font-size:12px">${stateWord(item(p.id))}</span></div>
-    <div class="weak" style="font-size:12px">${b2Summary(p)}${anyPending ? ' &middot; <span class="pending">&#9679; next start</span>' : ''}</div></div>`;
+    <div class="weak" style="font-size:12px">${b2Summary(p, own)}${anyPending ? ' &middot; <span class="pending">&#9679; next start</span>' : ''}</div></div>`;
 }
 function b2Settings(pid, moduleId, disabled, offNote){
   const list = settingsOf(pid, moduleId);
@@ -2588,12 +2595,72 @@ function variantB3(){
   return `<div class="split"><div class="list">${list}</div><div class="detail">${d}</div></div>`;
 }
 
+// ---- Variant B4: B, fourth iteration --------------------------------------------------
+// As B3, but a group header has no switch: modules are turned on and off one at a time. A plugin that
+// is off greys its modules and keeps showing each module's own switch, opt-ins and settings, so the
+// player sees what comes back when the plugin is turned on again.
+function b4Module(it, pOn){
+  const own = chosen(toml, it), on = pOn && own, n = settingsOf(it.plugin.id, it.mod.id).length;
+  const sw = it.gameplay ? '' : cb('', own, 'on', it.key, {disabled: !pOn, title: pOn ? '' : 'Its plugin is off; this switch is kept.'});
+  const moreKey = `${CTX}:more:${it.key}`;
+  let h = `<div class="mod${pOn ? '' : ' held'}" style="padding:6px 0"><div class="mrow"><span>${sw} ${esc(it.name)}${tag(it)}</span>
+    <span>${inGame() ? stateWord(it) : ''} ${pend(it)}</span></div>
+    <div class="mdesc full">${esc(it.mod.desc)}${it.mod.details ? ` <button class="expander" data-act="toggle" data-key="${esc(moreKey)}">${ui.open.has(moreKey) ? 'Less' : 'More'}</button>` : ''}</div>
+    ${it.mod.details && ui.open.has(moreKey) ? `<div class="more">${esc(it.mod.details)}</div>` : ''}`;
+  if (it.gameplay) h += `<div style="margin:6px 0 0 22px">${segment(it, !pOn, true)}<div class="note">${pOn ? whereText(it, true) : 'Kept while its plugin is off: ' + whereText(it, true)}</div></div>`;
+  if (n){
+    if (on) h += `<div style="margin-left:22px">${b2Settings(it.plugin.id, it.mod.id, false)}</div>`;
+    else {
+      const key = openKey(it.key);
+      h += `<div style="margin-left:22px"><button class="expander" data-act="toggle" data-key="${esc(key)}">${ui.open.has(key) ? '&#9662;' : '&#9656;'} Settings (${n}), kept while ${pOn ? 'it' : 'its plugin'} is off</button>
+        ${ui.open.has(key) ? b2Settings(it.plugin.id, it.mod.id, true, '') : ''}</div>`;
+    }
+  }
+  return h + '</div>';
+}
+function variantB4(){
+  const sel = inGame() ? ui.oselected : ui.selected;
+  const ours = PLUGINS.filter(p => !p.standard), std = PLUGINS.filter(p => p.standard);
+  const stdKey = `${CTX}:std`, stdOpen = ui.open.has(stdKey) || std.some(p => p.id === sel);
+  const list = ours.map(p => b2Entry(p, sel, true)).join('')
+    + `<div class="lhdr" data-act="toggle" data-key="${stdKey}">${stdOpen ? '&#9662;' : '&#9656;'} Comes with Anvil <span class="weak">&middot; ${std.length} plugins, ${std.filter(p => pluginOn(toml, p)).length} on</span></div>`
+    + (stdOpen ? std.map(p => b2Entry(p, sel, true)).join('') : '');
+  const p = PLUGINS.find(x => x.id === sel), pi = item(p.id), pOn = pluginOn(toml, p), deps = dependents(p);
+  let d = `<div class="mrow"><div style="font-size:16px">${esc(p.name)} <span class="weak" style="font-size:13px">${esc(p.version)} &middot; ${esc(p.id)}${p.standard ? ' &middot; comes with Anvil' : ''}</span></div><div>${removeBtn(p)}</div></div>
+    <div class="note" style="font-size:13px">${esc(p.desc)}</div>`;
+  if (p.id === 'bellows') d += `<div style="margin:6px 0"><span class="seg small">
+      <button class="${ui.bellows === 'today' ? 'cur' : ''}" data-act="bellows" data-key="today">Bellows 1.8 as it is</button>
+      <button class="${ui.bellows === 'v3b' ? 'cur' : ''}" data-act="bellows" data-key="v3b">Proposed for 3.0</button></span></div>`;
+  d += `<div style="margin:10px 0 4px">${cb('On', pOn, 'on', p.id)} ${pend(pi)} ${inGame() ? stateWord(pi) : ''}</div>`;
+  if (deps.length) d += `<div class="note">Needed by ${esc(deps.join(', '))}. Turning it off stops them too.</div>`;
+  if (!pOn && p.modules.length) d += `<div class="banner" style="margin:8px 0;display:flex;gap:8px;align-items:baseline"><span class="info">&#9432;</span><span>The plugin is off, so none of its modules load.
+    Each module keeps its switch and its settings; they apply again when you turn the plugin on.</span></div>`;
+  if (p.gameplay && !p.modules.length) d += `<div style="margin:8px 0">Where it runs ${tag(pi)}<div style="margin-top:4px">${segment(pi, !pOn)}</div><div class="note">${whereText(pi)}</div></div>`;
+  const general = b2Settings(p.id, null, !pOn, 'The plugin is off; its settings are kept.');
+  if (general) d += `<div class="section">Settings</div>${general}`;
+  if (p.modules.length){
+    if (p.modules.some(m => m.gameplay)) d += `<p class="note">${POLICY}</p>`;
+    const groups = [];
+    for (const m of p.modules){ const g = m.group || ''; let e = groups.find(x => x.g === g); if (!e){ e = {g, its:[]}; groups.push(e); } e.its.push(item(p.id + '.' + m.id)); }
+    const foldAll = p.modules.length > 12;
+    for (const {g, its} of groups){
+      const key = `${CTX}:grp4:${p.id}:${g}`, toggled = ui.open.has(key), open = foldAll ? toggled : !toggled;
+      const on = its.filter(i => chosen(toml, i)).length, pendN = its.filter(isPending).length;
+      d += `<div class="gsep${pOn ? '' : ' held'}" data-act="toggle" data-key="${esc(key)}">${open ? '&#9662;' : '&#9656;'} ${esc(g || 'Modules')}
+        <span class="weak">&middot; ${on} of ${its.length} on</span>${pendN ? ` <span class="pending">&#9679; ${pendN} at the next start</span>` : ''}</div>`;
+      if (open) d += its.map(it => b4Module(it, pOn)).join('');
+    }
+  }
+  return `<div class="split"><div class="list">${list}</div><div class="detail">${d}</div></div>`;
+}
+
 // ---- the two apps --------------------------------------------------------------------
 const VARIANTS = {'0':['Today', variant0], A:['Matrix table', variantA], B:['List and detail, one choice per module', variantB],
-                  C:['By game mode', variantC], B2:['B, second iteration', variantB2], B3:['B, third iteration', variantB3]};
-const KEYS = ['0', 'B2', 'B3'];   // A, B and C stay reachable with ?variant=A, B or C
-let variant = (new URLSearchParams(location.search).get('variant') || 'B3').toUpperCase();
-if (!VARIANTS[variant]) variant = 'B3';
+                  C:['By game mode', variantC], B2:['B, second iteration', variantB2], B3:['B, third iteration', variantB3],
+                  B4:['B, fourth iteration', variantB4]};
+const KEYS = ['0', 'B3', 'B4'];   // A, B, C and B2 stay reachable with ?variant=A, B, C or B2
+let variant = (new URLSearchParams(location.search).get('variant') || 'B4').toUpperCase();
+if (!VARIANTS[variant]) variant = 'B4';
 ui.selected = ui.oselected = 'bellows';
 useBellows(bellowsDefault(variant));
 const today = () => variant === '0';
