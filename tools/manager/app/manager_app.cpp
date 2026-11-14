@@ -297,6 +297,7 @@ void ManagerApp::poll() {
             launcher_opened_ = false;  // the note did its job
             anvil_missed_ = false;
             if (processes.here_started != 0) running_started_ = processes.here_started;
+            if (!was) plugins_take_effect();
         }
         if (was && !running_) {
             // Anvil opens anvil.log first thing once Windows loads its version.dll: a game that ended without

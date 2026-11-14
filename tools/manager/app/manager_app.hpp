@@ -125,6 +125,7 @@ private:
         std::string remove_folder;  // in anvil/plugins: Remove instead of edits
     };
     void rebuild_plugins();
+    void plugins_take_effect();  // the game started from game_: it loads what the files hold now
     size_t plugin_index(std::string_view id) const;  // SIZE_MAX when not in plugins_
     void draw_plugin_list();
     void draw_plugin_detail(size_t i);

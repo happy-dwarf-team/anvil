@@ -71,6 +71,7 @@ std::string entry_line(const mui::EntryLine& line) {
     }
     if (line.changed > 0) add(trf("{0} changed", {std::to_string(line.changed)}));
     if (text.empty() && line.changes_game) add(tr("changes the game"));
+    if (text.empty()) add(tr("on"));  // the glyph's state in words
     return text;
 }
 
@@ -129,6 +130,7 @@ std::string allow_word(bool on) { return on ? tr("allowed") : tr("not allowed");
 }  // namespace
 
 void ManagerApp::rebuild_plugins() {
+    std::optional<PluginsSnapshot> old = std::move(plugins_);
     plugins_.reset();
     if (!snapshot_ || !snapshot_->report || !package_) return;
     plugins_ = build_plugins_snapshot(game_, *snapshot_->report, snapshot_->anvil_toml, package_->standard_plugins,
@@ -136,6 +138,38 @@ void ManagerApp::rebuild_plugins() {
                                           return plugin_text(folder, english);
                                       });
     setting_texts_.clear();
+    // Until the Manager reads what the last start loaded, what the files held when it first read this
+    // folder, or when the game last started from it, is what is in effect: a switch saved since then
+    // waits for the next start as a setting does. The old snapshot is the same folder's (choose_game
+    // drops it).
+    if (!old) return;
+    for (mui::PluginSnap& p : plugins_->model.plugins) {
+        const auto was = std::find_if(old->model.plugins.begin(), old->model.plugins.end(),
+                                      [&](const mui::PluginSnap& o) { return o.id == p.id; });
+        if (was == old->model.plugins.end()) continue;
+        p.in_effect = was->in_effect;
+        p.approved_in_effect = was->approved_in_effect;
+        for (mui::ModuleSnap& m : p.modules) {
+            for (const mui::ModuleSnap& o : was->modules) {
+                if (o.id == m.id) m.in_effect = o.in_effect;
+            }
+        }
+        for (mui::SettingSnap& s : p.settings) {
+            for (const mui::SettingSnap& o : was->settings) {
+                if (o.name == s.name) s.in_effect = o.in_effect;
+            }
+        }
+    }
+}
+
+void ManagerApp::plugins_take_effect() {
+    if (!plugins_) return;
+    for (mui::PluginSnap& p : plugins_->model.plugins) {
+        p.in_effect = p.saved;
+        p.approved_in_effect = p.approved;
+        for (mui::ModuleSnap& m : p.modules) m.in_effect = m.saved;
+        for (mui::SettingSnap& s : p.settings) s.in_effect = s.saved;
+    }
 }
 
 size_t ManagerApp::plugin_index(std::string_view id) const {
@@ -205,7 +239,10 @@ void ManagerApp::draw_plugins_tab() {
     ImGui::Spacing();
 
     if (selected_.empty() || plugin_index(selected_) == SIZE_MAX) {
-        selected_ = model.plugins.empty() ? std::string() : model.plugins.front().id;
+        // The list's first entry: sections go Own, FromMod, WithAnvil, each in the model's order.
+        const auto first = std::min_element(model.plugins.begin(), model.plugins.end(),
+                                            [](const mui::PluginSnap& a, const mui::PluginSnap& b) { return a.origin < b.origin; });
+        selected_ = first == model.plugins.end() ? std::string() : first->id;
     }
     const float list_width = std::clamp(ImGui::GetContentRegionAvail().x * 0.34f, ImGui::GetFontSize() * 16, ImGui::GetFontSize() * 24);
     ImGui::BeginChild("list", ImVec2(list_width, 0), ImGuiChildFlags_Borders);
@@ -459,7 +496,11 @@ void ManagerApp::draw_plugin_detail(size_t i) {
     if (source.folder.size() > 0) {
         for (const cli::GamePlugin& gp : snapshot_->report->plugins) {
             if (gp.folder != source.folder) continue;
-            for (const cli::Problem& problem : problems_shown(gp.report)) colored_wrapped(kWarn, problem.message);
+            for (const cli::Problem& problem : problems_shown(gp.report)) {
+                // The reason it cannot load already says it.
+                if (p.blocked == mui::Blocked::CannotLoad && p.blocked_reason.find(problem.message) != std::string::npos) continue;
+                colored_wrapped(kWarn, problem.message);
+            }
         }
     }
     for (const cli::OverlapWarning& warning : snapshot_->report->warnings) {
