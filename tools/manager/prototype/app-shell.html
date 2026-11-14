@@ -7,7 +7,11 @@
   A, B and C are three shells around the same proposed tab contents:
     A  the system's caption in Forge's colours with the anvil icon (DWM; the C++ spike on this branch does it),
        one header row with the game and Play EU4, tabs under it;
-    B  the same caption, a sidebar instead of tabs (game tabs, tools, About at the bottom);
+    B  the same caption, a sidebar instead of tabs (chosen on 2026-11-14), in three forms:
+       B1 a 200 px sidebar with Play EU4 on top that folds to a rail of icons when narrow,
+       B2 a 72 px rail of icons with short labels and A's game header over the page,
+       B3 a 230 px sidebar whose entries say their state in a second line;
+       the 720 px button shows the window at its minimum width (the Plugins list keeps 16 font sizes);
     C  tabs in the title bar (the client area takes the caption: WM_NCCALCSIZE / WM_NCHITTEST), a status bar.
   Switch via ?variant=0|A|B|C, the bar at the bottom or the arrow keys; ?surface=overlay shows the overlay.
   The real apps are Dear ImGui; this page imitates Forge (docs/ui-design-system.md). Data is made up.
@@ -121,16 +125,20 @@ p{margin:0 0 6px} .measure{max-width:44em}
 </div>
 <div class="switcher" id="switcher"></div>
 <script>
-const V = ['0','A','B','C'];
-const NAMES = {'0':'Today (1.23, roughly)','A':'Native caption + header row','B':'Native caption + sidebar','C':'Tabs in the title bar'};
+const V = ['0','B1','B2','B3','A','C'];
+const NAMES = {'0':'Today (1.23, roughly)','A':'Native caption + header row','B1':'Sidebar: Play on top, sections','B2':'Rail with icons + game header',
+  'B3':'Sidebar that tells the state','C':'Tabs in the title bar'};
 const NOTES = {
   '0':'Today: the system caption (white in Windows light mode, no icon), the app name again in the client, the full folder path as the loudest text, Play EU4 as an ordinary button, seven equal tabs, sentences coloured yellow or green from end to end.',
   'A':'A: DWM paints the system caption in Forge\'s window colour with the anvil icon (Windows 11; Windows 10 gets its dark mode). One header row: the game, its state and Play EU4 as the one primary button. Native caption buttons, snap layouts and accessibility stay.',
-  'B':'B: the same caption. A sidebar replaces the seven tabs: what a player uses (Anvil, Plugins, Catalog) apart from tools (Benchmark, Crashes, Log); About at the bottom. Each page has a title row with its own actions.',
+  'B1':'B1: the caption of A. A 200 px sidebar replaces the seven tabs: Play EU4 and the game on top, what a player uses (Anvil, Plugins, Catalog) apart from tools (Benchmark, Crashes, Log), About at the bottom. Below about 900 px it folds to a rail of icons, so the Plugins list and detail keep their room.',
+  'B2':'B2: a 72 px rail of icons with short labels (Segoe Fluent Icons, which Windows 11 ships; Segoe MDL2 Assets on Windows 10), always. The game and Play EU4 are a header over the page, as in A. Most room for the Plugins tab; icons need a font in the atlas.',
+  'B3':'B3: each sidebar entry is two lines, like the plugin list: its name and its state ("14 files differ", "1 to approve", "last: Bellows, 14 Nov"), with the state glyph. The sidebar is the overview; a game card with Play EU4 sits on top. Widest of the three (230 px); folds to one line per entry when narrow.',
   'C':'C: the app draws the caption itself: icon, tabs and Play EU4 in the title row, caption buttons drawn by the app (WM_NCHITTEST returns HTMAXBUTTON for snap layouts). The game folder moves to a status bar. Most room for content; most code to keep right on Windows 10 and 11.'
 };
 const q = new URLSearchParams(location.search);
-let variant = V.includes(q.get('variant')) ? q.get('variant') : 'A';
+let variant = V.includes(q.get('variant')) ? q.get('variant') : 'B1';
+let narrow = q.get('narrow') === '1';   // the window at its minimum width, 720 px
 let surface = q.get('surface') === 'overlay' ? 'overlay' : 'manager';
 let theme = q.get('theme') === 'light' ? 'light' : 'dark';   // Windows app mode, for variant 0's caption
 let tab = q.get('tab') || 'anvil';
@@ -273,10 +281,14 @@ function catalogTab(){
     <div class="small">${st2(c)}${c.state==='build'?' <span class="weak">· runs on Steam 1.37.5 and GOG 1.37.5.2</span>':''}</div></div>`).join('')}`;
 }
 function plugins(){
-  return `<div style="display:flex;gap:10px;height:100%;min-height:520px"><div class="list" style="width:250px;padding:8px 0">
-    <div class="weak small" style="padding:0 12px">Find · chips · sections</div>
-    ${['Bellows','Smithy','Tongs','Lodestone'].map((n,i)=>`<div class="li ${i===0?'sel':''}"><span class="good">✓</span> <span class="semi">${n}</span><div class="weak small" style="padding-left:18px">${['14 of 16 modules on','5 of 7 modules on','9 settings · 2 changed','waits for approval'][i]}</div></div>`).join('')}</div>
-    <div class="card" style="flex:1;margin:0"><div class="weak">The Plugins tab as merged in 1.23 (anvil#382); not part of this prototype.</div></div></div>`;
+  // The list's width as plugins_view.cpp sets it: 34 % of the room, clamped to 16..24 font sizes (17 px).
+  return `<div style="display:flex;gap:10px;height:100%;min-height:500px"><div class="list" style="width:clamp(272px,34%,408px);flex:none;padding:8px 0">
+    <div class="weak small" style="padding:0 12px 6px">Find · chips · sections</div>
+    ${['Bellows','Smithy','Tongs','Lodestone'].map((n,i)=>`<div class="li ${i===0?'sel':''}"><span class="${i===3?'warn':'good'}">${i===3?'▲':'✓'}</span> <span class="semi">${n}</span><div class="weak small" style="padding-left:18px">${['14 of 16 modules on','5 of 7 modules on','9 settings · 2 changed','waits for approval'][i]}</div></div>`).join('')}</div>
+    <div class="card" style="flex:1;margin:0;min-width:0;overflow:hidden"><div class="row"><span class="semi">Bellows</span><span class="weak small">1.8.0</span><span class="spacer"></span><span class="tog on"><i></i>On</span><button class="btn small">Reset...</button></div>
+      <div class="sect">Simulation <span class="weak small" style="font-weight:400">5 of 6 on</span></div>
+      ${['Faster monthly tick','Trust that keeps its target','Cached trade values'].map(m=>`<div style="margin:4px 0">${chk(true,m,'none')}<div class="weak small" style="margin-left:24px">Where it runs ${seg([['o','Off'],['n','Normal'],['i','+ Ironman'],['m','+ MP'],['e','Everywhere']],'n','none')}</div></div>`).join('')}
+      <p class="weak small" style="margin-top:8px">The Plugins tab as merged in 1.23 (anvil#382), sketched for its width only.</p></div></div>`;
 }
 function benchTab(){
   return `<div class="measure"><p>Measures how long EU4 takes to start with and without one plugin. EU4 starts again and again and quits by itself; nothing in your saves, mods or anvil.toml changes.</p></div>
@@ -343,19 +355,74 @@ function shellA(){
     <div class="tabs" style="padding-top:6px">${TABS.map(t=>`<button class="tab ${t.id===tab?'on':''}" data-act="tab" data-v="${t.id}">${t.name}${t.cnt?`<span class="cnt">${t.cnt}</span>`:''}</button>`).join('')}</div>
     <div class="body ${fillTabs.includes(tab)?'fill':''}">${content()}</div></div>`;
 }
-function shellB(){
-  const item = (t)=>`<div class="li ${t.id===tab?'sel':''}" data-act="tab" data-v="${t.id}" style="padding:7px 12px;display:flex;align-items:center">${t.name}<span class="spacer"></span>${t.cnt?`<span class="tag ${t.id==='plugins'?'warn':''}">${t.id==='plugins'?'▲ 1':'● 1'}</span>`:''}</div>`;
+// Line icons in the spirit of Segoe Fluent Icons (the real app would take them from that font).
+const IC = {
+  anvil:`<path fill="currentColor" d="M2 10.5 9 8h19v5l-6 2v4l3.5 4v3h-17v-3l3.5-4v-4C7 14.5 4 13.2 2 10.5Z"/>`,
+  plugins:`<path d="M6 6h8v8H6zM18 6h8v8h-8zM6 18h8v8H6zM18 18h8v8h-8z"/>`,
+  catalog:`<path d="M6 10l10-5 10 5v12l-10 5-10-5zM6 10l10 5 10-5M16 15v12"/>`,
+  benchmark:`<path d="M5 22a11 11 0 0 1 22 0M16 22l6-7"/><circle cx="16" cy="22" r="1.5"/>`,
+  crashes:`<path d="M16 5 28 26H4zM16 13v6M16 22v1"/>`,
+  log:`<path d="M7 8h18M7 13h18M7 18h12M7 23h15"/>`,
+  about:`<circle cx="16" cy="16" r="11"/><path d="M16 15v7M16 10v1"/>`
+};
+const icon = (id,size=18)=>`<svg width="${size}" height="${size}" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" style="flex:none">${IC[id]}</svg>`;
+// What each entry says in B3 (and in B1/B2 tooltips): its state, with the state's glyph.
+const STATE = {anvil:['▲','warn','14 files differ'],catalog:['●','info','1 update'],plugins:['▲','warn','1 to approve · 9 on'],
+  benchmark:['','weak','no series kept'],crashes:['✕','bad','last: Bellows, 14 Nov'],log:['✕','bad','2 errors at the last start'],about:['✓','good','1.23.0 is the newest']};
+const capRow = ()=>`<div class="cap forge">${ICON}<span class="ttl">Anvil Manager</span>${CBTN}</div>`;
+const page = (title,actions='')=>`<div style="flex:1;display:flex;flex-direction:column;min-width:0">
+  <div class="row" style="padding:12px 16px 2px;flex:none"><span class="semi" style="font-size:17px">${title}</span><span class="spacer"></span>${actions}</div>
+  <div class="body ${fillTabs.includes(tab)?'fill':''}">${content()}</div></div>`;
+const badge = (t)=> t.id==='plugins'?`<span class="tag warn" title="1 plugin waits for your approval">▲ 1</span>`
+  : t.id==='catalog'?`<span class="tag" style="color:var(--info)" title="1 update in the catalog">● 1</span>`:'';
+function shellB1(){
+  const rail = narrow;   // below about 900 px the sidebar folds to a rail
+  const item = (t)=> rail
+    ? `<div class="li ${t.id===tab?'sel':''}" data-act="tab" data-v="${t.id}" title="${t.name}" style="padding:9px 0;display:flex;justify-content:center;position:relative">${icon(t.id)}
+        ${t.cnt?`<span style="position:absolute;right:10px;top:5px;font-size:10px" class="${t.id==='plugins'?'warn':'info'}">${t.id==='plugins'?'▲':'●'}</span>`:''}</div>`
+    : `<div class="li ${t.id===tab?'sel':''}" data-act="tab" data-v="${t.id}" style="padding:7px 12px;display:flex;align-items:center;gap:10px">${icon(t.id,16)}${t.name}<span class="spacer"></span>${badge(t)}</div>`;
   const title = TABS.find(t=>t.id===tab).name;
-  return `<div class="win"><div class="cap forge">${ICON}<span class="ttl">Anvil Manager</span>${CBTN}</div>
+  return `<div class="win">${capRow()}
     <div style="display:flex;flex:1;min-height:0">
-      <div style="width:200px;flex:none;background:var(--bg0);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:10px 0">
-        <div style="padding:0 12px 10px"><button class="btn primary" style="width:100%;padding:6px">Play EU4</button>
-          <div class="weak small" style="margin-top:6px">Steam 1.37.5 · <button class="tbtn small">Change...</button></div></div>
+      <div style="width:${rail?56:200}px;flex:none;background:var(--bg0);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:10px 0">
+        ${rail?`<div style="padding:0 8px 10px"><button class="btn primary" style="width:100%;padding:6px 0" title="Play EU4">▶</button></div>`
+             :`<div style="padding:0 12px 10px"><button class="btn primary" style="width:100%;padding:6px">Play EU4</button>
+          <div class="weak small" style="margin-top:6px">Steam 1.37.5 · <button class="tbtn small">Change...</button></div></div>`}
         ${TABS.filter(t=>!t.tool&&!t.end).map(item).join('')}
-        <div class="weak small" style="padding:12px 12px 4px">Tools</div>${TABS.filter(t=>t.tool).map(item).join('')}
+        ${rail?'<div style="height:1px;background:var(--line);margin:8px 10px"></div>':'<div class="weak small" style="padding:12px 12px 4px">Tools</div>'}${TABS.filter(t=>t.tool).map(item).join('')}
         <span class="spacer"></span>${TABS.filter(t=>t.end).map(item).join('')}</div>
-      <div style="flex:1;display:flex;flex-direction:column;min-width:0"><div class="row" style="padding:12px 16px 4px;flex:none"><span class="semi" style="font-size:17px">${title}</span></div>
-        <div class="body ${fillTabs.includes(tab)?'fill':''}">${content()}</div></div></div></div>`;
+      ${page(title)}</div></div>`;
+}
+function shellB2(){
+  const item = (t)=>`<div class="li ${t.id===tab?'sel':''}" data-act="tab" data-v="${t.id}" style="padding:8px 2px 6px;display:flex;flex-direction:column;align-items:center;gap:3px;position:relative;border-left-width:3px">
+      ${icon(t.id,20)}<span style="font-size:11px;line-height:1.2;text-align:center">${t.name}</span>
+      ${t.cnt?`<span style="position:absolute;right:8px;top:4px;font-size:10px" class="${t.id==='plugins'?'warn':'info'}" title="${t.id==='plugins'?'1 to approve':'1 update'}">${t.id==='plugins'?'▲':'●'}</span>`:''}</div>`;
+  const title = TABS.find(t=>t.id===tab).name;
+  return `<div class="win">${capRow()}
+    <div style="display:flex;flex:1;min-height:0">
+      <div style="width:72px;flex:none;background:var(--bg0);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:8px 0;gap:2px">
+        ${TABS.filter(t=>!t.tool&&!t.end).map(item).join('')}<div style="height:1px;background:var(--line);margin:6px 12px"></div>
+        ${TABS.filter(t=>t.tool).map(item).join('')}<span class="spacer"></span>${TABS.filter(t=>t.end).map(item).join('')}</div>
+      <div style="flex:1;display:flex;flex-direction:column;min-width:0">${gameHeader()}
+        ${page(title)}</div></div></div>`;
+}
+function shellB3(){
+  const one = narrow;   // narrow: one line per entry, the state behind its glyph
+  const item = (t)=>{const [g,c,s] = STATE[t.id];
+    return `<div class="li ${t.id===tab?'sel':''}" data-act="tab" data-v="${t.id}" style="padding:${one?6:7}px 12px" title="${one?s:''}">
+      <div class="row" style="gap:8px;flex-wrap:nowrap"><span class="glyph ${c}">${g}</span><span class="${t.id===tab?'semi':''}">${t.name}</span>${one&&t.cnt?`<span class="spacer"></span><span class="${c} small">${g} 1</span>`:''}</div>
+      ${one?'':`<div class="small ${c==='good'||c==='weak'?'weak':c}" style="padding-left:22px;line-height:1.3">${s}</div>`}</div>`;};
+  const title = TABS.find(t=>t.id===tab).name;
+  return `<div class="win">${capRow()}
+    <div style="display:flex;flex:1;min-height:0">
+      <div style="width:${one?170:230}px;flex:none;background:var(--bg0);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:10px 0;overflow:auto">
+        <div class="card" style="margin:0 10px 10px;padding:10px;background:var(--panel)">
+          <div class="semi" style="line-height:1.2">Europa Universalis IV</div><div class="weak small">Steam 1.37.5 · <button class="tbtn small">Change...</button></div>
+          <button class="btn primary" style="width:100%;margin-top:8px;padding:6px">Play EU4</button></div>
+        ${TABS.filter(t=>!t.tool&&!t.end).map(item).join('')}
+        <div class="weak small" style="padding:10px 12px 2px">Tools</div>${TABS.filter(t=>t.tool).map(item).join('')}
+        <span class="spacer"></span>${TABS.filter(t=>t.end).map(item).join('')}</div>
+      ${page(title)}</div></div>`;
 }
 function shellC(){
   return `<div class="win"><div class="cap forge" style="height:40px;background:var(--bg0)">${ICON}
@@ -402,7 +469,8 @@ function overlay(){
 
 /* ---------------- render ---------------- */
 function render(){
-  document.getElementById('stage').innerHTML = surface==='overlay' ? overlay() : ({'0':today,'A':shellA,'B':shellB,'C':shellC}[variant])();
+  document.getElementById('stage').innerHTML = surface==='overlay' ? overlay() : ({'0':today,'A':shellA,'B1':shellB1,'B2':shellB2,'B3':shellB3,'C':shellC}[variant])();
+  const win = document.querySelector('.win'); if(win) win.style.width = narrow ? '720px' : '1040px';
   document.getElementById('note').textContent = surface==='overlay'
     ? (variant==='0' ? 'Overlay today: the notice title all in warning yellow with an "x" button, the badge\'s dot says its state by colour only, the crash tab names plugin ids and shows a raw URL, the log is plain text.'
                      : 'Overlay proposed (A, B and C alike): the notice is a banner with a glyph and a primary action; the badge carries the state glyph; the crash tab names the plugin, turns it off through its switch (marked "at the next start" as in Plugins) and keeps the report in the code view; the log has levels and a filter.')
@@ -410,8 +478,9 @@ function render(){
   const sw = document.getElementById('switcher');
   sw.innerHTML = `<button data-act="prev" aria-label="Previous variant">&larr;</button><span class="lbl">${variant} (${NAMES[variant]})</span><button data-act="next" aria-label="Next variant">&rarr;</button>
     <button data-act="surface" class="${surface==='overlay'?'on':''}">${surface==='overlay'?'Overlay':'Manager'}</button>
+    ${surface==='manager'?`<button data-act="narrow" class="${narrow?'on':''}" title="The window at its minimum width">${narrow?'720 px':'1040 px'}</button>`:''}
     ${variant==='0'&&surface==='manager'?`<button data-act="theme">Windows ${theme}</button>`:''}`;
-  const p = new URLSearchParams({variant,surface,tab,ovtab}); if(theme==='light') p.set('theme','light');
+  const p = new URLSearchParams({variant,surface,tab,ovtab}); if(theme==='light') p.set('theme','light'); if(narrow) p.set('narrow','1');
   history.replaceState(null,'','?'+p.toString());
 }
 document.addEventListener('click',e=>{
@@ -420,6 +489,7 @@ document.addEventListener('click',e=>{
   if(a==='prev'||a==='next'){const i=V.indexOf(variant);variant=V[(i+(a==='next'?1:V.length-1))%V.length];}
   else if(a==='surface') surface = surface==='overlay'?'manager':'overlay';
   else if(a==='theme') theme = theme==='light'?'dark':'light';
+  else if(a==='narrow') narrow = !narrow;
   else if(a==='tab') tab=v; else if(a==='ovtab') ovtab=v;
   else if(a==='files') st.filesOpen=!st.filesOpen; else if(a==='remove') st.removeAll=!st.removeAll;
   else if(a==='bench') st.bench=+v; else if(a==='crash') st.crash=+v; else if(a==='logsrc') st.logSrc=v; else if(a==='loglevel') st.logLevel=v;
