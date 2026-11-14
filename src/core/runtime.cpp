@@ -629,6 +629,32 @@ void startup_impl(const std::filesystem::path& game_dir) {
     ResolveResult resolved = resolve(input);
     skipped.insert(skipped.end(), resolved.skipped.begin(), resolved.skipped.end());
     for (const auto& s : skipped) log_warning(s.id + ": skipped — " + s.reason);
+    // A local plugin that is off at this start keeps what its plugin.toml and
+    // settings.toml declare, so anvil.control shows its modules, settings and
+    // dependencies (ADR 0013). Its retired settings move as for a plugin that
+    // loads, so a value the player saves for it later drops none of them.
+    for (Skipped& s : skipped) {
+        if (!s.mod.empty()) continue;
+        ManifestResult parsed = load_manifest(s.folder);
+        if (!parsed.manifest || parsed.manifest->id != s.id) continue;
+        Manifest& m = *parsed.manifest;
+        add_implied_dependencies(m);
+        s.data_dir = g_runtime->anvil_dir / "data" / m.id;
+        if (!m.settings.empty()) {
+            SettingsFileResult declared = load_settings(m.folder / m.settings);
+            uint32_t line = 0;
+            if (declared.file && settings_module_error(*declared.file, m, line).empty()) {
+                if (!declared.file->retired.empty()) {
+                    for (const RetiredMoveNote& note : move_retired_settings(m, *declared.file, s.data_dir / "settings.toml",
+                                                                             g_runtime->anvil_dir / "anvil.toml", settings)) {
+                        Log::instance().write(note.level, m.id, note.message);
+                    }
+                }
+                s.settings = std::move(*declared.file);
+            }
+        }
+        s.manifest = std::move(m);
+    }
     log_info("resolved " + std::to_string(resolved.order.size()) + " plugin(s) to load at " + fmt_ms(elapsed_ms()));
     // The overlay speaks the language of EU4's settings, or with Mei, which
     // shows a translation mod's Chinese, Japanese or Korean, Steam's or
@@ -756,8 +782,10 @@ void startup_impl(const std::filesystem::path& game_dir) {
         return t.translation;
     };
     if (player_language != "en") {
-        for (size_t i = 0; i < g_runtime->plugins->resolved_count(); ++i) {
-            const Manifest& m = g_runtime->plugins->at(i).manifest();
+        // Also of a plugin that is off, whose plugin.toml parses (ADR 0013).
+        for (const PluginRecord& p : *g_runtime->plugins) {
+            if (!p.declared()) continue;
+            const Manifest& m = p.manifest();
             if (auto t = translation(m.folder, m.id)) sources.translations.emplace(m.id, std::move(*t));
         }
         for (uint32_t i = 0; i < g_runtime->mods.plugins.size(); ++i) {

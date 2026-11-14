@@ -1,11 +1,13 @@
 #pragma once
 
 #include "manifest.hpp"
+#include "settings.hpp"
 
 #include "i18n/message.hpp"
 
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -41,6 +43,14 @@ struct Skipped {
     bool awaiting_approval = false;  // a plugin from a mod that waits for the player's approval
     SkipKind kind = SkipKind::other;   // not used while `disabled`
     i18n::Message why;                 // the reason by code, for the player's language (#158)
+    // A local plugin whose plugin.toml parses (ADR 0013): its manifest, with
+    // the implied dependency, and its settings.toml when that parses and fits
+    // plugin.toml, so anvil.control shows its modules and settings while it
+    // is off. The runtime fills them after resolve; data_dir is
+    // anvil/data/<id>, whose settings.toml holds the player's values.
+    std::optional<Manifest> manifest;
+    std::optional<SettingsFile> settings;
+    std::filesystem::path data_dir;
 };
 
 // A skipped plugin whose `reason` holds the English words of `why`.
@@ -61,5 +71,9 @@ struct ResolveResult {
 // loaded are listed in `skipped` with a human-readable reason; anything
 // depending on them is skipped too. Conflict edge cases: docs/design.md §10.
 ResolveResult resolve(const ResolveInput& input);
+
+// The dependency on anvil-game the resolver adds to a plugin that affects
+// gameplay, itself or in a module, without declaring it (`implied`).
+void add_implied_dependencies(Manifest& manifest);
 
 }  // namespace anvil

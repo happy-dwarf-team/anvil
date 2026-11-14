@@ -300,6 +300,11 @@ int svc_last_start(AnvilControlSink sink, void* context) {
     return 1;
 }
 
+int svc_requirement(const char* plugin_id, uint32_t index, AnvilControlRequirement* out) {
+    if (plugin_id == nullptr) return 0;
+    return fill_sized(out, [&](AnvilControlRequirement& full) { return g_control->requirement(plugin_id, index, full); });
+}
+
 const AnvilControlService kService{
     sizeof(AnvilControlService),
     svc_status,
@@ -331,6 +336,7 @@ const AnvilControlService kService{
     svc_switch_state,
     svc_switch_set,
     svc_last_start,
+    svc_requirement,
 };
 
 // The reason as a message for the overlay (i18n::serialize).
@@ -365,7 +371,7 @@ Control::Control(ControlSources sources) : sources_(std::move(sources)) {
     if (sources_.plugins != nullptr) {
         for (const PluginRecord& p : *sources_.plugins) {
             const bool skipped = p.handle() == nullptr;
-            versions_.push_back(skipped ? std::string() : p.manifest().version.to_string());
+            versions_.push_back(p.declared() ? p.manifest().version.to_string() : std::string());
             messages_.push_back(skipped ? reason_message(*p.outcome()) : std::string());
         }
     }
@@ -440,6 +446,11 @@ void Control::loading_done() {
 const PluginRecord* Control::loadable(std::string_view plugin_id) const {
     const PluginRecord* p = sources_.plugins != nullptr ? sources_.plugins->find(plugin_id) : nullptr;
     return p != nullptr && p->handle() != nullptr ? p : nullptr;
+}
+
+const PluginRecord* Control::declared(std::string_view plugin_id) const {
+    const PluginRecord* p = sources_.plugins != nullptr ? sources_.plugins->find(plugin_id) : nullptr;
+    return p != nullptr && p->declared() ? p : nullptr;
 }
 
 void Control::status(AnvilControlStatus& out) const {
@@ -557,10 +568,21 @@ bool Control::plugin(uint32_t index, AnvilControlPlugin& out) const {
         }
     } else {
         // Skipped, or disabled (by the player or a benchmark arm): "skipped"
-        // with the `disabled` flag on the wire.
+        // with the `disabled` flag on the wire; what plugin.toml says when it
+        // is known (ADR 0013).
         const Outcome& o = *p.outcome();
         out.name = "";
         out.issues = "";
+        if (p.declared()) {
+            const Manifest& m = p.manifest();
+            out.name = m.name.c_str();
+            out.issues = m.issues.c_str();
+            out.early = m.phase == Phase::Early ? 1 : 0;
+            out.affects_gameplay = m.affects_gameplay ? 1 : 0;
+            out.offers_ironman = m.allow_ironman == Allow::OptIn ? 1 : 0;
+            out.offers_multiplayer = m.allow_multiplayer == Allow::OptIn ? 1 : 0;
+            out.settings = static_cast<uint32_t>(p.settings().size());
+        }
         out.state = "skipped";
         out.reason = o.reason.c_str();
         out.reason_message = messages_[index].c_str();
@@ -604,7 +626,7 @@ std::optional<std::string> Control::warning(uint32_t index) const {
 }
 
 PluginSettings* Control::settings_of(std::string_view plugin_id) const {
-    const PluginRecord* p = loadable(plugin_id);
+    const PluginRecord* p = declared(plugin_id);
     return p != nullptr ? &p->settings() : nullptr;
 }
 
@@ -767,17 +789,18 @@ void fill_declared(const Module& m, const char* key, AnvilControlModule& out) {
 }  // namespace
 
 uint32_t Control::module_count(std::string_view plugin_id) const {
-    const PluginRecord* p = loadable(plugin_id);
+    const PluginRecord* p = declared(plugin_id);
     return p != nullptr ? static_cast<uint32_t>(p->modules().size()) : 0;
 }
 
 bool Control::module(std::string_view plugin_id, uint32_t index, AnvilControlModule& out) const {
-    const PluginRecord* p = loadable(plugin_id);
+    const PluginRecord* p = declared(plugin_id);
     if (p == nullptr || index >= p->modules().size()) return false;
     const PluginRecord::ModuleSlot& m = p->modules()[index];
     fill_declared(*m.declared, m.key.c_str(), out);
     out.enabled = m.handle != nullptr ? 1 : 0;
-    out.state = m.handle == nullptr                              ? "disabled"
+    out.state = p->handle() == nullptr                           ? "skipped"
+                : m.handle == nullptr                            ? "disabled"
                 : loading_done_.load(std::memory_order_acquire) ? outcome_name(p->outcome())
                                                                 : "pending";
     out.suspended = sources_.policy != nullptr && m.handle != nullptr && sources_.policy->suspended(m.handle->owner) ? 1 : 0;
@@ -785,7 +808,7 @@ bool Control::module(std::string_view plugin_id, uint32_t index, AnvilControlMod
 }
 
 bool Control::setting_info(std::string_view plugin_id, AnvilSetting setting, AnvilControlSetting& out) const {
-    const PluginRecord* p = loadable(plugin_id);
+    const PluginRecord* p = declared(plugin_id);
     const Setting* d = p == nullptr ? nullptr : p->settings().schema().get(setting);
     if (d == nullptr) return false;
     out = AnvilControlSetting{};
@@ -809,7 +832,21 @@ bool Control::setting_info(std::string_view plugin_id, AnvilSetting setting, Anv
     }
     out.advanced = d->advanced ? 1 : 0;
     out.counts = setting_counts(*d, p->manifest()) ? 1 : 0;
-    out.locked = out.counts && multiplayer_session() ? 1 : 0;
+    // A plugin that is off does not act in this game: never locked.
+    out.locked = out.counts && p->handle() != nullptr && multiplayer_session() ? 1 : 0;
+    return true;
+}
+
+bool Control::requirement(std::string_view plugin_id, uint32_t index, AnvilControlRequirement& out) const {
+    const PluginRecord* p = declared(plugin_id);
+    if (p == nullptr || index >= p->manifest().dependencies.size()) return false;
+    const Dependency& d = p->manifest().dependencies[index];
+    out = AnvilControlRequirement{};
+    out.size = sizeof(out);
+    out.id = d.id.c_str();
+    out.version = d.range.text().c_str();
+    out.optional = d.optional ? 1 : 0;
+    out.implied = d.implied ? 1 : 0;
     return true;
 }
 
@@ -823,7 +860,7 @@ std::optional<Control::Target> Control::target(std::string_view key) const {
         if (p == nullptr) return std::nullopt;
         return Target{p, nullptr, std::string(key)};
     }
-    const PluginRecord* p = loadable(key.substr(0, dot));
+    const PluginRecord* p = declared(key.substr(0, dot));
     if (p == nullptr) return std::nullopt;
     for (const Module& m : p->manifest().modules) {
         if (m.id == key.substr(dot + 1)) return Target{p, &m, std::string(key)};
