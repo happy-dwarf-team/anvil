@@ -1,6 +1,7 @@
 // settings.toml (design §5.3, §11): the schema, key bindings, the player's
 // values, ANVIL_<ID>_<NAME> overrides and changes while the game runs.
 #include "core/discovery.hpp"
+#include "core/last_start.hpp"
 #include "core/plugin_settings.hpp"
 #include "core/retired_move.hpp"
 #include "core/settings.hpp"
@@ -336,6 +337,43 @@ void module_settings_tests() {
         CHECK(notes.size() == 1 && notes[0].level == ANVIL_LOG_WARNING && read(player) == "flows_mode = \n");
         // No player's file: nothing.
         CHECK(move_retired_settings(m, *r.file, dir / "missing.toml", toml, disabled).empty());
+    });
+
+    run("last-start.toml: written, read back, unknown keys and other formats (ADR 0013, point 8)", [] {
+        LastStart r;
+        r.anvil_version = "1.23.0";
+        r.written = "2026-11-14T18:05:11Z";
+        r.disabled_plugins = {"tongs"};
+        r.allow_multiplayer = {"lode", "lode.flows"};
+        r.disabled_modules = {"bellows.diagnostics"};
+        r.approvals = {{"trade-tweaks", "mod/ugc_123.mod", "1.0.2", "ab12"}};
+        r.settings["lode"] = {{"flip_ratio", "1.5"}, {"cooldown_months", "24"}, {"mode", "\"on\""}, {"on", "true"}};
+        r.settings["anvil-overlay"] = {{"panel_key", "\"Ctrl+Shift+F12\""}, {"scale", "1.0"}};
+        const std::string text = last_start_text(r);
+        CHECK(contains(text, "format = 1\nanvil = \"1.23.0\"\n"));
+        CHECK(contains(text, "allow_multiplayer = [\"lode\", \"lode.flows\"]\n"));
+        CHECK(contains(text, "[settings.\"anvil-overlay\"]\npanel_key = \"Ctrl+Shift+F12\"\nscale = 1.0\n"));
+        CHECK(contains(text, "[[approval]]\nid = \"trade-tweaks\"\nmod = \"mod/ugc_123.mod\"\n"));
+        std::string error;
+        const auto back = parse_last_start(text, error);
+        CHECK(back && *back == r);
+
+        // The values as the settings write them, so the Manager compares text with setting_toml.
+        const SettingsFile s = schema();
+        CHECK(back && back->settings.at("lode").at("flip_ratio") == "1.5");
+        CHECK(setting_toml(s.settings[2], {0, 1.0, {}}) == "1.0");  // scale: a float keeps its ".0"
+
+        // A newer Anvil may add keys; another format is not read.
+        CHECK(parse_last_start(text + "\n[future]\nx = 1\n", error) == r);
+        CHECK(!parse_last_start("format = 2\n", error) && error == "not format 1");
+        CHECK(!parse_last_start("format = \n", error) && contains(error, "line 1"));
+
+        const auto dir = scratch("last-start");
+        const auto file = dir / "data" / "anvil" / "last-start.toml";
+        CHECK(!read_last_start(file));  // missing: nothing is marked
+        CHECK(write_last_start(file, r, error) && read(file) == text && read_last_start(file) == r);
+        write(file, "not = = toml");
+        CHECK(!read_last_start(file));  // unreadable: nothing is marked
     });
 }
 

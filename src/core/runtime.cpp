@@ -10,6 +10,7 @@
 #include "game_build.hpp"
 #include "gameplay_policy.hpp"
 #include "host.hpp"
+#include "last_start.hpp"
 #include "log.hpp"
 #include "manifest.hpp"
 #include "platform.hpp"
@@ -27,6 +28,7 @@
 #include "plugin_translation.hpp"
 #include "settings.hpp"
 #include "symbol_check.hpp"
+#include "trust.hpp"
 
 #include <anvil/anvil_game.h>
 #include <anvil/anvil_plugin.h>
@@ -52,6 +54,7 @@ struct Runtime {
     std::filesystem::path anvil_dir;
     std::filesystem::path exe_path;
     std::string exe_name;  // e.g. eu4.exe, for crash reports
+    std::string last_start;  // data/anvil/last-start.toml as this start wrote it; "" when it could not
     PeIdentity identity;
     const KnownBuild* build = nullptr;
     AnvilGameInfo game{};
@@ -673,6 +676,36 @@ void startup_impl(const std::filesystem::path& game_dir) {
     deps.host = &g_runtime->host;
     g_runtime->plugins = std::make_unique<PluginSet>(std::move(to_load), std::move(skipped), std::move(deps));
     crash::attach_plugins(g_runtime->plugins.get());
+    // What this start used (ADR 0013, point 8), now that the retired settings
+    // moved and every plugin's settings were read: the Manager marks what
+    // changes at the next start from it.
+    {
+        LastStart last;
+        last.anvil_version = kAnvilVersion;
+        last.written = utc_now();
+        last.safe_mode = record.safe_mode;
+        last.disabled_plugins = settings.disabled_plugins;
+        last.allow_ironman = settings.allow_ironman;
+        last.allow_multiplayer = settings.allow_multiplayer;
+        last.enabled_modules = settings.enabled_modules;
+        last.disabled_modules = settings.disabled_modules;
+        for (const TrustEntry& e : g_runtime->mods.trust.entries) last.approvals.push_back({e.id, e.mod, e.version, e.hash});
+        for (size_t i = 0; i < g_runtime->plugins->resolved_count(); ++i) {
+            const PluginRecord& p = g_runtime->plugins->at(i);
+            const PluginSettings& values = p.settings();
+            if (values.size() == 0) continue;
+            auto& out = last.settings[p.id()];
+            for (const Setting& s : values.schema().settings) {
+                if (const auto v = values.saved(s.id)) out[s.name] = setting_toml(s, *v);
+            }
+        }
+        g_runtime->last_start = last_start_text(last);
+        std::string error;
+        if (!replace_text_file(g_runtime->anvil_dir / "data" / "anvil" / "last-start.toml", g_runtime->last_start, error)) {
+            log_warning("cannot write data/anvil/last-start.toml: " + error);
+            g_runtime->last_start.clear();
+        }
+    }
     const OwnerId core = g_runtime->plugins->core_owner();
     if (const ChangeStatus s = g_runtime->changes->replace_import(core, exe, "KERNEL32.dll", "ExitProcess",
                                                                   reinterpret_cast<void*>(&exit_process), &g_exit_next);
