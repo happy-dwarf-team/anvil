@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "ui/forge_widgets.hpp"
 #include "ui/imgui_colors.hpp"
 
 // Small drawing helpers the Manager's tabs share.
@@ -16,9 +17,20 @@ inline constexpr ImVec4 kGood = ::anvil::ui::kGood;
 inline constexpr ImVec4 kWarn = ::anvil::ui::kWarn;
 inline constexpr ImVec4 kBad = ::anvil::ui::kBad;
 using ::anvil::ui::primary_button;
-
-// The page titles' font (main.cpp, load_fonts); null when Windows lacks Segoe UI Semibold.
-inline ImFont* g_title_font = nullptr;
+using ::anvil::ui::Tone;
+using ::anvil::ui::banner;
+using ::anvil::ui::begin_banner;
+using ::anvil::ui::end_banner;
+using ::anvil::ui::begin_card;
+using ::anvil::ui::end_card;
+using ::anvil::ui::begin_facts;
+using ::anvil::ui::fact;
+using ::anvil::ui::end_facts;
+using ::anvil::ui::text_button;
+using ::anvil::ui::tag;
+using ::anvil::ui::state_row;
+using ::anvil::ui::begin_dialog;
+using ::anvil::ui::dialog_buttons;
 
 inline std::string u8(const std::filesystem::path& path) {
     const auto text = path.u8string();

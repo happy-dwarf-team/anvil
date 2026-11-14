@@ -4,6 +4,7 @@
 #include "ui/plugins_view.hpp"
 
 #include "i18n/translate.hpp"
+#include "ui/forge_widgets.hpp"
 #include "ui/plugin_widgets.hpp"
 
 #include <imgui.h>
@@ -39,7 +40,6 @@ void same_line_if_fits(float width) {
 
 float text_width(const std::string& text) { return ImGui::CalcTextSize(text.c_str()).x; }
 
-float button_width(const char* label) { return text_width(label) + ImGui::GetStyle().FramePadding.x * 2; }
 
 void weak_wrapped(const std::string& text) {
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
@@ -159,25 +159,28 @@ std::string allow_word(bool on) { return on ? tr("allowed") : tr("not allowed");
 
 void PluginsTab::draw_waiting(const Snapshot& model) {
     if (to_approve(model) == 0) return;
-    ImGui::AlignTextToFramePadding();
-    colored_wrapped(kWarn, tr("Waiting for your approval:"));
+    begin_banner("waiting", Tone::Warn);
+    ImGui::TextUnformatted(tr("Waiting for your approval:"));
     for (const PluginSnap& p : model.plugins) {
         if (!(p.blocked == Blocked::WaitsForApproval && !p.approved) && p.update_waits.empty()) continue;
-        ImGui::SameLine();
         const std::string label = p.update_waits.empty() ? p.name : trf("{0} (update to {1})", {p.name, p.update_waits});
+        ImGui::SameLine();
+        if (ImGui::GetContentRegionAvail().x < button_width(label.c_str())) ImGui::NewLine();
         if (ImGui::SmallButton((label + "##wait-" + p.id).c_str())) selected = p.id;
     }
+    end_banner(Tone::Warn);
 }
 
 void PluginsTab::draw_pending(const Snapshot& model, PluginsHost& host) {
     const size_t pending = pending_count(model);
     if (pending == 0) return;
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextColored(kInfo, "%s", trf("{0} change(s) wait for the next start.", {std::to_string(pending)}).c_str());
+    begin_banner("pending", Tone::Info);
+    ImGui::TextUnformatted(trf("{0} change(s) wait for the next start.", {std::to_string(pending)}).c_str());
     ImGui::SameLine();
     ImGui::BeginDisabled(host.read_only());
-    if (ImGui::SmallButton(tr("Undo them"))) host.apply(undo_pending(model));
+    if (text_button(tr("Undo them"))) host.apply(undo_pending(model));
     ImGui::EndDisabled();
+    end_banner(Tone::Info);
 }
 
 void PluginsTab::draw_panes(const Snapshot& model, PluginsHost& host) {
@@ -383,7 +386,8 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
     // What the player needs to know about it, in the order it matters.
     host.draw_facts(i);
     if (p.blocked == Blocked::CannotLoad) {
-        colored_wrapped(kBad, p.blocked_reason.empty() ? std::string(tr("It cannot load.")) : trf("It cannot load: {0}", {p.blocked_reason}));
+        banner("cannot-load", Tone::Bad,
+               p.blocked_reason.empty() ? std::string(tr("It cannot load.")) : trf("It cannot load: {0}", {p.blocked_reason}));
     }
     if (v.load.why == LoadState::Why::NeedsPlugin || v.load.why == LoadState::Why::NotInstalled) {
         const PluginSnap* missing = find_plugin(model, v.load.missing);
@@ -396,7 +400,8 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
                                                           : trf("Needs {0} (through {1}), which is off, so it does not load.", {name, through}))
                                        : (through.empty() ? trf("Needs {0}, which does not load, so it does not load either.", {name})
                                                           : trf("Needs {0} (through {1}), which does not load, so it does not load either.", {name, through}));
-        colored_wrapped(kWarn, text);
+        begin_banner("needs", Tone::Warn);
+        ImGui::TextWrapped("%s", text.c_str());
         const Chain chain = turn_on_chain(model, p.id);
         if (!chain.steps.empty()) {
             std::vector<std::string> others;
@@ -409,6 +414,7 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
                 ImGui::EndDisabled();
             }
         }
+        end_banner(Tone::Warn);
     }
     if (!v.needed_by.empty() && p.saved.on) {
         weak_wrapped(trf("Needed by {0}. Turning it off stops it too; it keeps its own switch.", {names_of(model, v.needed_by)}));
@@ -675,9 +681,9 @@ void PluginsTab::draw_confirm(PluginsHost& host) {
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 34, 0), ImGuiCond_Always);
     if (!confirm_) return;
-    if (!ImGui::BeginPopupModal((confirm_->title + "###confirm").c_str(), nullptr, ImGuiWindowFlags_NoSavedSettings)) return;
+    if (!begin_dialog("###confirm", confirm_->title)) return;
     for (const std::string& line : confirm_->lines) bullet(line);
-    ImGui::Spacing();
+    dialog_buttons({confirm_->button.c_str(), tr("Cancel")});
     ImGui::BeginDisabled(host.read_only() || (confirm_->edits.empty() && !confirm_->action));
     if (primary_button(confirm_->button.c_str())) {
         // The action may ask again: take this question first.
