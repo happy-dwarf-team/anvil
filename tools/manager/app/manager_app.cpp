@@ -101,7 +101,7 @@ bool is_standard(const Package& package, const std::string& id) {
 }
 
 // What a module (ADR 0011) does to the game and which opt-ins it offers; the
-// overlay's Mods tab says the same.
+// the overlay says the same.
 std::string module_summary(const Manifest& plugin, const Module& m, const std::string& name) {
     const std::string label = name.empty() ? module_key(plugin, m) : name + " (" + module_key(plugin, m) + ")";
     if (!m.affects_gameplay) return trf("{0}: does not change the game.", {label});
@@ -151,18 +151,27 @@ std::string zip_source(const CatalogPlugin& plugin) {
     return plugin.zip.url.substr(scheme, plugin.zip.url.find("/releases/") - scheme);
 }
 
+// The screenshot mode reads no manager.toml and asks nothing: no release question, no check.
+ManagerSettings screenshot_settings() {
+    ManagerSettings settings;
+    settings.asked_releases = true;
+    return settings;
+}
+
 }  // namespace
 
-ManagerApp::ManagerApp(HWND window, std::optional<Package> package, std::string package_error, fs::path game)
+ManagerApp::ManagerApp(HWND window, std::optional<Package> package, std::string package_error, fs::path game,
+                       std::optional<Screenshot> screenshot)
     : window_(window), package_(std::move(package)), package_error_(std::move(package_error)), exe_(own_exe_path()),
-      settings_(load_manager_settings()), benchmark_(window, settings_) {
+      settings_(screenshot ? screenshot_settings() : load_manager_settings()), benchmark_(window, settings_),
+      screenshot_(std::move(screenshot)) {
     const fs::path steam = steam_root_from_registry();
     if (!steam.empty()) steam_games_ = find_steam_games(steam);
     gog_game_ = find_gog_game();
     if (game.empty() && runs_from(exe_, exe_.parent_path()) && inspect_game_folder(exe_.parent_path()).error.empty()) {
         game = exe_.parent_path();  // the copy in <EU4>\AnvilManager.exe
     }
-    if (game.empty()) game = settings_.game_folder;
+    if (game.empty() && !screenshot_) game = settings_.game_folder;
     if (game.empty() && steam_games_.size() + (gog_game_ ? 1 : 0) == 1) {
         game = gog_game_ ? *gog_game_ : steam_games_.front();
     }
@@ -206,7 +215,7 @@ void ManagerApp::choose_game(const fs::path& dir) {
     gog_ = is_gog_folder(game_);
     follow_language(game_);
     snapshot_.reset();
-    editor_.reset();
+    plugins_.reset();
     crash_selected_.clear();
     crash_text_.clear();
     log_text_.clear();
@@ -224,7 +233,7 @@ void ManagerApp::choose_game(const fs::path& dir) {
             if (*answer) check_for_updates();
         }
     }
-    if (settings_.game_folder != game_) {
+    if (settings_.game_folder != game_ && !screenshot_) {
         settings_.game_folder = game_;
         std::string error;
         save_manager_settings(settings_, error);
@@ -235,15 +244,18 @@ void ManagerApp::choose_game(const fs::path& dir) {
 void ManagerApp::refresh() {
     if (game_.empty() || !package_) return;
     if (pending_.valid()) pending_.wait();
-    pending_ = std::async(std::launch::async, [game = game_, package = &*package_, exe = exe_] {
+    const std::string build = screenshot_ ? screenshot_->build : std::string();
+    pending_ = std::async(std::launch::async, [game = game_, package = &*package_, exe = exe_, build] {
         Snapshot snapshot;
         snapshot.folder = inspect_game_folder(game);
         if (!snapshot.folder.error.empty()) return snapshot;
+        if (!build.empty()) snapshot.folder.build = build;  // a fixture's eu4.exe
         snapshot.installation = inspect_installation(*package, game, exe);
         std::error_code ec;
         if (fs::is_directory(game / "anvil", ec)) {
             cli::GameOptions options;
             options.game_dir = game;
+            if (!build.empty()) options.build_of = [build](std::string_view) { return build.c_str(); };
             snapshot.report = cli::check_game(options);
         }
         snapshot.anvil_toml = read_anvil_settings(game / "anvil" / "anvil.toml");
@@ -258,6 +270,7 @@ void ManagerApp::poll() {
         snapshot_ = pending_.get();
         translations_.clear();   // a plugin installed or updated may bring other translations
         follow_language(game_);  // the overlay's setting may be new: the folder was installed or changed
+        rebuild_plugins();       // its sources point into the new report
     }
     if (release_pending_.valid() && release_pending_.wait_for(0s) == std::future_status::ready) {
         release_ = release_pending_.get();
@@ -284,6 +297,7 @@ void ManagerApp::poll() {
             launcher_opened_ = false;  // the note did its job
             anvil_missed_ = false;
             if (processes.here_started != 0) running_started_ = processes.here_started;
+            if (!was) plugins_take_effect();
         }
         if (was && !running_) {
             // Anvil opens anvil.log first thing once Windows loads its version.dll: a game that ended without
@@ -336,9 +350,13 @@ void ManagerApp::draw() {
         const bool locked = benchmark_.busy();
         // A tab's id stays English, so the open tab stays open when the language changes.
         const auto label = [](const char* name) { return std::string(tr(name)) + "###" + name; };
+        // The screenshot mode's tab, chosen once.
+        const auto pick = [&](const char* name) -> ImGuiTabItemFlags {
+            return forced_tab_ == name ? ImGuiTabItemFlags_SetSelected : 0;
+        };
         const auto tab = [&](const char* name, ImGuiTabItemFlags flags, void (ManagerApp::*body)()) {
             ImGui::BeginDisabled(locked);
-            const bool open = ImGui::BeginTabItem(label(name).c_str(), nullptr, locked ? 0 : flags);
+            const bool open = ImGui::BeginTabItem(label(name).c_str(), nullptr, locked ? 0 : flags | pick(name));
             ImGui::EndDisabled();
             if (!open) return;
             (this->*body)();
@@ -352,7 +370,7 @@ void ManagerApp::draw() {
             ImGui::BeginDisabled(locked);
             // The Plugins tab, drawn after this one, asks for it in the frame before.
             const bool open = ImGui::BeginTabItem((name + "###Catalog").c_str(), nullptr,
-                                                  !locked && show_catalog_tab_ ? ImGuiTabItemFlags_SetSelected : 0);
+                                                  !locked && show_catalog_tab_ ? ImGuiTabItemFlags_SetSelected : pick("Catalog"));
             show_catalog_tab_ = false;
             ImGui::EndDisabled();
             if (open) {
@@ -360,10 +378,19 @@ void ManagerApp::draw() {
                 ImGui::EndTabItem();
             }
         }
-        tab(N_("Plugins"), 0, &ManagerApp::draw_plugins_tab);
-        tab(N_("Mods"), 0, &ManagerApp::draw_mods_tab);
-        tab(N_("Settings"), show_settings_tab_ ? ImGuiTabItemFlags_SetSelected : 0, &ManagerApp::draw_settings_tab);
-        if (ImGui::BeginTabItem(label(N_("Benchmark")).c_str(), nullptr, locked ? ImGuiTabItemFlags_SetSelected : 0)) {
+        {
+            // What waits for the player's approval rides on the label (ui-guidelines §5); the id stays "Plugins".
+            const size_t waiting = plugins_ ? anvil::ui::to_approve(plugins_->model) : 0;
+            const std::string name = waiting > 0 ? trf("Plugins ({0} to approve)", {std::to_string(waiting)}) : std::string(tr("Plugins"));
+            ImGui::BeginDisabled(locked);
+            const bool open = ImGui::BeginTabItem((name + "###Plugins").c_str(), nullptr, pick("Plugins"));
+            ImGui::EndDisabled();
+            if (open) {
+                draw_plugins_tab();
+                ImGui::EndTabItem();
+            }
+        }
+        if (ImGui::BeginTabItem(label(N_("Benchmark")).c_str(), nullptr, locked ? ImGuiTabItemFlags_SetSelected : pick("Benchmark"))) {
             draw_benchmark_tab();
             ImGui::EndTabItem();
         }
@@ -371,7 +398,7 @@ void ManagerApp::draw() {
         tab(N_("Log"), 0, &ManagerApp::draw_log_tab);
         tab(N_("About"), 0, &ManagerApp::draw_about_tab);
         ImGui::EndTabBar();
-        show_settings_tab_ = false;
+        forced_tab_.clear();
     }
     draw_modals();
     ImGui::End();
@@ -699,7 +726,7 @@ void ManagerApp::draw_catalog_tab() {
         }
         if (status.from_mod) {
             weak_wrapped(status.installed.empty()
-                             ? tr("An enabled mod carries it (see the Mods tab). A copy installed here would load instead.")
+                             ? tr("An enabled mod carries it (see From mods on the Plugins tab). A copy installed here would load instead.")
                              : tr("An enabled mod carries it too; the copy in anvil/plugins loads."));
         }
 
@@ -717,253 +744,6 @@ void ManagerApp::draw_catalog_tab() {
             ImGui::SameLine();
             if (ImGui::Button(tr("Subscribe on Steam Workshop"))) open_url(plugin.workshop);
         }
-        ImGui::PopID();
-    }
-}
-
-void ManagerApp::draw_plugins_tab() {
-    const auto& report = snapshot_->report;
-    ImGui::Spacing();
-    ImGui::BeginDisabled(read_only() || !report || !report->cannot_check.empty());
-    if (ImGui::Button(tr("Install a plugin from a zip..."))) {
-        if (const auto file = pick_zip(window_)) open_zip(*file);
-    }
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button(tr("Open the plugins folder"))) open_folder(game_ / "anvil" / "plugins");
-    ImGui::SameLine();
-    ImGui::BeginDisabled(pending_.valid());
-    if (ImGui::Button(tr("Check again"))) refresh();
-    ImGui::EndDisabled();
-    weak(tr("You can also drop a plugin zip on this window."));
-    ImGui::Spacing();
-
-    if (!report) {
-        wrapped(tr("Anvil is not installed in this folder: no plugins load."));
-        return;
-    }
-    if (!report->cannot_check.empty()) {
-        colored_wrapped(kBad, trf("Cannot check the plugins: {0}", {report->cannot_check}));
-        return;
-    }
-    for (const cli::Problem& problem : report->problems) {
-        // dlc_load.json and trust.toml are shown on the Mods tab.
-        if (u8(fs::path(widen(problem.file)).filename()) == "anvil.toml") colored_wrapped(kBad, "anvil.toml: " + problem.message);
-    }
-    if (!report->mod_plugins.empty()) {
-        size_t waiting = 0;
-        for (const cli::GameModPlugin& p : report->mod_plugins) {
-            waiting += p.state == "pending" || p.state == "update-pending" || p.state == "conflict" ? 1 : 0;
-        }
-        const std::string count = std::to_string(report->mod_plugins.size());
-        const std::string text = waiting > 0 ? trf("{0} plugin(s) from enabled mods, {1} waiting for your approval: see the Mods tab.",
-                                                   {count, std::to_string(waiting)})
-                                             : trf("{0} plugin(s) from enabled mods: see the Mods tab.", {count});
-        if (waiting > 0) colored_wrapped(kWarn, text);
-        else weak(text);
-    }
-    if (!report->enabled) colored_wrapped(kWarn, tr("anvil.toml says enabled = false: no plugin loads."));
-    if (snapshot_->installation && !snapshot_->installation->installed()) {
-        colored_wrapped(kWarn, tr("version.dll is not Anvil's or missing: nothing below loads until Anvil is installed."));
-    }
-
-    const std::vector<const CatalogPlugin*> updates = catalog_updates_here();
-    const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp;
-    if (ImGui::BeginTable("plugins", 5, flags)) {
-        ImGui::TableSetupColumn(tr("Load"), ImGuiTableColumnFlags_WidthFixed);
-        ImGui::TableSetupColumn(tr("Plugin"), ImGuiTableColumnFlags_WidthStretch, 2.0f);
-        ImGui::TableSetupColumn(tr("Version"), ImGuiTableColumnFlags_WidthFixed);
-        ImGui::TableSetupColumn(tr("Status"), ImGuiTableColumnFlags_WidthStretch, 3.0f);
-        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed);
-        ImGui::TableHeadersRow();
-        for (const cli::GamePlugin& plugin : report->plugins) {
-            const auto& manifest = plugin.report.manifest;
-            const std::string id = manifest ? manifest->id : plugin.folder;
-            ImGui::PushID(plugin.folder.c_str());
-            ImGui::TableNextRow();
-
-            ImGui::TableNextColumn();
-            bool load = !listed(report->disabled_plugins, id);
-            ImGui::BeginDisabled(read_only() || !manifest);
-            if (ImGui::Checkbox("##load", &load)) edit_list("disabled_plugins", id, !load);
-            ImGui::EndDisabled();
-
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(manifest && !manifest->name.empty() ? manifest->name.c_str() : plugin.folder.c_str());
-            if (manifest && ImGui::IsItemHovered()) {
-                ImGui::BeginTooltip();
-                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30);
-                ImGui::TextUnformatted(trf("id {0}, folder {1}", {manifest->id, plugin.folder}).c_str());
-                if (!manifest->authors.empty()) ImGui::TextUnformatted(trf("by {0}", {join(manifest->authors)}).c_str());
-                if (!manifest->description.empty()) {
-                    ImGui::TextUnformatted(plugin_text(manifest->folder, manifest->description).c_str());
-                }
-                ImGui::PopTextWrapPos();
-                ImGui::EndTooltip();
-            }
-            if (is_standard(*package_, id)) {
-                ImGui::SameLine();
-                weak(tr("(comes with Anvil)"));
-            }
-
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(manifest ? manifest->version.to_string().c_str() : "-");
-
-            ImGui::TableNextColumn();
-            const auto skipped = std::find_if(report->skipped.begin(), report->skipped.end(),
-                                              [&](const cli::SkippedPlugin& s) { return s.folder == plugin.folder; });
-            if (plugin.status == "loaded") {
-                ImGui::TextColored(kGood, "%s", tr("loads"));
-            } else if (plugin.status == "disabled") {
-                weak(tr("disabled"));
-            } else {
-                colored_wrapped(kBad, skipped != report->skipped.end() ? trf("skipped: {0}", {i18n::text(skipped->why)})
-                                                                       : std::string(tr("skipped")));
-            }
-            const auto update = std::find_if(updates.begin(), updates.end(), [&](const CatalogPlugin* p) { return manifest && p->id == id; });
-            if (update != updates.end()) {
-                colored_wrapped(kGood, trf("{0} is available in the Catalog tab.", {(*update)->version}));
-                if (ImGui::SmallButton(tr("Open the Catalog tab"))) show_catalog_tab_ = true;
-            }
-            for (const cli::Problem& problem : shown_problems(plugin.report)) {
-                ImGui::PushStyleColor(ImGuiCol_Text, plugin.disabled ? ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled) : kWarn);
-                wrapped(problem.message);
-                ImGui::PopStyleColor();
-            }
-            if (manifest && manifest->affects_gameplay) {
-                weak_wrapped(tr("Changes the game: kept out of ironman and multiplayer unless allowed."));
-                ImGui::BeginDisabled(read_only());
-                if (manifest->allow_ironman == Allow::OptIn) {
-                    bool allow = listed(snapshot_->anvil_toml.allow_ironman, id);
-                    if (ImGui::Checkbox(tr("Allow in ironman"), &allow)) edit_list("allow_ironman", id, allow);
-                    ImGui::SameLine();
-                }
-                if (manifest->allow_multiplayer == Allow::OptIn) {
-                    bool allow = listed(snapshot_->anvil_toml.allow_multiplayer, id);
-                    if (ImGui::Checkbox(tr("Allow in multiplayer"), &allow)) edit_list("allow_multiplayer", id, allow);
-                }
-                ImGui::EndDisabled();
-            }
-            if (manifest) draw_modules(*manifest);
-
-            ImGui::TableNextColumn();
-            if (manifest && !manifest->settings.empty() && ImGui::SmallButton(tr("Settings"))) open_settings(plugin);
-            if (!is_standard(*package_, id)) {
-                ImGui::BeginDisabled(read_only());
-                if (ImGui::SmallButton(tr("Remove"))) ImGui::OpenPopup("remove");
-                ImGui::EndDisabled();
-            }
-            if (ImGui::BeginPopup("remove")) {
-                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 22);
-                ImGui::TextUnformatted(trf("Remove the folder {0}? Its settings and data in anvil/data stay.",
-                                           {"anvil/plugins/" + plugin.folder})
-                                           .c_str());
-                ImGui::PopTextWrapPos();
-                if (ImGui::Button(tr("Remove"))) {
-                    std::string error;
-                    if (!remove_plugin_folder(game_, plugin.folder, package_->standard_plugins, error)) {
-                        failed(tr("The plugin was not removed"), error, false);
-                    }
-                    refresh();
-                    ImGui::CloseCurrentPopup();
-                }
-                ImGui::SameLine();
-                if (ImGui::Button(tr("Cancel"))) ImGui::CloseCurrentPopup();
-                ImGui::EndPopup();
-            }
-            ImGui::PopID();
-        }
-        ImGui::EndTable();
-    }
-    if (report->plugins.empty()) weak(tr("No plugins are installed."));
-
-    if (!report->load_order.empty()) {
-        ImGui::Spacing();
-        weak(tr("Load order:"));
-        std::string order;
-        for (const cli::LoadedPlugin& p : report->load_order) order += (order.empty() ? "" : " > ") + p.id + " " + p.version +
-                                                                    (p.mod.empty() ? "" : " " + trf("(mod '{0}')", {p.mod}));
-        wrapped(order);
-    }
-    for (const cli::OverlapWarning& warning : report->warnings) colored_wrapped(kWarn, warning.message);
-}
-
-namespace {
-
-std::string mod_source(const cli::GameModPlugin& p) {
-    return trf("mod '{0}' ({1})", {p.mod, p.workshop_id.empty() ? std::string(tr("local mod")) : trf("Workshop {0}", {p.workshop_id})});
-}
-
-// What a plugin from a mod waits for, or does, in the player's words.
-std::string mod_state_text(const cli::GameModPlugin& p) {
-    if (p.state == "approved") return p.status == "loaded" ? std::string(tr("approved: loads")) : trf("approved, but {0}", {i18n::text(p.skip_why)});
-    if (p.state == "update-pending") return trf("an update waits for approval; the approved {0} loads", {p.approved_version});
-    if (p.state == "pending") return tr("waits for approval: does not load");
-    if (p.state == "conflict") return tr("conflict: does not load");
-    if (p.state == "shadowed") return tr("a plugin in anvil/plugins has this id and loads instead");
-    return tr("cannot be approved: does not load");
-}
-
-}  // namespace
-
-void ManagerApp::draw_mods_tab() {
-    const auto& report = snapshot_->report;
-    ImGui::Spacing();
-    ImGui::BeginDisabled(pending_.valid());
-    if (ImGui::Button(tr("Check again"))) refresh();
-    ImGui::EndDisabled();
-    ImGui::Spacing();
-    if (!report) {
-        wrapped(tr("Anvil is not installed in this folder: no plugins load."));
-        return;
-    }
-    wrapped(trf("Mods from the Workshop or your mod folder can carry plugins in their anvil/<id>/ folder. Only the "
-                "mods enabled in the playset the game starts with count ({0} enabled; the launcher changes the "
-                "playset). A plugin from a mod loads only after you approve its exact files; an update waits for a "
-                "new approval while the approved version keeps loading.",
-                {std::to_string(report->enabled_mods)}));
-    if (!report->playset_found) weak_wrapped(trf("No dlc_load.json in {0}: no mods are enabled.", {report->user_dir}));
-    for (const std::string& w : report->mod_warnings) colored_wrapped(kWarn, w);
-    for (const cli::Problem& problem : report->problems) {
-        const std::string file = u8(fs::path(widen(problem.file)).filename());
-        if (file != "anvil.toml") colored_wrapped(kBad, file + ": " + problem.message);
-    }
-    if (report->mod_plugins.empty()) {
-        ImGui::Spacing();
-        weak(tr("No enabled mod has plugins."));
-        return;
-    }
-    if (read_only() && running_) colored_wrapped(kWarn, tr("The game is running: approvals can be changed after it closes."));
-    ImGui::Spacing();
-    for (const cli::GameModPlugin& p : report->mod_plugins) {
-        ImGui::PushID((p.id + "/" + p.descriptor).c_str());
-        ImGui::Separator();
-        const auto& m = p.offered().manifest;
-        ImGui::Text("%s %s", m && !m->name.empty() ? m->name.c_str() : p.id.c_str(), p.version.c_str());
-        ImGui::SameLine();
-        weak(trf("id {0}, {1}", {p.id, mod_source(p)}));
-        const bool good = p.state == "approved" && p.status == "loaded";
-        const bool waits = p.state == "pending" || p.state == "update-pending" || p.state == "conflict";
-        colored_wrapped(good ? kGood : waits ? kWarn : p.state == "shadowed" ? ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled) : kBad,
-                        mod_state_text(p));
-        weak(p.why.empty() ? p.reason : i18n::text(p.why));
-        if (!p.others.empty()) weak(trf("Other mods with this id: {0}", {join(p.others)}));
-        for (const cli::Problem& problem : shown_problems(p.offered())) colored_wrapped(kWarn, problem.message);
-        const bool can_approve = can_approve_shown(p);
-        ImGui::BeginDisabled(read_only());
-        if (can_approve && ImGui::Button(p.state == "update-pending" ? tr("Approve the update...") : tr("Approve..."))) {
-            approve_ = p;
-            open_approve_ = true;
-        }
-        if (!p.approved_hash.empty()) {
-            if (can_approve) ImGui::SameLine();
-            if (ImGui::Button(tr("Revoke the approval"))) {
-                std::string error;
-                if (!revoke_shown_plugin(game_, p, error)) failed(tr("The approval was not revoked"), error, false);
-                refresh();
-            }
-        }
-        ImGui::EndDisabled();
         ImGui::PopID();
     }
 }
@@ -1042,186 +822,6 @@ void ManagerApp::draw_approve_modal() {
         ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
-}
-
-void ManagerApp::open_settings(const cli::GamePlugin& plugin) {
-    const Manifest& manifest = *plugin.report.manifest;
-    SettingsEditor editor;
-    editor.plugin = manifest.id;
-    editor.folder = game_ / "anvil" / "plugins" / widen(plugin.folder);
-    editor.player_file = game_ / "anvil" / "data" / widen(manifest.id) / "settings.toml";
-    const SettingsFileResult schema =
-        load_settings(game_ / "anvil" / "plugins" / widen(plugin.folder) / fs::path(widen(manifest.settings)));
-    if (!schema.file) {
-        editor.error = schema.error;
-    } else {
-        editor.schema = *schema.file;
-        PlayerSettings player = load_player_settings(editor.schema, editor.player_file);
-        editor.warnings = std::move(player.warnings);
-        for (const Setting& setting : editor.schema.settings) {
-            const SettingValue value = player.values[setting.id].value_or(setting.default_value);
-            editor.values.push_back(value);
-            editor.texts.push_back(setting.type == SettingType::Key      ? key_name(value.integer)
-                                   : setting.type == SettingType::String ? value.text
-                                                                          : std::string());
-        }
-    }
-    editor_ = std::move(editor);
-    show_settings_tab_ = true;
-}
-
-void ManagerApp::draw_settings_tab() {
-    const auto& report = snapshot_->report;
-    ImGui::Spacing();
-    if (!report || report->plugins.empty()) {
-        wrapped(tr("No installed plugin has settings."));
-        return;
-    }
-    const std::string current = editor_ ? editor_->plugin : std::string(tr("Choose a plugin"));
-    if (ImGui::BeginCombo((std::string(tr("Plugin")) + "###plugin").c_str(), current.c_str())) {
-        for (const cli::GamePlugin& plugin : report->plugins) {
-            const auto& manifest = plugin.report.manifest;
-            if (!manifest || manifest->settings.empty()) continue;
-            if (ImGui::Selectable(manifest->id.c_str(), editor_ && editor_->plugin == manifest->id)) open_settings(plugin);
-        }
-        ImGui::EndCombo();
-    }
-    if (!editor_) {
-        weak_wrapped(tr("Plugins with a settings.toml can be set up here. The values go to anvil/data/<plugin>/settings.toml "
-                "and apply when the game starts."));
-        return;
-    }
-    SettingsEditor& editor = *editor_;
-    if (!editor.error.empty()) {
-        colored_wrapped(kBad, editor.error);
-        return;
-    }
-    for (const std::string& warning : editor.warnings) colored_wrapped(kWarn, trf("Ignored in your file: {0}", {warning}));
-    ImGui::Spacing();
-    ImGui::BeginDisabled(read_only());
-    std::vector<std::string_view> groups;
-    for (const Setting& setting : editor.schema.settings) groups.emplace_back(setting.group);
-    std::string group;
-    for (const std::size_t position : anvil::ui::settings_display_order(groups)) {
-        const Setting& setting = editor.schema.settings[position];
-        SettingValue& value = editor.values[setting.id];
-        std::string& text = editor.texts[setting.id];
-        if (setting.group != group) {
-            group = setting.group;
-            ImGui::Spacing();
-            ImGui::SeparatorText(plugin_text(editor.folder, group).c_str());
-        }
-        ImGui::PushID(static_cast<int>(setting.id));
-        const std::string label = setting.label.empty() ? setting.name : plugin_text(editor.folder, setting.label);
-        bool changed = false;
-        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14);
-        switch (setting.type) {
-        case SettingType::Bool: {
-            bool on = value.integer != 0;
-            if (ImGui::Checkbox(label.c_str(), &on)) {
-                value.integer = on ? 1 : 0;
-                changed = true;
-            }
-            break;
-        }
-        case SettingType::Int: {
-            const int64_t step = setting.step ? setting.step->integer : 1;
-            changed = ImGui::InputScalar(label.c_str(), ImGuiDataType_S64, &value.integer, &step);
-            if (setting.min) value.integer = std::max(value.integer, setting.min->integer);
-            if (setting.max) value.integer = std::min(value.integer, setting.max->integer);
-            break;
-        }
-        case SettingType::Float: {
-            const double step = setting.step ? setting.step->real : 0.0;
-            changed = ImGui::InputDouble(label.c_str(), &value.real, step, step * 10, "%.4g");
-            if (setting.min) value.real = std::max(value.real, setting.min->real);
-            if (setting.max) value.real = std::min(value.real, setting.max->real);
-            break;
-        }
-        case SettingType::Enum: {
-            const auto index = static_cast<size_t>(value.integer);
-            const std::string shown =
-                index < setting.options.size() ? plugin_text(editor.folder, setting.options[index].label) : "?";
-            if (ImGui::BeginCombo(label.c_str(), shown.c_str())) {
-                for (size_t i = 0; i < setting.options.size(); ++i) {
-                    if (ImGui::Selectable(plugin_text(editor.folder, setting.options[i].label).c_str(), i == index)) {
-                        value.integer = static_cast<int64_t>(i);
-                        changed = true;
-                    }
-                }
-                ImGui::EndCombo();
-            }
-            break;
-        }
-        case SettingType::String:
-            if (ImGui::InputText(label.c_str(), &text)) {
-                value.text = text;
-                changed = true;
-            }
-            break;
-        case SettingType::Key:
-            if (ImGui::InputTextWithHint(label.c_str(), tr("no key"), &text)) {
-                if (const auto code = parse_key(text)) value.integer = *code;
-                changed = true;
-            }
-            if (!parse_key(text)) {
-                ImGui::SameLine();
-                ImGui::TextColored(kBad, "%s", tr("not a key (e.g. Ctrl+Shift+F12)"));
-            }
-            break;
-        }
-        if (!(value == setting.default_value)) {
-            ImGui::SameLine();
-            if (ImGui::SmallButton(tr("Default"))) {
-                value = setting.default_value;
-                text = setting.type == SettingType::Key ? key_name(value.integer) : value.text;
-                changed = true;
-            }
-        }
-        if (!setting.description.empty()) {
-            ImGui::Indent();
-            weak(plugin_text(editor.folder, setting.description));
-            ImGui::Unindent();
-        }
-        editor.dirty = editor.dirty || changed;
-        ImGui::PopID();
-    }
-    ImGui::Spacing();
-    ImGui::BeginDisabled(!editor.dirty);
-    if (primary_button(tr("Save"))) save_settings();
-    ImGui::SameLine();
-    if (ImGui::Button(tr("Undo changes"))) {
-        const auto& plugins = snapshot_->report->plugins;
-        const auto it = std::find_if(plugins.begin(), plugins.end(), [&](const cli::GamePlugin& p) {
-            return p.report.manifest && p.report.manifest->id == editor.plugin;
-        });
-        if (it != plugins.end()) open_settings(*it);
-    }
-    ImGui::EndDisabled();
-    ImGui::EndDisabled();
-    weak_wrapped(trf("Saved to {0}; values apply when the game starts.", {u8(editor_ ? editor_->player_file : fs::path())}));
-}
-
-void ManagerApp::save_settings() {
-    SettingsEditor& editor = *editor_;
-    for (const Setting& setting : editor.schema.settings) {
-        if (setting.type == SettingType::Key && !parse_key(editor.texts[setting.id])) {
-            show_message(tr("Not saved"), trf("{0}: '{1}' is not a key.", {setting.label.empty() ? setting.name : setting.label,
-                                                                            editor.texts[setting.id]}));
-            return;
-        }
-        if (const std::string why = check_setting_value(setting, editor.values[setting.id]); !why.empty()) {
-            show_message(tr("Not saved"), (setting.label.empty() ? setting.name : setting.label) + ": " + why);
-            return;
-        }
-    }
-    std::string error;
-    if (!write_player_settings(editor.schema, editor.values, editor.player_file, error)) {
-        failed(tr("The settings were not saved"), error, error.find("error 5)") != std::string::npos);
-        return;
-    }
-    editor.dirty = false;
-    editor.warnings.clear();
 }
 
 void ManagerApp::draw_benchmark_tab() {
@@ -1523,60 +1123,6 @@ void ManagerApp::dropped(const fs::path& file) {
     open_zip(file);
 }
 
-// A plugin's modules (ADR 0011): a switch each, written to enabled_modules /
-// disabled_modules, and the opt-ins of an enabled gameplay module. Choices apply
-// at the next start, as for plugins.
-void ManagerApp::draw_modules(const Manifest& manifest) {
-    if (manifest.modules.empty()) return;
-    const AnvilSettings& toml = snapshot_->anvil_toml;
-    ImGui::BeginDisabled(read_only());
-    for (const Module& mod : manifest.modules) {
-        const std::string key = module_key(manifest, mod);
-        ImGui::PushID(key.c_str());
-        bool on = !listed(toml.disabled_modules, key) && (mod.enabled_by_default || listed(toml.enabled_modules, key));
-        if (ImGui::Checkbox("##module", &on)) set_module(key, mod.enabled_by_default, on);
-        ImGui::SameLine();
-        wrapped(module_summary(manifest, mod, plugin_text(manifest.folder, mod.name)));
-        if (on && mod.affects_gameplay && (mod.allow_ironman == Allow::OptIn || mod.allow_multiplayer == Allow::OptIn)) {
-            ImGui::Indent();
-            if (mod.allow_ironman == Allow::OptIn) {
-                bool allow = listed(toml.allow_ironman, key);
-                if (ImGui::Checkbox(tr("Allow in ironman"), &allow)) edit_list("allow_ironman", key, allow);
-                ImGui::SameLine();
-            }
-            if (mod.allow_multiplayer == Allow::OptIn) {
-                bool allow = listed(toml.allow_multiplayer, key);
-                if (ImGui::Checkbox(tr("Allow in multiplayer"), &allow)) edit_list("allow_multiplayer", key, allow);
-            }
-            ImGui::Unindent();
-        }
-        ImGui::PopID();
-    }
-    ImGui::EndDisabled();
-}
-
-// On: out of disabled_modules, and into enabled_modules when it is off by
-// default. Off: into disabled_modules when it is on by default, else out of
-// enabled_modules.
-void ManagerApp::set_module(const std::string& key, bool on_by_default, bool on) {
-    if (on) {
-        edit_list("disabled_modules", key, false);
-        if (!on_by_default) edit_list("enabled_modules", key, true);
-    } else if (on_by_default) {
-        edit_list("disabled_modules", key, true);
-    } else {
-        edit_list("enabled_modules", key, false);
-    }
-}
-
-void ManagerApp::edit_list(const std::string& key, const std::string& id, bool listed_now) {
-    std::string error;
-    if (!set_plugin_listed(game_ / "anvil" / "anvil.toml", key, id, listed_now, error)) {
-        failed(tr("anvil.toml was not changed"), error, error.find("error 5)") != std::string::npos);
-    }
-    refresh();
-}
-
 void ManagerApp::show_message(std::string title, std::string text) {
     message_title_ = std::move(title);
     message_text_ = std::move(text);
@@ -1602,6 +1148,7 @@ void ManagerApp::draw_modals() {
     draw_zip_modal();
     draw_download_modal();
     draw_approve_modal();
+    draw_confirm_modal();
 
     next_modal(36);
     if (ImGui::BeginPopupModal((message_title_ + "###message").c_str(), nullptr, ImGuiWindowFlags_NoSavedSettings)) {

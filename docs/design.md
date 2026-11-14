@@ -671,7 +671,7 @@ Decided in [Workshop discovery and trust](https://github.com/happy-dwarf-team/an
   - A non-blocking notice lists the plugins that wait (new, an update, a conflict) and leads to the panel's **Mods** tab. There the player approves, with a second click, or revokes. The game never pauses.
   - Plugins that wait for approval are not repeated in the "not loaded" notice.
 - **In the Manager** (§15)
-  - A **Mods** tab shows the same states and reasons from `anvil check --game`.
+  - The **Plugins** tab lists them in a section of their own, **From mods**, with the same states and reasons from `anvil check --game` (ADR 0013).
   - The player can approve before launch through a prompt, and can revoke.
   - An approval reads the playset again and goes through only when the same mod still has that plugin with the hash that was shown.
 - **`anvil check --game [--user-dir <folder>]`**

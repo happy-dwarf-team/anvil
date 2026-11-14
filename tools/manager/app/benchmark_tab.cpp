@@ -207,7 +207,7 @@ void BenchmarkTab::draw_setup(const BenchmarkContext& context) {
     }
     const std::vector<ComparablePlugin> plugins = comparable_plugins(*context.report);
     if (plugins.empty()) {
-        colored_wrapped(kWarn, tr("No plugin to compare: enable one on the Plugins tab, or approve one on the Mods tab."));
+        colored_wrapped(kWarn, tr("No plugin to compare: turn one on, or approve one, on the Plugins tab."));
         draw_kept(context);
         return;
     }
