@@ -9,6 +9,8 @@
 - A change to game memory or the loader is tried on a copy of the game; the PR says what was
   and was not tested there.
 - English in code and docs. Do not imply affiliation with Paradox Interactive.
+- A change to the Manager, the overlay or a player-facing string follows
+  [docs/ui-guidelines.md](docs/ui-guidelines.md); the PR attaches screenshots as its checklist says.
 - The agent owns the pull request flow: it works on a branch with Conventional Commits,
   pushes it and opens the PR as a draft. Once ready (green CI, the change tested as above,
   no blocking review findings, not put on hold by the user) it marks the PR ready and
