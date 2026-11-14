@@ -118,6 +118,8 @@ pre.toml .chg{color:var(--info)}
 .banner.warn{background:rgba(245,184,66,.08);border-color:rgba(245,184,66,.4)}
 .li.held{opacity:.6}
 .chg{font-size:11px;padding:0 5px;border-radius:3px;border:1px solid var(--bs);color:#ccc;white-space:nowrap}
+.split.fixed{height:560px}
+.split.fixed .list,.split.fixed .detail{overflow-y:auto;min-height:0}
 .held{opacity:.55}
 .held .cb.dis{opacity:1}
 .held .seg button:disabled{opacity:1}
@@ -2854,7 +2856,8 @@ function variantB5(){
       if (open) d += its.map(it => b5Module(it, live, heldWhy)).join('');
     }
   }
-  return `${attentionBar()}<div class="split"><div class="list">${list}</div><div class="detail">${d}</div></div>`;
+  // As in the real apps: the window keeps its size, and the list and the detail scroll on their own.
+  return `${attentionBar()}<div class="split fixed"><div class="list">${list}</div><div class="detail">${d}</div></div>`;
 }
 function dialog(){
   const c = ui.confirm;
@@ -2955,7 +2958,13 @@ function tomlText(){
   return lines.join('\n');
 }
 function render(){
+  // Keep each pane's scroll across a redraw (ImGui keeps it); a new selection starts the detail at the top.
+  const panes = ['#variant .list', '#variant .detail', '#map .list', '#map .detail'];
+  const kept = panes.map(s => document.querySelector(s)?.scrollTop || 0);
+  const sel = [ui.selected, ui.oselected];
   manager(); overlay();
+  panes.forEach((s, i) => { const el = document.querySelector(s); if (el) el.scrollTop = s.endsWith('detail') && sel[i >> 1] !== render.lastSel?.[i >> 1] ? 0 : kept[i]; });
+  render.lastSel = sel;
   let m = document.getElementById('modal');
   if (!m){ m = document.createElement('div'); m.id = 'modal'; document.body.appendChild(m); }
   m.innerHTML = dialog();
