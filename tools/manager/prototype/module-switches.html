@@ -120,6 +120,29 @@ pre.toml .chg{color:var(--info)}
 .chg{font-size:11px;padding:0 5px;border-radius:3px;border:1px solid var(--bs);color:#ccc;white-space:nowrap}
 .split.fixed{height:560px}
 .split.fixed .list,.split.fixed .detail{overflow-y:auto;min-height:0}
+.lcol{display:flex;flex-direction:column;min-height:0;gap:6px}
+.lcol .list{flex:1}
+.lsearch{display:flex;flex-direction:column;gap:6px}
+.find{display:flex;align-items:center;gap:8px}
+.find input{flex:1;min-width:0}
+.find input::placeholder{color:#8a8a96}
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.chip{font-size:12px;padding:1px 8px;border-radius:10px;background:transparent;border:1px solid var(--bs);color:#ccc}
+.chip:hover:not(:disabled){background:rgba(66,150,250,.18)}
+.chip.on{background:var(--frame);border-color:var(--check);color:#fff}
+.chip .n{color:var(--weak)}
+.chip.on .n{color:#cfe0f7}
+mark{background:rgba(245,184,66,.35);color:inherit;border-radius:2px;padding:0 1px}
+.mod.hit{box-shadow:inset 3px 0 0 var(--warn);padding-left:6px !important}
+.empty{padding:12px 10px}
+/* Scrollbars as the apps' ImGui style will draw them (ui-guidelines §3): thin, no track, a neutral grab
+   that brightens on hover and takes the accent while dragged. */
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track,::-webkit-scrollbar-corner{background:transparent}
+::-webkit-scrollbar-thumb{background:#4f4f59;border-radius:6px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background-color:#6e6e80}
+::-webkit-scrollbar-thumb:active{background-color:rgba(66,150,250,.67)}
+@supports not selector(::-webkit-scrollbar){*{scrollbar-width:thin;scrollbar-color:#4f4f59 transparent}}
 .held{opacity:.55}
 .held .cb.dis{opacity:1}
 .held .seg button:disabled{opacity:1}
@@ -2142,8 +2165,8 @@ function control(pid, s, disabled){
   const v = getVal(pid, s), k = esc(valKey(pid, s)), dis = disabled ? 'disabled' : '';
   let c;
   if (s.type === 'bool') c = cb(s.label, v, 'set', valKey(pid, s), {disabled});
-  else if (s.type === 'enum') c = `<select data-set="${k}" ${dis}>${s.values.map(([n, l]) => `<option value="${n}" ${n === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select> <span>${esc(s.label)}</span>`;
-  else c = `<input type="${s.type === 'int' ? 'number' : 'text'}" data-set="${k}" value="${esc(v)}" ${dis}> <span>${esc(s.label)}</span>`;
+  else if (s.type === 'enum') c = `<select data-set="${k}" ${dis}>${s.values.map(([n, l]) => `<option value="${n}" ${n === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select> <span>${hl(s.label)}</span>`;
+  else c = `<input type="${s.type === 'int' ? 'number' : 'text'}" data-set="${k}" value="${esc(v)}" ${dis}> <span>${hl(s.label)}</span>`;
   const p = setPending(pid, s) ? `<span class="pending">&#9679; at the next start${running ? ` (now ${esc(show(getVal(pid, s, lastValues)))})` : ''}</span>` : '';
   const when = `<span class="weak" style="font-size:12px">${s.restart ? 'next start' : 'applies at once'}</span>`;
   const def = esc(show(s.def) || 'none');
@@ -2769,24 +2792,27 @@ function b5Entry(p, sel){
   const ch = changedSettings(p.id).length, tr = trustOf(toml, p);
   const what = tr === 'update' ? `${esc(p.fromMod.approvedVersion)} runs until you approve ${esc(p.version)}` : tr === 'invalid' ? 'see why' : mods;
   return `<div class="li ${sel === p.id ? 'sel' : ''}${loads(toml, p) || cannotLoad(tr) ? '' : ' held'}" data-act="select" data-key="${CTX}:${p.id}">
-    <div class="mrow"><span>${esc(p.name)} <span class="weak">${esc(tr === 'update' ? p.fromMod.approvedVersion : p.version)}</span></span><span style="font-size:12px">${b5State(p)}</span></div>
-    <div class="weak" style="font-size:12px">${what}${ch ? ` &middot; ${ch} changed` : ''}${anyPending ? ' &middot; <span class="pending">&#9679; next start</span>' : ''}</div></div>`;
+    <div class="mrow"><span>${hl(p.name)} <span class="weak">${esc(tr === 'update' ? p.fromMod.approvedVersion : p.version)}</span></span><span style="font-size:12px">${b5State(p)}</span></div>
+    <div class="weak" style="font-size:12px">${what}${ch ? ` &middot; ${ch} changed` : ''}${anyPending ? ' &middot; <span class="pending">&#9679; next start</span>' : ''}</div>
+    ${matchWhy(p) ? `<div style="font-size:12px">found in ${hl(matchWhy(p))}</div>` : ''}</div>`;
 }
 function b5Module(it, live, heldWhy){
   const own = chosen(toml, it), on = live && own, n = settingsOf(it.plugin.id, it.mod.id).length, ch = changedSettings(it.plugin.id, it.mod.id).length;
   const sw = it.gameplay ? '' : cb('', own, 'on', it.key, {disabled: !live, title: live ? '' : heldWhy});
   const moreKey = `${CTX}:more:${it.key}`;
-  let h = `<div class="mod${live ? '' : ' held'}" style="padding:6px 0"><div class="mrow"><span>${sw} ${esc(it.name)}${tag(it)}</span>
+  const hit = moduleHit(it);
+  let h = `<div class="mod${live ? '' : ' held'}${hit ? ' hit' : ''}" style="padding:6px 0"><div class="mrow"><span>${sw} ${hl(it.name)}${tag(it)}</span>
     <span>${inGame() ? stateWord(it) : ''} ${pend(it)} ${ch && live ? `<button class="expander" data-act="askResetMod" data-key="${esc(it.key)}">Reset settings (${ch})...</button>` : ''}</span></div>
-    <div class="mdesc full">${esc(it.mod.desc)}${it.mod.details ? ` <button class="expander" data-act="toggle" data-key="${esc(moreKey)}">${ui.open.has(moreKey) ? 'Less' : 'More'}</button>` : ''}</div>
+    <div class="mdesc full">${hl(it.mod.desc)}${it.mod.details ? ` <button class="expander" data-act="toggle" data-key="${esc(moreKey)}">${ui.open.has(moreKey) ? 'Less' : 'More'}</button>` : ''}</div>
     ${it.mod.details && ui.open.has(moreKey) ? `<div class="more">${esc(it.mod.details)}</div>` : ''}`;
   if (it.gameplay) h += `<div style="margin:6px 0 0 22px">${segment(it, !live, true)}<div class="note">${live ? whereText(it, true) : 'Kept: ' + whereText(it, true)}</div></div>`;
   if (n){
     if (on) h += `<div style="margin-left:22px">${b2Settings(it.plugin.id, it.mod.id, false)}</div>`;
     else {
       const key = openKey(it.key);
-      h += `<div style="margin-left:22px"><button class="expander" data-act="toggle" data-key="${esc(key)}">${ui.open.has(key) ? '&#9662;' : '&#9656;'} Settings (${n}${ch ? `, ${ch} changed` : ''}), kept while ${live ? 'it' : 'its plugin'} is off</button>
-        ${ui.open.has(key) ? b2Settings(it.plugin.id, it.mod.id, true, '') : ''}</div>`;
+      const open = ui.open.has(key) || settingsOf(it.plugin.id, it.mod.id).some(s => hasQ(s.label) || hasQ(s.name));   // a found setting shows
+      h += `<div style="margin-left:22px"><button class="expander" data-act="toggle" data-key="${esc(key)}">${open ? '&#9662;' : '&#9656;'} Settings (${n}${ch ? `, ${ch} changed` : ''}), kept while ${live ? 'it' : 'its plugin'} is off</button>
+        ${open ? b2Settings(it.plugin.id, it.mod.id, true, '') : ''}</div>`;
     }
   }
   return h + '</div>';
@@ -2806,17 +2832,71 @@ function b5ModCard(p){
   return `<div class="note">From the mod ${esc(f.mod)} (Workshop item ${esc(f.workshop)}) &middot; ${was !== tr ? '<span class="pending">&#9679; approved; loads at the next start</span>' : `approved on ${esc(f.approved || 'today')}`}
     &middot; <button class="expander" data-act="askRevoke" data-key="${p.id}">Revoke approval...</button></div>`;
 }
+// ---- B5: search and filters over the list --------------------------------------------------
+ui.query = {manager:'', overlay:''};
+ui.filters = {manager:new Set(), overlay:new Set()};
+const query = () => (ui.query[CTX] || '').trim();
+const hasQ = (s, q = query()) => !!q && (s || '').toLowerCase().includes(q.toLowerCase());
+// The text, escaped, with the search words marked.
+function hl(text){
+  const q = query(), t = String(text ?? '');
+  if (variant !== 'B5' || !q) return esc(t);
+  const i = t.toLowerCase().indexOf(q.toLowerCase());
+  return i < 0 ? esc(t) : esc(t.slice(0, i)) + `<mark>${esc(t.slice(i, i + q.length))}</mark>` + esc(t.slice(i + q.length));
+}
+// Why a plugin matches the search: '' for its own name or id, a short reason otherwise, null for no match.
+function matchWhy(p){
+  const q = query();
+  if (!q || hasQ(p.name) || hasQ(p.id)) return '';
+  const m = p.modules.find(x => hasQ(x.name) || hasQ(x.desc) || hasQ(x.id));
+  if (m) return `module: ${m.name}`;
+  const s = (SETTINGS[p.id] || []).find(x => hasQ(x.label) || hasQ(x.name) || hasQ(x.desc));
+  if (s) return `setting: ${s.label}`;
+  if (hasQ(p.desc)) return 'its description';
+  if (p.fromMod && hasQ(p.fromMod.mod)) return `mod: ${p.fromMod.mod}`;
+  return null;
+}
+const moduleHit = it => !!query() && (hasQ(it.name) || hasQ(it.mod.desc) || hasQ(it.mod.id) || settingsOf(it.plugin.id, it.mod.id).some(s => hasQ(s.label) || hasQ(s.name) || hasQ(s.desc)));
+const pendingOf = p => items().some(i => i.plugin === p && isPending(i)) || (SETTINGS[p.id] || []).some(s => setPending(p.id, s)) || trustOf(toml, p) !== trustOf(lastStart, p);
+const FILTERS = [
+  ['attention', 'Needs attention', p => { const tr = trustOf(toml, p); return tr === 'waits' || tr === 'update' || tr === 'invalid' || (pluginOn(toml, p) && !loads(toml, p)); }],
+  ['gameplay', 'Changes the game', p => p.gameplay || p.modules.some(m => m.gameplay)],
+  ['changed', 'Changed settings', p => changedSettings(p.id).length > 0],
+  ['pending', 'Waits for the next start', pendingOf],
+  ['off', 'Off', p => !loads(toml, p) && trustOf(toml, p) === 'local']];
+const shown = p => matchWhy(p) !== null && [...ui.filters[CTX]].every(k => FILTERS.find(f => f[0] === k)[2](p));
+function searchBox(total, visible){
+  const q = ui.query[CTX] || '', fs = ui.filters[CTX];
+  const chips = FILTERS.map(([k, label, test]) => {
+    const n = PLUGINS.filter(test).length, on = fs.has(k);
+    return n || on ? `<button class="chip${on ? ' on' : ''}" role="checkbox" aria-checked="${on}" data-act="filter" data-key="${CTX}:${k}">${on ? '&#10003; ' : ''}${label} <span class="n">${n}</span></button>` : '';
+  }).join('');
+  const busy = q || fs.size;
+  return `<div class="lsearch"><label class="find"><span class="weak">Find</span>
+      <input type="search" data-search="${CTX}" value="${esc(q)}" placeholder="plugin, module or setting" aria-label="Find a plugin, module or setting"></label>
+      <div class="chips">${chips}</div>
+      ${busy ? `<div class="weak" style="font-size:12px">${visible} of ${total} plugins <button class="expander" data-act="clearfind" data-key="${CTX}">Clear</button></div>` : ''}</div>`;
+}
+
 function variantB5(){
   const sel = inGame() ? ui.oselected : ui.selected;
   const ours = PLUGINS.filter(p => !p.standard && !p.fromMod), mods = PLUGINS.filter(p => p.fromMod), std = PLUGINS.filter(p => p.standard);
   const section = (key, title, list, openByDefault) => {
-    const k = `${CTX}:${key}`, open = (openByDefault ? !ui.open.has(k) : ui.open.has(k)) || list.some(p => p.id === sel);
-    return `<div class="lhdr" data-act="toggle" data-key="${k}">${open ? '&#9662;' : '&#9656;'} ${title}</div>` + (open ? list.map(p => b5Entry(p, sel)).join('') : '');
+    // While searching or filtering, a section shows only what matches and is open; without a match it is left out.
+    const busy = !!query() || ui.filters[CTX].size, hits = list.filter(shown);
+    if (busy && !hits.length) return '';
+    const k = `${CTX}:${key}`, open = busy || (openByDefault ? !ui.open.has(k) : ui.open.has(k)) || list.some(p => p.id === sel);
+    return `<div class="lhdr" data-act="toggle" data-key="${k}">${open ? '&#9662;' : '&#9656;'} ${title}${busy ? ` <span class="weak">&middot; ${hits.length} found</span>` : ''}</div>` + (open ? hits.map(p => b5Entry(p, sel)).join('') : '');
   };
   const waiting = toApprove().length, broken = mods.filter(p => trustOf(toml, p) === 'invalid').length;
-  const list = ours.map(p => b5Entry(p, sel)).join('')
+  const visible = PLUGINS.filter(shown).length;
+  let list = ours.filter(shown).map(p => b5Entry(p, sel)).join('')
     + section('mods', `From mods <span class="weak">&middot; ${mods.length} plugins in 3 enabled mods${waiting ? `, <span class="warn">${waiting} wait for approval</span>` : ''}${broken ? `, <span class="bad">${broken} cannot load</span>` : ''}</span>`, mods, true)
     + section('std', `Comes with Anvil <span class="weak">&middot; ${std.length} plugins, ${std.filter(p => pluginOn(toml, p)).length} on</span>`, std, false);
+  if (!visible) list = `<div class="empty"><p>No plugin matches${query() ? ` &ldquo;${esc(query())}&rdquo;` : ''}${ui.filters[CTX].size ? ' with these filters' : ''}.</p>
+    <p class="note">The search looks in names, modules, settings and descriptions.</p>
+    <button class="small" data-act="clearfind" data-key="${CTX}">Clear the search and filters</button></div>`;
+  const left = `<div class="lcol">${searchBox(PLUGINS.length, visible)}<div class="list">${list}</div></div>`;
   const p = plug(sel) || ours[0], pi = item(p.id), pOn = pluginOn(toml, p), tr = trustOf(toml, p);
   const live = loads(toml, p), b = pOn && tr !== 'waits' ? blocker(toml, p) : null;
   const locked = inGame() && overlayNeeds().has(p.id);
@@ -2848,7 +2928,7 @@ function variantB5(){
     for (const m of p.modules){ const g = m.group || ''; let e = groups.find(x => x.g === g); if (!e){ e = {g, its:[]}; groups.push(e); } e.its.push(item(p.id + '.' + m.id)); }
     const foldAll = p.modules.length > 12;
     for (const {g, its} of groups){
-      const key = `${CTX}:grp5:${p.id}:${g}`, toggled = ui.open.has(key), open = foldAll ? toggled : !toggled;
+      const key = `${CTX}:grp5:${p.id}:${g}`, toggled = ui.open.has(key), open = (foldAll ? toggled : !toggled) || its.some(moduleHit);   // a group with a found module opens
       const on = its.filter(i => chosen(toml, i)).length, pendN = its.filter(isPending).length;
       const ch = its.reduce((n, i) => n + changedSettings(p.id, i.mod.id).length, 0);
       d += `<div class="gsep${live ? '' : ' held'}" data-act="toggle" data-key="${esc(key)}">${open ? '&#9662;' : '&#9656;'} ${esc(g || 'Modules')}
@@ -2857,7 +2937,7 @@ function variantB5(){
     }
   }
   // As in the real apps: the window keeps its size, and the list and the detail scroll on their own.
-  return `${attentionBar()}<div class="split fixed"><div class="list">${list}</div><div class="detail">${d}</div></div>`;
+  return `${attentionBar()}<div class="split fixed">${left}<div class="detail">${d}</div></div>`;
 }
 function dialog(){
   const c = ui.confirm;
@@ -2962,7 +3042,9 @@ function render(){
   const panes = ['#variant .list', '#variant .detail', '#map .list', '#map .detail'];
   const kept = panes.map(s => document.querySelector(s)?.scrollTop || 0);
   const sel = [ui.selected, ui.oselected];
+  const focus = document.activeElement?.dataset?.search, caret = document.activeElement?.selectionStart;   // the field keeps focus while typing
   manager(); overlay();
+  if (focus){ const f = document.querySelector(`[data-search="${focus}"]`); if (f){ f.focus(); f.setSelectionRange(caret, caret); } }
   panes.forEach((s, i) => { const el = document.querySelector(s); if (el) el.scrollTop = s.endsWith('detail') && sel[i >> 1] !== render.lastSel?.[i >> 1] ? 0 : kept[i]; });
   render.lastSel = sel;
   let m = document.getElementById('modal');
@@ -3006,6 +3088,8 @@ function act(el){
   else if (a === 'bellows') useBellows(k);
   else if (a === 'confirmOk'){ const c = ui.confirm; ui.confirm = null; CTX = c.ctx; confirmed(c); CTX = 'manager'; }
   else if (a === 'confirmCancel') ui.confirm = null;
+  else if (a === 'filter'){ const [c, f] = k.split(':'), s = ui.filters[c]; s.has(f) ? s.delete(f) : s.add(f); }
+  else if (a === 'clearfind'){ ui.query[k] = ''; ui.filters[k].clear(); }
   else if (a === 'askOn' || a === 'askDeps'){
     CTX = el.closest('#map') ? 'overlay' : 'manager';
     const p = plug(k), chain = offChain(p);
@@ -3078,8 +3162,17 @@ document.addEventListener('change', e => {
     render();
   }
 });
+// B5: the search field filters as the player types; Esc clears it; Ctrl+F finds it in the Manager.
+document.addEventListener('input', e => {
+  const c = e.target.dataset && e.target.dataset.search;
+  if (c){ ui.query[c] = e.target.value; render(); }
+});
 document.addEventListener('keydown', e => {
   const t = e.target;
+  if (t.dataset && t.dataset.search && e.key === 'Escape'){ ui.query[t.dataset.search] = ''; render(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && variant === 'B5'){
+    const f = document.querySelector('[data-search="manager"]'); if (f){ e.preventDefault(); f.focus(); f.select(); return; }
+  }
   if (t.matches && t.matches('input, textarea, select, [contenteditable]')) return;
   if (e.key === 'ArrowLeft') go(-1);
   else if (e.key === 'ArrowRight') go(1);
