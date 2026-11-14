@@ -112,6 +112,12 @@ std::string module_summary(const Manifest& plugin, const Module& m, const std::s
     return trf("{0}: changes the game; suspended in ironman and multiplayer.", {label});
 }
 
+// A plugin changes the game when it says so or when any of its modules does.
+bool changes_game(const Manifest& m) {
+    return m.affects_gameplay ||
+           std::any_of(m.modules.begin(), m.modules.end(), [](const Module& mod) { return mod.affects_gameplay; });
+}
+
 bool listed(const std::vector<std::string>& list, const std::string& id) {
     return std::find(list.begin(), list.end(), id) != list.end();
 }
@@ -986,9 +992,7 @@ void ManagerApp::draw_approve_modal() {
     ImGui::Spacing();
     colored_wrapped(kWarn, tr("A plugin is native code: it runs inside the game with your rights, like any program. "
                               "Approve plugins only from authors you trust."));
-    const bool module_gameplay =
-        std::any_of(m.modules.begin(), m.modules.end(), [](const Module& mod) { return mod.affects_gameplay; });
-    if (m.affects_gameplay || module_gameplay) {
+    if (changes_game(m)) {
         bullet(tr("It changes the game. Anvil keeps it out of ironman and multiplayer games unless you allow it there."));
     } else {
         bullet(tr("It says it does not change the game (affects_gameplay = false)."));
@@ -1708,7 +1712,8 @@ void ManagerApp::draw_zip_modal() {
         ImGui::Spacing();
         colored_wrapped(kWarn, tr("A plugin is native code: it runs inside the game with your rights, like any "
                                   "program. Install plugins only from authors you trust."));
-        if (m.affects_gameplay) {
+        // A module that changes the game counts, as in the approval of a plugin from a mod.
+        if (changes_game(m)) {
             bullet(tr("It changes the game. Anvil keeps it out of ironman and multiplayer games unless you allow it there."));
         } else {
             bullet(tr("It says it does not change the game (affects_gameplay = false)."));
