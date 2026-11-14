@@ -6,12 +6,16 @@
 #include <string>
 #include <vector>
 
+#include "ui/imgui_colors.hpp"
+
 // Small drawing helpers the Manager's tabs share.
 namespace anvil::manager::ui {
 
-inline const ImVec4 kGood{0.40f, 0.78f, 0.45f, 1.0f};
-inline const ImVec4 kWarn{0.96f, 0.72f, 0.26f, 1.0f};
-inline const ImVec4 kBad{0.95f, 0.42f, 0.38f, 1.0f};
+// The state colours of the shared style (src/ui/imgui_colors.hpp).
+inline constexpr ImVec4 kGood = ::anvil::ui::kGood;
+inline constexpr ImVec4 kWarn = ::anvil::ui::kWarn;
+inline constexpr ImVec4 kBad = ::anvil::ui::kBad;
+using ::anvil::ui::primary_button;
 
 inline std::string u8(const std::filesystem::path& path) {
     const auto text = path.u8string();

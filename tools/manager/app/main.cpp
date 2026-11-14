@@ -170,15 +170,8 @@ void load_fonts(float scale) {
             io.Fonts->AddFontFromMemoryTTF(const_cast<void*>(mapped.view), mapped.size, 17.0f * scale, &windows_font);
         }
     }
-    ImGui::GetStyle() = ImGuiStyle();
-    anvil::ui::use_dark_colors();
-    ImGuiStyle& style = ImGui::GetStyle();
-    style.WindowPadding = ImVec2(14, 12);
-    style.FramePadding = ImVec2(8, 4);
-    style.ItemSpacing = ImVec2(8, 7);
-    style.FrameRounding = 3;
-    style.TabRounding = 3;
-    style.ScaleAllSizes(scale);
+    anvil::ui::use_anvil_style();
+    ImGui::GetStyle().ScaleAllSizes(scale);
 }
 
 bool is_button_message(UINT message) {
@@ -409,7 +402,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         ImGui::NewFrame();
         app->draw();
         ImGui::Render();
-        const float clear[4] = {0.08f, 0.08f, 0.09f, 1.0f};
+        const float clear[4] = {anvil::ui::kBackground.x, anvil::ui::kBackground.y, anvil::ui::kBackground.z, 1.0f};
         graphics.context->OMSetRenderTargets(1, &graphics.target, nullptr);
         graphics.context->ClearRenderTargetView(graphics.target, clear);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());

@@ -113,10 +113,11 @@ Ui& ui() {
     return u;
 }
 
-const ImVec4 kRed(0.95f, 0.40f, 0.35f, 1.0f);
-const ImVec4 kAmber(1.0f, 0.76f, 0.30f, 1.0f);
-const ImVec4 kBlue(0.55f, 0.75f, 1.0f, 1.0f);
-const ImVec4 kGreen(0.45f, 0.85f, 0.45f, 1.0f);
+// The state colours of the shared style (src/ui/imgui_colors.hpp).
+constexpr ImVec4 kRed = anvil::ui::kBad;
+constexpr ImVec4 kAmber = anvil::ui::kWarn;
+constexpr ImVec4 kBlue = anvil::ui::kInfo;
+constexpr ImVec4 kGreen = anvil::ui::kGood;
 
 ImVec4 kind_color(NoticeKind kind) {
     return kind == NoticeKind::Error ? kRed : kind == NoticeKind::Warning ? kAmber : kBlue;
@@ -588,12 +589,8 @@ bool ensure_imgui(IDirect3DDevice9* device) {
         platform.Platform_GetClipboardTextFn = get_clipboard;
         platform.Platform_SetImeDataFn = nullptr;  // IME calls could block on the window's thread
         platform.Platform_OpenInShellFn = nullptr;
-        anvil::ui::use_dark_colors();
-        ImGuiStyle& style = ImGui::GetStyle();
-        style.WindowRounding = 6.0f;
-        style.FrameRounding = 4.0f;
-        style.WindowBorderSize = 1.0f;
-        u.base_style = style;
+        anvil::ui::use_anvil_style();
+        u.base_style = ImGui::GetStyle();
         log_info("ImGui " IMGUI_VERSION " started");
     }
     if (u.win32_window != window) {
@@ -947,7 +944,7 @@ void draw_restart() {
                    "save first in the game's menu."));
         ImGui::PopStyleColor();
     }
-    if (ImGui::Button(tr("Restart now"))) {
+    if (anvil::ui::primary_button(tr("Restart now"))) {
         u.confirm_restart = false;
         // The confirmation said what happens to the campaign the panel shows;
         // anvil-game refuses a campaign the request did not accept.
@@ -1163,7 +1160,7 @@ void draw_mods() {
                         ImGui::PushStyleColor(ImGuiCol_Text, kAmber);
                         wrapped(trf("Approve native code from {0}? It loads from the next start.", {mod_source(m)}));
                         ImGui::PopStyleColor();
-                        if (ImGui::Button(tr("Approve"))) approve(m);
+                        if (anvil::ui::primary_button(tr("Approve"))) approve(m);
                         ImGui::SameLine();
                         if (ImGui::Button(tr("Cancel"))) u.confirm_approve.clear();
                     } else if (ImGui::Button(m.state == "update-pending" ? tr("Approve the update...") : tr("Approve..."))) {
@@ -1443,7 +1440,7 @@ void draw_panel() {
             ImGui::SameLine();
             if (ImGui::SmallButton(tr("OK"))) u.message.clear();
         }
-        if (ImGui::BeginTabBar("tabs")) {
+        if (ImGui::BeginTabBar("tabs", ImGuiTabBarFlags_DrawSelectedOverline)) {
             // The tab's id stays English, so a tab keeps its place whatever the language.
             const auto tab = [&](const char* name, Tab which, void (*body)()) {
                 const ImGuiTabItemFlags flags = u.requested_tab == which ? ImGuiTabItemFlags_SetSelected : 0;
