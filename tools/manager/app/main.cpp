@@ -20,6 +20,7 @@
 
 #include <windows.h>
 #include <d3d11.h>
+#include <dwmapi.h>
 #include <objbase.h>
 #include <shellapi.h>
 #include <wincodec.h>
@@ -372,6 +373,29 @@ struct ShotOptions {
     int scale = 100;
 };
 
+// PROTOTYPE (prototype/app-shell): the system's caption in Forge's colours.
+// ANVIL_PROTOTYPE_CAPTION: "off" keeps the system's, "dark" only asks for its
+// dark mode (Windows 10 20H1 and later), anything else also sets the colours
+// (Windows 11 22000 and later; older builds ignore those attributes).
+void style_caption(HWND window) {
+    wchar_t mode[16] = {};
+    GetEnvironmentVariableW(L"ANVIL_PROTOTYPE_CAPTION", mode, static_cast<DWORD>(std::size(mode)));
+    const std::wstring choice = mode;
+    if (choice == L"off") return;
+    constexpr DWORD kDarkMode = 20, kCorners = 33, kBorder = 34, kCaption = 35, kText = 36;
+    const BOOL dark = TRUE;
+    DwmSetWindowAttribute(window, kDarkMode, &dark, sizeof(dark));
+    if (choice == L"dark") return;
+    const COLORREF caption = RGB(0x12, 0x11, 0x10);  // Forge `window`, the client's own background
+    const COLORREF text = RGB(0xec, 0xe8, 0xe1);     // Forge `text`
+    const COLORREF border = RGB(0x2c, 0x29, 0x26);   // Forge `line`
+    const int round = 2;                             // DWMWCP_ROUND
+    DwmSetWindowAttribute(window, kCaption, &caption, sizeof(caption));
+    DwmSetWindowAttribute(window, kText, &text, sizeof(text));
+    DwmSetWindowAttribute(window, kBorder, &border, sizeof(border));
+    DwmSetWindowAttribute(window, kCorners, &round, sizeof(round));
+}
+
 // The tabs in their order, by the English names their ids use.
 constexpr const char* kShotTabs[] = {"Anvil", "Catalog", "Plugins", "Benchmark", "Crashes", "Log", "About"};
 
@@ -426,6 +450,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     window_class.lpfnWndProc = window_proc;
     window_class.hInstance = instance;
     window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    // PROTOTYPE (prototype/app-shell): no white flash before the first frame and while resizing.
+    window_class.hbrBackground = CreateSolidBrush(RGB(0x12, 0x11, 0x10));
+    // PROTOTYPE (prototype/app-shell): the icon of the title bar, the taskbar and Alt+Tab.
+    window_class.hIcon = static_cast<HICON>(LoadImageW(instance, L"ANVIL_ICON", IMAGE_ICON, 0, 0, LR_DEFAULTSIZE));
+    window_class.hIconSm = static_cast<HICON>(LoadImageW(instance, L"ANVIL_ICON", IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                                                         GetSystemMetrics(SM_CYSMICON), 0));
     window_class.lpszClassName = L"AnvilManager";
     RegisterClassExW(&window_class);
 
@@ -453,6 +483,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     }
     g_graphics = &graphics;
     if (!shot) {
+        style_caption(window);
         DragAcceptFiles(window, TRUE);
         ShowWindow(window, show);
         UpdateWindow(window);

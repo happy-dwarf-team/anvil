@@ -1,0 +1,437 @@
+<!doctype html>
+<!--
+  PROTOTYPE, throwaway (branch prototype/app-shell; never merge to main).
+  Question: what should the Manager's window, its header and the tabs other than Plugins look like in Forge, and
+  how far can its title bar join the app? And the overlay's Crash report and Log tabs, its notices and its badge.
+  Variant 0 is Anvil 1.23 as it is (manager_app.cpp, benchmark_tab.cpp, anvil-overlay ui.cpp), drawn roughly.
+  A, B and C are three shells around the same proposed tab contents:
+    A  the system's caption in Forge's colours with the anvil icon (DWM; the C++ spike on this branch does it),
+       one header row with the game and Play EU4, tabs under it;
+    B  the same caption, a sidebar instead of tabs (game tabs, tools, About at the bottom);
+    C  tabs in the title bar (the client area takes the caption: WM_NCCALCSIZE / WM_NCHITTEST), a status bar.
+  Switch via ?variant=0|A|B|C, the bar at the bottom or the arrow keys; ?surface=overlay shows the overlay.
+  The real apps are Dear ImGui; this page imitates Forge (docs/ui-design-system.md). Data is made up.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App shell prototype</title>
+<style>
+:root{
+  --bg0:#0d0c0b; --window:#121110; --panel:#181716; --raised:#1f1d1b; --frame:#242220; --frame-h:#2e2b28; --frame-a:#38342f;
+  --line:#2c2926; --border:#4a4540; --text:#ece8e1; --weak:#a39e96; --dim:#8a857e;
+  --ember:#e8853d; --ember-h:#f09a57; --on-ember:#1a1209; --good:#6cc48a; --warn:#e5c04b; --bad:#ef6a5e; --info:#7aa7e0;
+  --sel:rgba(232,133,61,.16); --fs:14px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#2a2d33;color:var(--text);font:var(--fs)/1.45 "Segoe UI",system-ui,sans-serif}
+body{display:flex;align-items:flex-start;justify-content:center;padding:28px 16px 90px;overflow:auto}
+button{font:inherit;color:inherit;cursor:pointer}
+.win{width:1040px;height:720px;flex:none;display:flex;flex-direction:column;background:var(--window);border-radius:8px;overflow:hidden;
+  box-shadow:0 0 0 1px var(--line),0 18px 50px rgba(0,0,0,.55)}
+.win.today{border-radius:8px}
+/* ---- captions ---- */
+.cap{height:32px;flex:none;display:flex;align-items:center;font:12px "Segoe UI",sans-serif;user-select:none}
+.cap .ico{width:16px;height:16px;margin:0 8px 0 10px;flex:none}
+.cap .ttl{flex:1}
+.cap .cb{width:46px;height:32px;display:flex;align-items:center;justify-content:center;font:10px "Segoe MDL2 Assets","Segoe Fluent Icons",sans-serif}
+.cap .cb:hover{background:rgba(255,255,255,.08)} .cap .cb.x:hover{background:#c42b1c;color:#fff}
+.cap.sys{background:#202020;color:#fff} .cap.forge{background:var(--window);color:var(--text);border-bottom:1px solid transparent}
+.cap.light{background:#f3f3f3;color:#1a1a1a} .cap.light .cb:hover{background:rgba(0,0,0,.06)}
+.capglyph{font-family:"Segoe UI Symbol",sans-serif}
+/* ---- shared Forge widgets ---- */
+.btn{background:var(--frame);border:1px solid var(--border);border-radius:4px;padding:3px 10px;color:var(--text);white-space:nowrap}
+.btn:hover{background:var(--frame-h)} .btn:disabled{opacity:.45;cursor:default}
+.btn.primary{background:var(--ember);border-color:var(--ember);color:var(--on-ember);font-weight:600} .btn.primary:hover{background:var(--ember-h)}
+.btn.small{padding:1px 8px}
+.tbtn{background:none;border:0;padding:0;color:var(--info)} .tbtn:hover{text-decoration:underline}
+.weak{color:var(--weak)} .dim{color:var(--dim)} .good{color:var(--good)} .warn{color:var(--warn)} .bad{color:var(--bad)} .info{color:var(--info)}
+.semi{font-weight:600}
+.small{font-size:12px}
+p{margin:0 0 6px} .measure{max-width:44em}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.spacer{flex:1}
+.banner{background:var(--raised);border-left:3px solid var(--warn);border-radius:4px;padding:8px 12px;margin:0 0 12px}
+.banner.good{border-color:var(--good)} .banner.bad{border-color:var(--bad)} .banner.info{border-color:var(--info)}
+.banner.good,.banner.bad,.banner.warn,.banner.info{color:var(--text)}
+.banner b.lead{font-weight:600}
+.banner.warn b.lead{color:var(--warn)} .banner.good b.lead{color:var(--good)} .banner.bad b.lead{color:var(--bad)} .banner.info b.lead{color:var(--info)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin:0 0 12px}
+.card h3{margin:0 0 6px;font-size:var(--fs);font-weight:600}
+.sect{display:flex;align-items:center;gap:8px;margin:16px 0 8px;font-weight:600}
+.sect::after{content:"";flex:1;height:1px;background:var(--line)}
+.seg{display:inline-flex;background:var(--frame);border:1px solid var(--border);border-radius:4px;padding:2px;gap:2px}
+.seg button{background:none;border:1px solid transparent;border-radius:3px;padding:1px 10px}
+.seg button.on{background:rgba(232,133,61,.28);border-color:var(--ember)}
+.chk{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+.chk i{width:16px;height:16px;border:1px solid var(--border);border-radius:3px;background:var(--frame);display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-size:11px;color:var(--ember)}
+.chk.on i{background:#5b3e28}
+.tog{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+.tog i{width:36px;height:20px;border-radius:10px;background:var(--frame);border:1px solid var(--border);position:relative}
+.tog i::after{content:"";position:absolute;top:3px;left:3px;width:12px;height:12px;border-radius:50%;background:var(--weak)}
+.tog.on i{background:var(--ember);border-color:var(--ember)} .tog.on i::after{left:19px;background:var(--on-ember)}
+.tag{display:inline-block;border:1px solid var(--border);border-radius:999px;padding:0 8px;font-size:12px;color:var(--weak)}
+.tag.warn{border-color:#6d5c2a;color:var(--warn)}
+.code{background:var(--bg0);border:1px solid var(--line);border-radius:6px;padding:8px 10px;font:12.5px/1.5 Consolas,"Cascadia Mono",monospace;
+  overflow:auto;white-space:pre;flex:1;min-height:0}
+.code .w{color:var(--warn)} .code .e{color:var(--bad)} .code .t{color:var(--dim)}
+.glyph{display:inline-block;width:14px;text-align:center;flex:none;font-size:12px}
+.fold{cursor:pointer;color:var(--info)}
+.list{border:1px solid var(--line);border-radius:6px;background:var(--panel);overflow:auto}
+.li{padding:6px 10px 6px 12px;border-left:3px solid transparent;cursor:pointer}
+.li:hover{background:var(--raised)} .li.sel{background:var(--sel);border-left-color:var(--ember)}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:3px 16px;margin:0 0 6px}
+.kv dt{color:var(--weak)} .kv dd{margin:0}
+.tabs{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--line);flex:none}
+.tab{background:none;border:0;padding:6px 12px 7px;color:var(--weak);border-top:2px solid transparent;border-radius:4px 4px 0 0}
+.tab:hover{color:var(--text)} .tab.on{background:var(--raised);color:var(--text);border-top-color:var(--ember)}
+.tab .cnt{display:inline-block;margin-left:6px;background:var(--frame);border-radius:999px;padding:0 6px;font-size:11px;color:var(--warn)}
+.body{flex:1;min-height:0;overflow:auto;padding:14px 16px}
+.body.fill{display:flex;flex-direction:column}
+/* ---- today (variant 0), roughly ---- */
+.today .body{padding:10px 12px}
+.today .tab{border-radius:3px 3px 0 0}
+.today .colwarn{color:var(--warn)} .today .colgood{color:var(--good)}
+/* ---- switcher ---- */
+.switcher{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:#f4f4f4;color:#111;border-radius:999px;padding:6px 8px;display:flex;
+  align-items:center;gap:8px;box-shadow:0 4px 18px rgba(0,0,0,.6);font:13px system-ui,sans-serif;z-index:10;max-width:calc(100vw - 32px)}
+.switcher button{background:#111;color:#fff;border:0;border-radius:999px;min-width:30px;height:30px;padding:0 10px;font-size:13px}
+.switcher button:hover{background:#333} .switcher button.on{background:#c4621c}
+.switcher .lbl{min-width:260px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.note{max-width:1040px;margin:0 auto 14px;color:#cfd3da;font:13px system-ui,sans-serif}
+.wrap{display:flex;flex-direction:column;align-items:center}
+/* ---- overlay ---- */
+.game{width:1280px;height:760px;flex:none;position:relative;border-radius:6px;overflow:hidden;
+  background:radial-gradient(ellipse at 30% 40%,#6f7f5a 0,#56664a 30%,#3e4c5c 60%,#27384d 100%)}
+.game::before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(35deg,rgba(255,255,255,.035) 0 2px,transparent 2px 40px)}
+.ovp{position:absolute;left:230px;top:110px;width:820px;height:540px;background:rgba(18,17,16,.97);border-radius:8px;display:flex;flex-direction:column;
+  box-shadow:0 10px 40px rgba(0,0,0,.6);overflow:hidden}
+.ovp .tb{height:28px;display:flex;align-items:center;padding:0 10px;border-top:2px solid var(--ember);background:var(--bg0);font-size:13px}
+.ovp.today .tb{border-top:0;background:#294a7a}
+.notice{position:absolute;right:14px;top:14px;width:440px;background:rgba(31,29,27,.97);border-left:3px solid var(--bad);border-radius:6px;padding:10px 12px;font-size:13px}
+.notice.today{border-left:0;background:rgba(15,15,15,.92)}
+.badge{position:absolute;left:14px;bottom:14px;background:rgba(18,17,16,.9);border-radius:6px;padding:4px 10px;font-size:13px;display:flex;gap:6px;align-items:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="note" id="note"></div>
+  <div id="stage"></div>
+</div>
+<div class="switcher" id="switcher"></div>
+<script>
+const V = ['0','A','B','C'];
+const NAMES = {'0':'Today (1.23, roughly)','A':'Native caption + header row','B':'Native caption + sidebar','C':'Tabs in the title bar'};
+const NOTES = {
+  '0':'Today: the system caption (white in Windows light mode, no icon), the app name again in the client, the full folder path as the loudest text, Play EU4 as an ordinary button, seven equal tabs, sentences coloured yellow or green from end to end.',
+  'A':'A: DWM paints the system caption in Forge\'s window colour with the anvil icon (Windows 11; Windows 10 gets its dark mode). One header row: the game, its state and Play EU4 as the one primary button. Native caption buttons, snap layouts and accessibility stay.',
+  'B':'B: the same caption. A sidebar replaces the seven tabs: what a player uses (Anvil, Plugins, Catalog) apart from tools (Benchmark, Crashes, Log); About at the bottom. Each page has a title row with its own actions.',
+  'C':'C: the app draws the caption itself: icon, tabs and Play EU4 in the title row, caption buttons drawn by the app (WM_NCHITTEST returns HTMAXBUTTON for snap layouts). The game folder moves to a status bar. Most room for content; most code to keep right on Windows 10 and 11.'
+};
+const q = new URLSearchParams(location.search);
+let variant = V.includes(q.get('variant')) ? q.get('variant') : 'A';
+let surface = q.get('surface') === 'overlay' ? 'overlay' : 'manager';
+let theme = q.get('theme') === 'light' ? 'light' : 'dark';   // Windows app mode, for variant 0's caption
+let tab = q.get('tab') || 'anvil';
+let ovtab = q.get('ovtab') || 'crash';
+const st = {logSrc:'last', bench:5, filesOpen:false, crash:0, logLevel:'all', checkReleases:true, removeAll:false, follow:true, offNext:false};
+
+const TABS = [
+  {id:'anvil',name:'Anvil'},{id:'catalog',name:'Catalog',cnt:'1'},{id:'plugins',name:'Plugins',cnt:'1 to approve'},
+  {id:'benchmark',name:'Benchmark',tool:1},{id:'crashes',name:'Crashes',tool:1},{id:'log',name:'Log',tool:1},{id:'about',name:'About',end:1}
+];
+const ICON = `<svg class="ico" viewBox="0 0 32 32"><path fill="#f5922a" d="M2 10.5 9 8h19v5l-6 2v4l3.5 4v3h-17v-3l3.5-4v-4C7 14.5 4 13.2 2 10.5Z"/><path fill="#16171a" opacity=".35" d="M9 8h19v1.6H9z"/></svg>`;
+const CBTN = `<span class="cb"><i style="width:10px;height:1px;background:currentColor"></i></span><span class="cb"><i style="width:10px;height:10px;border:1px solid currentColor"></i></span><span class="cb x capglyph">&#x2715;</span>`;
+const DIFF = ['version.dll','anvil/docs/README.md','anvil/plugins/anvil-game/anvil_game.dll','anvil/plugins/anvil-game/plugin.toml','anvil/plugins/anvil-inspector/anvil_inspector.dll',
+  'anvil/plugins/anvil-log-throttle/anvil_log_throttle.dll','anvil/plugins/anvil-map/anvil_map.dll','anvil/plugins/anvil-overlay/anvil_overlay.dll',
+  'anvil/plugins/anvil-script/anvil_script.dll','anvil/plugins/anvil-script-profiler/anvil_script_profiler.dll'];
+const CATALOG = [
+  {name:'Bellows',ver:'1.8.0',sum:'Makes the game start faster and the years pass sooner, without changing game files or rules.',state:'update',inst:'1.7.2',ws:1},
+  {name:'Tongs',ver:'0.34.0',sum:'Lets scripts and agents control a running game: read its state, take screenshots, use keyboard and mouse.',state:'none',game:1,ws:1},
+  {name:'Hamweard',ver:'1.4.0',sum:'Takes you from a campaign back to the main menu in seconds, without restarting the game.',state:'installed',ws:1},
+  {name:'Mei',ver:'0.8.0',sum:'Shows, wraps, searches and types the text of a Chinese, Japanese or Korean translation mod.',state:'build',note:'Mei\'s fonts come with its Workshop item; on GOG they are mei-fonts.zip in its release.',ws:1}
+];
+const CRASHES = [
+  {when:'14 Nov 2026, 09:41',who:'Bellows',level:'in plugin code',glyph:'✕',cls:'bad',sentence:'The game crashed in Bellows\'s code (trust.cpp:212).',file:'crash-20261114-094112'},
+  {when:'12 Nov 2026, 22:03',who:'',level:'in the game',glyph:'▲',cls:'warn',sentence:'The game crashed in its own code; no plugin was running at the time.',file:'crash-20261112-220301'},
+  {when:'9 Nov 2026, 18:15',who:'Smithy',level:'before the game was ready',glyph:'✕',cls:'bad',sentence:'The game crashed in a change Smithy made, before the game was ready.',file:'crash-20261109-181544'}
+];
+const LOG = [
+  ['09:40:58.112','I','anvil 1.23.0 (eu4-1.37.5-steam-win64), safe mode off'],
+  ['09:40:58.130','I','anvil.toml: 9 plugins, 2 disabled modules'],
+  ['09:40:58.402','I','loaded anvil-game 1.23.0 (12 ms)'],
+  ['09:40:58.415','I','loaded anvil-overlay 1.23.0 (9 ms)'],
+  ['09:40:58.611','W','bellows: trust.year_skip: setting value 7 above its maximum 5, using 5'],
+  ['09:40:58.700','I','loaded bellows 1.8.0 (55 ms), 14 of 16 modules'],
+  ['09:40:58.702','W','smithy.sharp_tooltips: kept out of this game: not allowed in ironman'],
+  ['09:40:59.020','I','loaded smithy 0.9.1 (31 ms)'],
+  ['09:40:59.300','E','lodestone: skipped: symbols.toml names 2 addresses this build does not have'],
+  ['09:41:03.877','I','game ready after 5.8 s'],
+  ['09:41:12.004','E','crash in bellows (trust.cpp:212): report crash-20261114-094112'],
+];
+const REPORT = `Anvil crash report crash-20261114-094112
+Anvil 1.23.0, eu4-1.37.5-steam-win64 (sha256 9AD3EFE1...)
+Exception 0xC0000005 (access violation) reading 0x0000000000000010
+Thread: main (CPU 4)
+
+In plugin code: bellows 1.8.0
+  bellows.dll+0x1a2f4  trust::advance (trust.cpp:212)
+  bellows.dll+0x19c10  trust::on_monthly_tick
+  eu4.exe+0x4b21c0
+  eu4.exe+0x4b1f33
+
+Plugins: anvil-game 1.23.0, anvil-overlay 1.23.0, bellows 1.8.0, smithy 0.9.1, tongs 0.34.0
+Game: 1719.3.17, speed 5, single player, not ironman`;
+
+const h = (s)=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+function chk(on,label,act){return `<span class="chk ${on?'on':''}" data-act="${act}"><i>${on?'✓':''}</i>${label}</span>`}
+function seg(opts,cur,act){return `<span class="seg">${opts.map(([v,l])=>`<button class="${v==cur?'on':''}" data-act="${act}" data-v="${v}">${l}</button>`).join('')}</span>`}
+
+/* ---------------- today (variant 0) ---------------- */
+function today(){
+  const capCls = theme==='light'?'light':'sys';
+  const folder = 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Europa Universalis IV';
+  const tabs = ['Anvil','Catalog','Plugins (1 to approve)','Benchmark','Crashes','Log','About'];
+  const ids = ['anvil','catalog','plugins','benchmark','crashes','log','about'];
+  let b='';
+  if(tab==='anvil') b=`<div class="colwarn">Anvil 1.23.0 is installed, but some of its files differ from its package:</div>
+    ${DIFF.map(d=>`<div style="padding-left:12px">• ${d} differs</div>`).join('')}
+    <div style="margin:8px 0"><button class="btn">Repair</button></div>
+    <div class="weak">Copies version.dll, the standard plugins (anvil-game, anvil-inspector, anvil-log-throttle, anvil-map, anvil-overlay, anvil-script, anvil-script-profiler) and this Manager into the game folder. Your anvil.toml, plugins and their settings stay.</div>
+    <hr style="border:0;border-top:1px solid var(--line)">${chk(false,'Also remove my plugins, their settings and data, crash reports and logs','none')}
+    <div style="margin:6px 0"><button class="btn">Uninstall Anvil</button></div><div class="weak">Without version.dll the game starts vanilla at once.</div>`;
+  else if(tab==='catalog') b=`<div>Plugins of the Anvil team. Install puts one in anvil/plugins; a plugin from the Steam Workshop comes with its mod instead.</div>
+    <div class="row" style="margin:4px 0"><button class="btn">Get the current list</button><span class="weak">The list of Manager 1.23.0.</span></div>
+    <div class="weak">Nothing is downloaded until you click: the list from the anvil repository on GitHub, and a plugin's zip from its GitHub release, installed only if its SHA-256 equals the list's.</div>
+    ${CATALOG.map(c=>`<hr style="border:0;border-top:1px solid var(--line)"><div>${c.name} ${c.ver}</div><div>${c.sum}</div>
+      ${c.game?'<div class="weak">It changes the game. Anvil keeps it out of ironman and multiplayer games unless you allow it there.</div>':''}
+      ${c.state==='build'?'<div class="colwarn">Not made for this game\'s build; it runs on eu4-1.37.5-steam-win64, eu4-1.37.5.2-gog-win64, eu4-1.37.5.0-gog-win64.</div>':''}
+      ${c.state==='installed'?'<div class="colgood">Installed.</div>':''}${c.state==='update'?`<div class="colgood">Version ${c.inst} is installed; ${c.ver} is available.</div>`:''}
+      <div class="row" style="margin:4px 0 6px">${c.state!=='installed'?`<button class="btn" ${c.state==='build'?'disabled':''}>${c.state==='update'?'Update':'Install'}</button>`:''}<button class="btn">Open its page</button><button class="btn">Subscribe on Steam Workshop</button></div>`).join('')}`;
+  else if(tab==='benchmark') b=`<div>The start-up benchmark measures how long EU4 takes to start on this computer without a plugin and with it. EU4 starts again and again, without the plugin and with it, and each start quits by itself. Nothing in your saves, mods or anvil.toml changes.</div>
+    <div class="row" style="margin:6px 0"><span class="btn" style="width:270px">bellows ▾</span>Compare</div>
+    <div class="row">Valid warm starts per arm: (○) 3 (●) 5 (○) 10 <span class="weak">about 10 starts, about 10 minutes</span></div>
+    <div class="sect" style="font-weight:400">Before the series</div>
+    ${['Anvil 1.23.0 is installed','anvil-game loads','Steam is running','EU4 is not running','The next start is not in safe mode','bellows 1.8.0 is enabled and loads','No Workshop update waits for approval','Plugged in'].map(x=>`<div><span class="good">✓</span> ${x}</div>`).join('')}
+    <div style="margin:6px 0">Please leave the computer alone while the series runs.</div><div class="row"><button class="btn">Start the series</button><button class="btn">Check again</button></div>
+    <div style="margin-top:8px;background:#3a2a1c;padding:3px 8px">▶ Kept reports (0)</div>`;
+  else if(tab==='crashes') b=`<button class="btn">Open the crashes folder</button><div style="display:flex;gap:8px;margin-top:8px;height:520px">
+    <div class="list" style="width:200px">${CRASHES.map((c,i)=>`<div class="li ${i===0?'sel':''}" style="border:0">${c.file}</div>`).join('')}</div>
+    <div style="flex:1;display:flex;flex-direction:column"><div>${CRASHES[0].when}: ${CRASHES[0].sentence}</div><div>Plugins involved: bellows</div>
+    <div class="row" style="margin:4px 0"><button class="btn">Copy the report</button><button class="btn">Report it to the plugin's author</button></div>
+    <div class="code" style="font-family:'Segoe UI';background:var(--frame)">${h(REPORT)}</div></div></div>`;
+  else if(tab==='log') b=`<div class="row">(●) Last start (○) The start before <button class="btn">Reload</button><button class="btn">Copy</button><button class="btn">Open the folder</button></div>
+    <div class="row" style="margin:6px 0"><button class="btn">Copy a problem report</button><button class="btn">Open an Anvil issue</button></div>
+    <div class="weak">For an issue: versions, the game build, the plugins and why one is skipped, and the end of anvil.log, with your folders and Windows user name left out.</div>
+    <div class="code" style="font-family:'Segoe UI';background:var(--frame);height:470px;margin-top:6px">${LOG.map(l=>h(l.join(' '))).join('\n')}</div>`;
+  else if(tab==='about') b=`<div>Anvil Manager 1.23.0 installs Anvil 1.23.0, the native plugin loader for Europa Universalis IV 1.37.5, and manages its plugins.</div>
+    <div class="weak">Unofficial community project, not affiliated with Paradox Interactive. MIT License.</div><button class="btn" style="margin:4px 0">Anvil on GitHub</button>
+    <div class="sect" style="font-weight:400">New releases</div>${chk(true,'Ask GitHub for new releases of Anvil and its plugins when the Manager or the game starts','none')}
+    <div class="weak">For Anvil a link is shown, and the Catalog and Plugins tabs show plugin updates; nothing is downloaded until you click. To update Anvil, run the Manager of the new release.</div>
+    <div class="weak">The game follows this answer unless the Anvil panel's setting "Check for new Anvil releases" says On or Off.</div><button class="btn">Check now</button>`;
+  else b=plugins();
+  return `<div class="win today"><div class="cap ${capCls}"><span style="width:34px"></span><span class="ttl">Anvil Manager</span>${CBTN}</div>
+    <div style="padding:8px 12px 0"><div class="row"><span>Anvil Manager 1.23.0</span><span class="weak">|</span><span>${folder}</span><button class="btn small">Change...</button><span class="spacer"></span><button class="btn">Play EU4</button></div>
+    <div class="weak small" style="margin:4px 0 6px">eu4.exe: eu4-1.37.5-steam-win64</div></div>
+    <div class="tabs">${tabs.map((t,i)=>`<button class="tab ${ids[i]===tab?'on':''}" data-act="tab" data-v="${ids[i]}">${t}</button>`).join('')}</div>
+    <div class="body">${b}</div></div>`;
+}
+
+/* ---------------- proposed tab contents ---------------- */
+function anvilTab(){
+  return `<div class="measure">
+  <div class="banner warn"><b class="lead">Some of Anvil's files differ from its package.</b> Anvil 1.23.0 is installed; ${DIFF.length+4} files are not the ones it shipped.
+    Repair copies them again. <span class="fold" data-act="files">${st.filesOpen?'Hide the files':'Show the files'}</span>
+    ${st.filesOpen?`<div class="code" style="white-space:pre-wrap;margin-top:8px;max-height:150px">${DIFF.map(d=>d).join('\n')}</div>`:''}
+    <div class="row" style="margin-top:8px"><button class="btn primary">Repair</button></div></div>
+  <div class="banner info"><b class="lead">Check for new releases?</b> Anvil can ask GitHub for new releases when the Manager or the game starts. Nothing is downloaded until you click.
+    <div class="row" style="margin-top:8px"><button class="btn">Yes, check</button><button class="btn">No</button><span class="weak small">About changes it later.</span></div></div>
+  <div class="sect">Installed</div>
+  <dl class="kv"><dt>Anvil</dt><dd>1.23.0 <span class="weak">· this Manager carries 1.23.0</span></dd>
+    <dt>Standard plugins</dt><dd>7 <span class="tbtn" title="Anvil game, Anvil overlay, Anvil log throttle, Anvil map, Anvil script, Anvil inspector, Anvil script profiler">which</span></dd>
+    <dt>Start menu</dt><dd>not added <button class="tbtn" style="margin-left:6px">Add to the Start menu</button></dd></dl>
+  <p class="weak small">Repair and Install copy version.dll, the standard plugins and this Manager into the game folder. Your anvil.toml, plugins and settings stay.</p>
+  <div class="sect">Uninstall</div>
+  <p class="weak">Without version.dll the game starts vanilla at once.</p>
+  ${chk(st.removeAll,'Remove my plugins and data too','remove')}<div class="weak small" style="margin:2px 0 8px 24px">Settings, crash reports and logs of every plugin.</div>
+  <button class="btn">Uninstall Anvil...</button></div>`;
+}
+function catalogTab(){
+  const st2 = (c)=> c.state==='installed'?`<span class="good">✓</span> <span class="weak">installed</span>`
+    : c.state==='update'?`<span class="info">●</span> <span class="info">update: ${c.inst} → ${c.ver}</span>`
+    : c.state==='build'?`<span class="warn">▲</span> <span class="warn">not for this game build</span>`:'';
+  const act = (c)=> c.state==='update'?`<button class="btn">Update</button>`: c.state==='none'?`<button class="btn">Install</button>`
+    : c.state==='build'?`<button class="btn" disabled title="Mei 0.8.0 runs on Steam 1.37.5 and GOG 1.37.5.2; this folder has GOG 1.37.5.0">Install</button>`:'';
+  return `<div class="row" style="margin-bottom:10px"><span class="measure">Plugins of the Anvil team. Install puts one in anvil/plugins; one from the Workshop comes with its mod.</span>
+    <span class="spacer"></span><span class="weak small" title="Nothing is downloaded until you click; a zip is installed only if its SHA-256 equals the list's.">List of 14 Nov, from GitHub</span><button class="tbtn">Get the current list</button></div>
+  ${CATALOG.map(c=>`<div class="card" style="display:grid;grid-template-columns:1fr auto;gap:4px 16px;align-items:start">
+    <div><span class="semi">${c.name}</span> <span class="weak small">${c.ver}</span> ${c.game?'<span class="tag warn">changes the game</span>':''}</div>
+    <div class="row" style="justify-content:flex-end">${act(c)}</div>
+    <div class="measure">${c.sum}${c.note?`<div class="weak small">${c.note}</div>`:''}</div>
+    <div class="row small" style="justify-content:flex-end;gap:12px"><button class="tbtn">Page</button>${c.ws?'<button class="tbtn">Workshop</button>':''}</div>
+    <div class="small">${st2(c)}${c.state==='build'?' <span class="weak">· runs on Steam 1.37.5 and GOG 1.37.5.2</span>':''}</div></div>`).join('')}`;
+}
+function plugins(){
+  return `<div style="display:flex;gap:10px;height:100%;min-height:520px"><div class="list" style="width:250px;padding:8px 0">
+    <div class="weak small" style="padding:0 12px">Find · chips · sections</div>
+    ${['Bellows','Smithy','Tongs','Lodestone'].map((n,i)=>`<div class="li ${i===0?'sel':''}"><span class="good">✓</span> <span class="semi">${n}</span><div class="weak small" style="padding-left:18px">${['14 of 16 modules on','5 of 7 modules on','9 settings · 2 changed','waits for approval'][i]}</div></div>`).join('')}</div>
+    <div class="card" style="flex:1;margin:0"><div class="weak">The Plugins tab as merged in 1.23 (anvil#382); not part of this prototype.</div></div></div>`;
+}
+function benchTab(){
+  return `<div class="measure"><p>Measures how long EU4 takes to start with and without one plugin. EU4 starts again and again and quits by itself; nothing in your saves, mods or anvil.toml changes.</p></div>
+  <div class="card" style="display:grid;grid-template-columns:max-content 1fr;gap:10px 16px;align-items:center">
+    <span class="weak">Compare</span><span><span class="btn" style="display:inline-block;width:260px">Bellows 1.8.0 ▾</span></span>
+    <span class="weak">Warm starts per arm</span><span class="row">${seg([[3,'3'],[5,'5'],[10,'10']],st.bench,'bench')}<span class="weak small">about ${st.bench*2} starts, about ${st.bench*2} minutes</span></span></div>
+  <div class="sect">Before the series <span class="good small" style="font-weight:400">8 of 8 ready</span></div>
+  <div style="columns:2;max-width:44em">${['Anvil 1.23.0 is installed','Anvil game loads','Steam is running','EU4 is not running','The next start is not in safe mode','Bellows 1.8.0 is on and loads','No Workshop update waits for approval','Plugged in'].map(x=>`<div><span class="good glyph">✓</span> ${x}</div>`).join('')}</div>
+  <p class="weak" style="margin-top:8px">Leave the computer alone while the series runs; keyboard and mouse use is recorded next to each start.</p>
+  <div class="row"><button class="btn primary">Start the series</button><button class="tbtn">Check again</button></div>
+  <div class="sect">Kept reports <span class="tag">0</span></div><p class="weak">A finished series keeps its report here.</p>`;
+}
+function crashTab(){
+  const c = CRASHES[st.crash];
+  return `<div style="display:flex;gap:12px;height:100%;min-height:560px">
+    <div style="width:250px;display:flex;flex-direction:column;gap:6px"><div class="row"><span class="weak small">Last 10 kept</span><span class="spacer"></span><button class="tbtn small">Open the folder</button></div>
+    <div class="list" style="flex:1">${CRASHES.map((x,i)=>`<div class="li ${i===st.crash?'sel':''}" data-act="crash" data-v="${i}"><span class="${x.cls} glyph">${x.glyph}</span> <span class="semi">${x.who||'The game'}</span>
+      <div class="weak small" style="padding-left:18px">${x.when} · ${x.level}</div></div>`).join('')}</div></div>
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+      <div class="banner ${c.cls}"><b class="lead">${c.who?`Crash in ${c.who}`:'Crash in the game'}</b> · ${c.when}<div>${c.sentence}</div>
+      ${c.who?`<div class="row" style="margin-top:8px"><button class="btn primary">Report to ${c.who}'s author</button><button class="btn">Copy the report</button><button class="tbtn">Turn ${c.who} off...</button></div>`
+             :`<div class="row" style="margin-top:8px"><button class="btn primary">Copy the report</button><button class="tbtn">Open an Anvil issue</button></div>`}</div>
+      <div class="code">${h(REPORT)}</div></div></div>`;
+}
+function logTab(){
+  const lv = {I:'',W:'w',E:'e'};
+  const lines = LOG.filter(l=>st.logLevel==='all'||(st.logLevel==='warn'&&l[1]!=='I'));
+  return `<div class="row" style="margin-bottom:8px">${seg([['last','Last start'],['prev','The start before']],st.logSrc,'logsrc')}
+    ${seg([['all','All'],['warn','Warnings and errors (5)']],st.logLevel,'loglevel')}<span class="spacer"></span>
+    <button class="tbtn">Reload</button><button class="tbtn">Copy</button><button class="tbtn">Open the folder</button></div>
+  <div style="display:flex;gap:12px;flex:1;min-height:0">
+    <div class="code">${lines.map(l=>`<span class="t">${l[0]}</span> <span class="${lv[l[1]]}">${l[1]==='I'?'     ':l[1]==='W'?'WARN ':'ERROR'} ${h(l[2])}</span>`).join('\n')}</div>
+    <div class="card" style="width:250px;margin:0;align-self:flex-start"><h3>Report a problem</h3>
+      <p class="weak small">Versions, the game build, the plugins and why one is skipped, and the end of anvil.log, with your folders and Windows user name left out.</p>
+      <button class="btn primary" style="width:100%;margin:4px 0">Copy a problem report</button><button class="tbtn">Open an Anvil issue</button>
+      <p class="weak small" style="margin-top:8px">A plugin named in a crash or skipped: report it to its author instead.</p></div></div>`;
+}
+function aboutTab(){
+  return `<div class="measure"><div class="row" style="gap:12px;margin-bottom:10px">${ICON.replace('class="ico"','width="40" height="40"')}<div><div class="semi">Anvil Manager 1.23.0</div>
+    <div class="weak small">Installs Anvil, the plugin loader for Europa Universalis IV 1.37.5, and manages its plugins.</div></div></div>
+  <dl class="kv"><dt>Anvil it installs</dt><dd>1.23.0</dd><dt>Game build</dt><dd>Steam 1.37.5 <span class="weak">(eu4-1.37.5-steam-win64)</span></dd><dt>License</dt><dd>MIT · unofficial, not affiliated with Paradox Interactive</dd></dl>
+  <div class="row"><button class="btn">Anvil on GitHub</button><button class="tbtn">Copy these facts</button></div>
+  <div class="sect">New releases</div>
+  <span class="tog ${st.checkReleases?'on':''}" data-act="releases"><i></i><span class="semi">Check for new releases</span></span>
+  <p class="weak small" style="margin:6px 0">When the Manager or the game starts, ask GitHub for new releases of Anvil and its plugins. Nothing is downloaded until you click. The game follows this unless the overlay's own setting says On or Off.</p>
+  <div class="row"><button class="btn">Check now</button><span class="good small">✓ 1.23.0 is the newest</span></div>
+  <div class="sect">Third-party code</div>
+  <p class="weak small">Dear ImGui, miniz, toml++ and Zydis (MIT License); Source Han Sans subsets by Adobe (SIL Open Font License 1.1). Their licenses are in anvil/docs/third-party after installing.</p></div>`;
+}
+function content(){
+  return {anvil:anvilTab,catalog:catalogTab,plugins:plugins,benchmark:benchTab,crashes:crashTab,log:logTab,about:aboutTab}[tab]();
+}
+const fillTabs = ['log','crashes','plugins'];
+
+/* ---------------- shells ---------------- */
+function gameHeader(compact){
+  return `<div class="row" style="padding:10px 16px;gap:12px;flex:none;${compact?'':'border-bottom:1px solid var(--line)'}">
+    <span class="good glyph">✓</span><div style="line-height:1.25"><div class="semi">Europa Universalis IV <span class="weak" style="font-weight:400">· Steam 1.37.5</span></div>
+    <div class="weak small" title="C:\\Program Files (x86)\\Steam\\steamapps\\common\\Europa Universalis IV">…\\steamapps\\common\\Europa Universalis IV · <button class="tbtn small">Change...</button></div></div>
+    <span class="spacer"></span><span class="weak small">Anvil 1.23.0 · 9 plugins on</span><button class="btn primary" style="padding:5px 18px">Play EU4</button></div>`;
+}
+function shellA(){
+  return `<div class="win"><div class="cap forge">${ICON}<span class="ttl">Anvil Manager</span>${CBTN}</div>${gameHeader()}
+    <div class="tabs" style="padding-top:6px">${TABS.map(t=>`<button class="tab ${t.id===tab?'on':''}" data-act="tab" data-v="${t.id}">${t.name}${t.cnt?`<span class="cnt">${t.cnt}</span>`:''}</button>`).join('')}</div>
+    <div class="body ${fillTabs.includes(tab)?'fill':''}">${content()}</div></div>`;
+}
+function shellB(){
+  const item = (t)=>`<div class="li ${t.id===tab?'sel':''}" data-act="tab" data-v="${t.id}" style="padding:7px 12px;display:flex;align-items:center">${t.name}<span class="spacer"></span>${t.cnt?`<span class="tag ${t.id==='plugins'?'warn':''}">${t.id==='plugins'?'▲ 1':'● 1'}</span>`:''}</div>`;
+  const title = TABS.find(t=>t.id===tab).name;
+  return `<div class="win"><div class="cap forge">${ICON}<span class="ttl">Anvil Manager</span>${CBTN}</div>
+    <div style="display:flex;flex:1;min-height:0">
+      <div style="width:200px;flex:none;background:var(--bg0);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:10px 0">
+        <div style="padding:0 12px 10px"><button class="btn primary" style="width:100%;padding:6px">Play EU4</button>
+          <div class="weak small" style="margin-top:6px">Steam 1.37.5 · <button class="tbtn small">Change...</button></div></div>
+        ${TABS.filter(t=>!t.tool&&!t.end).map(item).join('')}
+        <div class="weak small" style="padding:12px 12px 4px">Tools</div>${TABS.filter(t=>t.tool).map(item).join('')}
+        <span class="spacer"></span>${TABS.filter(t=>t.end).map(item).join('')}</div>
+      <div style="flex:1;display:flex;flex-direction:column;min-width:0"><div class="row" style="padding:12px 16px 4px;flex:none"><span class="semi" style="font-size:17px">${title}</span></div>
+        <div class="body ${fillTabs.includes(tab)?'fill':''}">${content()}</div></div></div></div>`;
+}
+function shellC(){
+  return `<div class="win"><div class="cap forge" style="height:40px;background:var(--bg0)">${ICON}
+      ${TABS.map(t=>`<button class="tab ${t.id===tab?'on':''}" style="font-size:13px;padding:4px 10px;margin-top:6px" data-act="tab" data-v="${t.id}">${t.name}${t.cnt?`<span class="cnt">${t.cnt}</span>`:''}</button>`).join('')}
+      <span class="ttl"></span><button class="btn primary" style="margin-right:10px;font-size:13px">Play EU4</button>${CBTN.replace(/height:32px/g,'')}</div>
+    <div class="body ${fillTabs.includes(tab)?'fill':''}">${content()}</div>
+    <div class="row small" style="flex:none;padding:3px 12px;background:var(--bg0);border-top:1px solid var(--line);color:var(--weak);gap:14px">
+      <span><span class="good">✓</span> Anvil 1.23.0</span><span>Steam 1.37.5</span><span title="C:\\Program Files (x86)\\Steam\\steamapps\\common\\Europa Universalis IV">…\\Europa Universalis IV</span><button class="tbtn small">Change...</button><span class="spacer"></span><span>9 plugins on · 1 to approve</span></div></div>`;
+}
+
+/* ---------------- overlay ---------------- */
+function overlay(){
+  const old = variant==='0';
+  let b='';
+  if(ovtab==='crash'){
+    b = old ? `<div>Report crash-20261114-094112, before the game was ready</div><div>The game crashed in plugin code: bellows (trust.cpp:212).</div><div>Plugins involved: bellows</div>
+      <div>Report it at https://github.com/happy-dwarf-team/bellows/issues <button class="btn small">Copy link</button></div>
+      <div class="row" style="margin:4px 0"><button class="btn">Copy report</button><button class="btn">Disable bellows at the next start</button></div>
+      <div class="code" style="font-family:'Segoe UI';background:transparent">${h(REPORT)}</div>`
+    : `<div class="banner bad"><b class="lead">The last start crashed in Bellows.</b> 14 Nov, 09:41 · in its code (trust.cpp:212)
+      <div class="row" style="margin-top:8px"><button class="btn primary">Copy the report</button><button class="tbtn">Copy the issue link</button>
+      <span class="spacer"></span>${st.offNext?'<span class="info small">● Bellows off at the next start</span> <button class="tbtn small" data-act="offnext">Undo</button>':'<button class="tbtn" data-act="offnext">Turn Bellows off at the next start</button>'}</div></div>
+      <div class="code">${h(REPORT)}</div>`;
+  } else if(ovtab==='log'){
+    b = old ? `<div class="row"><button class="btn">Refresh</button>${chk(true,'Follow','none')}<button class="btn">Copy</button></div>
+      <div class="code" style="font-family:'Segoe UI';background:transparent;margin-top:6px">${LOG.map(l=>h(l.join(' '))).join('\n')}</div>`
+    : `<div class="row" style="margin-bottom:8px">${seg([['all','All'],['warn','Warnings and errors (5)']],st.logLevel,'loglevel')}<span class="spacer"></span>
+      <span class="tog ${st.follow?'on':''}" data-act="follow"><i></i>Follow</span><button class="tbtn">Copy</button></div>
+      <div class="code">${LOG.filter(l=>st.logLevel==='all'||l[1]!=='I').map(l=>`<span class="t">${l[0]}</span> <span class="${{I:'',W:'w',E:'e'}[l[1]]}">${l[1]==='I'?'     ':l[1]==='W'?'WARN ':'ERROR'} ${h(l[2])}</span>`).join('\n')}</div>`;
+  } else b = `<div class="weak">The Plugins tab as merged in 1.23 (anvil#382); not part of this prototype.</div>`;
+  const ovt = [['plugins','Plugins'],['crash','Crash report'],['log','Log']];
+  return `<div class="game">
+    <div class="notice ${old?'today':''}">${old?`<div class="row"><span class="warn" style="flex:1">A plugin crashed the game at the last start</span><button class="btn small">x</button></div>
+      <div>Bellows crashed in its code. Open the crash report?</div><button class="btn" style="margin-top:6px">Crash report</button>`
+      :`<div class="row"><span class="bad glyph">✕</span><b style="flex:1">The last start crashed in Bellows</b><button class="tbtn" title="Close" style="color:var(--weak)">✕</button></div>
+      <div style="margin:2px 0 8px 22px">It is still on. The crash report says where; its author can fix it.</div><div style="margin-left:22px"><button class="btn primary">Crash report</button></div>`}</div>
+    <div class="ovp ${old?'today':''}"><div class="tb"><span style="flex:1">Anvil</span><span class="weak">✕</span></div>
+      ${old?'':''}
+      <div class="tabs" style="padding-top:6px">${ovt.map(([id,n])=>`<button class="tab ${id===ovtab?'on':''}" data-act="ovtab" data-v="${id}">${n}</button>`).join('')}</div>
+      <div class="body fill">${b}</div></div>
+    <div class="badge">${old?'<span style="width:8px;height:8px;border-radius:50%;background:var(--bad);display:inline-block"></span>':'<span class="bad glyph">✕</span>'} Anvil 1.23.0</div>
+  </div>`;
+}
+
+/* ---------------- render ---------------- */
+function render(){
+  document.getElementById('stage').innerHTML = surface==='overlay' ? overlay() : ({'0':today,'A':shellA,'B':shellB,'C':shellC}[variant])();
+  document.getElementById('note').textContent = surface==='overlay'
+    ? (variant==='0' ? 'Overlay today: the notice title all in warning yellow with an "x" button, the badge\'s dot says its state by colour only, the crash tab names plugin ids and shows a raw URL, the log is plain text.'
+                     : 'Overlay proposed (A, B and C alike): the notice is a banner with a glyph and a primary action; the badge carries the state glyph; the crash tab names the plugin, turns it off through its switch (marked "at the next start" as in Plugins) and keeps the report in the code view; the log has levels and a filter.')
+    : NOTES[variant];
+  const sw = document.getElementById('switcher');
+  sw.innerHTML = `<button data-act="prev" aria-label="Previous variant">&larr;</button><span class="lbl">${variant} (${NAMES[variant]})</span><button data-act="next" aria-label="Next variant">&rarr;</button>
+    <button data-act="surface" class="${surface==='overlay'?'on':''}">${surface==='overlay'?'Overlay':'Manager'}</button>
+    ${variant==='0'&&surface==='manager'?`<button data-act="theme">Windows ${theme}</button>`:''}`;
+  const p = new URLSearchParams({variant,surface,tab,ovtab}); if(theme==='light') p.set('theme','light');
+  history.replaceState(null,'','?'+p.toString());
+}
+document.addEventListener('click',e=>{
+  const el = e.target.closest('[data-act]'); if(!el) return;
+  const a = el.dataset.act, v = el.dataset.v;
+  if(a==='prev'||a==='next'){const i=V.indexOf(variant);variant=V[(i+(a==='next'?1:V.length-1))%V.length];}
+  else if(a==='surface') surface = surface==='overlay'?'manager':'overlay';
+  else if(a==='theme') theme = theme==='light'?'dark':'light';
+  else if(a==='tab') tab=v; else if(a==='ovtab') ovtab=v;
+  else if(a==='files') st.filesOpen=!st.filesOpen; else if(a==='remove') st.removeAll=!st.removeAll;
+  else if(a==='bench') st.bench=+v; else if(a==='crash') st.crash=+v; else if(a==='logsrc') st.logSrc=v; else if(a==='loglevel') st.logLevel=v;
+  else if(a==='releases') st.checkReleases=!st.checkReleases; else if(a==='follow') st.follow=!st.follow; else if(a==='offnext') st.offNext=!st.offNext;
+  else return;
+  render();
+});
+document.addEventListener('keydown',e=>{
+  if(e.target.closest('input,textarea,[contenteditable]')) return;
+  if(e.key==='ArrowLeft'||e.key==='ArrowRight'){const i=V.indexOf(variant);variant=V[(i+(e.key==='ArrowRight'?1:V.length-1))%V.length];render();}
+});
+render();
+</script>
+</body>
+</html>

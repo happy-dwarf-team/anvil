@@ -1,6 +1,10 @@
 // Resources of AnvilManager.exe; configured by CMake from version.txt.
 #include <winver.h>
 
+// PROTOTYPE (prototype/app-shell): the window's and Explorer's icon, the anvil
+// mark of anvil-website's favicon.svg. The first icon resource is Explorer's.
+ANVIL_ICON ICON "@CMAKE_CURRENT_SOURCE_DIR@/app/anvil.ico"
+
 // The Anvil package of this version (tools/manager/CMakeLists.txt).
 ANVIL_PACKAGE RCDATA "@ANVIL_MANAGER_PACKAGE@"
 
