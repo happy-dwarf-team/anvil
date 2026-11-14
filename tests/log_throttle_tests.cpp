@@ -292,14 +292,16 @@ void panel_tests(const fs::path& source_dir) {
     run("panel: what the game's text says", [] {
         se::Message m = classified(
             "Script error! Script Object Token: \"has_country_flag\", Error: Trigger condition set on the wrong scope: province");
-        CHECK(m.kind == se::Kind::script && m.token == "has_country_flag" && !m.searchable && m.file.empty());
+        CHECK(m.kind == se::Kind::script && m.token == "has_country_flag" && m.find.empty() && m.file.empty() &&
+              m.context.empty());
         m = classified("Undefined event target: destination_province", "gamestate.cpp");
-        CHECK(m.kind == se::Kind::target && m.token == "destination_province" && m.searchable && !m.tooltip);
+        CHECK(m.kind == se::Kind::target && m.token == "destination_province" && m.find == "destination_province" &&
+              m.find_in == se::FindIn::script && !m.tooltip && m.context.empty());
         m = classified("Undefined event target in tooltip: destination_province", "gamestate.cpp");
         CHECK(m.kind == se::Kind::target && m.token == "destination_province" && m.tooltip);
         CHECK(se::item_key(classified("Undefined event target: destination_province")) == se::item_key(m));
         m = classified("Unknown country 'Z99' in a tag trigger");
-        CHECK(m.kind == se::Kind::script && m.token == "Z99" && m.searchable);
+        CHECK(m.kind == se::Kind::script && m.token == "Z99" && m.find == "Z99" && m.find_in == se::FindIn::script);
         m = classified("Could not open file: history/provinces/1 - Stockholm.txt, error: not found");
         CHECK(m.kind == se::Kind::files && m.group == "Could not open file" && m.file == "history/provinces/1 - Stockholm.txt");
         m = classified("Invalid file when updating checksum: history/provinces/2.txt");
@@ -313,7 +315,111 @@ void panel_tests(const fs::path& source_dir) {
         m = classified("Missing localization key: \"abc\"", "localizer.cpp");
         CHECK(m.kind == se::Kind::loc);
         m = classified("Something else");
-        CHECK(m.kind == se::Kind::other && m.token.empty());
+        CHECK(m.kind == se::Kind::other && m.token.empty() && m.find.empty() && m.context.empty());
+    });
+
+    // Lines of Anbennar's error.log (EU4 1.37.5 Steam, eu4-engine-lab runs it4-arg-seed1 and
+    // sp164-steam-anb), without the "[file.cpp:line]: " the table keeps apart; the colour
+    // codes as the table holds them, converted from Windows-1252.
+    run("panel: the game's own Context: text and what Find looks for", [] {
+        se::Message m = classified(
+            "Script error! Script Object Token: \"culture_group\", Context: \"province event '6033'\", Error: Unknown "
+            "culture group \"ROOT\". Root Country: ---. Root Province: 4696");
+        CHECK(m.kind == se::Kind::script && m.token == "culture_group" && m.context == "province event '6033'" &&
+              m.find == "6033" && m.find_in == se::FindIn::events && m.file.empty());
+        m = classified(
+            "Script error! Script Object Token: \"join_all_offensive_wars_of\", Context: \"flavor_spiked_log.1.a\", "
+            "Error: I35cannot join war 'Spiked Log Conquest of Oubbligschild' with I36': \xC2\xA7R- Already called to one "
+            "of the active wars.\xC2\xA7!",
+            "effectimplementation.cpp");
+        CHECK(m.kind == se::Kind::script && m.token == "join_all_offensive_wars_of" &&
+              m.context == "flavor_spiked_log.1.a" && m.find == "flavor_spiked_log.1.a" && m.find_in == se::FindIn::events);
+        // The same line echoed by the font code: the context is read there too.
+        m = classified(
+            "Could not find coloring for character '[effectimplementation.cpp:29078]: Script error! Script Object Token: "
+            "\"join_all_defensive_wars_of\", Context: \"flavour_baihon_xinh.5.a\", Error: Y72cannot join war 'War For "
+            "The Mantle of Baihon Xinh' with Y66': \xC2\xA7R- Already called to one of the active wars.\xC2\xA7!",
+            "bitmapfont.cpp");
+        CHECK(m.kind == se::Kind::gfx && m.context == "flavour_baihon_xinh.5.a" && m.find == "flavour_baihon_xinh.5.a");
+        // The other forms the game writes (docs/script-context-service-research.md in the lab).
+        m = classified("Script error! Script Object Token: \"is_year\", Context: \"country event 'ns.12'\", Error: x");
+        CHECK(m.context == "country event 'ns.12'" && m.find == "ns.12" && m.find_in == se::FindIn::events);
+        m = classified("Script error! Script Object Token: \"x\", Context: \"on_action random event 'a.1'\", Error: y");
+        CHECK(m.find == "a.1" && m.find_in == se::FindIn::events);
+        m = classified("Script error! Script Object Token: \"x\", Context: \"on_action event 'b.2'\", Error: y");
+        CHECK(m.find == "b.2" && m.find_in == se::FindIn::events);
+        m = classified("Script error! Script Object Token: \"x\", Context: \"lor_unite_the_lake.IsFulfilled\", Error: y");
+        CHECK(m.context == "lor_unite_the_lake.IsFulfilled" && m.find == "lor_unite_the_lake" &&
+              m.find_in == se::FindIn::missions);
+        // Game text is data: shown, but what is not a script name is not searched for.
+        m = classified("Script error! Script Object Token: \"x\", Context: \"province event '../../x'\", Error: y");
+        CHECK(m.context == "province event '../../x'" && m.find.empty() && m.find_in == se::FindIn::none);
+        m = classified("Script error! Script Object Token: \"x\", Context: \"C:\\Windows\\notepad.exe\", Error: y");
+        CHECK(!m.context.empty() && m.find.empty());
+        m = classified("Script error! Script Object Token: \"x\", Context: \"\", Error: y");
+        CHECK(m.context.empty() && m.find.empty());
+        m = classified("Script error! Script Object Token: \"x\", Context: \"unclosed");
+        CHECK(m.context.empty() && m.find.empty());
+        CHECK(se::find_folder(se::FindIn::events) == "events" && se::find_folder(se::FindIn::missions) == "missions" &&
+              se::find_folder(se::FindIn::script).empty());
+    });
+
+    run("panel: an item with a context shows it and offers a Find in events", [] {
+        se::Model model;
+        const std::string text =
+            "Script error! Script Object Token: \"culture_group\", Context: \"province event '6033'\", Error: Unknown "
+            "culture group \"ROOT\". Root Country: ---. Root Province: 4696";
+        model.update(0, "triggerimplementation.cpp", 7256, text, 10, 0);
+        model.update(1, "t.cpp", 1, "Script error! Script Object Token: \"development\", Error: x", 2, 0);
+        se::View view;
+        view.open = {static_cast<int>(se::Kind::script)};
+        const se::Texts en;
+        const auto details = [&](std::uint64_t key) {
+            view.selected = key;
+            return model.rows(view, {}, en);
+        };
+        std::vector<se::Row> rows = details(se::item_key(*model.message(0)));
+        bool context = false, find = false, script_find = false;
+        for (const se::Row& r : rows) {
+            if (r.label.ends_with("Context") && r.value == "province event '6033'") context = true;
+            if (r.label.ends_with("Find '6033' in events") && se::action_of(r.id) == se::Action::find) find = true;
+            if (r.label.ends_with("in the playset's script")) script_find = true;
+        }
+        CHECK(context && find && !script_find);
+        // The item's row in the list is the same as without a context: its token, then the game's text.
+        bool listed = false;
+        for (const se::Row& r : rows) {
+            if (r.label.starts_with("    v * 10  culture_group: Script error!")) listed = true;
+        }
+        CHECK(listed);
+        // Without a context: no Context line and no Find.
+        rows = details(se::item_key(*model.message(1)));
+        context = find = false;
+        for (const se::Row& r : rows) {
+            if (r.label.ends_with("Context")) context = true;
+            if (se::action_of(r.id) == se::Action::find) find = true;
+        }
+        CHECK(!context && !find);
+        // While Find runs, and its definitions once done.
+        se::Message& m = *model.message(0);
+        m.search = 1;
+        rows = details(se::item_key(m));
+        bool searching = false;
+        for (const se::Row& r : rows) {
+            if (r.label.ends_with("Searching events...")) searching = true;
+        }
+        CHECK(searching);
+        m.search = 2;
+        m.hit_total = 2;
+        m.hit_files = 1;
+        m.hits = {{"events/Flavour.txt", "C:/m/events/Flavour.txt", 40, true}, {"events/Flavour.txt", "C:/m/events/Flavour.txt", 90, false}};
+        rows = details(se::item_key(m));
+        bool defined = false, used = false;
+        for (const se::Row& r : rows) {
+            if (r.label.ends_with("defined at events/Flavour.txt:40") && se::action_of(r.id) == se::Action::open_hit) defined = true;
+            if (r.label.ends_with("used at events/Flavour.txt:90")) used = true;
+        }
+        CHECK(defined && used);
     });
 
     run("panel: a heading per kind, file and line first, missing files folded and last", [] {
@@ -460,6 +566,38 @@ void panel_tests(const fs::path& source_dir) {
         const se::Search found = se::search(layers, "dest");
         CHECK(found.total == 2 && found.files == 2 && found.hits.size() == 2 && found.hits[0].defines &&
               found.hits[0].rel == "events/a.txt" && found.hits[1].rel == "common/b.txt" && found.hits[1].line == 3);
+        // An event key, an option and a mission: their folder alone, a dot inside the name.
+        put(root / "user" / "mod" / "m" / "events" / "Flavour.txt",
+            "namespace = flavor_spiked_log\ncountry_event = {\n\tid = flavor_spiked_log.1\n\toption = {\n"
+            "\t\tname = flavor_spiked_log.1.a\n\t}\n}\n# flavor_spiked_log.1 in a comment\n"
+            "country_event = {\n\tid = flavor_spiked_log.2\n\timmediate = { country_event = { id = flavor_spiked_log.1 } }\n"
+            "\toption = {\n\t\tcountry_event = {\n\t\t\tid = flavor_spiked_log.1\n\t\t}\n\t}\n}\n");
+        put(root / "user" / "mod" / "m" / "common" / "x.txt", "flavor_spiked_log.1 = { }\n");
+        put(root / "user" / "mod" / "m" / "missions" / "lorent.txt",
+            "lor_missions = {\n\tlor_unite_the_lake = {\n\t\ticon = x\n\t}\n\tlor_next = { required_missions = { lor_unite_the_lake } }\n}\n");
+        const se::Search event = se::search(layers, "flavor_spiked_log.1", se::FindIn::events);
+        // The event's own id first; its calls, on one line or several, are uses.
+        CHECK(event.total == 3 && event.files == 1 && event.hits.size() == 3 && event.hits[0].defines &&
+              event.hits[0].line == 3 && !event.hits[1].defines && event.hits[1].line == 11 &&
+              !event.hits[2].defines && event.hits[2].line == 14 && event.hits[0].rel == "events/Flavour.txt");
+        const se::Search option = se::search(layers, "flavor_spiked_log.1.a", se::FindIn::events);
+        CHECK(option.total == 1 && option.hits.size() == 1 && option.hits[0].defines && option.hits[0].line == 5);
+        const se::Search mission = se::search(layers, "lor_unite_the_lake", se::FindIn::missions);
+        CHECK(mission.total == 2 && mission.hits.size() == 2 && mission.hits[0].defines && mission.hits[0].line == 2 &&
+              !mission.hits[1].defines && mission.hits[1].line == 5);
+        CHECK(se::search(layers, "flavor_spiked_log.1", se::FindIn::none).total == 0);
+        // A later mod's replace_path hides the folder of every earlier layer, as in the game
+        // (Anbennar replaces events: the game's own event 6033 is not in it).
+        put(root / "user" / "mod" / "r.mod", "name=\"Replacer\"\nreplace_path=\"common/ideas\"\nreplace_path=\"events/\"\npath=\"mod/r\"\n");
+        put(root / "user" / "mod" / "r" / "events" / "R.txt", "province_event = {\n\tid = flavor_spiked_log.1\n}\n");
+        put(root / "user" / "dlc_load.json", "{\"enabled_mods\":[\"mod/m.mod\",\"mod/r.mod\"],\"disabled_dlcs\":[]}");
+        const std::vector<se::Layer> replaced = se::playset_layers(root / "user" / "dlc_load.json", root / "user", root / "game");
+        const std::vector<std::string> folders{"common/ideas", "events"};
+        CHECK(replaced.size() == 3 && replaced[1].replaced.empty() && replaced[2].replaced == folders);
+        const se::Search only = se::search(replaced, "flavor_spiked_log.1", se::FindIn::events);
+        CHECK(only.total == 1 && only.hits.size() == 1 && only.hits[0].defines && only.hits[0].rel == "events/R.txt");
+        const se::Search dest = se::search(replaced, "dest");
+        CHECK(dest.total == 1 && dest.hits.size() == 1 && dest.hits[0].rel == "common/b.txt");
         CHECK(se::vscode_uri("C:\\Program Files (x86)\\a b.txt", 12) == "vscode://file/C:/Program%20Files%20%28x86%29/a%20b.txt:12");
         fs::remove_all(root, ec);
     });
