@@ -6,7 +6,7 @@
 //   AnvilManager.exe --check-package          exit code 0 when the package and the catalog it carries are sound
 //   AnvilManager.exe --remove-after-exit <exe> <pid>   (internal: the uninstall's last step)
 //   AnvilManager.exe --screenshot <dir> --game <folder> [--lang <code>] [--scale <percent>]
-//                    [--tab <name>] [--select <plugin>] [--build <id>]
+//                    [--tab <name>] [--select <plugin>] [--build <id>] [--dialog install|uninstall]
 //       ADR 0013, point 13: draws each tab (or only <name>) in a hidden window,
 //       writes <dir>/<tab>.png and exits; it reads the folder and writes nothing
 //       else. --build takes a fixture's eu4.exe for that game build.
@@ -186,7 +186,7 @@ void load_fonts(float scale) {
         io.Fonts->AddFontDefault(&fallback);
     }
     // Page titles (docs/ui-design-system.md, "Shell"): Segoe UI Semibold, or the text's font.
-    anvil::manager::ui::g_title_font = add(L"seguisb.ttf", 17.0f * 1.18f * scale);
+    anvil::ui::g_title_font = add(L"seguisb.ttf", 17.0f * 1.18f * scale);
     anvil::ui::use_anvil_style();
     ImGui::GetStyle().ScaleAllSizes(scale);
 }
@@ -377,6 +377,7 @@ struct ShotOptions {
     std::string tab;     // English name; "" for every tab
     std::string select;  // plugin id
     std::string build;
+    std::string dialog;  // "install" or "uninstall": the shot shows that dialog over the page
     int scale = 100;
     int width = 1040;  // the window's width at 100 %: a narrower one shows the sidebar's rail
 };
@@ -434,6 +435,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         if (args[i] == L"--tab" && i + 1 < args.size()) shot_options().tab = anvil::narrow(args[++i]);
         if (args[i] == L"--select" && i + 1 < args.size()) shot_options().select = anvil::narrow(args[++i]);
         if (args[i] == L"--build" && i + 1 < args.size()) shot_options().build = anvil::narrow(args[++i]);
+        if (args[i] == L"--dialog" && i + 1 < args.size()) shot_options().dialog = anvil::narrow(args[++i]);
         if (args[i] == L"--scale" && i + 1 < args.size()) shot_options().scale = std::max(50, _wtoi(args[++i].c_str()));
         if (args[i] == L"--width" && i + 1 < args.size()) shot_options().width = std::max(720, _wtoi(args[++i].c_str()));
         // The language goes through ANVIL_LANGUAGE, which every later choice of it honours.
@@ -520,6 +522,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         }
         app->show_tab(shot_tabs.front());
         if (!shot->select.empty()) app->select_plugin(shot->select);
+        if (!shot->dialog.empty()) app->open_dialog(shot->dialog);
     }
     const auto shot_started = std::chrono::steady_clock::now();
     size_t shot_index = 0;
@@ -563,9 +566,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
         if (shot) {
             // Five frames after the folder is read: tab bars, child sizes and wrapping settle.
+            // A dialog's dimming fades in over about 0.2 s of frame time: half a second of frames for it.
             shot_frames = app->settled() ? shot_frames + 1 : 0;
-            if (shot_frames >= 5) {
-                const fs::path file = shot->out / anvil::widen(lower(shot_tabs[shot_index]) + ".png");
+            if (!shot->dialog.empty()) Sleep(16);
+            if (shot_frames >= (shot->dialog.empty() ? 5 : 30)) {
+                const std::string dialog = shot->dialog.empty() ? std::string() : "-" + lower(shot->dialog);
+                const fs::path file = shot->out / anvil::widen(lower(shot_tabs[shot_index]) + dialog + ".png");
                 if (!write_png(graphics, file)) ++shot_failed;
                 shot_frames = 0;
                 if (++shot_index == shot_tabs.size()) break;

@@ -15,6 +15,7 @@ their symbols could only be checked against the real eu4.exe. The Anvil tab
 therefore lists those plugin.toml files as changed. Nothing here is the game's.
 """
 
+import json
 import pathlib
 import shutil
 import sys
@@ -127,6 +128,19 @@ version = "*"
 ''')
 write(plugins / "broken" / "plugin.toml", 'id = "broken"\nname = "Broken"\nversion = "1.0"\n')
 write(game / "anvil" / "anvil.toml", 'disabled_plugins = ["ledger-lib"]\nallow_ironman = ["tuning.drill_all"]\n')
+
+# Two crash reports for the Crashes page, in the layout Anvil writes (two-space indent):
+# one in a plugin's code, one with no plugin named.
+crashes = game / "anvil" / "crashes"
+write(crashes / "2026-11-12_21-04-33.json", json.dumps({
+    "time": "2026-11-12 21:04:33", "level": "in_plugin_code", "summary": "in plugin tuning's code",
+    "plugins_involved": ["tuning"], "issues": [{"plugin": "tuning", "url": "https://example.invalid/tuning/issues"}],
+    "before_game_ready": False}, indent=2))
+write(crashes / "2026-11-12_21-04-33.txt", "Anvil crash report (fixture)\nException: 0xC0000005 at tuning.dll+0x1a2b\n")
+write(crashes / "2026-11-10_18-30-02.json", json.dumps({
+    "time": "2026-11-10 18:30:02", "level": "no_plugin", "summary": "", "plugins_involved": [], "issues": [],
+    "before_game_ready": True}, indent=2))
+write(crashes / "2026-11-10_18-30-02.txt", "Anvil crash report (fixture)\nException: 0xC0000005 at eu4.exe+0x4b1f33\n")
 
 plugin(user / "mod" / "fixture-mod" / "anvil" / "sieges", "sieges", "Siege overview", '''description = "A list of every siege the player's armies hold."
 affects_gameplay = false

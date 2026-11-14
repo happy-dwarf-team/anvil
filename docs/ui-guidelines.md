@@ -324,6 +324,7 @@ How a plugin's manifest makes this UI work. `anvil check` enforces what it can.
 - [ ] Screenshots before and after, in English, German and one CJK language, at 100 % and
       150 % scaling, from the screenshot mode (`AnvilManager.exe --screenshot`, ADR 0013).
       CI keeps the Manager's as the artefact `anvil-manager-screenshots-<sha>`, drawn from
-      the folder `tools/manager/screenshots/fixture.py` lays out, and one set in a narrow
-      window (`--width 820`) for the sidebar's rail; the overlay's are taken in the game until
+      the folder `tools/manager/screenshots/fixture.py` lays out, one set in a narrow
+      window (`--width 820`) for the sidebar's rail, and the Anvil page's dialogs
+      (`--tab Anvil --dialog install|uninstall`); the overlay's are taken in the game until
       its test host exists.

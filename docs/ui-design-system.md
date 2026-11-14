@@ -105,6 +105,11 @@ All of them pass through `ScaleAllSizes`, as today.
 
 ## Components
 
+The code is the source: `src/ui/forge_widgets.hpp` draws the banner, state row, card, facts,
+tag, text button, title and the dialog's frame, and `src/ui/plugin_widgets.hpp` the glyphs, the
+toggle and the segmented control. A view draws a state, an action or a dialog with these, not
+with its own colours and spacings.
+
 | Component | Forge |
 |---|---|
 | **Sidebar entry** (Manager) | A line icon and the page's name, the full width of the sidebar; hover and selection as a list row (ember at 16 % with a 3 px ember bar). What waits on the page is a pill at the right: "▲ 2" in `warn` for plugins to approve, "● 1" in `info` for catalog updates, its meaning in the tooltip. |
@@ -122,8 +127,11 @@ All of them pass through `ScaleAllSizes`, as today.
 | **Group header** in the detail | Semibold `text`, a fold arrow, "n of m on", a `line` rule to the right. |
 | **Detail header** | The name in semibold at 17 px with version and id under it in `text_weak`; at the right the plugin toggle, a `line` separator, then Reset and Remove as secondary buttons. Under it, in the overlay, the plugin's state when it is an exception, with its glyph ("▲ kept out of this game: its author keeps it out of ironman"). It stays at the top of the scrolling detail (a fixed part above `BeginChild`), so the plugin being changed is always named. |
 | **Tag and chip** | Pills with a hairline. The "changes the game" tag carries the warning colour only in its word and outline. An active filter chip is ember at 16 % with an ember outline. |
-| **Banner** | `raised` with a 3 px left bar in the state colour; the text stays `text`, only its first bold words take the state colour. A list of facts inside it sits in a `panel` box. |
-| **Dialog** | `raised`, rounded 8, the screen dimmed by `ModalWindowDimBg` at 66 %. The title is semibold; the primary button sits at the right with Cancel to its left. |
+| **Banner** | `raised`, as high as its contents, with a 3 px left bar in the state colour and the state's glyph (§ Status; a dot for information) before its first line; the text stays `text` and wraps under itself, not under the glyph. Its actions sit inside it, after the text. Every notice of a page is one: a warning, a refusal, an update, a crash. |
+| **State row** | A glyph and one line beside it, outside a banner: a state that is no exception ("You have the latest release", "No crash reports"). |
+| **Card** | `panel` with a `line` hairline, as high as its contents: one thing to choose among several (a game copy on the first start; the Catalog's entries). |
+| **Facts** | Names in `text_weak` in a column of their own and values in `text` beside them ("Anvil 1.22.0", "eu4.exe", "Folder"). |
+| **Dialog** | `raised`, rounded 8, the screen dimmed by `ModalWindowDimBg` at 66 %, no title bar: the title in semibold inside. The buttons sit in a row at the right in Windows' order, the primary first and Cancel last; notices inside it are banners. |
 | **Overlay window** | `window` at 97 % opacity, rounded 8, a 2 px ember line at the top of its title bar instead of the blue title bar. |
 | **Scrollbar** | No track; the grab `#3d3935`, `border_hovered` on hover, ember while dragged. |
 | **Keyboard cursor** | A 2 px ember outline (`NavCursor`), always visible while navigating with the keyboard. |
@@ -181,8 +189,8 @@ Decided on 2026-11-14 as variant B1 of the throwaway page
 2. **The selection is a bar plus a tint** rather than a solid fill, so a selected row that is
    also greyed out or needs attention keeps its own state visible.
 3. **The detail header stays put** while the modules scroll.
-4. **Warning text is not written in yellow.** A banner says its state with its bar and its first
-   words; the rest is body text, readable at length (the approval card today is yellow from top to bottom).
+4. **Warning text is not written in yellow.** A banner says its state with its bar and its
+   glyph; the text is body text, readable at length (the approval card was yellow from top to bottom).
 5. **Shapes for states** (§ Status), so the list reads in greyscale and for colour-blind
    players.
 6. **The keyboard cursor is ember and 2 px**, easy to see on the warm surfaces.
@@ -234,11 +242,12 @@ Two steps, both in Anvil 1.23.0 (decided on 2026-11-14: the whole of ADR 0013 sh
 2. **With the view model of ADR 0013:** what needs the new list and detail: the plugin
    toggle, the status glyphs, the two-line list entries, the detail header and the "where it
    runs" segmented control, drawn by `src/ui/plugin_widgets.hpp` for both apps.
-3. **The shell B1** (decided on 2026-11-14, also for 1.23.0), in three pull requests: the
+3. **The shell B1** (decided on 2026-11-14, also for 1.23.0), in four pull requests: the
    caption, the icon and the sidebar with Segoe UI Semibold for page titles (§ Shell); the
-   Manager's other pages in Forge's components (banners for notices, cards in the Catalog,
-   a segmented control for the benchmark, levels in the log); the overlay's badge, notices,
-   crash report and log.
+   shared components of `forge_widgets.hpp` with the Plugins page, Anvil, Crashes, About, the
+   first start and the dialogs drawn in them, and "page" for "tab" in the texts; the Catalog
+   (cards), Benchmark (a segmented control for the series), Log (levels) and a monospace font
+   for logs and crash reports; the overlay's badge, notices, crash report and log.
 
 Each step's pull request has screenshots before and after (ui-guidelines §7).
 

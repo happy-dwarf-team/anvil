@@ -2,6 +2,7 @@
 
 #include "benchmark_tab.hpp"
 #include "cli/game.hpp"
+#include "core/crash_history.hpp"
 #include "core/discovery.hpp"
 #include "core/last_start.hpp"
 #include "core/plugin_translation.hpp"
@@ -60,6 +61,9 @@ public:
         if (!name.empty()) page_ = std::move(name);
     }
     void select_plugin(std::string id) { plugins_tab_.selected = std::move(id); }
+    // The dialog to open once the folder is read: "install" (the Anvil page's
+    // Install, Replace or Repair) or "uninstall"; it opens only where its button would.
+    void open_dialog(std::string name) { shot_dialog_ = std::move(name); }
 
 private:
     // What the worker reads from the game folder.
@@ -185,6 +189,8 @@ private:
     const std::string& plugin_text(const std::filesystem::path& folder, const std::string& english) const;
     mutable std::map<std::pair<std::filesystem::path, std::string>, std::optional<PluginTranslation>> translations_;
     std::string crash_selected_;
+    std::string shot_dialog_;  // the screenshot mode's dialog, until it opens
+    std::map<std::string, std::optional<CrashSummary>> crash_summaries_;  // the crash list's, read once each
     std::string crash_text_;
     std::string log_text_;
 
