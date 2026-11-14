@@ -98,6 +98,7 @@ add_library(anvil_core STATIC
     src/core/files.cpp
     src/core/game_build.cpp
     src/core/instructions.cpp
+    src/core/last_start.cpp
     src/core/log.cpp
     src/core/manifest.cpp
     src/core/mod_plugins.cpp

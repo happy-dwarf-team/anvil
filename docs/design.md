@@ -46,6 +46,7 @@ This is verified for direct starts and through the Paradox launcher (EU4 engine 
     data/anvil/approved/<id>/<hash>/   the approved copy a plugin from a mod loads from (§14)
     data/anvil/unfinished-starts.txt   starts in a row that ended before the game was ready (§10)
     data/anvil/crash-shown.txt         the last crash report the overlay announced (§15)
+    data/anvil/last-start.toml         what the last start used: anvil.toml's lists, approvals, settings (§11)
 <mod folder of an enabled mod>/anvil/<plugin-id>/   plugins from mods, Workshop or local (§14)
 ```
 
@@ -483,6 +484,7 @@ The C ABI is [`include/anvil/anvil_plugin.h`](../include/anvil/anvil_plugin.h) (
 - **Changing a value while the game runs** (the overlay, 1.1): the core holds each resolved plugin's settings in a `PluginSettings` (`src/core/plugin_settings.hpp`), found by `anvil::plugin_settings(id)` (`runtime.hpp`). `set(id, value)` (or `set_text`, `reset`) checks the value, saves the player's file (atomically, through a temporary file; with only defaults it is removed), and for a `restart = false` setting makes it the current value and runs the callbacks; a `restart = true` setting keeps its current value until the next start (`current` and `saved` tell the editor whether to show "applies at the next start"). A change replaces an environment override for the rest of the session. The overlay, a plugin itself, reaches these calls through the core's private service `anvil.control` (§15); the warnings of the start-up are in `warnings()`.
 - **Outside the game** (the Manager, 1.2): `anvil_core` has the same rules without the running game: `load_settings`, `load_player_settings` and `write_player_settings` (`src/core/settings.hpp`), `parse_setting_text` and `setting_toml` for text, `check_setting_value`. Edits are safe only while the game is closed: a running game rewrites the file on the next change in the overlay.
 - Settings are global per plugin; there are no per-playset or per-save profiles (§21).
+- **The record of the last start** ([ADR 0013](adr/0013-module-settings-and-overlay-writes.md), point 8, 1.23.0): at each start that loads plugins, after the retired settings moved and the plugins' settings were read, the core writes `anvil/data/anvil/last-start.toml` (`src/core/last_start.hpp`, format 1): the lists of `anvil.toml` (`disabled_plugins`, `allow_ironman`, `allow_multiplayer`, `enabled_modules`, `disabled_modules`) as that start read them, the approvals of `trust.toml` (id, mod, version, hash) and, for every plugin that resolved, each declared setting's value as that start read it from the player's file or the default (not an `ANVIL_<ID>_<NAME>` override), written as `setting_toml` writes it. The Manager compares the files with it to mark what changes at the next start and to undo, also while the game is closed; `read_last_start` gives nothing for a missing or unreadable record, and then nothing is marked. A start with `ANVIL_DISABLE=1` or `enabled = false` loads nothing and leaves the record as it was.
 
 ## 12. Crash capture and attribution
 
