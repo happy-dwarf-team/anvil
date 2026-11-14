@@ -37,11 +37,57 @@ std::string value_of(std::string_view text, std::string_view key) {
     return {};
 }
 
-bool word_char(char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; }
+// In an event key or an option's name ('ns.1', 'ns.1.a') a dot is part of
+// the name, so 'ns.1' is not found inside 'ns.1.a'.
+bool word_char(char c, bool dots) {
+    return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || (dots && (c == '.' || c == '-'));
+}
 
-bool word_at(std::string_view line, std::size_t at, std::size_t size) {
-    if (at > 0 && word_char(line[at - 1])) return false;
-    return at + size >= line.size() || !word_char(line[at + size]);
+bool word_at(std::string_view line, std::size_t at, std::size_t size, bool dots) {
+    if (at > 0 && word_char(line[at - 1], dots)) return false;
+    return at + size >= line.size() || !word_char(line[at + size], dots);
+}
+
+std::string_view trimmed_right(std::string_view s) {
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.remove_suffix(1);
+    return s;
+}
+
+// '{' less '}'.
+int braces(std::string_view code) {
+    int n = 0;
+    for (const char c : code) n += c == '{' ? 1 : c == '}' ? -1 : 0;
+    return n;
+}
+
+// Whether the use of a name at `at` in a line's code defines it (FindIn);
+// `depth` is the nesting of braces there.
+bool defines(std::string_view code, std::size_t at, std::size_t size, int depth, FindIn in) {
+    switch (in) {
+    case FindIn::script: return code.find("event_target_as") != std::string_view::npos;
+    case FindIn::events: {
+        // "id = <key>" in a top-level event, "name = <option>" in its option; deeper,
+        // "country_event = { id = <key> }" calls the event.
+        std::string_view before = trimmed_right(code.substr(0, at));
+        if (before.empty() || before.back() != '=') return false;
+        before = trimmed_right(before.substr(0, before.size() - 1));
+        for (const std::string_view key : {"id", "name"}) {
+            if (depth == (key == "id" ? 1 : 2) && before.ends_with(key) &&
+                (before.size() == key.size() || !word_char(before[before.size() - key.size() - 1], false))) {
+                return true;
+            }
+        }
+        return false;
+    }
+    case FindIn::missions: {
+        // "<mission> = {" at the start of a line, in a series.
+        if (depth != 1 || !trimmed_right(code.substr(0, at)).empty()) return false;
+        std::size_t i = at + size;
+        while (i < code.size() && std::isspace(static_cast<unsigned char>(code[i]))) ++i;
+        return i < code.size() && code[i] == '=';
+    }
+    default: return false;
+    }
 }
 
 }  // namespace
@@ -130,13 +176,19 @@ bool resolve(const std::vector<Layer>& layers, std::string_view file, std::strin
     return false;
 }
 
-Search search(const std::vector<Layer>& layers, std::string_view token) {
+Search search(const std::vector<Layer>& layers, std::string_view token, FindIn in) {
     Search out;
-    if (token.empty()) return out;
-    static const wchar_t* const kFolders[] = {L"events", L"common", L"decisions", L"missions", L"history/countries"};
+    if (token.empty() || in == FindIn::none) return out;
+    static const std::vector<const wchar_t*> kScript = {L"events", L"common", L"decisions", L"missions",
+                                                         L"history/countries"};
+    static const std::vector<const wchar_t*> kEvents = {L"events"};
+    static const std::vector<const wchar_t*> kMissions = {L"missions"};
+    const std::vector<const wchar_t*>& folders =
+        in == FindIn::events ? kEvents : in == FindIn::missions ? kMissions : kScript;
+    const bool dots = in != FindIn::script;
     std::vector<Hit> uses;
     for (const Layer& layer : layers) {
-        for (const wchar_t* folder : kFolders) {
+        for (const wchar_t* folder : folders) {
             std::error_code ec;
             const std::filesystem::path dir = layer.path / folder;
             if (!std::filesystem::is_directory(dir, ec)) continue;
@@ -147,6 +199,7 @@ Search search(const std::vector<Layer>& layers, std::string_view token) {
                 if (text.find(token) == std::string::npos) continue;
                 bool counted_file = false;
                 int number = 0;
+                int depth = 0;  // of braces, at the start of the line
                 for (std::size_t start = 0; start < text.size();) {
                     std::size_t end = text.find('\n', start);
                     if (end == std::string::npos) end = text.size();
@@ -156,7 +209,7 @@ Search search(const std::vector<Layer>& layers, std::string_view token) {
                     const std::string_view code = line.substr(0, line.find('#'));
                     for (std::size_t at = code.find(token); at != std::string_view::npos;
                          at = code.find(token, at + 1)) {
-                        if (!word_at(code, at, token.size())) continue;
+                        if (!word_at(code, at, token.size(), dots)) continue;
                         ++out.total;
                         if (!counted_file) {
                             ++out.files;
@@ -168,7 +221,7 @@ Search search(const std::vector<Layer>& layers, std::string_view token) {
                         std::replace(rel.begin(), rel.end(), '\\', '/');
                         h.rel = rel;
                         h.line = number;
-                        h.defines = code.find("event_target_as") != std::string_view::npos;
+                        h.defines = defines(code, at, token.size(), depth + braces(code.substr(0, at)), in);
                         if (h.defines) {
                             out.hits.push_back(std::move(h));
                         } else if (uses.size() < 8) {
@@ -176,6 +229,7 @@ Search search(const std::vector<Layer>& layers, std::string_view token) {
                         }
                         break;
                     }
+                    depth = std::max(0, depth + braces(code));
                 }
             }
         }

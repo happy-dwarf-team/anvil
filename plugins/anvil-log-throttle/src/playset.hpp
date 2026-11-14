@@ -32,15 +32,17 @@ std::vector<Layer> playset_layers(const std::filesystem::path& dlc_load, const s
 // The last layer that has `file` (game-relative); false when none has it.
 bool resolve(const std::vector<Layer>& layers, std::string_view file, std::string& path, std::string& layer);
 
-// The uses of `token` as a whole word in the script folders of every layer
-// (events, common, decisions, missions, history/countries; comments left
-// out): the lines that save it as an event target first, then other uses.
+// The uses of `token` as a whole word in the .txt files of the folders `in`
+// names, in every layer, comments left out: the lines that define it first
+// (FindIn), then other uses. For FindIn::script the folders are events,
+// common, decisions, missions and history/countries; for events and
+// missions, that folder alone, and a dot is part of a name.
 struct Search {
     std::vector<Hit> hits;  // at most 10
     std::size_t total = 0;
     std::size_t files = 0;
 };
-Search search(const std::vector<Layer>& layers, std::string_view token);
+Search search(const std::vector<Layer>& layers, std::string_view token, FindIn in = FindIn::script);
 
 // vscode://file/<path>:<line>, the path's characters escaped.
 std::string vscode_uri(std::string_view utf8_path, int line);

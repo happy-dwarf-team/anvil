@@ -45,6 +45,8 @@ From the top:
 3. Inside an open heading, its items by count, the largest first, at most 30. A click opens an
    item's details:
    - the text, and its count: lines written and lines counted by the throttle;
+   - **Context**, when the game names what was running: its own `, Context: "<text>"`, which it
+     writes before `, Error:` for a few paths only (below);
    - the game's code that wrote it, `[file.cpp:line]`: the game's C++ source, not a mod's file;
    - the file and line, when the game names them, with the layer of the playset that has the
      file (the last of the game folder and the enabled mods of `dlc_load.json`), **Open in VS
@@ -53,6 +55,29 @@ From the top:
      of `events`, `common`, `decisions`, `missions` and `history/countries` of every layer for the
      name as a whole word, outside comments. The lines that save it as an event target come
      first, then other uses, each a button that opens the file at its line.
+   - for a context that names an event or an option, **Find '<key>' in events**, and for a
+     mission, **Find '<mission>' in missions**: the same search in that folder alone, with a dot
+     part of the name (`ns.1` is not found inside `ns.1.a`). The line that defines it comes first
+     (`id = <key>`, `name = <option>`, `<mission> = {`).
+
+### The game's context
+
+The game sets the context on six paths of EU4 1.37.5 (the same text in Steam and both GOG builds),
+and the panel reads it from the line, with no hook and no cost in the game:
+
+| Context | What ran | Find |
+| --- | --- | --- |
+| `country event '<key>'`, `province event '<key>'` | an event's trigger | the key in `events` |
+| `on_action event '<key>'`, `on_action random event '<key>'` | an on_action's event | the key in `events` |
+| `<option>` (`flavor_spiked_log.1.a`) | the option the player or the AI chose | the name in `events` |
+| `<mission>.IsFulfilled` | a mission's trigger | the mission in `missions` |
+
+Decisions, casus belli, the AI's checks, music weights, tooltips and `Undefined event target` get
+none. In the lab's logs it was on none of 209 run-time script lines of vanilla, 2 of 10 of Anbennar
+in normal play and 88 of 251 on a save of 1582, so it helps big gameplay mods on event errors, not
+every line. The context is game text: it is shown as it is, and only a script name taken from it
+(letters, digits, `_`, `.`, `-`) is searched for, never used as a path. Find looks in every layer's
+folder, including the game's own when a mod replaces it (`replace_path`).
 
 The panel's own words come in the overlay's language, from its own table
 (`plugins/anvil-log-throttle/src/texts.cpp`), since `anvil-overlay.panel` translates nothing and
@@ -75,9 +100,11 @@ is B with C's first group, as the prototype's comment recommended, for these rea
   everything else down; their heading still says how many files.
 - **Find works for event targets, not for triggers.** `destination_province` gave 339 uses in 24
   files with its `save_event_target_as` on top, in 0.9 s; a trigger such as `has_country_flag`
-  is used in thousands of places, so its list would be noise. Find is offered only for event
-  targets and unknown tags. Leading a run-time error to the event or decision that caused it
-  needs a hook of the game's trigger evaluation, which is later work (with a script profiler).
+  is used in thousands of places, so its list would be noise. Find is offered for event
+  targets, unknown tags, and the events, options and missions the game's own context names.
+  Leading other run-time errors to the decision or check that caused them needs a hook of the
+  game's trigger evaluation; eu4-engine-lab#167 chose the game's context instead, and a context
+  limited to the script profiler's spans stays the next step if modders ask for more.
 - **Counts as they happen.** The prototype read the file every 2 s and got the throttled counts
   only with the reports, a minute late. The table is filled where the throttle sees each line.
 - **Panel v1 is enough.** Collapsed, the headings fit one window at 1280×720; a filter field or
@@ -109,7 +136,7 @@ notification, a filter, an editor other than VS Code, a link to Etch.
 - `anvil_log_throttle_tests`: the table (keep, counts, versions, positions, a full table, stable
   strings, Windows-1252), the panel's model (kinds from the game's texts, the headings and their
   order, the merged event target, the folded missing files, new and seen, the limits of
-  `anvil-overlay.panel`), that every text the panel uses has every language with the same
+  `anvil-overlay.panel`), the game's context on real Anbennar lines and its Find, that every text the panel uses has every language with the same
   placeholders, the playset's layers and Find on a folder of files, and the service end to end
   through the plugin's write hook, with the count compared to the lines and reports the log gets.
 - The Rust wrapper against a stand-in service (`cargo test -p anvil-sdk`).

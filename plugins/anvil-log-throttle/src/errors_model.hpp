@@ -23,12 +23,21 @@ namespace script_errors {
 enum class Kind : std::uint8_t { located, script, target, loc, gui, gfx, other, files };
 inline constexpr int kKinds = 8;
 
+// Where Find looks for a name, and which of its lines define it.
+enum class FindIn : std::uint8_t {
+    none,
+    script,    // an event target or a tag: events, common, decisions, missions, history/countries;
+               // defined by save_event_target_as, save_global_event_target_as
+    events,    // an event key or an option's name: events; defined by "id = <key>", "name = <option>"
+    missions,  // a mission: missions; defined by "<mission> = {"
+};
+
 // A line of a playset file that names the searched name.
 struct Hit {
     std::string rel;  // the path in the game's folders, "events/x.txt"
     std::string abs;  // UTF-8
     int line = 0;
-    bool defines = false;  // save_event_target_as, save_global_event_target_as
+    bool defines = false;  // as FindIn says
 };
 
 struct Message {
@@ -37,8 +46,13 @@ struct Message {
     int source_line = 0;
     std::string text;
     Kind kind = Kind::other;
-    std::string token;   // a name to group or search by (event target, tag, trigger)
-    bool searchable = false;
+    std::string token;   // a name to group by (event target, tag, trigger)
+    // The game's own `, Context: "<text>"`: what was running (an event, an
+    // option, a mission). Shown as it is; only a script name taken from it
+    // is searched for, never used as a path.
+    std::string context;
+    std::string find;    // the name Find searches for; empty: no Find
+    FindIn find_in = FindIn::none;
     bool tooltip = false;  // an event target of a tooltip
     std::string file;    // the game-relative file the game names
     int line = 0;        // 0: none
@@ -61,8 +75,13 @@ struct Message {
     bool is_new() const { return count() > seen; }
 };
 
-// What the game's text says: kind, names, file and line.
+// What the game's text says: kind, names, file and line, the context and
+// what Find looks for.
 void classify(Message& message);
+
+// The folder Find names for `in`: "events", "missions"; empty for script,
+// which searches several.
+std::string_view find_folder(FindIn in);
 
 enum class Action : std::uint8_t { none, new_only, mark, toggle, select, open, copy, find, open_hit };
 

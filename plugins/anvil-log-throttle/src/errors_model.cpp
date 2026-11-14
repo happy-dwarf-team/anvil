@@ -67,6 +67,58 @@ void file_and_line(Message& m) {
     m.line = line;
 }
 
+// A name of the game's script as Find takes it: letters, digits, '_', '.',
+// '-', at most 128 bytes. Anything else (spaces, quotes, slashes) is not
+// searched for.
+bool script_name(std::string_view s) {
+    if (s.empty() || s.size() > 128) return false;
+    for (const char c : s) {
+        if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '.' || c == '-')) return false;
+    }
+    return true;
+}
+
+// `, Context: "<text>"`, which the game writes before `, Error:` when a
+// script runs for an event, an option or a mission
+// (eu4-engine-lab docs/script-context-service-research.md). Its forms:
+//   country event '<key>', province event '<key>', on_action event '<key>',
+//   on_action random event '<key>': an event's key, found in events;
+//   <mission>.IsFulfilled: a mission, found in missions;
+//   <option>: the name of the option the player or the AI chose, in events.
+void context_of(Message& m) {
+    constexpr std::string_view kKey = ", Context: \"";
+    const std::string_view t = m.text;
+    const std::size_t at = t.find(kKey);
+    if (at == std::string_view::npos) return;
+    const std::size_t from = at + kKey.size();
+    std::size_t end = t.find("\", Error: ", from);
+    if (end == std::string_view::npos) end = t.find('"', from);
+    if (end == std::string_view::npos || end == from) return;
+    const std::string_view context = t.substr(from, end - from);
+    m.context = std::string(context);
+    if (!m.find.empty()) return;
+    std::string_view name;
+    FindIn in = FindIn::none;
+    for (const std::string_view event :
+         {"country event '", "province event '", "on_action event '", "on_action random event '"}) {
+        if (starts_with(context, event) && context.size() > event.size() + 1 && context.back() == '\'') {
+            name = context.substr(event.size(), context.size() - event.size() - 1);
+            in = FindIn::events;
+        }
+    }
+    constexpr std::string_view kMission = ".IsFulfilled";
+    if (in == FindIn::none && context.ends_with(kMission)) {
+        name = context.substr(0, context.size() - kMission.size());
+        in = FindIn::missions;
+    } else if (in == FindIn::none) {
+        name = context;
+        in = FindIn::events;
+    }
+    if (!script_name(name)) return;
+    m.find = std::string(name);
+    m.find_in = in;
+}
+
 std::uint64_t fnv(std::string_view s) {
     std::uint64_t h = 14695981039346656037ull;
     for (const unsigned char c : s) h = (h ^ c) * 1099511628211ull;
@@ -120,12 +172,18 @@ void classify(Message& m) {
         if (c != std::string_view::npos) m.token = std::string(t.substr(c + 2));
         while (!m.token.empty() && m.token.back() == ' ') m.token.pop_back();
         m.tooltip = contains(t, "tooltip");
-        m.searchable = !m.token.empty();
+        if (!m.token.empty()) {
+            m.find = m.token;
+            m.find_in = FindIn::script;
+        }
     } else if (starts_with(t, "Unknown country '")) {
         m.kind = Kind::script;
         const std::size_t end = t.find('\'', 17);
         if (end != std::string_view::npos) m.token = std::string(t.substr(17, end - 17));
-        m.searchable = !m.token.empty();
+        if (!m.token.empty()) {
+            m.find = m.token;
+            m.find_in = FindIn::script;
+        }
     } else if (contains(src, "windowtype") || contains(src, "guitype") || contains(src, "spritetype") ||
                m.file.ends_with(".gui") || m.file.ends_with(".gfx")) {
         m.kind = Kind::gui;
@@ -134,6 +192,15 @@ void classify(Message& m) {
     } else if (contains(src, "bitmapfont") || contains(src, "texture") || contains(t, "Texture ") ||
                contains(t, "building entity")) {
         m.kind = Kind::gfx;
+    }
+    context_of(m);
+}
+
+std::string_view find_folder(FindIn in) {
+    switch (in) {
+    case FindIn::events: return "events";
+    case FindIn::missions: return "missions";
+    default: return {};
     }
 }
 
@@ -289,7 +356,8 @@ std::vector<Row> Model::rows(const View& view, const Totals& totals, const Texts
             case Kind::files: label = t.f("{0}: {1} files", {first.group, grouped(item.messages.size())}); break;
             case Kind::located: label = file_line(first) + ": " + first.text; break;
             case Kind::script:
-                label = first.token.empty() || first.searchable ? first.text : first.token + ": " + first.text;
+                label = first.token.empty() || first.find_in == FindIn::script ? first.text
+                                                                               : first.token + ": " + first.text;
                 break;
             default: label = first.text; break;
             }
@@ -332,6 +400,7 @@ void Model::details(std::vector<Row>& out, const Item& item, const Texts& t) con
         text(in + t("Count"), t.f("{0} in script, {1} in tooltips", {grouped(script), grouped(tooltip)}));
     } else {
         text(in + t("Message"), cut(m.text, kMaxText));
+        if (!m.context.empty()) text(in + t("Context"), cut(m.context, 300));
         text(in + t("Count"), m.counted != 0 ? t.f("{0}: {1} written, {2} counted by the throttle",
                                                     {grouped(m.count()), grouped(m.written), grouped(m.counted)})
                                               : grouped(m.count()));
@@ -349,19 +418,26 @@ void Model::details(std::vector<Row>& out, const Item& item, const Texts& t) con
             text(in + t("File"), t.f("{0}: no layer of the playset has it", {file_line(m)}));
         }
     }
-    if (!m.searchable) return;
+    if (m.find.empty()) return;
+    const bool script = m.find_in == FindIn::script;
+    const std::string folder(find_folder(m.find_in));
     if (m.search == 0) {
-        button(in + t.f("Find '{0}' in the playset's script", {cut(m.token, 48)}), make_id(Action::find, 0));
+        button(in + (script ? t.f("Find '{0}' in the playset's script", {cut(m.find, 48)})
+                            : t.f("Find '{0}' in {1}", {cut(m.find, 48), folder})),
+               make_id(Action::find, 0));
     } else if (m.search == 1) {
-        text(in + t("Searching events, common, decisions, missions and history/countries..."));
+        text(in + (script ? std::string(t("Searching events, common, decisions, missions and history/countries..."))
+                          : t.f("Searching {0}...", {folder})));
     } else {
         text(in + t("Found"), t.f("{0} uses in {1} files ({2} ms)",
                                   {grouped(m.hit_total), grouped(m.hit_files), std::to_string(m.search_ms)}));
         for (std::size_t h = 0; h < m.hits.size(); ++h) {
             const Hit& hit = m.hits[h];
             const std::string where = cut(hit.rel, 60) + ":" + std::to_string(hit.line);
-            button(in + "  " + (hit.defines ? t.f("saved at {0}", {where}) : t.f("used at {0}", {where})),
-                   make_id(Action::open_hit, h));
+            const std::string label = !hit.defines ? t.f("used at {0}", {where})
+                                      : script     ? t.f("saved at {0}", {where})
+                                                   : t.f("defined at {0}", {where});
+            button(in + "  " + label, make_id(Action::open_hit, h));
         }
     }
 }

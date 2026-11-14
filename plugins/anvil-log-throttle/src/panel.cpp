@@ -162,15 +162,15 @@ void copy_text(const std::string& text) {
 
 std::string file_line(const std::string& path, int line) { return line > 0 ? path + ":" + std::to_string(line) : path; }
 
-void start_search(std::uint64_t key, std::string token) {
-    std::thread([key, token = std::move(token)] {
+void start_search(std::uint64_t key, std::string token, se::FindIn in) {
+    std::thread([key, token = std::move(token), in] {
         std::vector<se::Layer> layers;
         {
             std::lock_guard lock(g_mutex);
             layers = layers_locked();
         }
         const auto start = std::chrono::steady_clock::now();
-        se::Search found = se::search(layers, token);
+        se::Search found = se::search(layers, token, in);
         const auto ms = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
         anvil::Host{}.info("the script errors panel: '{}' has {} uses in {} files ({} ms)", token, found.total, found.files, ms);
@@ -216,9 +216,9 @@ void on_click(void*, std::uint64_t id) {
                 }
                 break;
             case se::Action::find:
-                if (m.search == 0 && m.searchable) {
+                if (m.search == 0 && !m.find.empty()) {
                     m.search = 1;
-                    start_search(g_view.selected, m.token);
+                    start_search(g_view.selected, m.find, m.find_in);
                 }
                 break;
             default:
