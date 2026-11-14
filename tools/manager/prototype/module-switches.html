@@ -2684,7 +2684,11 @@ const MOD_SAMPLES = [
    modules:[{id:'node_tooltips', name:'Node tooltips', desc:'Shows in a node\'s tooltip how much value it sends on.', gameplay:false, ironman:false, mp:false, def:true},
             {id:'ai_merchants', name:'AI merchant steering', desc:'AI merchants follow the richest links.', gameplay:true, ironman:true, mp:false, def:false}],
    fromMod:{mod:'Trade Tweaks', workshop:'3301122334', authors:'Sample author', repository:'github.com/example/trade-tweaks', symbols:3,
-            hash:'c41d77e0…02bb', approvedVersion:'1.0.2', approved:'2026-11-02'}}];
+            hash:'c41d77e0…02bb', approvedVersion:'1.0.2', approved:'2026-11-02'}},
+  {id:'map-labels', name:'Map Labels', version:'0.3.0', gameplay:false, ironman:false, mp:false, standard:false,
+   desc:'Sample plugin from a local mod that Anvil cannot load.', modules:[], deps:['anvil-game'],
+   fromMod:{mod:'Map Labels', workshop:'', authors:'Sample author', repository:'', symbols:0, hash:'',
+            approvedVersion:'', approved:'', invalid:'Its plugin.toml has a key this Anvil does not know (modules): it needs a newer Anvil.'}}];
 const MOD_SETTINGS = {'trade-tweaks':[{name:'tooltip_decimals', type:'int', label:'Decimals in tooltips', def:1, min:0, max:3, group:'', restart:false, desc:'', module:'node_tooltips'}]};
 function useMods(on){
   PLUGINS = PLUGINS.filter(p => !p.fromMod);
@@ -2692,21 +2696,33 @@ function useMods(on){
   if (!on) return;
   PLUGINS = PLUGINS.concat(JSON.parse(JSON.stringify(MOD_SAMPLES)));
   Object.assign(SETTINGS, JSON.parse(JSON.stringify(MOD_SETTINGS)));
-  for (const t of [toml, lastStart]) if (!t.trust) t.trust = {hello:'waits', 'trade-tweaks':'update'};
+  for (const t of [toml, lastStart]) if (!t.trust) t.trust = {hello:'waits', 'trade-tweaks':'update', 'map-labels':'invalid'};
 }
 const plug = id => PLUGINS.find(p => p.id === id);
 const trustOf = (t, p) => p.fromMod ? (t.trust || {})[p.id] || 'waits' : 'local';
+const cannotLoad = tr => tr === 'waits' || tr === 'invalid';
+// What waits for the player: first approvals and updates.
+const toApprove = () => PLUGINS.filter(p => p.fromMod && ['waits', 'update'].includes(trustOf(toml, p)));
+// B5: the Plugins tab says how many plugins wait for the player, in words, not only by colour.
+const tabLabel = t => t === 'Plugins' && variant === 'B5' && toApprove().length ? `Plugins <span class="chg" style="color:var(--warn);border-color:rgba(245,184,66,.55)">${toApprove().length} to approve</span>` : t;
+function attentionBar(){
+  const list = toApprove();
+  if (!list.length) return '';
+  return `<div class="banner warn" style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap"><span class="warn">&#9888;</span>
+    <span>${list.length} plugin${list.length > 1 ? 's' : ''} from mods wait${list.length > 1 ? '' : 's'} for your approval:</span>
+    ${list.map(p => `<button class="small" data-act="select" data-key="${CTX}:${p.id}">${esc(p.name)}${trustOf(toml, p) === 'update' ? ` (update to ${esc(p.version)})` : ''}</button>`).join('')}</div>`;
+}
 const depsOf = p => (p.deps || []).map(plug).filter(Boolean);
 // Does it load at the next start (t = toml) or did it at this one (t = lastStart)?
 function loads(t, p, path = []){
-  if (path.includes(p.id) || !pluginOn(t, p) || trustOf(t, p) === 'waits') return false;
+  if (path.includes(p.id) || !pluginOn(t, p) || cannotLoad(trustOf(t, p))) return false;
   return depsOf(p).every(d => loads(t, d, path.concat(p.id)));
 }
 // The first dependency that keeps it from loading; .via names the plugins in between.
 function blocker(t, p, path = []){
   for (const d of depsOf(p)){
     if (path.includes(d.id)) continue;
-    if (!pluginOn(t, d) || trustOf(t, d) === 'waits') return {...d, via: []};
+    if (!pluginOn(t, d) || cannotLoad(trustOf(t, d))) return {...d, via: []};
     const deeper = blocker(t, d, path.concat(p.id)); if (deeper) return {...deeper, via: [d.name, ...deeper.via]};
   }
   return null;
@@ -2732,22 +2748,27 @@ function changesOf(p){
 }
 function b5State(p){
   if (inGame()){
-    if (!loads(lastStart, p)) return trustOf(lastStart, p) === 'waits' ? '<span class="warn">waits for approval</span>' : '<span class="weak">off in this game</span>';
+    const was = trustOf(lastStart, p);
+    if (!loads(lastStart, p)) return was === 'waits' ? '<span class="warn">waits for approval</span>' : was === 'invalid' ? '<span class="bad">cannot load</span>' : '<span class="weak">off in this game</span>';
+    if (trustOf(toml, p) === 'update') return '<span class="warn">update waits for approval</span>';
     return stateWord(item(p.id));
   }
-  if (trustOf(toml, p) === 'waits') return '<span class="warn">waits for approval</span>';
+  const tr = trustOf(toml, p);
+  if (tr === 'waits') return '<span class="warn">waits for approval</span>';
+  if (tr === 'invalid') return '<span class="bad">cannot load</span>';
   if (!pluginOn(toml, p)) return '<span class="weak">off</span>';
   const b = blocker(toml, p);
   if (b) return `<span class="weak">off: needs ${esc(b.name)}</span>`;   // the detail says through what
-  return trustOf(toml, p) === 'update' ? '<span class="good">on</span> <span class="info">&middot; update waits</span>' : '<span class="good">on</span>';
+  return tr === 'update' ? '<span class="warn">update waits for approval</span>' : '<span class="good">on</span>';
 }
 function b5Entry(p, sel){
   const anyPending = items().some(i => i.plugin === p && isPending(i)) || (SETTINGS[p.id] || []).some(s => setPending(p.id, s)) || trustOf(toml, p) !== trustOf(lastStart, p);
   const mods = p.modules.length ? `${p.modules.length} modules, ${p.modules.filter(m => chosen(toml, item(p.id + '.' + m.id))).length} on` : (p.gameplay ? 'changes the game' : `${(SETTINGS[p.id] || []).length} settings`);
-  const ch = changedSettings(p.id).length;
-  return `<div class="li ${sel === p.id ? 'sel' : ''}${loads(toml, p) || trustOf(toml, p) === 'waits' ? '' : ' held'}" data-act="select" data-key="${CTX}:${p.id}">
-    <div class="mrow"><span>${esc(p.name)} <span class="weak">${esc(p.version)}</span></span><span style="font-size:12px">${b5State(p)}</span></div>
-    <div class="weak" style="font-size:12px">${mods}${ch ? ` &middot; ${ch} changed` : ''}${anyPending ? ' &middot; <span class="pending">&#9679; next start</span>' : ''}</div></div>`;
+  const ch = changedSettings(p.id).length, tr = trustOf(toml, p);
+  const what = tr === 'update' ? `${esc(p.fromMod.approvedVersion)} runs until you approve ${esc(p.version)}` : tr === 'invalid' ? 'see why' : mods;
+  return `<div class="li ${sel === p.id ? 'sel' : ''}${loads(toml, p) || cannotLoad(tr) ? '' : ' held'}" data-act="select" data-key="${CTX}:${p.id}">
+    <div class="mrow"><span>${esc(p.name)} <span class="weak">${esc(tr === 'update' ? p.fromMod.approvedVersion : p.version)}</span></span><span style="font-size:12px">${b5State(p)}</span></div>
+    <div class="weak" style="font-size:12px">${what}${ch ? ` &middot; ${ch} changed` : ''}${anyPending ? ' &middot; <span class="pending">&#9679; next start</span>' : ''}</div></div>`;
 }
 function b5Module(it, live, heldWhy){
   const own = chosen(toml, it), on = live && own, n = settingsOf(it.plugin.id, it.mod.id).length, ch = changedSettings(it.plugin.id, it.mod.id).length;
@@ -2770,13 +2791,15 @@ function b5Module(it, live, heldWhy){
 }
 function b5ModCard(p){
   const f = p.fromMod, tr = trustOf(toml, p), was = trustOf(lastStart, p);
+  if (tr === 'invalid') return `<div class="banner warn" style="display:block;margin:8px 0"><b class="bad">Cannot load.</b> ${esc(f.invalid)}
+      <div class="note">From the ${f.workshop ? `mod ${esc(f.mod)} (Workshop item ${esc(f.workshop)})` : `local mod ${esc(f.mod)}`}. Ask its author for a version for this Anvil, or update Anvil.</div></div>`;
   const facts = `<div class="facts"><span class="k">Mod</span><span>${esc(f.mod)} &middot; Workshop item ${esc(f.workshop)}</span>
     <span class="k">Authors</span><span>${esc(f.authors)}</span><span class="k">Source</span><span>${esc(f.repository)}</span>
     <span class="k">Changes the game</span><span>${p.modules.some(m => m.gameplay) ? 'some modules: ' + esc(p.modules.filter(m => m.gameplay).map(m => m.name).join(', ')) : p.gameplay ? 'yes' : 'no'}</span>
     <span class="k">Game addresses</span><span>${f.symbols}</span><span class="k">Folder hash</span><span>${esc(f.hash)}</span></div>`;
   if (tr === 'waits') return `<div class="banner warn" style="display:block;margin:8px 0"><b>Waits for your approval.</b> It is native code from a mod: it runs with the same rights as the game, so approve only what you trust.
       ${facts}<button data-act="askApprove" data-key="${p.id}">Approve...</button>${was !== tr ? ' <span class="pending">&#9679; revoked at the next start</span>' : ''}</div>`;
-  if (tr === 'update') return `<div class="banner" style="display:block;margin:8px 0"><b>Version ${esc(p.version)} waits for your approval.</b> ${esc(f.approvedVersion)}, approved on ${esc(f.approved)}, runs until you approve it.
+  if (tr === 'update') return `<div class="banner warn" style="display:block;margin:8px 0"><b>Version ${esc(p.version)} waits for your approval.</b> ${esc(f.approvedVersion)}, approved on ${esc(f.approved)}, runs until you approve it.
       ${facts}<button data-act="askApprove" data-key="${p.id}">Approve ${esc(p.version)}...</button></div>`;
   return `<div class="note">From the mod ${esc(f.mod)} (Workshop item ${esc(f.workshop)}) &middot; ${was !== tr ? '<span class="pending">&#9679; approved; loads at the next start</span>' : `approved on ${esc(f.approved || 'today')}`}
     &middot; <button class="expander" data-act="askRevoke" data-key="${p.id}">Revoke approval...</button></div>`;
@@ -2788,9 +2811,9 @@ function variantB5(){
     const k = `${CTX}:${key}`, open = (openByDefault ? !ui.open.has(k) : ui.open.has(k)) || list.some(p => p.id === sel);
     return `<div class="lhdr" data-act="toggle" data-key="${k}">${open ? '&#9662;' : '&#9656;'} ${title}</div>` + (open ? list.map(p => b5Entry(p, sel)).join('') : '');
   };
-  const waiting = mods.filter(p => trustOf(toml, p) !== 'approved').length;
+  const waiting = toApprove().length, broken = mods.filter(p => trustOf(toml, p) === 'invalid').length;
   const list = ours.map(p => b5Entry(p, sel)).join('')
-    + section('mods', `From mods <span class="weak">&middot; ${mods.length} plugins${waiting ? `, <span class="warn">${waiting} wait for approval</span>` : ''}</span>`, mods, true)
+    + section('mods', `From mods <span class="weak">&middot; ${mods.length} plugins in 3 enabled mods${waiting ? `, <span class="warn">${waiting} wait for approval</span>` : ''}${broken ? `, <span class="bad">${broken} cannot load</span>` : ''}</span>`, mods, true)
     + section('std', `Comes with Anvil <span class="weak">&middot; ${std.length} plugins, ${std.filter(p => pluginOn(toml, p)).length} on</span>`, std, false);
   const p = plug(sel) || ours[0], pi = item(p.id), pOn = pluginOn(toml, p), tr = trustOf(toml, p);
   const live = loads(toml, p), b = pOn && tr !== 'waits' ? blocker(toml, p) : null;
@@ -2803,15 +2826,15 @@ function variantB5(){
       <button class="${ui.bellows === 'today' ? 'cur' : ''}" data-act="bellows" data-key="today">Bellows as it is</button>
       <button class="${ui.bellows === 'v3b' ? 'cur' : ''}" data-act="bellows" data-key="v3b">Proposed for 2.0</button></span></div>`;
   if (p.fromMod) d += b5ModCard(p);
-  const swTitle = locked ? 'The overlay needs it. Turn it off in Anvil Manager.' : tr === 'waits' ? 'Approve it first.' : '';
-  d += `<div style="margin:10px 0 4px">${pOn ? cb('On', true, 'on', p.id, {disabled: locked || tr === 'waits', title: swTitle})
-                                             : cb('On', false, 'askOn', p.id, {disabled: tr === 'waits', title: swTitle})} ${pend(pi)} ${inGame() ? stateWord(pi) : ''}</div>`;
+  const swTitle = locked ? 'The overlay needs it. Turn it off in Anvil Manager.' : tr === 'waits' ? 'Approve it first.' : tr === 'invalid' ? 'It cannot load.' : '';
+  d += `<div style="margin:10px 0 4px">${pOn ? cb('On', true, 'on', p.id, {disabled: locked || cannotLoad(tr), title: swTitle})
+                                             : cb('On', false, 'askOn', p.id, {disabled: cannotLoad(tr), title: swTitle})} ${pend(pi)} ${inGame() ? stateWord(pi) : ''}</div>`;
   if (locked) d += `<div class="note">The overlay needs it, so it cannot be turned off here. Turn it off in Anvil Manager.</div>`;
   const deps = dependentsAll(p);
   if (deps.length) d += `<div class="note">Needed by ${esc(deps.map(x => x.name).join(', '))}. ${pOn ? `Turning it off stops ${deps.length > 1 ? 'them' : 'it'} too; ${deps.length > 1 ? 'they keep their' : 'it keeps its'} own switch.` : `${deps.length > 1 ? 'They do' : 'It does'} not load while this one is off.`}</div>`;
   if (b) d += `<div class="banner" style="margin:8px 0;display:flex;gap:8px;align-items:baseline"><span class="info">&#9432;</span><span>Needs ${esc(b.name)}${viaText(b)}, which is ${trustOf(toml, b) === 'waits' ? 'waiting for approval' : 'off'}, so it does not load.
       ${trustOf(toml, b) === 'waits' ? '' : `<button class="small" data-act="askDeps" data-key="${p.id}">Turn on ${esc(offChain(p).filter(x => x !== p).map(x => x.name).join(' and '))}...</button>`}</span></div>`;
-  const heldWhy = tr === 'waits' ? 'Approve the plugin first; this choice is kept.' : !pOn ? 'Its plugin is off; this switch is kept.' : b ? `Its plugin needs ${b.name}; this switch is kept.` : '';
+  const heldWhy = tr === 'invalid' ? 'The plugin cannot load.' : tr === 'waits' ? 'Approve the plugin first; this choice is kept.' : !pOn ? 'Its plugin is off; this switch is kept.' : b ? `Its plugin needs ${b.name}; this switch is kept.` : '';
   if (!live && pOn === false && p.modules.length) d += `<div class="banner" style="margin:8px 0;display:flex;gap:8px;align-items:baseline"><span class="info">&#9432;</span><span>The plugin is off, so none of its modules load.
     Each module keeps its switch and its settings; they apply again when you turn the plugin on.</span></div>`;
   if (p.gameplay && !p.modules.length) d += `<div style="margin:8px 0">Where it runs ${tag(pi)}<div style="margin-top:4px">${segment(pi, !live)}</div><div class="note">${whereText(pi)}</div></div>`;
@@ -2831,7 +2854,7 @@ function variantB5(){
       if (open) d += its.map(it => b5Module(it, live, heldWhy)).join('');
     }
   }
-  return `<div class="split"><div class="list">${list}</div><div class="detail">${d}</div></div>`;
+  return `${attentionBar()}<div class="split"><div class="list">${list}</div><div class="detail">${d}</div></div>`;
 }
 function dialog(){
   const c = ui.confirm;
@@ -2887,9 +2910,9 @@ function sessionLine(){
 }
 function manager(){
   CTX = 'manager';
-  const tabs = today() ? ['Anvil','Catalog','Plugins','Mods','Settings','Benchmark','Crashes','Log','About'] : ['Anvil','Catalog','Plugins','Mods','Benchmark','Crashes','Log','About'];
+  const tabs = today() ? ['Anvil','Catalog','Plugins','Mods','Settings','Benchmark','Crashes','Log','About'] : ['Anvil','Catalog','Plugins', ...(variant === 'B5' ? [] : ['Mods']),'Benchmark','Crashes','Log','About'];
   if (!today() && ui.tab === 'settings') ui.tab = 'plugins';
-  document.getElementById('tabs').innerHTML = tabs.map(t => `<span class="tab ${ui.tab === t.toLowerCase() ? 'cur' : ''}" ${t === 'Plugins' || t === 'Settings' ? `data-act="tab" data-key="${t.toLowerCase()}"` : ''}>${t}</span>`).join('');
+  document.getElementById('tabs').innerHTML = tabs.map(t => `<span class="tab ${ui.tab === t.toLowerCase() ? 'cur' : ''}" ${t === 'Plugins' || t === 'Settings' ? `data-act="tab" data-key="${t.toLowerCase()}"` : ''}>${tabLabel(t)}</span>`).join('');
   document.getElementById('mbanner').innerHTML = running ? `<div class="banner amber">EU4 is running from this folder. Close it to change plugins here${today() ? '' : '; the overlay changes the same things in the game'}.</div>` : '';
   document.getElementById('pending').innerHTML = running ? '' : pendingBar();
   const body = ui.tab === 'settings' ? todayManagerSettings() : VARIANTS[variant][1]();
@@ -2902,14 +2925,14 @@ function overlay(){
   document.getElementById('quitbtn').innerHTML = running ? '<button class="small" data-act="quit">Quit to desktop</button>' : '';
   if (!running){ map.innerHTML = `<div style="text-align:center;padding:60px 0"><p>EU4 is not running.</p><button data-act="start">Start EU4</button></div>`; CTX = 'manager'; return; }
   const tabs = today() ? [['status','Status'],['mods','Mods'],['settings','Settings'],['crash','Crash report'],['log','Log']]
-                       : [['plugins','Plugins'],['mods','Mods'],['crash','Crash report'],['log','Log']];
+                       : [['plugins','Plugins'], ...(variant === 'B5' ? [] : [['mods','Mods']]),['crash','Crash report'],['log','Log']];
   if (!tabs.some(([k]) => k === ui.otab)) ui.otab = tabs[0][0];
   let body;
   if (today()) body = ui.otab === 'settings' ? todayOverlaySettings() : ui.otab === 'status' ? todayOverlayStatus() : '<p class="weak">Not part of this prototype.</p>';
   else body = ui.otab === 'plugins' ? sessionLine() + pendingBar() + VARIANTS[variant][1]() : '<p class="weak">Not part of this prototype.</p>';
   const msg = message ? `<div class="msg"><span class="${message.error ? 'bad' : 'good'}">${esc(message.text)}</span><button class="small" data-act="okmsg">OK</button></div>` : '';
   map.innerHTML = `<div class="owin"><div class="otitle"><span>Anvil</span><span>&times;</span></div>
-    <div class="tabs" style="padding:6px 8px 0">${tabs.map(([k, l]) => `<span class="tab ${ui.otab === k ? 'cur' : ''}" ${['status','settings','plugins'].includes(k) ? `data-act="otab" data-key="${k}"` : ''}>${l}</span>`).join('')}</div>
+    <div class="tabs" style="padding:6px 8px 0">${tabs.map(([k, l]) => `<span class="tab ${ui.otab === k ? 'cur' : ''}" ${['status','settings','plugins'].includes(k) ? `data-act="otab" data-key="${k}"` : ''}>${tabLabel(l)}</span>`).join('')}</div>
     <div class="obody">${msg}${body}</div></div>`;
   CTX = 'manager';
 }
