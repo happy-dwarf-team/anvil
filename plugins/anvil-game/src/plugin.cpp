@@ -1355,6 +1355,14 @@ AnvilResult world_country_subjects(const char* tag, AnvilGameTag* out, std::uint
     return give_tags([&](auto& t) { return anvil_game::read_subjects(g_world, tag, t); }, out, capacity, count);
 }
 
+AnvilResult world_player_tags(AnvilGamePlayer* out) {
+    if (out == nullptr || out->size < sizeof(out->size)) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (!world_open()) return ANVIL_ERROR_WRONG_PHASE;
+    AnvilGamePlayer player{};
+    const AnvilResult r = anvil_game::read_player_tags(g_world, player);
+    return r == ANVIL_OK ? give(out, player) : r;
+}
+
 constexpr AnvilGameWorldService kWorldService = {
     sizeof(AnvilGameWorldService), world_player,         world_province_limit, world_province,
     world_province_name,           world_province_cores, world_country,        world_country_provinces,
@@ -1372,6 +1380,7 @@ constexpr AnvilGameWorldService kWorldService = {
     world_province_view,
     world_country_relations,       world_subject_type,     world_diplomacy_status,
     world_country_rivals,          world_country_overlord, world_country_subjects,
+    world_player_tags,
 };
 
 // A port may declare these symbols absent on a new build (ADR 0004): the game

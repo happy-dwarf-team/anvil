@@ -857,6 +857,17 @@ unsafe extern "C" fn world_country_subjects(
     ANVIL_OK
 }
 
+unsafe extern "C" fn world_player_tags(out: *mut AnvilGamePlayer) -> AnvilResult {
+    unsafe {
+        assert_eq!((*out).size, std::mem::size_of::<AnvilGamePlayer>() as u32);
+        (*out).tag = Tag::new("RUS").unwrap().to_raw();
+        (*out).own = Tag::new("O00").unwrap().to_raw();
+        (*out).observed = Tag::new("RUS").unwrap().to_raw();
+        (*out).flags = ANVIL_GAME_PLAYER_OBSERVER;
+    }
+    ANVIL_OK
+}
+
 static FAKE_WORLD_FULL: Shared<AnvilGameWorldService> = Shared({
     let mut table: AnvilGameWorldService = unsafe { std::mem::zeroed() };
     table.size = std::mem::size_of::<AnvilGameWorldService>() as u32;
@@ -874,6 +885,7 @@ static FAKE_WORLD_FULL: Shared<AnvilGameWorldService> = Shared({
     table.diplomacy_status = Some(world_diplomacy_status);
     table.country_overlord = Some(world_country_overlord);
     table.country_subjects = Some(world_country_subjects);
+    table.player_tags = Some(world_player_tags);
     table
 });
 
@@ -1258,6 +1270,15 @@ fn world_reads_diplomacy() {
         ErrorCode::NotFound
     );
     assert_eq!(w.country_subjects(rus).unwrap(), [tur]);
+    assert_eq!(
+        w.player_tags().unwrap(),
+        world::PlayerTags {
+            tag: Some(rus),
+            own: Tag::new("O00"),
+            observed: Some(rus),
+            observer: true
+        }
+    );
     // In the table's size but not filled in: Unsupported.
     assert_eq!(
         w.subject_type(rus, tur).unwrap_err().code(),
