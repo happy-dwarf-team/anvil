@@ -135,6 +135,18 @@ pre.toml .chg{color:var(--info)}
 mark{background:rgba(245,184,66,.35);color:inherit;border-radius:2px;padding:0 1px}
 .mod.hit{box-shadow:inset 3px 0 0 var(--warn);padding-left:6px !important}
 .empty{padding:12px 10px}
+/* B5's detail header: name on the left; the plugin's switch, then (apart) Reset and Remove on the right. */
+.dhead{display:flex;justify-content:space-between;align-items:center;gap:8px 12px;flex-wrap:wrap;padding-bottom:6px}
+.dname{font-size:16px}
+.dacts{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.vsep{width:1px;align-self:stretch;background:var(--bl);margin:2px 4px}
+.dstate{font-size:13px;margin:0 0 4px}
+.pswitch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+.pswitch .track{width:36px;height:20px;border-radius:999px;background:var(--frame);position:relative;flex:none}
+.pswitch .knob{position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#bbb}
+.pswitch.on .track{background:var(--check)}
+.pswitch.on .knob{left:19px;background:#fff}
+.pswitch.dis{opacity:.45;cursor:default}
 /* Scrollbars as the apps' ImGui style will draw them (ui-guidelines §3): thin, no track, a neutral grab
    that brightens on hover and takes the accent while dragged. */
 ::-webkit-scrollbar{width:10px;height:10px}
@@ -206,20 +218,33 @@ body.forge{
 .forge .lhdr{background:transparent;color:var(--weak);font-size:12px;letter-spacing:.04em;padding:10px 10px 4px;border-bottom:1px solid var(--line)}
 .forge .lhdr:hover{color:var(--text)}
 .forge .detail{padding:0 16px 12px}
-.forge .detail>.mrow:first-child{position:sticky;top:0;z-index:2;background:var(--child);padding:12px 0 8px;margin-bottom:2px;border-bottom:1px solid var(--line)}
-.forge .detail>.mrow:first-child>div:first-child{font-weight:600}
+.forge .dhead{position:sticky;top:0;z-index:2;background:var(--child);padding:12px 0 10px;margin-bottom:6px;border-bottom:1px solid var(--line)}
+.forge .dname{font-weight:600;font-size:17px}
+.forge .vsep{background:var(--line)}
+.forge .pswitch .track{background:var(--frame);border:1px solid var(--bs)}
+.forge .pswitch .knob{background:var(--weak)}
+.forge .pswitch:hover:not(.dis) .track{border-color:#5c564f}
+.forge .pswitch.on .track{background:var(--ember);border-color:var(--ember)}
+.forge .pswitch.on .knob{background:var(--on-ember)}
+.forge .pswitch .plabel{font-weight:600}
+/* The list entry: glyph column, name, one phrase. */
+.forge .li.e2{display:grid;grid-template-columns:18px minmax(0,1fr) auto;column-gap:6px;row-gap:1px;align-items:baseline;padding:7px 10px}
+.forge .li.e2 .g{grid-row:1;text-align:center;font-size:13px}
+.forge .li.e2 .g.warn{font-size:10px}
+.forge .li.e2 .g.good{color:var(--good)}
+.forge .li.e2 .nm{font-weight:600;overflow-wrap:anywhere}
+.forge .li.e2 .pdot{color:var(--info);font-size:10px}
+.forge .li.e2 .l2,.forge .li.e2 .l3{grid-column:2 / 4;font-size:12px}
+.forge .li.e2 .l3{color:var(--text)}
+.forge .legend{font-size:12px;color:var(--weak);padding:0 2px}
+.forge .lhdr .cnt{display:inline-block;min-width:18px;padding:0 6px;margin-left:4px;border-radius:999px;background:var(--frame);color:var(--weak);font-size:11px;text-align:center}
+.forge .lhdr .warn,.forge .lhdr .bad{font-size:11px;margin-left:4px}
 .forge .gsep{color:var(--text);font-weight:600;margin:18px 0 6px}
 .forge .gsep::after,.forge .sep::after{border-top-color:var(--line)}
 .forge .mod{border-bottom:1px solid var(--line)}
 .forge .mod.hit{box-shadow:inset 3px 0 0 var(--ember)}
 .forge .setbox{border-left-color:var(--line)}
 .forge mark{background:var(--ember-tt);color:var(--text);box-shadow:0 1px 0 var(--ember)}
-/* Status: a word and a glyph of its own shape, so state never rests on colour (ui-guidelines §3). */
-.forge .li .mrow>span:last-child>span::before{display:inline-block;width:1.1em;text-align:center}
-.forge .li .mrow>span:last-child>.good::before{content:"\2713"}
-.forge .li .mrow>span:last-child>.weak::before{content:"\25CB"}
-.forge .li .mrow>span:last-child>.warn::before{content:"\25B2";font-size:10px;vertical-align:1px}
-.forge .li .mrow>span:last-child>.bad::before{content:"\2715"}
 /* Tags and chips: pills with a hairline, the state colour only on the word. */
 .forge .tag{border-radius:999px;border-color:rgba(229,192,75,.45);background:rgba(229,192,75,.07);padding:0 8px}
 .forge .chg{border-radius:999px;border-color:var(--bs);color:var(--weak);padding:0 7px}
@@ -2251,6 +2276,8 @@ function stateWord(it){
     if (it.mod && !pluginOn(lastStart, it.plugin)) return '<span class="weak">off with its plugin in this game</span>';
     if (!isOn(lastStart, it)) return '<span class="weak">off in this game</span>';
     const r = keptOut(lastStart, it, SESSION);
+    // Forge (B5): "on" is the usual case and is not repeated on every row; an exception is one line with its reason.
+    if (skin === 'forge' && variant === 'B5') return r ? `<span class="warn">kept out of this game: ${r}</span>` : '';
     return r ? `<span class="warn">kept out of this game</span><div class="weak" style="font-size:12px">${r}</div>` : '<span class="good">on in this game</span>';
   }
   if (!pluginOn(toml, it.plugin)) return it.mod ? '<span class="weak">off with its plugin</span>' : '<span class="weak">off</span>';
@@ -2266,7 +2293,11 @@ function control(pid, s, disabled){
   else if (s.type === 'enum') c = `<select data-set="${k}" ${dis}>${s.values.map(([n, l]) => `<option value="${n}" ${n === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select> <span>${hl(s.label)}</span>`;
   else c = `<input type="${s.type === 'int' ? 'number' : 'text'}" data-set="${k}" value="${esc(v)}" ${dis}> <span>${hl(s.label)}</span>`;
   const p = setPending(pid, s) ? `<span class="pending">&#9679; at the next start${running ? ` (now ${esc(show(getVal(pid, s, lastValues)))})` : ''}</span>` : '';
-  const when = `<span class="weak" style="font-size:12px">${s.restart ? 'next start' : 'applies at once'}</span>`;
+  // Forge (B5): only the exception is marked. In the overlay most settings apply at once, so a row says so only
+  // when it waits for the next start; in the Manager the game is not running and no row needs it.
+  const quiet = skin === 'forge' && variant === 'B5';
+  const when = quiet ? (inGame() && s.restart ? '<span class="weak" style="font-size:12px">applies at the next start</span>' : '')
+                     : `<span class="weak" style="font-size:12px">${s.restart ? 'next start' : 'applies at once'}</span>`;
   const def = esc(show(s.def) || 'none');
   // B5: a changed value says so in words and shows the default; the (?) always carries the default.
   const changed = v !== s.def && variant === 'B5' ? `<span class="chg">changed</span> <span class="weak" style="font-size:12px">default: ${def}</span>` : '';
@@ -2417,18 +2448,25 @@ function whereText(it, own = false){
   const w = whereNow(it, own);
   if (w === 'off') return 'Does not load.';
   if (!it.gameplay) return 'Runs in every game; it does not change the game.';
-  let t = {normal:'Runs in normal games. Kept out of ironman and multiplayer.', im:'Runs in normal and ironman games. Kept out of multiplayer.',
-           mp:'Runs in normal and multiplayer games. Kept out of ironman.', all:'Runs in every game, ironman and multiplayer included.'}[w];
-  const locked = ['ironman','mp'].filter(m => !offers(it, m)).map(m => MODE[m]);
+  if (w === 'all') return 'Runs in every game, ironman and multiplayer included.';
+  // Each kept-out mode is named once: either the player keeps it out (and may allow it) or its author does.
+  const runs = {normal:'normal', im:'normal and ironman', mp:'normal and multiplayer'}[w];
+  const out = ['ironman','mp'].filter(m => !(w === 'im' && m === 'ironman') && !(w === 'mp' && m === 'mp'));
+  const yours = out.filter(m => offers(it, m)).map(m => MODE[m]), locked = out.filter(m => !offers(it, m)).map(m => MODE[m]);
+  let t = `Runs in ${runs} games.`;
+  if (yours.length) t += ` Kept out of ${yours.join(' and ')} unless you allow it.`;
   if (locked.length) t += ` Its author keeps it out of ${locked.join(' and ')}.`;
   return t;
 }
-function segment(it, disabled, own = false){
-  const cur = whereNow(it, own);
-  return `<div class="seg" role="radiogroup">${whereChoices(it).map(c => {
+function segment(it, disabled, own = false, noOff = false){
+  // noOff: the plugin's own switch (B5's header) turns it on and off; the segment says only where it runs,
+  // and keeps showing that choice while the plugin is off.
+  const i = allowed(toml, it, 'ironman'), m = allowed(toml, it, 'mp');
+  const cur = noOff ? (i && m ? 'all' : i ? 'im' : m ? 'mp' : 'normal') : whereNow(it, own);
+  return `<div class="seg" role="radiogroup">${whereChoices(it).filter(c => !noOff || c.k !== 'off').map(c => {
     const missing = (c.need || []).filter(m => !offers(it, m)), dis = disabled || missing.length > 0;
     const title = disabled ? 'Its plugin is off.' : missing.length ? `Its author keeps it out of ${missing.map(m => MODE[m]).join(' and ')}.` : '';
-    return `<button role="radio" aria-checked="${c.k === cur}" class="${c.k === cur ? 'cur' : ''}" ${dis ? 'disabled' : ''} title="${esc(title)}" data-act="where" data-key="${esc(it.key)}" data-where="${c.k}">${esc(c.l)}</button>`;
+    return `<button role="radio" aria-checked="${c.k === cur}" class="${c.k === cur ? 'cur' : ''}" ${dis ? 'disabled' : ''} title="${esc(title)}" data-act="${noOff ? 'whereonly' : 'where'}" data-key="${esc(it.key)}" data-where="${c.k}">${esc(c.l)}</button>`;
   }).join('')}</div>`;
 }
 function variantB(){
@@ -2884,7 +2922,50 @@ function b5State(p){
   if (b) return `<span class="weak">off: needs ${esc(b.name)}</span>`;   // the detail says through what
   return tr === 'update' ? '<span class="warn">update waits for approval</span>' : '<span class="good">on</span>';
 }
+// The plugin's own switch: a toggle, so it reads apart from the modules' checkboxes. Turning it on goes through
+// askOn (it may need a chain of dependencies); turning it off acts at once.
+function pluginSwitch(p, on, extra = {}){
+  const dis = extra.disabled;
+  return `<span class="pswitch${on ? ' on' : ''}${dis ? ' dis' : ''}" role="switch" aria-checked="${on}" tabindex="0" title="${esc(extra.title || '')}"
+    ${dis ? 'aria-disabled="true"' : `data-act="${on ? 'on' : 'askOn'}" data-key="${esc(p.id)}"`}><span class="track"><span class="knob"></span></span><span class="plabel">${on ? 'On' : 'Off'}</span></span>`;
+}
+// The one line under a plugin's name in the list: what is unusual about it if anything is, else a short summary.
+// [kind, text]; kind picks the glyph and the colour (good, weak, warn, bad).
+function b5Line(p){
+  const tr = trustOf(toml, p);
+  if (inGame()){
+    const was = trustOf(lastStart, p);
+    if (was === 'waits') return ['warn', 'waits for approval'];
+    if (was === 'invalid') return ['bad', 'cannot load'];
+    if (!loads(lastStart, p)) return ['weak', 'off in this game'];
+    const r = keptOut(lastStart, item(p.id), SESSION);
+    if (r) return ['warn', r.replace(/^its author keeps it /, 'kept ')];
+    if (tr === 'update') return ['warn', `update ${p.version} waits for approval`];
+  } else {
+    if (tr === 'waits') return ['warn', 'waits for approval'];
+    if (tr === 'invalid') return ['bad', 'cannot load'];
+    if (!pluginOn(toml, p)) return ['weak', 'off'];
+    const b = blocker(toml, p);
+    if (b) return ['weak', `off: needs ${b.name}`];
+    if (tr === 'update') return ['warn', `update ${p.version} waits for approval`];
+  }
+  const ch = changedSettings(p.id).length, n = (SETTINGS[p.id] || []).length;
+  const sum = p.modules.length ? `${p.modules.filter(m => chosen(toml, item(p.id + '.' + m.id))).length} of ${p.modules.length} modules on`
+            : p.gameplay ? 'changes the game' : n ? `${n} setting${n > 1 ? 's' : ''}` : 'no settings';
+  return ['good', sum + (ch ? ` · ${ch} changed` : '')];
+}
 function b5Entry(p, sel){
+  if (skin === 'forge'){
+    // Two lines, always: a status glyph in its own column and the name; under it one phrase. The version is in the
+    // detail (and in the phrase when an update waits); "in this game" is said once, above the overlay's list.
+    const anyPending = items().some(i => i.plugin === p && isPending(i)) || (SETTINGS[p.id] || []).some(s => setPending(p.id, s)) || trustOf(toml, p) !== trustOf(lastStart, p);
+    const [kind, text] = b5Line(p), tr = trustOf(toml, p);
+    const glyph = {good:'&#10003;', weak:'&#9675;', warn:'&#9650;', bad:'&#10005;'}[kind];
+    return `<div class="li e2 ${sel === p.id ? 'sel' : ''}${loads(toml, p) || cannotLoad(tr) ? '' : ' held'}" data-act="select" data-key="${CTX}:${p.id}" title="${esc(p.name + ' ' + p.version)}">
+      <span class="g ${kind}">${glyph}</span><span class="nm">${hl(p.name)}</span>${anyPending ? '<span class="pdot" title="Changes at the next start">&#9679;</span>' : ''}
+      <span class="l2 ${kind === 'good' ? 'weak' : kind}">${esc(text)}</span>
+      ${matchWhy(p) ? `<span class="l3">found in ${hl(matchWhy(p))}</span>` : ''}</div>`;
+  }
   const anyPending = items().some(i => i.plugin === p && isPending(i)) || (SETTINGS[p.id] || []).some(s => setPending(p.id, s)) || trustOf(toml, p) !== trustOf(lastStart, p);
   const mods = p.modules.length ? `${p.modules.length} modules, ${p.modules.filter(m => chosen(toml, item(p.id + '.' + m.id))).length} on` : (p.gameplay ? 'changes the game' : `${(SETTINGS[p.id] || []).length} settings`);
   const ch = changedSettings(p.id).length, tr = trustOf(toml, p);
@@ -2988,27 +3069,39 @@ function variantB5(){
   };
   const waiting = toApprove().length, broken = mods.filter(p => trustOf(toml, p) === 'invalid').length;
   const visible = PLUGINS.filter(shown).length;
+  // Forge: a section header is a name and a count; what needs attention is said by the entries and the bar above.
+  const forge = skin === 'forge', count = n => `<span class="cnt">${n}</span>`;
   let list = ours.filter(shown).map(p => b5Entry(p, sel)).join('')
-    + section('mods', `From mods <span class="weak">&middot; ${mods.length} plugins in 3 enabled mods${waiting ? `, <span class="warn">${waiting} wait for approval</span>` : ''}${broken ? `, <span class="bad">${broken} cannot load</span>` : ''}</span>`, mods, true)
-    + section('std', `Comes with Anvil <span class="weak">&middot; ${std.length} plugins, ${std.filter(p => pluginOn(toml, p)).length} on</span>`, std, false);
+    + section('mods', forge ? `From mods ${count(mods.length)}${waiting ? ` <span class="warn" title="${waiting} wait for approval">&#9650; ${waiting}</span>` : ''}${broken ? ` <span class="bad" title="${broken} cannot load">&#10005; ${broken}</span>` : ''}`
+                            : `From mods <span class="weak">&middot; ${mods.length} plugins in 3 enabled mods${waiting ? `, <span class="warn">${waiting} wait for approval</span>` : ''}${broken ? `, <span class="bad">${broken} cannot load</span>` : ''}</span>`, mods, true)
+    + section('std', forge ? `Comes with Anvil ${count(std.length)}` : `Comes with Anvil <span class="weak">&middot; ${std.length} plugins, ${std.filter(p => pluginOn(toml, p)).length} on</span>`, std, false);
   if (!visible) list = `<div class="empty"><p>No plugin matches${query() ? ` &ldquo;${esc(query())}&rdquo;` : ''}${ui.filters[CTX].size ? ' with these filters' : ''}.</p>
     <p class="note">The search looks in names, modules, settings and descriptions.</p>
     <button class="small" data-act="clearfind" data-key="${CTX}">Clear the search and filters</button></div>`;
-  const left = `<div class="lcol">${searchBox(PLUGINS.length, visible)}<div class="list">${list}</div></div>`;
+  const dot = `<span class="info">&#9679;</span> waits for the next start`;
+  const legend = !forge ? '' : inGame() ? `<div class="legend">As in this game &middot; ${dot}</div>` : pendingCount() ? `<div class="legend">${dot}</div>` : '';
+  const left = `<div class="lcol">${searchBox(PLUGINS.length, visible)}${legend}<div class="list">${list}</div></div>`;
   const p = plug(sel) || ours[0], pi = item(p.id), pOn = pluginOn(toml, p), tr = trustOf(toml, p);
   const live = loads(toml, p), b = pOn && tr !== 'waits' ? blocker(toml, p) : null;
   const locked = inGame() && overlayNeeds().has(p.id);
   const changes = changesOf(p);
-  let d = `<div class="mrow"><div style="font-size:16px">${esc(p.name)} <span class="weak" style="font-size:13px">${esc(p.version)} &middot; ${esc(p.id)}${p.standard ? ' &middot; comes with Anvil' : ''}</span></div>
-    <div>${changes.length ? `<button class="small" data-act="askReset" data-key="${p.id}">Reset to defaults...</button> ` : ''}${p.fromMod ? '' : removeBtn(p)}</div></div>
-    <div class="note" style="font-size:13px">${esc(p.desc)}</div>`;
+  // The header: the plugin's name, its own switch (bigger than a module's checkbox: it decides about all of them),
+  // and, set apart, Reset and Remove. It stays at the top while the modules scroll.
+  const swTitle = locked ? 'The overlay needs it. Turn it off in Anvil Manager.' : tr === 'waits' ? 'Approve it first.' : tr === 'invalid' ? 'It cannot load.' : '';
+  const sw = pluginSwitch(p, pOn, {disabled: (pOn && locked) || cannotLoad(tr), title: swTitle});
+  const tools = `${changes.length ? `<button class="small" data-act="askReset" data-key="${p.id}">Reset to defaults...</button>` : ''}${p.fromMod ? '' : removeBtn(p)}`;
+  const [kind] = b5Line(p), mark = skin === 'forge' && inGame() && kind !== 'good' ? `<span class="${kind}">${{weak:'&#9675;', warn:'&#9650;', bad:'&#10005;'}[kind]}</span> ` : '';
+  const status = `${pend(pi)} ${inGame() ? mark + stateWord(pi) : ''}`.trim();
+  let d = `<div class="dhead"><div class="dtitle"><div class="dname">${esc(p.name)}</div>
+      <div class="weak" style="font-size:12px">${esc(p.version)} &middot; ${esc(p.id)}${p.standard ? ' &middot; comes with Anvil' : ''}</div></div>
+    <div class="dacts">${sw}${tools ? `<span class="vsep"></span>${tools}` : ''}</div></div>
+    ${status ? `<div class="dstate">${status}</div>` : ''}
+    <div class="note" style="font-size:13px">${esc(p.desc)}</div>
+    ${skin === 'forge' && inGame() && (SETTINGS[p.id] || []).length ? '<div class="note">Settings apply at once unless they say &ldquo;applies at the next start&rdquo;.</div>' : ''}`;
   if (p.id === 'bellows') d += `<div style="margin:6px 0"><span class="seg small">
       <button class="${ui.bellows === 'today' ? 'cur' : ''}" data-act="bellows" data-key="today">Bellows as it is</button>
       <button class="${ui.bellows === 'v3b' ? 'cur' : ''}" data-act="bellows" data-key="v3b">Proposed for 2.0</button></span></div>`;
   if (p.fromMod) d += b5ModCard(p);
-  const swTitle = locked ? 'The overlay needs it. Turn it off in Anvil Manager.' : tr === 'waits' ? 'Approve it first.' : tr === 'invalid' ? 'It cannot load.' : '';
-  d += `<div style="margin:10px 0 4px">${pOn ? cb('On', true, 'on', p.id, {disabled: locked || cannotLoad(tr), title: swTitle})
-                                             : cb('On', false, 'askOn', p.id, {disabled: cannotLoad(tr), title: swTitle})} ${pend(pi)} ${inGame() ? stateWord(pi) : ''}</div>`;
   if (locked) d += `<div class="note">The overlay needs it, so it cannot be turned off here. Turn it off in Anvil Manager.</div>`;
   const deps = dependentsAll(p);
   if (deps.length) d += `<div class="note">Needed by ${esc(deps.map(x => x.name).join(', '))}. ${pOn ? `Turning it off stops ${deps.length > 1 ? 'them' : 'it'} too; ${deps.length > 1 ? 'they keep their' : 'it keeps its'} own switch.` : `${deps.length > 1 ? 'They do' : 'It does'} not load while this one is off.`}</div>`;
@@ -3017,7 +3110,7 @@ function variantB5(){
   const heldWhy = tr === 'invalid' ? 'The plugin cannot load.' : tr === 'waits' ? 'Approve the plugin first; this choice is kept.' : !pOn ? 'Its plugin is off; this switch is kept.' : b ? `Its plugin needs ${b.name}; this switch is kept.` : '';
   if (!live && pOn === false && p.modules.length) d += `<div class="banner" style="margin:8px 0;display:flex;gap:8px;align-items:baseline"><span class="info">&#9432;</span><span>The plugin is off, so none of its modules load.
     Each module keeps its switch and its settings; they apply again when you turn the plugin on.</span></div>`;
-  if (p.gameplay && !p.modules.length) d += `<div style="margin:8px 0">Where it runs ${tag(pi)}<div style="margin-top:4px">${segment(pi, !live)}</div><div class="note">${whereText(pi)}</div></div>`;
+  if (p.gameplay && !p.modules.length) d += `<div style="margin:8px 0">Where it runs ${tag(pi)}<div style="margin-top:4px">${segment(pi, !live, false, true)}</div><div class="note">${pOn ? whereText(pi) : 'The plugin is off; this choice is kept for when you turn it on.'}</div></div>`;
   const general = b2Settings(p.id, null, !live, 'Kept while the plugin does not load.');
   if (general) d += `<div class="section">Settings</div>${general}`;
   if (p.modules.length){
@@ -3088,7 +3181,8 @@ function pendingBar(){
 function sessionLine(){
   const s = SESSION, g = lastStart, acting = items().filter(i => i.gameplay && isOn(g, i) && !keptOut(g, i, s));
   const kind = s.ironman && s.mp ? 'an ironman multiplayer game' : s.ironman ? 'an ironman game' : s.mp ? 'a multiplayer game' : 'a single-player game';
-  return `<div style="margin-bottom:6px">In ${kind}: ${acting.length ? `${acting.length} plugin(s) or module(s) that change the game act. Multiplayer code <b>${hash(acting.map(i => i.key))}</b>.` : 'nothing that changes the game acts.'}</div>`;
+  const n = acting.length, what = n === 1 ? '1 plugin or module that changes the game acts' : `${n} plugins or modules that change the game act`;
+  return `<div style="margin-bottom:6px">In ${kind}: ${n ? `${what}. Multiplayer code <b>${hash(acting.map(i => i.key))}</b>.` : 'nothing that changes the game acts.'}</div>`;
 }
 function manager(){
   CTX = 'manager';
@@ -3185,6 +3279,7 @@ function act(el){
     if (w === 'off') setOn(it, false);
     else { setOn(it, true); if (it.gameplay){ setAllowed(it, 'ironman', w === 'im' || w === 'all'); setAllowed(it, 'mp', w === 'mp' || w === 'all'); } }
   }
+  else if (a === 'whereonly'){ const it = item(k), w = el.dataset.where; setAllowed(it, 'ironman', w === 'im' || w === 'all'); setAllowed(it, 'mp', w === 'mp' || w === 'all'); }
   else if (a === 'select'){ const [c, id] = k.split(':'); if (c === 'overlay') ui.oselected = id; else ui.selected = id; }
   else if (a === 'mode'){ const [c, m] = k.split(':'); if (c === 'overlay') ui.omode = m; else ui.mode = m; }
   else if (a === 'bellows') useBellows(k);
