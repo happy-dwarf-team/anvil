@@ -71,6 +71,11 @@ std::vector<std::string> opt_in_problems(const Manifest& manifest, const Gamepla
 GameplayPolicy::GameplayPolicy(ChangeRegistry& changes, ServiceBus& bus, GameplayOptIns opt_ins, LogSink log)
     : changes_(changes), bus_(bus), opt_ins_(std::move(opt_ins)), log_(std::move(log)) {}
 
+void GameplayPolicy::set_opt_ins(GameplayOptIns opt_ins) {
+    std::lock_guard lock(mutex_);
+    opt_ins_ = std::move(opt_ins);
+}
+
 void GameplayPolicy::add(const Manifest& manifest, OwnerId owner) {
     for (const auto& problem : opt_in_problems(manifest, opt_ins_)) log_(ANVIL_LOG_WARNING, manifest.id, problem);
     std::lock_guard lock(mutex_);

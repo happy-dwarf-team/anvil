@@ -54,6 +54,9 @@ public:
     // a session that calls for it runs already, the plugin's owner is
     // suspended now, so the changes it requests are enabled suspended.
     void add(const Manifest& manifest, OwnerId owner);
+    // Replaces the player's opt-ins before the first add (the retired
+    // settings of ADR 0013 may have added to them at this start).
+    void set_opt_ins(GameplayOptIns opt_ins);
     // A plugin whose load failed: it has no changes and nothing to tell.
     void forget(OwnerId owner);
 

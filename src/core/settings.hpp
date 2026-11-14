@@ -61,7 +61,7 @@ struct Setting {
     std::optional<bool> affects_gameplay;
 };
 
-// A value of a retired setting's `off`, as TOML wrote it.
+// A value of a retired setting's lists (`off`, `on`, `ironman`, `multiplayer`), as TOML wrote it.
 struct RetiredValue {
     enum class Kind { Bool, Int, Float, String } kind = Kind::Bool;
     int64_t integer = 0;  // bool (0 or 1) and int
@@ -71,11 +71,17 @@ struct RetiredValue {
 
 // [retired.<name>] (ADR 0013, point 4): a setting an earlier version had,
 // which the switch of `module` replaces. At the start the core moves a value
-// in `off` from the player's file into disabled_modules.
+// in `off` or `on` into the module's switch and one in `ironman` or
+// `multiplayer` into that opt-in of anvil.toml, and removes every value of
+// the name from the player's file. Each list is optional; with none the
+// values are only removed.
 struct RetiredSetting {
     std::string name;
     std::string module;
     std::vector<RetiredValue> off;
+    std::vector<RetiredValue> on;
+    std::vector<RetiredValue> ironman;
+    std::vector<RetiredValue> multiplayer;
     uint32_t line = 0;         // of its [retired.<name>] table
     uint32_t module_line = 0;  // of its `module` key
 };
@@ -101,7 +107,9 @@ SettingsFileResult parse_settings_text(std::string_view text);
 SettingsFileResult load_settings(const std::filesystem::path& file);
 
 // The schema error of a `module` (of a setting or of a [retired.<name>]) that
-// is not an id of the plugin's [[modules]]; empty when every one is. `line` is
+// is not an id of the plugin's [[modules]], or of a retired `ironman` or
+// `multiplayer` for a module that does not offer that opt-in; empty when
+// there is none. `line` is
 // set to the line of that key. The loader skips the plugin for it, as for
 // any other schema error (ADR 0013, point 1).
 std::string settings_module_error(const SettingsFile& file, const Manifest& manifest, uint32_t& line);
@@ -114,9 +122,10 @@ bool setting_counts(const Setting& setting, const Manifest& manifest);
 
 // The one-time move of retired settings (ADR 0013, point 4) on the text of
 // the player's file (anvil/data/<id>/settings.toml): every top-level value
-// named as a [retired.<name>] is removed; one that is in its `off` (the same
-// TOML type; an int and a float compare as numbers) also turns its module
-// off.
+// named as a [retired.<name>] is removed; one that is in its `off` or `on`
+// (the same TOML type; an int and a float compare as numbers) also turns its
+// module off or on, and one in its `ironman` or `multiplayer` allows the
+// module in that mode.
 struct RetiredMove {
     struct Item {
         std::string name;
@@ -124,6 +133,9 @@ struct RetiredMove {
         std::string value;  // as the file wrote it, e.g. "off" or false
         uint32_t line = 0;  // in the player's file
         bool turns_off = false;
+        bool turns_on = false;
+        bool allows_ironman = false;
+        bool allows_multiplayer = false;
     };
     std::vector<Item> items;  // in file order; empty: nothing to do
     // The file without them. Empty when nothing but comments and blank lines
