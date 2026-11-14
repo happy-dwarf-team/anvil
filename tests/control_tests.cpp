@@ -14,6 +14,7 @@
 #include <windows.h>
 
 #include <cstddef>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -717,6 +718,131 @@ default = false
         // The record of the last start.
         Text record;
         CHECK(svc.last_start(Text::sink, &record) == 1 && record.value == "format = 1\n");
+        fs::remove_all(dir);
+    });
+
+    run("control: settings in the multiplayer code, the code for a game started now, the lock (ADR 0013)", [] {
+        const fs::path dir = fresh_dir("anvil-control-mp-settings");
+        TestStart start(0, 0, nullptr, GameplayOptIns{{}, {"lode"}});  // the policy's allow_multiplayer
+        constexpr const char* kLodeSettings = R"toml([setting.cooldown_months]
+type = "int"
+default = 24
+label = "Cooldown"
+
+[setting.log_flows]
+type = "bool"
+default = false
+label = "Log flows"
+affects_gameplay = false
+restart = false
+
+[setting.panel_key]
+type = "key"
+default = "F9"
+label = "Panel key"
+restart = false
+
+[setting.flip_ratio]
+type = "float"
+default = 1.5
+label = "Flip ratio"
+module = "flows"
+restart = false
+
+[setting.colour]
+type = "string"
+default = "red"
+label = "Colour"
+module = "look"
+restart = false
+)toml";
+        ResolvedPlugin& lode = add_plugin(start, "lode", true, R"([[modules]]
+id = "flows"
+name = "Flows"
+affects_gameplay = true
+allow_multiplayer = "opt-in"
+
+[[modules]]
+id = "look"
+name = "Look"
+affects_gameplay = false
+)",
+                                          dir / "data", kLodeSettings);
+        lode.manifest.affects_gameplay = true;  // plugin_toml writes false
+        lode.manifest.allow_multiplayer = Allow::OptIn;
+        start.make();
+        CHECK(start.load("lode") != nullptr);
+        ControlSources sources;
+        sources.anvil_dir = dir / "anvil";
+        sources.plugins = &start.set();
+        sources.policy = &start.policy;
+        sources.allow_multiplayer = {"lode"};  // not lode.flows
+        Control control(sources);
+        control.loading_done();
+        const AnvilControlService& svc = *control.service();
+        const auto status = [&] {
+            AnvilControlStatus s{};
+            s.size = sizeof(s);
+            svc.status(&s);
+            return s;
+        };
+        const std::string own = "lode 1.2.3 cooldown_months=24";
+        // Outside a session every gameplay handle acts; a multiplayer game
+        // started now would keep only lode, which the player allows.
+        AnvilControlStatus s = status();
+        CHECK(std::string(s.gameplay_hash) == plugin_set_hash({own, "lode.flows 1.2.3 flip_ratio=1.5"}));
+        CHECK(std::string(s.next_game_hash) == plugin_set_hash({own}) && s.settings_locked == 0);
+        CHECK(std::string(s.gameplay_hash) != plugin_set_hash({"lode 1.2.3", "lode.flows 1.2.3"}));
+
+        AnvilControlSetting info{};
+        info.size = sizeof(info);
+        const auto counts = [&](AnvilSetting id) { return svc.setting_info("lode", id, &info) == 1 ? info.counts : -1; };
+        CHECK(counts(0) == 1 && counts(1) == 0 && counts(2) == 0 && counts(3) == 1 && counts(4) == 0 && info.locked == 0);
+
+        AnvilControlResult r{};
+        r.size = sizeof(r);
+        // A restart = false value changes the code at once; a restart = true one at the next start.
+        CHECK(svc.setting_set_text("lode", 3, "2", &r) == ANVIL_OK && r.applied == 1);
+        CHECK(svc.setting_set_text("lode", 0, "12", &r) == ANVIL_OK && r.applied == 0);
+        s = status();
+        CHECK(std::string(s.gameplay_hash) == plugin_set_hash({own, "lode.flows 1.2.3 flip_ratio=2"}));
+        CHECK(std::string(s.next_game_hash) == plugin_set_hash({own}));
+        // What does not count changes no code.
+        CHECK(svc.setting_set_text("lode", 1, "true", &r) == ANVIL_OK && svc.setting_set_text("lode", 4, "blue", &r) == ANVIL_OK);
+        CHECK(std::string(status().gameplay_hash) == std::string(s.gameplay_hash));
+
+        // A multiplayer session: flows is suspended, the counting settings lock.
+        start.policy.session_started(SessionMode{false, true});
+        s = status();
+        CHECK(s.multiplayer == 1 && s.settings_locked == 1 && std::string(s.gameplay_hash) == plugin_set_hash({own}) &&
+              std::string(s.next_game_hash) == std::string(s.gameplay_hash));
+        CHECK(svc.setting_info("lode", 0, &info) == 1 && info.counts == 1 && info.locked == 1);
+        CHECK(svc.setting_info("lode", 1, &info) == 1 && info.locked == 0);
+        CHECK(svc.setting_set_text("lode", 0, "6", &r) == ANVIL_ERROR_WRONG_PHASE &&
+              std::string(r.error) == "locked in a multiplayer game");
+        AnvilControlValue value{};
+        value.real = 3.0;
+        CHECK(svc.setting_set("lode", 3, &value, &r) == ANVIL_ERROR_WRONG_PHASE);
+        CHECK(svc.setting_reset("lode", 3, &r) == ANVIL_ERROR_WRONG_PHASE);
+        CHECK(svc.setting_set_text("lode", 1, "false", &r) == ANVIL_OK);  // logging does not lock
+        CHECK(svc.setting_set_text("lode", 2, "F10", &r) == ANVIL_OK);    // nor does a key
+        Text text;
+        CHECK(svc.setting_value("lode", 3, ANVIL_CONTROL_VALUE_CURRENT, Text::sink, &text) == 1 && text.value == "2");
+        start.policy.session_ended();
+        CHECK(status().settings_locked == 0 && svc.setting_reset("lode", 3, &r) == ANVIL_OK);
+
+        // Ironman alone locks nothing.
+        start.policy.session_started(SessionMode{true, false});
+        CHECK(status().settings_locked == 0 && svc.setting_set_text("lode", 3, "1.25", &r) == ANVIL_OK);
+        start.policy.session_ended();
+
+        // A caller built before 1.23 gets only the fields it knows.
+        AnvilControlStatus old{};
+        old.size = offsetof(AnvilControlStatus, next_game_hash);
+        old.settings_locked = 7;
+        svc.status(&old);
+        CHECK(old.size == offsetof(AnvilControlStatus, next_game_hash) && old.loading_done == 1 &&
+              old.next_game_hash[0] == '\0' && old.settings_locked == 7);
         fs::remove_all(dir);
     });
 
