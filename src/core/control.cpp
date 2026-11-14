@@ -301,15 +301,6 @@ const AnvilControlService kService{
 // The reason as a message for the overlay (i18n::serialize).
 std::string reason_message(const Outcome& o) { return i18n::serialize(o.why.empty() ? i18n::Message(o.reason) : o.why); }
 
-// A module that is on shares its plugin's outcome. It reads "pending" when its
-// plugin failed before anvil_plugin_load ran (a dependency, the approved copy,
-// the DLL), as anvil.control answered before the plugin set.
-const char* module_state(const PluginRecord& p) {
-    const Outcome* o = p.outcome();
-    if (o != nullptr && o->kind == Outcome::Kind::failed && p.dll() == nullptr) return "pending";
-    return outcome_name(o);
-}
-
 }  // namespace
 
 // ---- Control ---------------------------------------------------------------------
@@ -490,8 +481,11 @@ bool Control::plugin_of(const AnvilPlugin* plugin, AnvilControlPlugin& out) cons
         const PluginRecord& p = sources_.plugins->at(i);
         if (p.handle() == plugin) return this->plugin(static_cast<uint32_t>(i), out);
         // A module's handle (ADR 0011): its plugin's entry with the module's
-        // key, flags and state, so a service that checks its caller
+        // key and flags, so a service that checks its caller
         // (anvil-game.commands, anvil-script) gates the module, not the plugin.
+        // A module that is on shares its plugin's outcome, so the state stays
+        // the plugin's: "failed" also when the plugin failed before
+        // anvil_plugin_load ran (a dependency, the approved copy, the DLL).
         for (const auto& m : p.modules()) {
             if (m.handle == nullptr || m.handle != plugin) continue;
             if (!this->plugin(static_cast<uint32_t>(i), out)) return false;
@@ -499,7 +493,6 @@ bool Control::plugin_of(const AnvilPlugin* plugin, AnvilControlPlugin& out) cons
             out.name = m.name.c_str();
             out.affects_gameplay = m.handle->affects_gameplay ? 1 : 0;
             out.suspended = sources_.policy != nullptr && sources_.policy->suspended(m.handle->owner) ? 1 : 0;
-            if (loading_done_.load(std::memory_order_acquire)) out.state = module_state(p);
             return true;
         }
     }
@@ -685,7 +678,7 @@ bool Control::module(std::string_view plugin_id, uint32_t index, AnvilControlMod
     fill_declared(*m.declared, m.key.c_str(), out);
     out.enabled = m.handle != nullptr ? 1 : 0;
     out.state = m.handle == nullptr                              ? "disabled"
-                : loading_done_.load(std::memory_order_acquire) ? module_state(*p)
+                : loading_done_.load(std::memory_order_acquire) ? outcome_name(p->outcome())
                                                                 : "pending";
     out.suspended = sources_.policy != nullptr && m.handle != nullptr && sources_.policy->suspended(m.handle->owner) ? 1 : 0;
     return true;
