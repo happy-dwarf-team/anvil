@@ -236,7 +236,7 @@ void ManagerApp::choose_game(const fs::path& dir) {
     crash_selected_.clear();
     crash_summaries_.clear();
     crash_text_.clear();
-    log_text_.clear();
+    set_log_text({});
     running_checked_ = {};
     running_started_ = 0;
     running_elsewhere_.clear();
@@ -789,12 +789,12 @@ const std::string& ManagerApp::plugin_text(const fs::path& folder, const std::st
 
 void ManagerApp::draw_catalog_tab() {
     const auto& report = snapshot_->report;
-    ImGui::Spacing();
     wrapped(gog_ ? tr("Plugins of the Anvil team. Install puts one in anvil/plugins.")
                  : tr("Plugins of the Anvil team. Install puts one in anvil/plugins; a plugin from the Steam Workshop comes "
                       "with its mod instead."));
+    // Where the list comes from, and the link that asks GitHub again.
     ImGui::BeginDisabled(catalog_pending_.valid());
-    if (ImGui::Button(tr("Get the current list"))) {
+    if (text_button(tr("Get the current list"))) {
         catalog_by_check_ = false;
         catalog_pending_ = std::async(std::launch::async, fetch_catalog);
     }
@@ -811,27 +811,53 @@ void ManagerApp::draw_catalog_tab() {
         weak_wrapped(tr("Nothing is downloaded until you click: the list from the anvil repository on GitHub, and a plugin's "
                         "zip from its GitHub release, installed only if its SHA-256 equals the list's."));
     }
-    if (!catalog_error_.empty()) colored_wrapped(kWarn, trf("The list was refused: {0}", {catalog_error_}));
+    if (!catalog_error_.empty()) banner("refused", Tone::Bad, trf("The list was refused: {0}", {catalog_error_}));
     if (!catalog_) return;
-    if (!report) colored_wrapped(kWarn, tr("Install Anvil first, then its plugins."));
+    if (!report) banner("no-anvil", Tone::Info, tr("Install Anvil first, then its plugins."));
     if (download_pending_.valid() && download_) weak(trf("Downloading {0}...", {zip_file_name(*download_)}));
+    ImGui::Spacing();
 
     const CatalogInputs in = catalog_inputs();
     const std::string& build = in.build;
     const bool steam = !gog_;
+    const float line = ImGui::GetTextLineHeight();
+    const float indent = line + ImGui::GetStyle().ItemInnerSpacing.x * 2;
 
+    // A card per plugin, as the Plugins list draws an entry: its state's glyph,
+    // the name in semibold, then what it does, its state and its actions.
     for (const CatalogPlugin& plugin : catalog_->plugins) {
         const CatalogStatus status = catalog_status(plugin, build, in.anvil_version, in.local, in.mods);
+        const auto installed = Version::parse(status.installed);
+        const auto pinned = Version::parse(plugin.version);
+        const bool newer_installed = installed && pinned && *pinned < *installed;
+        const bool problem = !status.for_build || !status.anvil_ok;
         ImGui::PushID(plugin.id.c_str());
-        ImGui::Separator();
-        ImGui::Text("%s %s", plugin.name.c_str(), plugin.version.c_str());
+        begin_card("plugin");
+        const ImVec2 at = ImGui::GetCursorScreenPos();
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        if (problem) {
+            anvil::ui::draw_glyph(draw, at, line, anvil::ui::Glyph::Attention);
+        } else if (status.current(plugin)) {
+            anvil::ui::draw_glyph(draw, at, line, anvil::ui::Glyph::On);
+        } else if (status.update(plugin)) {
+            anvil::ui::draw_pending_dot(draw, ImVec2(at.x + line * 0.5f, at.y + line * 0.5f), line * 0.22f);
+        }
+        ImGui::Indent(indent);
+        anvil::ui::strong(plugin.name.c_str());
+        ImGui::SameLine();
+        weak(plugin.version);
+        if (plugin.affects_gameplay) {
+            ImGui::SameLine();
+            tag(tr("changes the game"), true);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", tr("It changes the game. Anvil keeps it out of ironman and multiplayer games unless you allow it there."));
+            }
+        }
         const char* code = i18n::language_code(i18n::language());
         if (!plugin.summary.empty()) wrapped(plugin.summary_in(code));
         if (!plugin.note.empty()) weak_wrapped(plugin.note_in(code));
-        if (plugin.affects_gameplay) {
-            weak_wrapped(tr("It changes the game. Anvil keeps it out of ironman and multiplayer games unless you allow it there."));
-        }
 
+        // Its state: an exception in its colour, the usual in weak text.
         bool can_install = report && report->cannot_check.empty();
         if (!status.for_build) {
             colored_wrapped(kWarn, build.empty() ? std::string(tr("It runs only on a game build Anvil knows."))
@@ -841,13 +867,10 @@ void ManagerApp::draw_catalog_tab() {
             colored_wrapped(kWarn, trf("It needs Anvil {0}: run the Manager of a newer Anvil first.", {plugin.anvil}));
             can_install = false;
         }
-        const auto installed = Version::parse(status.installed);
-        const auto pinned = Version::parse(plugin.version);
-        const bool newer_installed = installed && pinned && *pinned < *installed;
         if (status.current(plugin)) {
-            colored_wrapped(kGood, tr("Installed."));
+            weak_wrapped(tr("Installed."));
         } else if (status.update(plugin)) {
-            colored_wrapped(kGood, trf("Version {0} is installed; {1} is available.", {status.installed, plugin.version}));
+            colored_wrapped(kInfo, trf("Version {0} is installed; {1} is available.", {status.installed, plugin.version}));
         } else if (!status.installed.empty()) {
             weak_wrapped(trf("Version {0} is installed.", {status.installed}));
         }
@@ -857,6 +880,7 @@ void ManagerApp::draw_catalog_tab() {
                              : tr("An enabled mod carries it too; the copy in anvil/plugins loads."));
         }
 
+        // Its actions: Install or Update as a button, the links as text buttons.
         if (!status.current(plugin) && !newer_installed) {
             ImGui::BeginDisabled(!can_install || read_only() || download_pending_.valid());
             if (ImGui::Button(status.installed.empty() ? tr("Install") : tr("Update"))) {
@@ -866,11 +890,13 @@ void ManagerApp::draw_catalog_tab() {
             ImGui::EndDisabled();
             ImGui::SameLine();
         }
-        if (ImGui::Button(tr("Open its page"))) open_url(plugin.page);
+        if (text_button(tr("Open its page"))) open_url(plugin.page);
         if (!plugin.workshop.empty() && steam) {
             ImGui::SameLine();
-            if (ImGui::Button(tr("Subscribe on Steam Workshop"))) open_url(plugin.workshop);
+            if (text_button(tr("Subscribe on Steam Workshop"))) open_url(plugin.workshop);
         }
+        ImGui::Unindent(indent);
+        end_card();
         ImGui::PopID();
     }
 }
@@ -1022,48 +1048,59 @@ void ManagerApp::draw_crashes_tab() {
         if (text_button(tr("Copy the report"))) copy_to_clipboard(window_, crash_text_);
         end_banner(Tone::Bad);
         ImGui::Spacing();
+        begin_mono();
         ImGui::InputTextMultiline("##text", &crash_text_, ImVec2(-1, -1), ImGuiInputTextFlags_ReadOnly);
+        end_mono();
     } else {
         banner("unreadable", Tone::Bad, tr("The report cannot be read."));
     }
     ImGui::EndChild();
 }
 
+void ManagerApp::set_log_text(std::string text) {
+    log_text_ = std::move(text);
+    log_lines_.clear();
+    std::string_view rest = log_text_;
+    while (!rest.empty()) {
+        const size_t end = rest.find('\n');
+        std::string_view line = rest.substr(0, end);
+        rest = end == std::string_view::npos ? std::string_view() : rest.substr(end + 1);
+        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+        const auto level = log_line_level(line);
+        log_lines_.push_back({line, level ? static_cast<int>(*level) : -1});
+    }
+}
+
 void ManagerApp::draw_log_tab() {
-    ImGui::Spacing();
     bool& previous = log_previous_;
-    const fs::path file = game_ / "anvil" / (previous ? "anvil.prev.log" : "anvil.log");
     bool reload = log_text_.empty();
-    if (ImGui::RadioButton(tr("Last start"), !previous && !log_report_)) {
-        previous = false;
+    // Which log, then what to do with it.
+    const char* sources[] = {tr("Last start"), tr("The start before")};
+    const bool enabled[] = {true, true};
+    const int shown = log_report_ ? -1 : previous ? 1 : 0;
+    if (const int chosen = anvil::ui::segmented("source", sources, enabled, nullptr, 2, shown, false); chosen >= 0) {
+        previous = chosen == 1;
         reload = true;
     }
     ImGui::SameLine();
-    if (ImGui::RadioButton(tr("The start before"), previous && !log_report_)) {
-        previous = true;
-        reload = true;
-    }
+    if (text_button(tr("Reload"))) reload = true;
     ImGui::SameLine();
-    if (ImGui::Button(tr("Reload"))) reload = true;
+    if (text_button(tr("Copy"))) copy_to_clipboard(window_, log_text_);
     ImGui::SameLine();
-    if (ImGui::Button(tr("Copy"))) copy_to_clipboard(window_, log_text_);
-    ImGui::SameLine();
-    if (ImGui::Button(tr("Open the folder"))) open_folder(game_ / "anvil");
+    if (text_button(tr("Open the folder"))) open_folder(game_ / "anvil");
     if (reload) {
         log_report_ = false;
-        log_text_ = read_text_tail(file, 2000, 512 << 10);
-        if (log_text_.empty()) log_text_ = trf("({0} is empty or missing: Anvil writes it when the game starts)", {u8(file.filename())});
+        const fs::path file = game_ / "anvil" / (previous ? "anvil.prev.log" : "anvil.log");
+        std::string text = read_text_tail(file, 2000, 512 << 10);
+        if (text.empty()) text = trf("({0} is empty or missing: Anvil writes it when the game starts)", {u8(file.filename())});
+        set_log_text(std::move(text));
     }
 
     // The problem report (issue #186): what the bug forms ask for, with private paths shortened, shown where the
     // log was so the player sees what the clipboard holds.
-    if (ImGui::Button(tr("Copy a problem report"))) {
-        log_text_ = make_problem_report();
-        log_report_ = true;
-        report_copied_ = copy_to_clipboard(window_, log_text_);
-    }
-    ImGui::SameLine();
-    if (ImGui::Button(tr("Open an Anvil issue"))) open_url("https://github.com/happy-dwarf-team/anvil/issues/new/choose");
+    ImGui::Spacing();
+    begin_card("report");
+    strong(tr("Report a problem"));
     if (log_report_) {
         weak_wrapped(report_copied_ ? tr("The report is in the clipboard. Nothing is uploaded.")
                                     : tr("The clipboard could not be opened."));
@@ -1073,7 +1110,58 @@ void ManagerApp::draw_log_tab() {
         weak_wrapped(tr("For an issue: versions, the game build, the plugins and why one is skipped, and the end of "
                         "anvil.log, with your folders and Windows user name left out."));
     }
-    ImGui::InputTextMultiline("##log", &log_text_, ImVec2(-1, -1), ImGuiInputTextFlags_ReadOnly);
+    if (ImGui::Button(tr("Copy a problem report"))) {
+        set_log_text(make_problem_report());
+        log_report_ = true;
+        report_copied_ = copy_to_clipboard(window_, log_text_);
+    }
+    ImGui::SameLine();
+    if (text_button(tr("Open an Anvil issue"))) open_url("https://github.com/happy-dwarf-team/anvil/issues/new/choose");
+    end_card();
+
+    // The levels a log line can be filtered to, with their counts; the report has none.
+    size_t warnings = 0, errors = 0;
+    for (const LogLine& l : log_lines_) {
+        warnings += l.level == ANVIL_LOG_WARNING ? 1 : 0;
+        errors += l.level == ANVIL_LOG_ERROR ? 1 : 0;
+    }
+    if (warnings + errors > 0 || log_warnings_ || log_errors_) {
+        ImGui::Spacing();
+        if (chip((trf("Warnings ({0})", {std::to_string(warnings)}) + "##warnings").c_str(), log_warnings_)) log_warnings_ = !log_warnings_;
+        ImGui::SameLine();
+        if (chip((trf("Errors ({0})", {std::to_string(errors)}) + "##errors").c_str(), log_errors_)) log_errors_ = !log_errors_;
+    }
+    const bool filtering = log_warnings_ || log_errors_;
+    std::vector<size_t> rows;
+    rows.reserve(log_lines_.size());
+    for (size_t i = 0; i < log_lines_.size(); ++i) {
+        const int level = log_lines_[i].level;
+        if (!filtering || (log_warnings_ && level == ANVIL_LOG_WARNING) || (log_errors_ && level == ANVIL_LOG_ERROR)) rows.push_back(i);
+    }
+
+    // The lines in the monospace font, a warning's and an error's glyph in a gutter.
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ::anvil::ui::kPanel);
+    ImGui::BeginChild("lines", ImVec2(0, 0), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
+    ImGui::PopStyleColor();
+    begin_mono();
+    const float line = ImGui::GetTextLineHeight();
+    const float gutter = line + ImGui::GetStyle().ItemInnerSpacing.x * 2;
+    ImGuiListClipper clipper;
+    clipper.Begin(static_cast<int>(rows.size()));
+    while (clipper.Step()) {
+        for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+            const LogLine& l = log_lines_[rows[static_cast<size_t>(i)]];
+            const ImVec2 at = ImGui::GetCursorScreenPos();
+            if (l.level == ANVIL_LOG_WARNING || l.level == ANVIL_LOG_ERROR) {
+                anvil::ui::draw_glyph(ImGui::GetWindowDrawList(), at, line,
+                                      l.level == ANVIL_LOG_ERROR ? anvil::ui::Glyph::CannotLoad : anvil::ui::Glyph::Attention);
+            }
+            ImGui::SetCursorScreenPos(ImVec2(at.x + gutter, at.y));
+            ImGui::TextUnformatted(l.text.data(), l.text.data() + l.text.size());
+        }
+    }
+    end_mono();
+    ImGui::EndChild();
 }
 
 std::string ManagerApp::make_problem_report() const {

@@ -16,7 +16,13 @@ namespace anvil::manager::ui {
 inline constexpr ImVec4 kGood = ::anvil::ui::kGood;
 inline constexpr ImVec4 kWarn = ::anvil::ui::kWarn;
 inline constexpr ImVec4 kBad = ::anvil::ui::kBad;
+inline constexpr ImVec4 kInfo = ::anvil::ui::kInfo;
 using ::anvil::ui::primary_button;
+using ::anvil::ui::strong;
+using ::anvil::ui::chip;
+using ::anvil::ui::state_note;
+using ::anvil::ui::begin_mono;
+using ::anvil::ui::end_mono;
 using ::anvil::ui::Tone;
 using ::anvil::ui::banner;
 using ::anvil::ui::begin_banner;
