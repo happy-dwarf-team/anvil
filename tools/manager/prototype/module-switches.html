@@ -2358,7 +2358,7 @@ function variantC(){
 }
 
 // ---- Variant B2: B, second iteration --------------------------------------------------
-// Bellows as proposed for 3.0: the module is the feature's only switch. A mode setting loses "off";
+// Bellows as proposed for 2.0: the module is the feature's only switch. A mode setting loses "off";
 // "verify" becomes a per-module check, mimalloc's "startup" a scope; plain on/off settings (the
 // diagnostic profiles, verifypath_session) become modules; each module gets the group of its old setting (proposed
 // `group` key in [[modules]]).
@@ -2385,10 +2385,10 @@ const BELLOWS_3 = (() => {
     out.push(s);
   }
   for (const m of p.modules) if (!m.group) m.group = groupOf[m.id] || '';
-  p.version = '3.0.0 (proposed)';
+  p.version = '2.0.0 (proposed)';
   return {p, s:out};
 })();
-// Bellows 3.0, second draft (variant B3): the lab tools become ONE Diagnostics module (timing profiles
+// Bellows 2.0, second draft (variant B3): the lab tools become ONE Diagnostics module (timing profiles
 // and the checks against the game's own code as its settings), the modules get short names and a
 // one-line description of what the player gains (DRAFT WORDING, from the 1.8 descriptions), and the
 // 1.8 text stays one click away ("More"), where the README would carry it.
@@ -2442,10 +2442,10 @@ const BELLOWS_3B = (() => {
     if (!m.group) m.group = groupOf[m.id] || '';
     if (SHORT[m.id]){ m.details = m.desc; [m.name, m.desc] = SHORT[m.id]; }
   }
-  // Groups show in the order of their first module, so 3.0 would list its modules in this order.
+  // Groups show in the order of their first module, so 2.0 would list its modules in this order.
   const ORDER = ['Start-up', 'Loading', 'Simulation', 'Saving', 'For testing'];
   p.modules.sort((a, b) => ORDER.indexOf(a.group) - ORDER.indexOf(b.group));
-  p.version = '3.0.0 (draft 2)';
+  p.version = '2.0.0 (draft 2)';
   return {p, s: out.concat(checks)};
 })();
 function useBellows(which){
@@ -2513,7 +2513,7 @@ function variantB2(){
     <div class="note" style="font-size:13px">${esc(p.desc)}</div>`;
   if (p.id === 'bellows') d += `<div style="margin:6px 0"><span class="seg small">
       <button class="${ui.bellows3 ? '' : 'cur'}" data-act="bellows" data-key="today">Bellows 1.8 as it is</button>
-      <button class="${ui.bellows3 ? 'cur' : ''}" data-act="bellows" data-key="v3">Proposed for 3.0</button></span></div>`;
+      <button class="${ui.bellows3 ? 'cur' : ''}" data-act="bellows" data-key="v3">Proposed for 2.0</button></span></div>`;
   d += `<div style="margin:10px 0 4px">${cb('On', pOn, 'on', p.id)} ${pend(pi)} ${inGame() ? stateWord(pi) : ''}</div>`;
   if (deps.length) d += `<div class="note">Needed by ${esc(deps.join(', '))}. Turning it off stops them too.</div>`;
   if (p.gameplay && !p.modules.length) d += `<div style="margin:8px 0">Where it runs ${tag(pi)}<div style="margin-top:4px">${segment(pi, !pOn)}</div><div class="note">${whereText(pi)}</div></div>`;
@@ -2570,7 +2570,7 @@ function variantB3(){
     <div class="note" style="font-size:13px">${esc(p.desc)}</div>`;
   if (p.id === 'bellows') d += `<div style="margin:6px 0"><span class="seg small">
       <button class="${ui.bellows === 'today' ? 'cur' : ''}" data-act="bellows" data-key="today">Bellows 1.8 as it is</button>
-      <button class="${ui.bellows === 'v3b' ? 'cur' : ''}" data-act="bellows" data-key="v3b">Proposed for 3.0</button></span></div>`;
+      <button class="${ui.bellows === 'v3b' ? 'cur' : ''}" data-act="bellows" data-key="v3b">Proposed for 2.0</button></span></div>`;
   d += `<div style="margin:10px 0 4px">${cb('On', pOn, 'on', p.id)} ${pend(pi)} ${inGame() ? stateWord(pi) : ''}</div>`;
   if (deps.length) d += `<div class="note">Needed by ${esc(deps.join(', '))}. Turning it off stops them too.</div>`;
   if (p.gameplay && !p.modules.length) d += `<div style="margin:8px 0">Where it runs ${tag(pi)}<div style="margin-top:4px">${segment(pi, !pOn)}</div><div class="note">${whereText(pi)}</div></div>`;
@@ -2630,7 +2630,7 @@ function variantB4(){
     <div class="note" style="font-size:13px">${esc(p.desc)}</div>`;
   if (p.id === 'bellows') d += `<div style="margin:6px 0"><span class="seg small">
       <button class="${ui.bellows === 'today' ? 'cur' : ''}" data-act="bellows" data-key="today">Bellows 1.8 as it is</button>
-      <button class="${ui.bellows === 'v3b' ? 'cur' : ''}" data-act="bellows" data-key="v3b">Proposed for 3.0</button></span></div>`;
+      <button class="${ui.bellows === 'v3b' ? 'cur' : ''}" data-act="bellows" data-key="v3b">Proposed for 2.0</button></span></div>`;
   d += `<div style="margin:10px 0 4px">${cb('On', pOn, 'on', p.id)} ${pend(pi)} ${inGame() ? stateWord(pi) : ''}</div>`;
   if (deps.length) d += `<div class="note">Needed by ${esc(deps.join(', '))}. Turning it off stops them too.</div>`;
   if (!pOn && p.modules.length) d += `<div class="banner" style="margin:8px 0;display:flex;gap:8px;align-items:baseline"><span class="info">&#9432;</span><span>The plugin is off, so none of its modules load.
