@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace anvil {
 
@@ -32,5 +33,23 @@ std::optional<std::string> with_disabled_plugin(std::string_view text, std::stri
 bool set_plugin_listed(const std::filesystem::path& file, std::string_view key, std::string_view id, bool listed,
                        std::string& error);
 bool add_disabled_plugin(const std::filesystem::path& file, std::string_view id, std::string& error);
+
+// One change of a list: `id` into (`listed`) or out of `key`.
+struct ListEdit {
+    std::string key;
+    std::string id;
+    bool listed = false;
+};
+// Several changes of the file in one write, in order; false with `error`, and
+// the file untouched, when any of them cannot be made.
+bool set_listed(const std::filesystem::path& file, const std::vector<ListEdit>& edits, std::string& error);
+
+// A module's switch for the next start (ADR 0011, 0013), the same text in
+// the Manager and in the overlay: on is out of disabled_modules, and into
+// enabled_modules when the module is off by default; off is into
+// disabled_modules when it is on by default, else out of enabled_modules.
+std::vector<ListEdit> module_switch_edits(std::string_view key, bool on, bool on_by_default);
+bool set_module_switch(const std::filesystem::path& file, std::string_view key, bool on, bool on_by_default,
+                       std::string& error);
 
 }  // namespace anvil

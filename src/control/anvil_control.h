@@ -5,8 +5,11 @@
  * 1.3 the plugins in mods with their approval (#60); since 1.7 the reasons as
  * messages and the player's language (#158); since 1.16 a plugin's entry by
  * its handle, for anvil-script (ADR 0008); since 1.20 the plugins' own texts
- * in the player's language (ADR 0010). Fields and functions are only
- * appended: a caller checks `size` before it reads a later one.
+ * in the player's language (ADR 0010); since 1.22 the plugins' modules (ADR
+ * 0011); since 1.23 the settings of modules, the writes of switches and
+ * opt-ins and the record of the last start (ADR 0013).
+ * Fields and functions are only appended: a caller checks `size` before it
+ * reads a later one.
  *
  * Not part of the SDK: it lives in the Anvil repository, only Anvil's own
  * plugins use it, and it may change in a minor release (a new version is
@@ -74,6 +77,11 @@ typedef struct AnvilControlPlugin {
     /* Appended in 1.7 (#158): `reason` as a message, code and arguments, for
      * the player's language (src/i18n/message.hpp, i18n::parse). */
     const char *reason_message;
+    /* Appended in 1.23 (ADR 0013): plugin.toml offers the opt-in for the
+     * plugin's own handle (allow_ironman / allow_multiplayer = "opt-in");
+     * 0 for a skipped plugin. */
+    int offers_ironman;
+    int offers_multiplayer;
 } AnvilControlPlugin;
 
 /* A plugin in <mod>/anvil/<id>/ of an enabled mod, as the start found it
@@ -129,6 +137,9 @@ typedef struct AnvilControlModule {
     const char *state;
     int enabled;             /* on at this start (anvil.toml, `default`) */
     int suspended;           /* taken out of the current session (design §13) */
+    /* Appended in 1.23 (ADR 0013, point 3): [[modules]] `group`, a subheading
+     * in the order of its first module; "" for none. Through plugin_text. */
+    const char *group;
 } AnvilControlModule;
 
 enum {
@@ -152,6 +163,9 @@ typedef struct AnvilControlSetting {
     int has_min, has_max, has_step;
     double min, max, step; /* int and float */
     uint32_t options;      /* enum: entries of setting_option */
+    /* Appended in 1.23 (ADR 0013). */
+    int32_t module;    /* the module() index it belongs to (settings.toml `module`); -1: the plugin's */
+    int advanced;      /* folded behind "Advanced (n)" */
 } AnvilControlSetting;
 
 /* Which value setting_value gives. */
@@ -176,6 +190,26 @@ typedef struct AnvilControlResult {
     uint32_t notified; /* settings: callbacks run */
     char error[256];   /* why, when the call did not return ANVIL_OK or the file was not written */
 } AnvilControlResult;
+
+/* Which switch switch_state and switch_set read or write (appended in 1.23,
+ * ADR 0013 point 7). */
+enum {
+    ANVIL_CONTROL_SWITCH_ON = 0,          /* a plugin: disabled_plugins; a module: enabled_modules, disabled_modules */
+    ANVIL_CONTROL_SWITCH_IRONMAN = 1,     /* allow_ironman */
+    ANVIL_CONTROL_SWITCH_MULTIPLAYER = 2  /* allow_multiplayer */
+};
+
+typedef struct AnvilControlSwitch {
+    uint32_t size;
+    int this_start; /* on at this start (as it read anvil.toml, and a module's `default`) */
+    int next_start; /* on at the next start: anvil.toml now */
+    int can_set;    /* switch_set may change next_start now */
+    /* Why not when can_set is 0, as a code: "needed" (anvil-overlay or a plugin
+     * it needs, today anvil-game: "turn it off in Anvil Manager"),
+     * "not-offered" (plugin.toml does not offer that opt-in); "" otherwise.
+     * Valid for the process. */
+    const char *refusal;
+} AnvilControlSwitch;
 
 typedef struct AnvilControlCrash {
     uint32_t size;
@@ -287,6 +321,32 @@ typedef struct AnvilControlService {
      * plugin.toml declares them (for the approval prompt); `state` is "". */
     uint32_t (*mod_plugin_module_count)(uint32_t index);
     int (*mod_plugin_module)(uint32_t index, uint32_t module, AnvilControlModule *out);
+
+    /* --- switches and opt-ins (appended in 1.23, ADR 0013 point 7) --- */
+    /* `key` is the id of a plugin of this start (resolved, disabled or
+     * skipped) or "<plugin>.<module>" of a resolved plugin's module; an
+     * opt-in needs a plugin or module whose plugin.toml offers it. 0 for an
+     * unknown key or `which`. */
+    int (*switch_state)(const char *key, uint32_t which, AnvilControlSwitch *out);
+    /* Sets the switch for the next start: writes anvil/anvil.toml atomically,
+     * keeping the rest of the file and its comments, the same text the
+     * Manager writes (a module on: out of disabled_modules, and into
+     * enabled_modules when it is off by default; off: into disabled_modules
+     * when on by default, else out of enabled_modules). The running game does
+     * not change. Fills `state` (may be NULL) with the state after the call,
+     * also when it fails. NOT_FOUND: an unknown key; INVALID_ARGUMENT: an
+     * unknown `which`; NOT_DECLARED: an opt-in plugin.toml does not offer;
+     * UNSUPPORTED: turning off anvil-overlay or a plugin it needs, with "turn
+     * it off in Anvil Manager" in `error`; INTERNAL: anvil.toml could not be
+     * written. ANVIL_OK also when it already was so. Only on the player's
+     * request. */
+    AnvilResult (*switch_set)(const char *key, uint32_t which, int on, AnvilControlSwitch *state,
+                              AnvilControlResult *out);
+
+    /* --- the record of the last start (appended in 1.23, ADR 0013 point 8) --- */
+    /* anvil/data/anvil/last-start.toml as this start wrote it, one call of the
+     * sink; 0 when this start wrote none. */
+    int (*last_start)(AnvilControlSink sink, void *context);
 } AnvilControlService;
 
 #ifdef __cplusplus

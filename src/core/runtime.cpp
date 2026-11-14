@@ -733,6 +733,11 @@ void startup_impl(const std::filesystem::path& game_dir) {
     sources.plugins = g_runtime->plugins.get();
     sources.policy = g_runtime->policy.get();
     sources.disabled = settings.disabled_plugins;
+    sources.allow_ironman = settings.allow_ironman;
+    sources.allow_multiplayer = settings.allow_multiplayer;
+    sources.enabled_modules = settings.enabled_modules;
+    sources.disabled_modules = settings.disabled_modules;
+    sources.last_start = g_runtime->last_start;
     sources.safe_mode = record.safe_mode;
     sources.unfinished_starts = record.unfinished;
     if (!crash_names.empty()) sources.previous_crash = crash_names.front();

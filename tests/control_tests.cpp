@@ -142,6 +142,8 @@ struct Text {
     }
 };
 
+bool contains_text(const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; }
+
 int g_notified = 0;
 void count_notification(AnvilSetting, void*) { ++g_notified; }
 
@@ -557,6 +559,164 @@ default = false
         CHECK(svc.module("smithy", 2, &entry) == 1 && entry.on_by_default == 0 && entry.enabled == 0 &&
               std::string(entry.state) == "disabled");
         CHECK(svc.module("smithy", 3, &entry) == 0 && svc.module("tongs", 0, &entry) == 0 && svc.module(nullptr, 0, &entry) == 0);
+        fs::remove_all(dir);
+    });
+
+    run("control: switches and opt-ins for the next start, module settings (ADR 0013)", [] {
+        const fs::path dir = fresh_dir("anvil-control-switches");
+        TestStart start;
+        add_plugin(start, "anvil-game", true, "", dir / "data");
+        add_plugin(start, "anvil-overlay", true, "[[dependencies]]\nid = \"anvil-game\"\nversion = \"^1\"\noptional = true\n",
+                   dir / "data", nullptr, "early");
+        constexpr const char* kSmithySettings = R"toml([setting.drill_key]
+type = "key"
+default = "F9"
+label = "Drill key"
+module = "drill_all"
+advanced = true
+
+[setting.picture_prefix]
+type = "string"
+default = "x"
+label = "Prefix"
+)toml";
+        ResolvedPlugin& smithy = add_plugin(start, "smithy", true, R"([[modules]]
+id = "ui_fix"
+name = "UI fix"
+group = "Interface"
+affects_gameplay = false
+
+[[modules]]
+id = "drill_all"
+name = "Drill"
+affects_gameplay = true
+allow_multiplayer = "opt-in"
+
+[[modules]]
+id = "chase"
+name = "Chase"
+affects_gameplay = true
+default = false
+)",
+                                            dir / "data", kSmithySettings);
+        smithy.manifest.affects_gameplay = true;  // plugin_toml writes false
+        smithy.manifest.allow_ironman = Allow::OptIn;
+        smithy.modules_on = {true, false, false};  // drill_all off at this start (disabled_modules)
+        start.skip(skipped_for("tongs", i18n::Message("disabled", {}), dir / "tongs", SkipKind::other, true));
+        start.make();
+        const fs::path toml = dir / "anvil" / "anvil.toml";
+        write_file(toml, "# mine\ndisabled_plugins = [\"tongs\"]\ndisabled_modules = [\"smithy.drill_all\"]\n");
+        ControlSources sources;
+        sources.anvil_dir = dir / "anvil";
+        sources.plugins = &start.set();
+        sources.disabled = {"tongs"};
+        sources.disabled_modules = {"smithy.drill_all"};
+        sources.last_start = "format = 1\n";
+        Control control(sources);
+        control.loading_done();
+        const AnvilControlService& svc = *control.service();
+        CHECK(svc.size >= offsetof(AnvilControlService, last_start) + sizeof(svc.last_start));
+
+        const auto state = [&](const char* key, uint32_t which) {
+            AnvilControlSwitch s{};
+            s.size = sizeof(s);
+            const int found = svc.switch_state(key, which, &s);
+            return found ? std::optional<AnvilControlSwitch>(s) : std::nullopt;
+        };
+        // The plugin's own switch: on, off by the player at this start, needed by the overlay.
+        auto s = state("smithy", ANVIL_CONTROL_SWITCH_ON);
+        CHECK(s && s->this_start == 1 && s->next_start == 1 && s->can_set == 1 && std::string(s->refusal).empty());
+        s = state("tongs", ANVIL_CONTROL_SWITCH_ON);
+        CHECK(s && s->this_start == 0 && s->next_start == 0 && s->can_set == 1);
+        for (const char* needed : {"anvil-overlay", "anvil-game"}) {
+            s = state(needed, ANVIL_CONTROL_SWITCH_ON);
+            CHECK(s && s->next_start == 1 && s->can_set == 0 && std::string(s->refusal) == "needed");
+        }
+        // Modules: by anvil.toml and `default`.
+        s = state("smithy.drill_all", ANVIL_CONTROL_SWITCH_ON);
+        CHECK(s && s->this_start == 0 && s->next_start == 0 && s->can_set == 1);
+        s = state("smithy.chase", ANVIL_CONTROL_SWITCH_ON);
+        CHECK(s && s->this_start == 0 && s->next_start == 0);
+        CHECK(!state("smithy.nope", ANVIL_CONTROL_SWITCH_ON) && !state("nope", ANVIL_CONTROL_SWITCH_ON) &&
+              !state("tongs.x", ANVIL_CONTROL_SWITCH_ON) && !state("smithy", 7));
+        // Opt-ins: only where plugin.toml offers them.
+        s = state("smithy", ANVIL_CONTROL_SWITCH_IRONMAN);
+        CHECK(s && s->this_start == 0 && s->next_start == 0 && s->can_set == 1);
+        s = state("smithy", ANVIL_CONTROL_SWITCH_MULTIPLAYER);
+        CHECK(s && s->can_set == 0 && std::string(s->refusal) == "not-offered");
+        s = state("smithy.drill_all", ANVIL_CONTROL_SWITCH_MULTIPLAYER);
+        CHECK(s && s->can_set == 1);
+
+        const auto set = [&](const char* key, uint32_t which, int on, AnvilControlSwitch* after = nullptr) {
+            AnvilControlResult r{};
+            r.size = sizeof(r);
+            const AnvilResult result = svc.switch_set(key, which, on, after, &r);
+            return std::pair<AnvilResult, std::string>(result, r.error);
+        };
+        // Turn drill_all on (it is on by default: out of disabled_modules) and chase on (into enabled_modules).
+        AnvilControlSwitch after{};
+        after.size = sizeof(after);
+        CHECK(set("smithy.drill_all", ANVIL_CONTROL_SWITCH_ON, 1, &after).first == ANVIL_OK);
+        CHECK(after.this_start == 0 && after.next_start == 1);  // the running game does not change
+        CHECK(set("smithy.chase", ANVIL_CONTROL_SWITCH_ON, 1).first == ANVIL_OK);
+        CHECK(set("smithy.ui_fix", ANVIL_CONTROL_SWITCH_ON, 0).first == ANVIL_OK);
+        CHECK(set("tongs", ANVIL_CONTROL_SWITCH_ON, 1).first == ANVIL_OK);
+        CHECK(set("smithy", ANVIL_CONTROL_SWITCH_ON, 0).first == ANVIL_OK);
+        CHECK(set("smithy", ANVIL_CONTROL_SWITCH_IRONMAN, 1).first == ANVIL_OK);
+        CHECK(set("smithy.drill_all", ANVIL_CONTROL_SWITCH_MULTIPLAYER, 1).first == ANVIL_OK);
+        CHECK(read_file(toml) == "# mine\ndisabled_plugins = [\"smithy\"]\ndisabled_modules = [\"smithy.ui_fix\"]\n"
+                                 "enabled_modules = [\"smithy.chase\"]\nallow_ironman = [\"smithy\"]\n"
+                                 "allow_multiplayer = [\"smithy.drill_all\"]\n");
+        // What anvil.toml now says reads back as the next start's state, which the Manager writes alike.
+        const AnvilSettings next = read_anvil_settings(toml);
+        CHECK(module_enabled(next, "smithy.drill_all", true) && module_enabled(next, "smithy.chase", false) &&
+              !module_enabled(next, "smithy.ui_fix", true));
+        s = state("smithy.chase", ANVIL_CONTROL_SWITCH_ON);
+        CHECK(s && s->this_start == 0 && s->next_start == 1);
+        // Off again: chase is off by default, so it only leaves enabled_modules.
+        CHECK(set("smithy.chase", ANVIL_CONTROL_SWITCH_ON, 0).first == ANVIL_OK);
+        CHECK(!contains_text(read_file(toml), "enabled_modules = [\"smithy.chase\"]"));
+        // Already so: OK, nothing written.
+        const std::string before = read_file(toml);
+        CHECK(set("smithy", ANVIL_CONTROL_SWITCH_ON, 0).first == ANVIL_OK && read_file(toml) == before);
+        AnvilControlPlugin entry{};
+        entry.size = sizeof(entry);
+        CHECK(svc.plugin(2, &entry) == 1 && std::string(entry.id) == "smithy" && entry.disabled_next_start == 1 &&
+              entry.offers_ironman == 1 && entry.offers_multiplayer == 0);
+
+        // Refusals.
+        auto refused = set("anvil-overlay", ANVIL_CONTROL_SWITCH_ON, 0);
+        CHECK(refused.first == ANVIL_ERROR_UNSUPPORTED && contains_text(refused.second, "turn it off in Anvil Manager"));
+        CHECK(set("anvil-game", ANVIL_CONTROL_SWITCH_ON, 0).first == ANVIL_ERROR_UNSUPPORTED);
+        CHECK(set("smithy", ANVIL_CONTROL_SWITCH_MULTIPLAYER, 1).first == ANVIL_ERROR_NOT_DECLARED);
+        CHECK(set("nope", ANVIL_CONTROL_SWITCH_ON, 0).first == ANVIL_ERROR_NOT_FOUND);
+        CHECK(set("smithy", 9, 1).first == ANVIL_ERROR_INVALID_ARGUMENT);
+        CHECK(read_file(toml) == before);
+        // anvil.toml that does not parse: INTERNAL, the state stays.
+        write_file(toml, "disabled_plugins = [\n");
+        CHECK(set("tongs", ANVIL_CONTROL_SWITCH_ON, 0).first == ANVIL_ERROR_INTERNAL);
+        s = state("tongs", ANVIL_CONTROL_SWITCH_ON);
+        CHECK(s && s->next_start == 1);
+
+        // A module's group and a setting's module index and `advanced`.
+        AnvilControlModule module{};
+        module.size = sizeof(module);
+        CHECK(svc.module("smithy", 0, &module) == 1 && std::string(module.group) == "Interface");
+        CHECK(svc.module("smithy", 1, &module) == 1 && std::string(module.group).empty());
+        AnvilControlSetting setting{};
+        setting.size = sizeof(setting);
+        CHECK(svc.setting_info("smithy", 0, &setting) == 1 && setting.module == 1 && setting.advanced == 1);
+        CHECK(svc.setting_info("smithy", 1, &setting) == 1 && setting.module == -1 && setting.advanced == 0);
+        // A caller built before 1.23 gets only the fields it knows.
+        AnvilControlSetting old{};
+        old.size = offsetof(AnvilControlSetting, module);
+        old.module = 77;
+        CHECK(svc.setting_info("smithy", 0, &old) == 1 && old.size == offsetof(AnvilControlSetting, module) &&
+              old.module == 77 && std::string(old.name) == "drill_key");
+
+        // The record of the last start.
+        Text record;
+        CHECK(svc.last_start(Text::sink, &record) == 1 && record.value == "format = 1\n");
         fs::remove_all(dir);
     });
 
