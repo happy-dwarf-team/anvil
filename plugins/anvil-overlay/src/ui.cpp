@@ -8,7 +8,9 @@
 #include "overlay.hpp"
 #include "plugins_model.hpp"
 #include "release.hpp"
+#include "ui/forge_widgets.hpp"
 #include "ui/imgui_colors.hpp"
+#include "ui/log_view.hpp"
 #include "ui/plugins_view.hpp"
 
 #include <imgui.h>
@@ -90,6 +92,8 @@ struct Ui {
     bool crash_loaded = false;
     std::optional<CrashInfo> crash;
     std::string log;
+    std::vector<anvil::ui::LogLine> log_lines;  // `log` in lines, rebuilt with it
+    anvil::ui::LogFilter log_filter;            // the Log tab's level chips
     ULONGLONG log_refreshed = 0;
     bool log_follow = true;
     bool log_scroll = false;
@@ -119,14 +123,12 @@ Ui& ui() {
     return u;
 }
 
-// The state colours of the shared style (src/ui/imgui_colors.hpp).
-constexpr ImVec4 kRed = anvil::ui::kBad;
-constexpr ImVec4 kAmber = anvil::ui::kWarn;
-constexpr ImVec4 kBlue = anvil::ui::kInfo;
-constexpr ImVec4 kGreen = anvil::ui::kGood;
+using anvil::ui::Glyph;
+using anvil::ui::Tone;
 
-ImVec4 kind_color(NoticeKind kind) {
-    return kind == NoticeKind::Error ? kRed : kind == NoticeKind::Warning ? kAmber : kBlue;
+// A notice's state, as its bar and glyph say it.
+Tone kind_tone(NoticeKind kind) {
+    return kind == NoticeKind::Error ? Tone::Bad : kind == NoticeKind::Warning ? Tone::Warn : Tone::Info;
 }
 
 float scale() { return static_cast<float>(shared().scale.load()); }
@@ -140,7 +142,6 @@ void say(std::string text, bool error) {
 // A translated text as one ImGui line or a wrapped one.
 void line(const std::string& text) { ImGui::TextUnformatted(text.c_str()); }
 void wrapped(const std::string& text) { ImGui::TextWrapped("%s", text.c_str()); }
-void colored(const ImVec4& color, const std::string& text) { ImGui::TextColored(color, "%s", text.c_str()); }
 void weak(const std::string& text) { ImGui::TextDisabled("%s", text.c_str()); }
 void weak_wrapped(const std::string& text) {
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
@@ -752,27 +753,41 @@ void draw_notice(const Notice& notice, bool* closed, float& y, int index) {
                                    ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
                                    ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize;
     if (ImGui::Begin(name, nullptr, flags)) {
+        // A banner (docs/ui-design-system.md): a bar in the state's colour at the
+        // left edge and its glyph before the title; the text stays the text's colour.
+        const Tone tone = kind_tone(notice.kind);
+        const ImVec2 pos = ImGui::GetWindowPos(), size = ImGui::GetWindowSize();
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        draw->PushClipRect(pos, ImVec2(pos.x + size.x, pos.y + size.y), false);
+        draw->AddRectFilled(pos, ImVec2(pos.x + std::round(3.0f * k), pos.y + size.y), ImGui::GetColorU32(anvil::ui::tone_color(tone)),
+                            ImGui::GetStyle().WindowRounding, ImDrawFlags_RoundLeft);
+        draw->PopClipRect();
+        const float glyph = ImGui::GetTextLineHeight();
+        const float indent = glyph + ImGui::GetStyle().ItemInnerSpacing.x * 2;
+        anvil::ui::tone_glyph(draw, ImGui::GetCursorScreenPos(), glyph, tone);
+        ImGui::Indent(indent);
         const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
         const float button = ImGui::GetFrameHeight();
-        ImGui::PushStyleColor(ImGuiCol_Text, kind_color(notice.kind));
         ImGui::PushTextWrapPos(closed != nullptr ? right - button : 0.0f);
-        ImGui::TextWrapped("%s", notice.title.c_str());
+        anvil::ui::strong_wrapped(notice.title.c_str());
         ImGui::PopTextWrapPos();
-        ImGui::PopStyleColor();
         if (closed != nullptr) {
             ImGui::SameLine(right - button);
             if (ImGui::SmallButton("x")) *closed = true;
         }
         for (const std::string& line : notice.lines) ImGui::TextWrapped("%s", line.c_str());
+        // The steps as buttons, the links as text buttons.
         bool first = true;
         for (const NoticeAction& action : notice.actions) {
             if (!first) ImGui::SameLine();
             first = false;
-            if (ImGui::Button(action.label.c_str())) {
+            const bool link = action.type == NoticeAction::Type::OpenLink || action.type == NoticeAction::Type::CopyLink;
+            if (link ? anvil::ui::text_button(action.label.c_str()) : ImGui::Button(action.label.c_str())) {
                 run_action(notice, action);
                 break;  // the actions may have changed
             }
         }
+        ImGui::Unindent(indent);
         y += ImGui::GetWindowHeight() + 8.0f * k;
     }
     ImGui::End();
@@ -813,9 +828,9 @@ std::string panel_key_text() {
     return "";
 }
 
-// Anvil's version, with a dot that turns amber when a plugin waits for this
-// game version and red when a plugin failed; a click
-// opens or closes the panel. Only the badge takes the mouse: clicks beside it
+// Anvil's version after the state's glyph: a tick, a triangle when a plugin
+// waits for this game version, a cross when a plugin failed (a shape of its
+// own for each, not a colour alone); a click opens or closes the panel. Only the badge takes the mouse: clicks beside it
 // reach the game.
 void draw_badge(ULONGLONG now) {
     Shared& s = shared();
@@ -828,9 +843,9 @@ void draw_badge(ULONGLONG now) {
     const std::string label = std::string("Anvil ") + (status.anvil_version != nullptr ? status.anvil_version : "?");
     const ImGuiStyle& style = ImGui::GetStyle();
     const ImVec2 padding = style.WindowPadding;
-    const float dot = ImGui::GetFontSize() * 0.5f;
     const ImVec2 text = ImGui::CalcTextSize(label.c_str());
-    const ImVec2 size(padding.x * 2.0f + dot + style.ItemInnerSpacing.x + text.x, padding.y * 2.0f + text.y);
+    const float glyph = text.y;
+    const ImVec2 size(padding.x * 2.0f + glyph + style.ItemInnerSpacing.x + text.x, padding.y * 2.0f + text.y);
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     const BadgeRect r = menu_badge_rect(viewport->WorkSize.y, size.x, size.y);
     ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + r.x, viewport->WorkPos.y + r.y), ImGuiCond_Always);
@@ -851,10 +866,9 @@ void draw_badge(ULONGLONG now) {
             draw->AddRectFilled(at, ImVec2(at.x + size.x, at.y + size.y), ImGui::GetColorU32(ImGuiCol_ButtonHovered),
                                 style.WindowRounding);
         }
-        const float middle = at.y + size.y * 0.5f;
-        draw->AddCircleFilled(ImVec2(at.x + padding.x + dot * 0.5f, middle), dot * 0.5f,
-                              ImGui::GetColorU32(status.failed > 0 ? kRed : u.waiting_for_build > 0 ? kAmber : kGreen));
-        draw->AddText(ImVec2(at.x + padding.x + dot + style.ItemInnerSpacing.x, at.y + padding.y),
+        const Glyph state = status.failed > 0 ? Glyph::CannotLoad : u.waiting_for_build > 0 ? Glyph::Attention : Glyph::On;
+        anvil::ui::draw_glyph(draw, ImVec2(at.x + padding.x, at.y + padding.y), glyph, state);
+        draw->AddText(ImVec2(at.x + padding.x + glyph + style.ItemInnerSpacing.x, at.y + padding.y),
                       ImGui::GetColorU32(ImGuiCol_Text), label.c_str());
         if (hovered && ImGui::BeginTooltip()) {
             ImGui::TextUnformatted(label.c_str());
@@ -912,11 +926,9 @@ void draw_restart() {
     } else if (s.ironman) {
         wrapped(tr("Your ironman campaign is saved, as at Exit to Menu, and the game starts again."));
     } else {
-        // A long sentence: wrapped, unlike colored().
-        ImGui::PushStyleColor(ImGuiCol_Text, kAmber);
-        wrapped(tr("Your campaign closes as at Exit to Menu: progress since your last save is lost. To keep it, "
-                   "save first in the game's menu."));
-        ImGui::PopStyleColor();
+        anvil::ui::banner("campaign", Tone::Warn,
+                          tr("Your campaign closes as at Exit to Menu: progress since your last save is lost. To keep it, "
+                             "save first in the game's menu."));
     }
     if (anvil::ui::primary_button(tr("Restart now"))) {
         u.confirm_restart = false;
@@ -939,16 +951,20 @@ void draw_status_lines() {
     const AnvilControlStatus& s = u.status;
     line(trf("Anvil {0}, game build {1}", {s.anvil_version ? s.anvil_version : "?", s.game_build ? s.game_build : tr("unknown")}));
     if (s.safe_mode) {
-        colored(kRed, trf("Safe mode: the last {0} starts ended before the game was ready.", {std::to_string(s.unfinished_starts)}));
+        anvil::ui::banner("safe-mode", Tone::Bad,
+                          trf("Safe mode: the last {0} starts ended before the game was ready.", {std::to_string(s.unfinished_starts)}));
     } else if (s.unfinished_starts > 0) {
-        colored(kAmber, trf("{0} earlier start(s) ended before the game was ready.", {std::to_string(s.unfinished_starts)}));
+        anvil::ui::banner("unfinished", Tone::Warn,
+                          trf("{0} earlier start(s) ended before the game was ready.", {std::to_string(s.unfinished_starts)}));
     }
     if (u.latest && s.anvil_version != nullptr && anvil::net::newer_release(u.latest->tag, s.anvil_version)) {
-        colored(kGreen, trf("Anvil {0} is available.", {u.latest->tag}));
+        anvil::ui::begin_banner("release", Tone::Info);
+        line(trf("Anvil {0} is available.", {u.latest->tag}));
         ImGui::SameLine();
-        if (ImGui::SmallButton(tr("Open its page"))) open_link(u.latest->url);
+        if (anvil::ui::text_button(tr("Open its page"))) open_link(u.latest->url);
         ImGui::SameLine();
-        if (ImGui::SmallButton((std::string(tr("Copy link")) + "##release").c_str())) copy_to_clipboard(u.latest->url);
+        if (anvil::ui::text_button((std::string(tr("Copy link")) + "##release").c_str())) copy_to_clipboard(u.latest->url);
+        anvil::ui::end_banner(Tone::Info);
     }
     if (s.session) {
         wrapped(session_text(s));
@@ -1210,9 +1226,7 @@ struct OverlayHost final : anvil::ui::PluginsHost {
         weak_wrapped(trf("from {0}", {mod_source(m)}));
         const bool good = (m.state == "approved" && m.loaded) || m.approved_next;
         const bool waits = m.state == "pending" || m.state == "update-pending" || m.state == "conflict";
-        ImGui::PushStyleColor(ImGuiCol_Text, good ? kGreen : waits ? kAmber : kRed);
-        wrapped(state_text(m));
-        ImGui::PopStyleColor();
+        anvil::ui::state_row(good ? Glyph::On : waits ? Glyph::Attention : Glyph::CannotLoad, state_text(m));
         if (!good && !m.reason_text().empty()) weak_wrapped(m.reason_text());
         if (!m.repository.empty()) weak_wrapped(trf("Source: {0}", {m.repository}));
         if (!m.approved_hash.empty()) {
@@ -1245,17 +1259,11 @@ struct OverlayHost final : anvil::ui::PluginsHost {
         Ui& u = ui();
         const anvil::ui::PluginSnap& p = plugin(i);
         if (p.blocked == anvil::ui::Blocked::Failed && !p.blocked_reason.empty()) {
-            ImGui::PushStyleColor(ImGuiCol_Text, kRed);
-            wrapped(p.blocked_reason);
-            ImGui::PopStyleColor();
+            anvil::ui::state_row(Glyph::CannotLoad, p.blocked_reason);
         }
         const OverlaySource& src = source(i);
         if (src.row && *src.row < u.plugins.size() && u.plugins[*src.row].suspended) weak_wrapped(tr("suspended in this game"));
-        for (const std::string& w : shared().control.setting_warnings(p.id)) {
-            ImGui::PushStyleColor(ImGuiCol_Text, kAmber);
-            wrapped(w);
-            ImGui::PopStyleColor();
-        }
+        for (const std::string& w : shared().control.setting_warnings(p.id)) anvil::ui::state_row(Glyph::Attention, w);
     }
 };
 
@@ -1276,19 +1284,26 @@ void draw_crash() {
         return;
     }
     const CrashInfo& c = *u.crash;
-    line(trf(c.before_game_ready ? N_("Report {0}, before the game was ready") : N_("Report {0}"), {c.name}));
+    anvil::ui::strong(trf(c.before_game_ready ? N_("Report {0}, before the game was ready") : N_("Report {0}"), {c.name}).c_str());
+    // What happened, as a banner; the plugins by the names the Plugins tab shows.
+    anvil::ui::begin_banner("crash", Tone::Bad);
     wrapped(crash_sentence(c));
     if (!c.plugins.empty()) {
         std::string list;
-        for (const std::string& id : c.plugins) list += (list.empty() ? "" : ", ") + id;
+        for (const std::string& id : c.plugins) {
+            const auto row = std::find_if(u.plugins.begin(), u.plugins.end(), [&](const PluginRow& p) { return p.id == id; });
+            const std::string& name = row != u.plugins.end() && !row->name.empty() ? row->name : id;
+            list += (list.empty() ? "" : ", ") + name;
+        }
         wrapped(trf("Plugins involved: {0}", {list}));
     }
     if (!c.issues.empty()) {
         wrapped(trf("Report it at {0}", {c.issues}));
-        ImGui::SameLine();
-        if (ImGui::SmallButton(tr("Copy link"))) copy_to_clipboard(c.issues);
+        if (anvil::ui::text_button(tr("Copy link"))) copy_to_clipboard(c.issues);
     }
-    if (ImGui::Button(tr("Copy report"))) {
+    anvil::ui::end_banner(Tone::Bad);
+    ImGui::Spacing();
+    if (anvil::ui::primary_button(tr("Copy report"))) {
         copy_to_clipboard(c.report);
         say(tr("The report is in the clipboard. Nothing is uploaded."), false);
     }
@@ -1304,8 +1319,14 @@ void draw_crash() {
             }
         }
     }
-    if (ImGui::BeginChild("report", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar)) {
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, anvil::ui::kPanel);
+    const bool shown = ImGui::BeginChild("report", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
+    ImGui::PopStyleColor();
+    if (shown) {
+        anvil::ui::begin_mono();
         ImGui::TextUnformatted(c.report.data(), c.report.data() + c.report.size());
+        anvil::ui::end_mono();
     }
     ImGui::EndChild();
 }
@@ -1313,24 +1334,20 @@ void draw_crash() {
 void draw_log() {
     Ui& u = ui();
     const ULONGLONG now = GetTickCount64();
-    bool refresh_now = ImGui::Button(tr("Refresh"));
-    ImGui::SameLine();
     ImGui::Checkbox(tr("Follow"), &u.log_follow);
     ImGui::SameLine();
-    if (ImGui::Button(tr("Copy"))) copy_to_clipboard(u.log);
+    const bool refresh_now = anvil::ui::text_button(tr("Refresh"));
+    ImGui::SameLine();
+    if (anvil::ui::text_button(tr("Copy"))) copy_to_clipboard(u.log);
     if (u.log_refreshed == 0 || refresh_now || (u.log_follow && now - u.log_refreshed > 2000)) {
         u.log = shared().control.log_tail(400);
+        u.log_lines = anvil::ui::split_log(u.log);
         u.log_refreshed = now;
         u.log_scroll = u.log_follow || refresh_now;
     }
-    if (ImGui::BeginChild("log", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar)) {
-        ImGui::TextUnformatted(u.log.data(), u.log.data() + u.log.size());
-        if (u.log_scroll) {
-            ImGui::SetScrollHereY(1.0f);
-            u.log_scroll = false;
-        }
-    }
-    ImGui::EndChild();
+    anvil::ui::log_chips(u.log_lines, u.log_filter);
+    anvil::ui::log_lines("log", u.log_lines, u.log_filter, u.log_scroll);
+    u.log_scroll = false;
 }
 
 void draw_panel() {
@@ -1343,10 +1360,14 @@ void draw_panel() {
     ImGui::SetNextWindowSize(ImVec2(820.0f * k, 540.0f * k), ImGuiCond_FirstUseEver);
     bool open = true;
     if (ImGui::Begin("Anvil###anvil-panel", &open, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings)) {
+        // The last action's result: a banner in its state, closed with OK.
         if (!u.message.empty()) {
-            ImGui::TextColored(u.message_error ? kRed : kGreen, "%s", u.message.c_str());
+            const Tone tone = u.message_error ? Tone::Bad : Tone::Good;
+            anvil::ui::begin_banner("message", tone);
+            line(u.message);
             ImGui::SameLine();
-            if (ImGui::SmallButton(tr("OK"))) u.message.clear();
+            if (anvil::ui::text_button(tr("OK"))) u.message.clear();
+            anvil::ui::end_banner(tone);
         }
         if (ImGui::BeginTabBar("tabs", ImGuiTabBarFlags_DrawSelectedOverline)) {
             // The tab's id stays English, so a tab keeps its place whatever the language.

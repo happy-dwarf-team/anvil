@@ -37,19 +37,7 @@ LogState& state() {
     return s;
 }
 
-const char* level_name(AnvilLogLevel level) {
-    switch (level) {
-    case ANVIL_LOG_DEBUG:
-        return "debug";
-    case ANVIL_LOG_INFO:
-        return "info ";
-    case ANVIL_LOG_WARNING:
-        return "WARN ";
-    case ANVIL_LOG_ERROR:
-        return "ERROR";
-    }
-    return "?    ";
-}
+const char* level_name(AnvilLogLevel level) { return log_level_word(level); }
 
 void write_raw(HANDLE file, const std::string& line) {
     DWORD written = 0;
@@ -210,16 +198,6 @@ size_t Log::warning_count() const {
     LogState& s = state();
     std::lock_guard lock(s.mutex);
     return s.warnings.size();
-}
-
-std::optional<AnvilLogLevel> log_line_level(std::string_view line) {
-    const size_t at = line.find(" ms] ");
-    if (line.empty() || line.front() != '[' || at == std::string_view::npos) return std::nullopt;
-    const std::string_view level = line.substr(at + 5, 5);
-    for (const AnvilLogLevel l : {ANVIL_LOG_DEBUG, ANVIL_LOG_INFO, ANVIL_LOG_WARNING, ANVIL_LOG_ERROR}) {
-        if (level == level_name(l)) return l;
-    }
-    return std::nullopt;
 }
 
 void log_info(std::string_view message) { Log::instance().write(ANVIL_LOG_INFO, "anvil", message); }
