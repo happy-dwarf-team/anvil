@@ -1,6 +1,7 @@
 #include "i18n/translate.hpp"
 
 #include <atomic>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -86,6 +87,63 @@ const char* tr(const char* english) { return tr(language(), english); }
 
 std::string trf(const char* english, std::initializer_list<std::string_view> args) {
     return i18n::format(tr(english), std::vector<std::string>(args.begin(), args.end()));
+}
+
+int plural_forms(Language language) {
+    switch (language) {
+    case Language::SimplifiedChinese:
+    case Language::TraditionalChinese:
+    case Language::Japanese:
+    case Language::Korean: return 1;
+    case Language::Polish: return 3;
+    case Language::English:
+    case Language::French:
+    case Language::German:
+    case Language::Spanish: break;
+    }
+    return 2;
+}
+
+// The CLDR rules of each language's cardinal numbers, for whole numbers.
+int plural_form(Language language, long long n) {
+    const long long a = n < 0 ? -n : n;
+    switch (language) {
+    case Language::SimplifiedChinese:
+    case Language::TraditionalChinese:
+    case Language::Japanese:
+    case Language::Korean: return 0;
+    case Language::French: return a <= 1 ? 0 : 1;
+    case Language::Polish:
+        if (a == 1) return 0;
+        if (a % 10 >= 2 && a % 10 <= 4 && (a % 100 < 12 || a % 100 > 14)) return 1;
+        return 2;
+    case Language::English:
+    case Language::German:
+    case Language::Spanish: break;
+    }
+    return a == 1 ? 0 : 1;
+}
+
+std::string trn(Language language, const char* forms, long long n, std::initializer_list<std::string_view> args) {
+    // A translation without enough forms falls back to its last one.
+    const std::string_view all = tr(language, forms);
+    const bool english = all.data() == std::string_view(forms).data();
+    int form = english ? plural_form(Language::English, n) : plural_form(language, n);
+    size_t begin = 0;
+    for (; form > 0; --form) {
+        const size_t bar = all.find('|', begin);
+        if (bar == std::string_view::npos) break;
+        begin = bar + 1;
+    }
+    const size_t end = all.find('|', begin);
+    const std::string_view chosen = all.substr(begin, end == std::string_view::npos ? std::string_view::npos : end - begin);
+    std::vector<std::string> values{std::to_string(n)};
+    values.insert(values.end(), args.begin(), args.end());
+    return i18n::format(std::string(chosen), values);
+}
+
+std::string trn(const char* forms, long long n, std::initializer_list<std::string_view> args) {
+    return trn(language(), forms, n, args);
 }
 
 std::string text(Language language, const Message& message) {

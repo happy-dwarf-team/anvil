@@ -1,6 +1,7 @@
 // The Plugins tab's view model (src/ui/plugin_model.hpp; ADR 0013, point 9;
 // docs/ui-guidelines.md §5), on made-up snapshots.
 #include "ui/plugin_model.hpp"
+#include "ui/line_breaks.hpp"
 
 #include "test_support.hpp"
 
@@ -385,6 +386,47 @@ void layout_tests() {
     });
 }
 
+// CJK line breaks (src/ui/line_breaks.hpp), every character one unit wide.
+std::vector<std::string> wrap(std::string_view text, float width) {
+    const std::vector<size_t> starts = wrap_starts(text, width, [](const char*, const char*) { return 1.0f; });
+    std::vector<std::string> lines;
+    for (size_t k = 0; k < starts.size(); ++k) {
+        size_t end = k + 1 < starts.size() ? starts[k + 1] : text.size();
+        while (end > starts[k] && (text[end - 1] == ' ' || text[end - 1] == '\n')) --end;
+        lines.emplace_back(text.substr(starts[k], end - starts[k]));
+    }
+    return lines;
+}
+
+void line_break_tests() {
+    run("Japanese breaks between any two characters, not only at its punctuation", [] {
+        CHECK(wrap("ゲームの起動を速くします", 5) == (std::vector<std::string>{"ゲームの起", "動を速くし", "ます"}));
+    });
+    run("kinsoku: no line starts with 。 or ー, none ends with 「", [] {
+        // 。 would start the second line: the break moves one character back.
+        CHECK(wrap("あいうえ。かき", 4) == (std::vector<std::string>{"あいう", "え。かき"}));
+        CHECK(wrap("あいうー", 3) == (std::vector<std::string>{"あい", "うー"}));
+        CHECK(wrap("あいう「え」", 4) == (std::vector<std::string>{"あいう", "「え」"}));
+    });
+    run("Latin words keep breaking at spaces, also next to CJK text", [] {
+        CHECK(wrap("one two three", 7) == (std::vector<std::string>{"one two", "three"}));
+        CHECK(wrap("Steam ワークショップ", 8) == (std::vector<std::string>{"Steam ワー", "クショップ"}));
+        CHECK(wrap("anvil/plugins に入ります", 13) == (std::vector<std::string>{"anvil/plugins", "に入ります"}));
+    });
+    run("Korean breaks at spaces only", [] {
+        CHECK(wrap("새 릴리스 확인", 5) == (std::vector<std::string>{"새 릴리스", "확인"}));
+        CHECK(!has_cjk_breaks("새 릴리스 확인") && has_cjk_breaks("ゲーム") && !has_cjk_breaks("plain text"));
+    });
+    run("a path breaks after a separator, not inside a folder's name", [] {
+        CHECK(wrap("C:\\Games\\fixture\\game", 12) == (std::vector<std::string>{"C:\\Games\\", "fixture\\game"}));
+        CHECK(needs_own_breaks("C:\\Games") && !needs_own_breaks("anvil/plugins"));
+    });
+    run("a word longer than the line breaks where it overflows; newlines stay", [] {
+        CHECK(wrap("abcdefgh", 3) == (std::vector<std::string>{"abc", "def", "gh"}));
+        CHECK(wrap("あい\nうえ", 9) == (std::vector<std::string>{"あい", "うえ"}));
+    });
+}
+
 }  // namespace
 
 int main() {
@@ -396,6 +438,7 @@ int main() {
     reset_tests();
     find_tests();
     layout_tests();
+    line_break_tests();
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

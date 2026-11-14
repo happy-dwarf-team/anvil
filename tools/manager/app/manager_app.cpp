@@ -35,6 +35,8 @@ using namespace ui;
 using i18n::N_;
 using i18n::tr;
 using i18n::trf;
+using i18n::trn;
+using ::anvil::ui::checkbox;
 using ::anvil::ui::glyph_item;
 using ::anvil::ui::kBackground;
 using ::anvil::ui::kLine;
@@ -154,6 +156,8 @@ const char* step_text(Step::Kind kind) {
 }
 
 constexpr const char* kTroubleshootingUrl = "https://anvil.happydwarf.dev/docs/troubleshooting/#if-anvil-does-not-run-at-all";
+// A plan's changes are listed open up to this many; more are folded.
+constexpr size_t kOpenChangesUpTo = 8;
 
 std::string megabytes(uint64_t bytes) {
     char text[32];
@@ -393,7 +397,7 @@ void ManagerApp::draw() {
     ImGui::PopStyleColor();
     if (!package_) {
         ::anvil::ui::title("Anvil Manager " ANVIL_VERSION);
-        colored_wrapped(kBad, trf("This AnvilManager.exe is broken: {0}. Download it again from {1}.", {package_error_, kReleasesUrl}));
+        banner("broken", Tone::Bad, trf("This AnvilManager.exe is broken: {0}. Download it again from {1}.", {package_error_, kReleasesUrl}));
     } else if (!shell) {
         ::anvil::ui::title("Anvil Manager " ANVIL_VERSION);
         draw_first_run();
@@ -544,44 +548,48 @@ void ManagerApp::draw_page() {
     }
 }
 
-// What concerns every page: the game's build, a game that runs, a series that runs.
+// What concerns every page: the game's build, a game that runs, a series that
+// runs. Each notice is a banner with its action inside (docs/ui-design-system.md, "Banner").
 void ManagerApp::draw_notices() {
     const float before = ImGui::GetCursorPosY();
     if (snapshot_ && snapshot_->folder.error.empty() && snapshot_->folder.build.empty()) {
-        colored_wrapped(kWarn, tr("eu4.exe is not a build Anvil knows (EU4 updated?): plugins that need game "
-                                  "addresses are skipped, the others load."));
+        begin_banner("unknown-build", Tone::Warn);
+        wrapped(tr("eu4.exe is not a build Anvil knows (EU4 updated?): plugins that need game "
+                   "addresses are skipped, the others load."));
         if (snapshot_->folder.gog) {
-            colored_wrapped(kWarn, i18n::text(i18n::Message("build_unknown_gog", {known_gog_version()})));
+            wrapped(i18n::text(i18n::Message("build_unknown_gog", {known_gog_version()})));
             if (!snapshot_->folder.gog_version.empty()) weak(trf("GOG calls this version {0}.", {snapshot_->folder.gog_version}));
         }
+        end_banner(Tone::Warn);
     }
     if (launcher_opened_ && !running_) {
-        weak_wrapped(tr("The Paradox launcher opens: press Play there and Anvil loads with the game. On its first start it shows Paradox's EULA before Play. Only you can accept it; it comes from the launcher, not from Anvil."));
+        banner("launcher", Tone::Info,
+               tr("The Paradox launcher opens: press Play there and Anvil loads with the game. On its first start it shows Paradox's EULA before Play. Only you can accept it; it comes from the launcher, not from Anvil."));
     }
     if (benchmark_.busy()) {
-        colored_wrapped(kWarn, tr("A start-up benchmark series is running: EU4 starts and quits by itself. The other "
-                                  "pages are locked until the series ends."));
+        banner("series", Tone::Warn, tr("A start-up benchmark series is running: EU4 starts and quits by itself. The other "
+                                        "pages are locked until the series ends."));
     } else if (running_) {
-        colored_wrapped(kWarn, tr("EU4 is running from this folder. Close the game to change Anvil, plugins or "
-                                  "settings; until then the Manager only shows them."));
+        banner("running", Tone::Warn, tr("EU4 is running from this folder. Close the game to change Anvil, plugins or "
+                                         "settings; until then the Manager only shows them."));
     } else if (!running_elsewhere_.empty() && anvil_installed()) {
         // Steam starts its own copy whatever folder the Manager shows (issue #253).
         const fs::path& other = running_elsewhere_.front();
-        colored_wrapped(kWarn, trf("EU4 is running from {0}, not from the folder Anvil is installed in.", {u8(other)}));
-        if (ImGui::SmallButton(tr("Switch to that folder"))) {
+        begin_banner("elsewhere", Tone::Warn);
+        wrapped(trf("EU4 is running from {0}, not from the folder Anvil is installed in.", {u8(other)}));
+        if (text_button(tr("Switch to that folder"))) {
             const fs::path chosen = other;  // choose_game clears running_elsewhere_
             choose_game(chosen);
         }
+        end_banner(Tone::Warn);
     }
     if (anvil_missed_ && !running_ && !benchmark_.busy()) {
-        colored_wrapped(kWarn, tr("The game ran, but Anvil did not load."));
-        if (ImGui::SmallButton(tr("What to check"))) open_url(kTroubleshootingUrl);
+        begin_banner("missed", Tone::Warn);
+        wrapped(tr("The game ran, but Anvil did not load."));
+        if (text_button(tr("What to check"))) open_url(kTroubleshootingUrl);
+        end_banner(Tone::Warn);
     }
-    if (ImGui::GetCursorPosY() > before) {
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-    }
+    if (ImGui::GetCursorPosY() > before) ImGui::Spacing();
 }
 
 void ManagerApp::draw_first_run() {
@@ -691,13 +699,17 @@ void ManagerApp::draw_anvil_tab() {
             ImGui::TreePop();
         }
     }
+    // What installing does, then the button, which opens the dialog that lists the changes ("..." in its label).
+    weak_wrapped(trf("Copies version.dll, the standard plugins ({0}) and this Manager into the game folder. Your anvil.toml, "
+                     "plugins and their settings stay.",
+                     {join(package_->standard_plugins)}));
     ImGui::BeginDisabled(read_only());
-    const std::string label = !inst.legacy.empty()                 ? trf("Replace {0}", {inst.legacy_name()})
-                              : inst.dll != Installation::Dll::Anvil ? trf("Install Anvil {0}", {version})
-                              : inst.dll_version != version         ? trf("Install this Anvil {0}", {version})
-                                                                    : std::string(tr("Repair"));
+    const std::string label = !inst.legacy.empty()                 ? trf("Replace {0}...", {inst.legacy_name()})
+                              : inst.dll != Installation::Dll::Anvil ? trf("Install Anvil {0}...", {version})
+                              : inst.dll_version != version         ? trf("Install this Anvil {0}...", {version})
+                                                                    : std::string(tr("Repair..."));
     const bool unknown_dll = inst.dll == Installation::Dll::Foreign && inst.legacy.empty();
-    if (unknown_dll) ImGui::Checkbox(tr("Replace the other version.dll"), &replace_foreign_dll_);
+    if (unknown_dll) checkbox(tr("Replace the other version.dll"), &replace_foreign_dll_);
     const bool nothing = inst.intact() && inst.dll_version == version && inst.manager_current;
     ImGui::BeginDisabled(nothing || (unknown_dll && !replace_foreign_dll_));
     // Installing or repairing is the view's main action while there is something to do.
@@ -708,9 +720,6 @@ void ManagerApp::draw_anvil_tab() {
         weak(tr("nothing to repair"));
     }
     ImGui::EndDisabled();
-    weak_wrapped(trf("Copies version.dll, the standard plugins ({0}) and this Manager into the game folder. Your anvil.toml, "
-                     "plugins and their settings stay.",
-                     {join(package_->standard_plugins)}));
     end_banner(tone);
 
     if (!settings_.asked_releases) {
@@ -842,6 +851,8 @@ void ManagerApp::draw_catalog_tab() {
             anvil::ui::draw_glyph(draw, at, line, anvil::ui::Glyph::On);
         } else if (status.update(plugin)) {
             anvil::ui::draw_pending_dot(draw, ImVec2(at.x + line * 0.5f, at.y + line * 0.5f), line * 0.22f);
+        } else {
+            anvil::ui::draw_glyph(draw, at, line, status.installed.empty() ? anvil::ui::Glyph::Off : anvil::ui::Glyph::On);
         }
         ImGui::Indent(indent);
         anvil::ui::strong(plugin.name.c_str());
@@ -874,6 +885,8 @@ void ManagerApp::draw_catalog_tab() {
             colored_wrapped(kInfo, trf("Version {0} is installed; {1} is available.", {status.installed, plugin.version}));
         } else if (!status.installed.empty()) {
             weak_wrapped(trf("Version {0} is installed.", {status.installed}));
+        } else {
+            weak_wrapped(tr("Not installed."));
         }
         if (status.from_mod) {
             weak_wrapped(status.installed.empty()
@@ -884,7 +897,7 @@ void ManagerApp::draw_catalog_tab() {
         // Its actions: Install or Update as a button, the links as text buttons.
         if (!status.current(plugin) && !newer_installed) {
             ImGui::BeginDisabled(!can_install || read_only() || download_pending_.valid());
-            if (ImGui::Button(status.installed.empty() ? tr("Install") : tr("Update"))) {
+            if (ImGui::Button(status.installed.empty() ? tr("Install...") : tr("Update..."))) {
                 download_ = plugin;
                 open_download_ = true;
             }
@@ -918,7 +931,7 @@ void ManagerApp::draw_approve_modal() {
     weak(trf("from {0}", {mod_source(p)}));
     if (!m.description.empty()) wrapped(plugin_text(m.folder, m.description));
     if (!m.repository.empty() && m.repository.starts_with("https://")) {
-        if (ImGui::SmallButton(tr("Open its repository"))) open_url(m.repository);
+        if (text_button(tr("Open its repository"))) open_url(m.repository);
     }
     ImGui::Spacing();
     banner("native", Tone::Warn, tr("A plugin is native code: it runs inside the game with your rights, like any program. "
@@ -929,7 +942,7 @@ void ManagerApp::draw_approve_modal() {
         bullet(tr("It says it does not change the game (affects_gameplay = false)."));
     }
     if (!m.modules.empty()) {
-        bullet(trf("Modules ({0}); one approval covers all of them:", {std::to_string(m.modules.size())}));
+        bullet(trn("{0} module; the approval covers it:|{0} modules; one approval covers all of them:", static_cast<long long>(m.modules.size())));
         ImGui::Indent();
         for (const Module& mod : m.modules) {
             const std::string text = module_summary(m, mod, plugin_text(m.folder, mod.name));
@@ -937,7 +950,7 @@ void ManagerApp::draw_approve_modal() {
         }
         ImGui::Unindent();
     }
-    bullet(offered.has_symbols ? trf("{0} game address(es) declared in symbols.toml", {std::to_string(offered.symbols)})
+    bullet(offered.has_symbols ? trn("{0} game address declared in symbols.toml|{0} game addresses declared in symbols.toml", static_cast<long long>(offered.symbols))
                                : std::string(tr("It declares no game addresses (no symbols.toml).")));
     bullet(trf("Hash of its files: {0}", {p.hash}));
     if (catalog_) {
@@ -1020,14 +1033,15 @@ void ManagerApp::draw_crashes_tab() {
         const float pad = ImGui::GetStyle().FramePadding.y;
         const ImVec2 at = ImGui::GetCursorScreenPos();
         const float right = at.x + ImGui::GetContentRegionAvail().x;
-        if (ImGui::Selectable(("##" + name).c_str(), name == crash_selected_, ImGuiSelectableFlags_None, ImVec2(0, line * 2 + pad * 2))) {
+        if (::anvil::ui::list_row(("##" + name).c_str(), name == crash_selected_, 2)) {
             crash_selected_ = name;
             crash_text_ = read_text_file(folder / widen(name + ".txt"), 1 << 20).value_or(tr("(the report's text cannot be read)"));
         }
         ImDrawList* draw = ImGui::GetWindowDrawList();
-        const float x = at.x + line + ImGui::GetStyle().ItemInnerSpacing.x * 2;
-        anvil::ui::draw_glyph(draw, ImVec2(at.x + 2, at.y + pad), line, anvil::ui::Glyph::CannotLoad);
-        draw->AddText(ImVec2(x, at.y + pad), ImGui::GetColorU32(kText), crash && !crash->time.empty() ? crash->time.c_str() : name.c_str());
+        const float x = ::anvil::ui::row_text_x(at);
+        anvil::ui::draw_glyph(draw, ImVec2(::anvil::ui::row_glyph_x(at), at.y + pad), line, anvil::ui::Glyph::CannotLoad);
+        ::anvil::ui::draw_strong(draw, ImVec2(x, at.y + pad), ImGui::GetColorU32(kText),
+                                 crash && !crash->time.empty() ? crash->time.c_str() : name.c_str());
         const std::string sub = fitted(crash ? what(*crash) : std::string(tr("The report cannot be read.")), right - x);
         draw->AddText(ImVec2(x, at.y + pad + line), ImGui::GetColorU32(kTextWeak), sub.c_str());
     }
@@ -1037,7 +1051,9 @@ void ManagerApp::draw_crashes_tab() {
     // The detail: what crashed in a banner with its actions, then the report.
     ImGui::BeginChild("report", ImVec2(0, 0), ImGuiChildFlags_Borders);
     if (const std::optional<CrashSummary>& crash = summary(crash_selected_)) {
-        ::anvil::ui::title(crash->time.empty() ? crash_selected_.c_str() : crash->time.c_str());
+        // The detail's header, as the Plugins detail names its plugin: semibold at the text's size.
+        strong(crash->time.empty() ? crash_selected_.c_str() : crash->time.c_str());
+        ImGui::Spacing();
         begin_banner("crash", Tone::Bad);
         wrapped(what(*crash));
         if (!crash->plugins.empty()) wrapped(trf("Plugins involved: {0}", {join(crash->plugins)}));
@@ -1049,9 +1065,7 @@ void ManagerApp::draw_crashes_tab() {
         if (text_button(tr("Copy the report"))) copy_to_clipboard(window_, crash_text_);
         end_banner(Tone::Bad);
         ImGui::Spacing();
-        begin_mono();
-        ImGui::InputTextMultiline("##text", &crash_text_, ImVec2(-1, -1), ImGuiInputTextFlags_ReadOnly);
-        end_mono();
+        ::anvil::ui::code_text("##text", crash_text_, ImVec2(-1, -1));
     } else {
         banner("unreadable", Tone::Bad, tr("The report cannot be read."));
     }
@@ -1161,16 +1175,19 @@ void ManagerApp::draw_about_tab() {
     ImGui::Spacing();
     ImGui::SeparatorText(tr("New releases"));
     bool check = settings_.check_releases;
-    if (ImGui::Checkbox(tr("Ask GitHub for new releases of Anvil and its plugins when the Manager or the game starts"), &check)) {
+    if (checkbox(tr("Check for new releases"), &check)) {
         settings_.check_releases = check;
         settings_.asked_releases = true;
         std::string error;
         save_manager_settings(settings_, error);
         if (check) check_for_updates();
     }
-    weak_wrapped(tr("For Anvil a link is shown, and the Catalog and Plugins pages show plugin updates; nothing is downloaded "
-                    "until you click. To update Anvil, run the Manager of the new release."));
-    weak_wrapped(tr("The game follows this answer unless the Anvil panel's setting \"Check for new Anvil releases\" says On or Off."));
+    ::anvil::ui::checkbox_note(tr("Anvil and its plugins, from GitHub, when the Manager or the game starts. For Anvil a link is "
+                               "shown, and the Catalog and Plugins pages show plugin updates; nothing is downloaded until you "
+                               "click. To update Anvil, run the Manager of the new release."));
+    // The overlay's setting in the words the overlay shows: each catalog quotes its
+    // translations/ (tests/i18n_tests.cpp checks that they agree).
+    ::anvil::ui::checkbox_note(tr("The game follows this answer unless the Anvil panel's setting \"Check for new Anvil releases\" says On or Off."));
     ImGui::BeginDisabled(release_pending_.valid());
     if (ImGui::Button(tr("Check now"))) release_pending_ = std::async(std::launch::async, fetch_latest_release);
     ImGui::EndDisabled();
@@ -1381,9 +1398,15 @@ void ManagerApp::draw_plan_modal() {
     // Uninstalling asks here what goes with Anvil; each answer plans again.
     if (plan_->uninstall) {
         const Installation& now = *snapshot_->installation;
-        bool again = ImGui::Checkbox(tr("Also remove my plugins, their settings and data, crash reports and logs"), &remove_everything_);
+        bool again = checkbox(tr("Remove my data too"), &remove_everything_);
+        ::anvil::ui::checkbox_note(tr("Your plugins, their settings and data, crash reports and logs."));
+        if (remove_everything_) {
+            banner("remove-everything", Tone::Warn,
+                   tr("They are deleted, not moved to the Recycle Bin: this cannot be undone. Installing Anvil again starts "
+                      "without them."));
+        }
         if (now.backup) {
-            again |= ImGui::Checkbox(trf("Restore {0} from the backup", {now.backup->name}).c_str(), &restore_backup_);
+            again |= checkbox(trf("Restore {0} from the backup", {now.backup->name}).c_str(), &restore_backup_);
             if (restore_backup_ && now.backup->name != "version.dll") {
                 weak_wrapped(trf("Saves made with Mei may show garbled text in {0}.", {now.backup->name}));
             }
@@ -1395,10 +1418,15 @@ void ManagerApp::draw_plan_modal() {
     if (!plan.refused.empty()) banner("refused", Tone::Bad, plan.refused);
     for (const std::string& note : plan.notes) bullet(note);
     if (plan.steps.empty() && plan.refused.empty()) wrapped(tr("Nothing to change."));
-    if (!plan.steps.empty() &&
-        ImGui::TreeNode("changes", "%s", trf("{0} change(s) in {1}", {std::to_string(plan.steps.size()), u8(game_)}).c_str())) {
-        for (const Step& step : plan.steps) ImGui::BulletText("%s", i18n::format(step_text(step.kind), {step.path, step.to}).c_str());
-        ImGui::TreePop();
+    if (!plan.steps.empty()) {
+        // The folder on a line of its own, wrapped at its separators; the changes
+        // under it, open while they are few enough to read at once.
+        weak_wrapped(trf("In {0}", {u8(game_)}));
+        ImGui::SetNextItemOpen(plan.steps.size() <= kOpenChangesUpTo, ImGuiCond_Appearing);
+        if (ImGui::TreeNode("changes", "%s", trn("{0} change|{0} changes", static_cast<long long>(plan.steps.size())).c_str())) {
+            for (const Step& step : plan.steps) bullet(i18n::format(step_text(step.kind), {step.path, step.to}));
+            ImGui::TreePop();
+        }
     }
     const Installation& inst = *snapshot_->installation;
     const bool repair = inst.installed() && inst.dll_version == package_->version;
@@ -1464,7 +1492,7 @@ void ManagerApp::draw_zip_modal() {
         weak(m.authors.empty() ? trf("id {0}", {m.id}) : trf("id {0}, by {1}", {m.id, join(m.authors)}));
         if (!m.description.empty()) wrapped(plugin_text(m.folder, m.description));
         if (!m.repository.empty() && m.repository.starts_with("https://")) {
-            if (ImGui::SmallButton(tr("Open its repository"))) open_url(m.repository);
+            if (text_button(tr("Open its repository"))) open_url(m.repository);
         }
         ImGui::Spacing();
         banner("native", Tone::Warn, tr("A plugin is native code: it runs inside the game with your rights, like any "
@@ -1493,7 +1521,7 @@ void ManagerApp::draw_zip_modal() {
         if (check.would_skip) {
             begin_banner("skip", Tone::Bad);
             wrapped(trf("Anvil would not load it with this eu4.exe: {0}", {i18n::text(check.report.skip_why)}));
-            ImGui::Checkbox(tr("Install it anyway"), &zip_anyway_);
+            checkbox(tr("Install it anyway"), &zip_anyway_);
             end_banner(Tone::Bad);
             can_install = zip_anyway_;
         } else if (check.report.problems.empty()) {

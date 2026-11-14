@@ -188,8 +188,11 @@ bench/run-lab.ps1 -Memory   # exit 1 over a budget
 
 The overlay and the Manager show their texts in the player's language (design
 §15). A text the player reads goes through `tr("…")`, or `trf("… {0} …", {arg})`
-when it has arguments (`src/i18n/translate.hpp`); a text picked from several
-(a ternary, a table) is marked with `N_("…")` where it is written. Build
+when it has arguments (`src/i18n/translate.hpp`); a count goes through
+`trn("{0} setting|{0} settings", n)`, whose translation holds as many forms as
+the language has (three in Polish, one in Chinese, Japanese and Korean); a
+text picked from several (a ternary, a table) is marked with `N_("…")` where
+it is written. Build
 sentences whole, with placeholders, rather than from pieces, since word order
 differs between languages. `anvil.log`, `anvil check` and the benchmark
 reports stay English.

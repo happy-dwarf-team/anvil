@@ -52,6 +52,7 @@ Text needs 4.5:1 and a control's outline 3:1.
 | `frame_active` | `#38342f` | 0.220, 0.204, 0.184 | `FrameBgActive`, `ButtonActive` | |
 | `line` | `#2c2926` | 0.173, 0.161, 0.149 | `Separator`, `TableBorderLight`, row lines | |
 | `border` | `#4a4540` | 0.290, 0.271, 0.251 | `Border`, `TableBorderStrong`, frame outlines | 1.9 (decorative) |
+| `control_outline` | `#756f66` | 0.459, 0.435, 0.400 | the outline of an unticked checkbox, which shows that it can be ticked | 3.6 (3.2 on `frame`) |
 | `text` | `#ece8e1` | 0.925, 0.910, 0.882 | `Text` | 14.7 |
 | `text_weak` | `#a39e96` | 0.639, 0.620, 0.588 | secondary text, "off", counts | 6.7 |
 | `text_dim` | `#8a857e` | 0.541, 0.522, 0.494 | `TextDisabled`, placeholders | 4.9 |
@@ -122,10 +123,10 @@ with its own colours and spacings.
 | **Secondary button** | `frame` with a `border` outline. Everything else, Cancel included. |
 | **Text button** | No frame, `info` text: "More", "Clear", "Reset settings (2)...", "Revoke approval...". |
 | **Plugin toggle** | A 36 × 20 track (in font units: about 2.1 × 1.2 lines) with a round knob and the word "On" or "Off" in semibold after it; ember track and `on_ember` knob when on, a `frame` track with a `border` outline when off. Only the plugin's own switch uses it, in the detail's header. |
-| **Checkbox** | An outlined box; on, an ember tick (`CheckMark`) on an ember-tinted box (`CheckboxSelectedBg`, `#5b3e28`: ember at 28 % over `frame`). ImGui draws a radio button's dot in `CheckMark` on `FrameBg` too, so the tick stays light rather than dark on a filled box (as the prototype drew it). When its plugin is off, the checkbox is disabled and keeps its tick, so the choice stays visible but reads as held (ui-guidelines §5). |
+| **Checkbox** | A box outlined in `control_outline` (3:1, so an unticked one still reads as a control), with what it covers in weak text under its label, aligned with it; on, an ember tick (`CheckMark`) on an ember-tinted box (`CheckboxSelectedBg`, `#5b3e28`: ember at 28 % over `frame`). ImGui draws a radio button's dot in `CheckMark` on `FrameBg` too, so the tick stays light rather than dark on a filled box (as the prototype drew it). When its plugin is off, the checkbox is disabled and keeps its tick, so the choice stays visible but reads as held (ui-guidelines §5). |
 | **Segmented control** | A `frame` track with a 2 px inset; the chosen segment is ember at 28 % with an ember outline. |
 | **Input and combo** | `frame` with a `border` outline that brightens on hover; the caret is ember (`InputTextCursor`). |
-| **List row** | Two lines, always (ui-guidelines §5): a status glyph in a column of its own, the name in semibold and an `info` dot when something waits; under it one phrase in 12 px, in `text_weak` for a summary and in the state colour for an exception. Hover `raised`; the selection is ember at 16 % with a 3 px ember bar at its left edge. |
+| **List row** | Two lines, always (ui-guidelines §5), in the Plugins list and the Crashes list alike: a status glyph in a column of its own, the name in semibold and an `info` dot when something waits; under it one phrase in 12 px, in `text_weak` for a summary and in the state colour for an exception. Hover `raised`; the selection is ember at 16 % with a 3 px ember bar at its left edge. |
 | **Section header** in the list | Small text in `text_weak` on no fill, a count in a `frame` pill, and "▲ 2" / "✕ 1" in the state colours when entries need attention ("From mods (3) ▲ 2 ✕ 1"), brighter on hover. |
 | **Group header** in the detail | Semibold `text`, a fold arrow, "n of m on", a `line` rule to the right. |
 | **Detail header** | The name in semibold at 17 px with version and id under it in `text_weak`; at the right the plugin toggle, a `line` separator, then Reset and Remove as secondary buttons. Under it, in the overlay, the plugin's state when it is an exception, with its glyph ("▲ kept out of this game: its author keeps it out of ironman"). It stays at the top of the scrolling detail (a fixed part above `BeginChild`), so the plugin being changed is always named. |
@@ -133,6 +134,7 @@ with its own colours and spacings.
 | **Banner** | `raised`, as high as its contents, with a 3 px left bar in the state colour and the state's glyph (§ Status; a dot for information) before its first line; the text stays `text` and wraps under itself, not under the glyph. Its actions sit inside it, after the text. Every notice of a page is one: a warning, a refusal, an update, a crash. |
 | **State row** | A glyph and one line beside it, outside a banner: a state that is no exception ("You have the latest release", "No crash reports"). |
 | **Card** | `panel` with a `line` hairline, as high as its contents: one thing to choose among several (a game copy on the first start; the Catalog's entries). A Catalog card is drawn like a list entry: the state's glyph in its own column, the name in semibold with the version and its tags, what it does, its state, then Install or Update as a secondary button (a page of several cards has no primary) and its links as text buttons. |
+| **Code view** | A log or a report in Consolas on `bg0` with a `line` hairline; its text can be selected and copied, but it does not look like a field to type in. |
 | **Facts** | Names in `text_weak` in a column of their own and values in `text` beside them ("Anvil 1.22.0", "eu4.exe", "Folder"). |
 | **Dialog** | `raised`, rounded 8, the screen dimmed by `ModalWindowDimBg` at 66 %, no title bar: the title in semibold inside. The buttons sit in a row at the right in Windows' order, the primary first and Cancel last; notices inside it are banners. |
 | **Overlay window** | `window` at 97 % opacity, rounded 8, a 2 px ember line at the top of its title bar instead of the blue title bar. |
@@ -217,7 +219,26 @@ truncation and compact labels.
 | Versions ("0.0.0") on every entry, needed only for an update. | In the detail and the tooltip; in the phrase when an update waits ("update 1.1.0 waits for approval"). |
 | Every module row in the overlay said "on in this game", and every setting "applies at once". | Rows say only exceptions ("off in this game", "applies at the next start"); one line above says the rule. |
 | "Where it runs" said "Kept out of ironman and multiplayer" and then "Its author keeps it out of ironman and multiplayer". | Each mode is named once, as the player's or as the author's choice. |
-| "2 plugin(s) or module(s)". | Real plurals. |
+| "2 plugin(s) or module(s)". | Real plurals: `trn()` picks each language's form (one and other; one, few and many in Polish; one form in Chinese, Japanese and Korean). |
+
+## Review of every page, 2026-11-15
+
+A fresh review of the Manager's pages in English, German at 150 %, Japanese, a narrow window
+and the Anvil page's dialogs, against the Plugins page and this document. What it found, and
+what changed in Anvil 1.23.0:
+
+| Found | Change |
+|---|---|
+| Repair, Install Anvil, Replace and the Catalog's Install and Update open a dialog without "...". | "Repair...", "Install Anvil 1.23.0...", "Install...", "Update..." (ui-guidelines §4). |
+| The plan dialogs cut the folder off at their edge ("6 change(s) in C:\Users\…"), inside a fold. | The folder on its own wrapped line, broken after its separators; "6 changes" open when there are eight or fewer. |
+| The Plugins and Crashes lists drew their selection without the ember bar, and their names in regular weight. | One list row for both (`list_row`, `draw_strong`), as the sidebar draws its page. |
+| "1 setting(s)", "6 change(s)", and a line under "From mods" that repeated the header's counts. | Real plurals; the line is gone. |
+| Japanese wrapped only at 、 and 。, leaving lines short, and some kanji of the Catalog were drawn in Windows' font, larger than the rest. | Lines break between any two CJK characters, with kinsoku (`src/ui/line_breaks.hpp`); the CJK fonts carry the Catalog's texts too. |
+| About named the overlay's setting "Check for new Anvil releases" in English in every language. | Each catalog quotes the overlay's own words, and a test checks that they agree. |
+| The crash report looked like a field to type in; the log was on `panel`. | Both are the code view on `bg0`. |
+| "Also remove my plugins, their settings and data, crash reports and logs" deleted them with no warning. | "Remove my data too", what it covers under it, and a warning banner while it is ticked. |
+| An unticked checkbox's outline was `border`, 1.9:1. | `control_outline`, 3.6:1. |
+| Notices above a page were coloured text with small buttons; text buttons at the start of a line sat 8 px in; the Benchmark listed eight green checks and said "per arm". | Banners with text buttons; text buttons line up with the text; one "Ready: all 8 checks pass" that unfolds, and "without and with the plugin". |
 
 ## What came from `/ui-ux-pro-max`, and what did not
 

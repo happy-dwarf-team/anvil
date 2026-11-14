@@ -1,14 +1,15 @@
 """Writes the overlay's and the Manager's CJK fonts (src/i18n/fonts/README.md).
 
 Each font is the subset of one Source Han Sans Regular face that holds the
-characters its catalog uses (src/i18n/catalog_<code>.cpp) beyond the Latin
-font: Simplified Chinese from the SC face, Traditional Chinese from TC,
+characters its catalog uses (src/i18n/catalog_<code>.cpp) and those of the
+language's texts in the plugin catalog (catalog/plugins.json, which the
+Manager's Catalog page shows) beyond the Latin font: Simplified Chinese from the SC face, Traditional Chinese from TC,
 Japanese from the default (J) face and Korean from K. The subsets are
 Modified Versions under the SIL Open Font License, so they do not carry the
 Reserved Font Name "Source": their family is "Anvil CJK <region>".
 
-Run it after a CJK catalog changes; anvil_i18n_tests fails while a catalog
-uses a character its font lacks.
+Run it after a CJK catalog or catalog/plugins.json changes; anvil_i18n_tests
+fails while either uses a character its font lacks.
 
     python -I tools/i18n/cjk-fonts.py <SourceHanSans.ttc>
 
@@ -18,6 +19,7 @@ Needs fontTools (pip install fonttools==4.55.3).
 """
 
 import hashlib
+import json
 import pathlib
 import re
 import sys
@@ -29,12 +31,12 @@ TTC_SHA256 = "1382ea173f57af2ef9de32b41ce24d9c33fe69b8f4f2eae7cf05e64a4efd8aef"
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 OUT = ROOT / "src" / "i18n" / "fonts"
 
-# catalog, face index in the collection, region, output file
+# catalog, face index in the collection, region, output file, code in catalog/plugins.json
 FONTS = [
-    ("zh_hans", 17, "SC", "anvil-cjk-sc.otf"),
-    ("zh_hant", 18, "TC", "anvil-cjk-tc.otf"),
-    ("ja", 15, "JP", "anvil-cjk-jp.otf"),
-    ("ko", 16, "KR", "anvil-cjk-kr.otf"),
+    ("zh_hans", 17, "SC", "anvil-cjk-sc.otf", "zh-Hans"),
+    ("zh_hant", 18, "TC", "anvil-cjk-tc.otf", "zh-Hant"),
+    ("ja", 15, "JP", "anvil-cjk-jp.otf", "ja"),
+    ("ko", 16, "KR", "anvil-cjk-kr.otf", "ko"),
 ]
 
 
@@ -50,6 +52,16 @@ def catalog_characters(code: str) -> set[int]:
     chars = set()
     for literal in literals:
         chars.update(ord(c) for c in literal if not latin(ord(c)) and ord(c) >= 0x20)
+    return chars
+
+
+def plugin_catalog_characters(language: str) -> set[int]:
+    """The characters of the language's summaries and notes in catalog/plugins.json."""
+    catalog = json.loads((ROOT / "catalog" / "plugins.json").read_text(encoding="utf-8"))
+    chars = set()
+    for plugin in catalog["plugins"]:
+        for text in plugin.get("translations", {}).get(language, {}).values():
+            chars.update(ord(c) for c in text if not latin(ord(c)) and ord(c) >= 0x20)
     return chars
 
 
@@ -91,8 +103,8 @@ def main() -> int:
         print(f"{ttc}: SHA-256 {digest}, expected {TTC_SHA256}")
         return 1
     collection = TTCollection(str(ttc), lazy=False)
-    for code, index, region, file in FONTS:
-        chars = catalog_characters(code)
+    for code, index, region, file, language in FONTS:
+        chars = catalog_characters(code) | plugin_catalog_characters(language)
         font = collection.fonts[index]
         options = subset.Options()
         options.layout_features = []

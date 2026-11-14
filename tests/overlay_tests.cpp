@@ -357,7 +357,7 @@ int main() {
         CHECK(n->title == "3 plugins from mods wait for your approval" && n->lines.size() == 4);
         CHECK(n->lines[0] == "new 1.0.0 from mod 'Mod new': new");
         CHECK(n->lines[1] == "upd 1.0.0 from mod 'Mod upd': an update; the approved 0.9.0 runs");
-        CHECK(n->lines[2] == "two 1.0.0 from mod 'Mod two': the same id as mod(s) Other Mod");
+        CHECK(n->lines[2] == "two 1.0.0 from mod 'Mod two': the same id as a plugin in Other Mod");
         CHECK(n->lines[3].find("native code") != std::string::npos);
         CHECK(n->actions.size() == 1 && n->actions[0].type == NoticeAction::Type::OpenPanel);
         // Approved in this game: nothing waits any more.

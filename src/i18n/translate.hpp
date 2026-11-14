@@ -25,6 +25,18 @@ const char* tr(Language language, const char* english);
 // tr(), then {0}, {1}... replaced by `args` (i18n::format).
 std::string trf(const char* english, std::initializer_list<std::string_view> args);
 
+// A count in words, with the plural form `n` takes in language(). `forms` is
+// the English singular and plural joined by "|" ("{0} setting|{0} settings"),
+// and its translation holds as many forms as the language has (plural_forms):
+// one for Chinese, Japanese and Korean, three for Polish (one, few, many).
+// {0} is `n`; `args` fill {1}, {2}...
+std::string trn(const char* forms, long long n, std::initializer_list<std::string_view> args = {});
+std::string trn(Language language, const char* forms, long long n, std::initializer_list<std::string_view> args = {});
+
+// How many plural forms a language's translations hold, and which one `n` takes.
+int plural_forms(Language language);
+int plural_form(Language language, long long n);
+
 // Marks an English text for the catalogs where it is translated later (an
 // array of texts, a ternary): the tests find every tr("..."), trf("...") and
 // N_("...") in the sources and check that each catalog translates it.

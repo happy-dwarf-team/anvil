@@ -26,6 +26,8 @@ inline constexpr ImVec4 kFrameActive = rgb(0x38342f);
 inline constexpr ImVec4 kLine = rgb(0x2c2926);  // separators, light table borders
 inline constexpr ImVec4 kBorder = rgb(0x4a4540);  // outlines of windows and frames
 inline constexpr ImVec4 kBorderHovered = rgb(0x5c564f);
+// A checkbox's outline: 3.6 to 1 on kPanel, 3.2 on kFrame (a control's outline needs 3).
+inline constexpr ImVec4 kControlOutline = rgb(0x756f66);
 // Text: contrast on kPanel 14.7, 6.7 and 4.9 to 1.
 inline constexpr ImVec4 kText = rgb(0xece8e1);
 inline constexpr ImVec4 kTextWeak = rgb(0xa39e96);

@@ -3,7 +3,8 @@
 The overlay and the Manager draw Latin text with Segoe UI from Windows (or ImGui's own
 font). Chinese, Japanese and Korean come from these four fonts, which `fonts.rc` links into
 `anvil_overlay.dll`, `AnvilManager.exe` and `anvil_i18n_tests.exe` (design §15). Only the
-player's language's font is loaded, and only the characters its catalog uses go into the
+player's language's font is loaded, and only the characters its catalog and the language's
+texts in `catalog/plugins.json` (the Catalog page's summaries and notes) use go into the
 atlas, merged into the Latin font.
 
 | File | Language | Face of Source Han Sans 2.005R |
@@ -13,7 +14,7 @@ atlas, merged into the Latin font.
 | `anvil-cjk-jp.otf` | Japanese (`catalog_ja.cpp`) | J Regular |
 | `anvil-cjk-kr.otf` | Korean (`catalog_ko.cpp`) | K Regular |
 
-Each is a subset with the characters of its catalog beyond Latin Extended-A (a few hundred,
+Each is a subset with the characters of its catalog and of `catalog/plugins.json` beyond Latin Extended-A (a few hundred,
 35–115 KB), without hinting and OpenType layout, which ImGui does not use. A region's own
 face gives each language its own forms of the ideographs it shares with the others.
 
@@ -26,9 +27,10 @@ is a Modified Version, which may not use the Reserved Font Name "Source": their 
 "Anvil CJK SC", "Anvil CJK TC", "Anvil CJK JP" and "Anvil CJK KR", and `anvil_i18n_tests`
 checks that their names do not contain it. The copyright notice stays in each font.
 
-## When a CJK catalog changes
+## When a CJK catalog or `catalog/plugins.json` changes
 
-`anvil_i18n_tests` fails while a catalog uses a character its font does not have. Write the
+`anvil_i18n_tests` fails while a catalog or a plugin's translated summary or note uses a
+character its font does not have. Write the
 fonts again from `SourceHanSans.ttc` of the release's `01_SourceHanSans.ttc.zip`, which the
 script checks by SHA-256 (fontTools 4.55.3):
 
