@@ -8,7 +8,9 @@
   "Start EU4" starts a pretend game: the overlay appears, the Manager turns read-only (as it does today), settings
   with restart = false apply at once and everything else waits for the next start.
   A, B and C tie settings to modules with a new optional `module` key in settings.toml (today there is only `group`).
-  The real apps are Dear ImGui; this page imitates their dark style. Plugins, modules and settings are sample data.
+  The real apps are Dear ImGui; this page imitates their dark style. Plugins, modules and settings are read from
+  the team's plugin.toml and settings.toml files (anvil standard plugins, Bellows, Smithy, Whetstone, Sieve, Hoard,
+  Lodestone, Mei, Tongs); versions are the checkouts', not releases.
 -->
 <html lang="en">
 <head>
@@ -103,7 +105,7 @@ pre.toml .chg{color:var(--info)}
 <body>
 <div class="cap">ANVIL MANAGER</div>
 <div class="app">
-  <div class="titlebar"><span>Anvil Manager 1.22.0</span><span>PROTOTYPE &middot; sample data</span></div>
+  <div class="titlebar"><span>Anvil Manager 1.22.0</span><span>PROTOTYPE &middot; real manifests, 2026-11-14</span></div>
   <div class="gamebar">
     <span>EU4 1.37.5.0 &middot; <span class="weak">...\Europa Universalis IV</span> &middot; <span class="good">Anvil 1.22.0 installed</span></span>
     <span style="flex:1"></span>
@@ -127,39 +129,1867 @@ pre.toml .chg{color:var(--info)}
 <div class="switcher" id="switcher"></div>
 
 <script>
-// ---- sample data ----------------------------------------------------------------------
+// ---- real data: plugin.toml and settings.toml of the team's plugins (read 2026-11-14) ----------
+// `module` on a setting is the PROPOSED key; here it is guessed from the setting's name
+// (Bellows: a setting named as its module or prefixed by it; Smithy: by its group). Variant 0 ignores it.
 const PLUGINS = [
-  {id:'anvil-inspector', name:'Anvil Inspector', version:'1.22.0', standard:true, gameplay:false, modules:[]},
-  {id:'bellows', name:'Bellows', version:'1.6.0', gameplay:false, modules:[]},
-  {id:'europagiga', name:'Europagiga', version:'0.3.0', gameplay:false, modules:[
-    {id:'whetstone', name:'Whetstone', desc:'Extra tooltips and ledger columns.', gameplay:false, def:true},
-    {id:'sieve', name:'Sieve', desc:'Filters for the outliner.', gameplay:false, def:true},
-    {id:'muster', name:'Muster', desc:'Recruits and merges armies on a hotkey.', gameplay:true, ironman:true, mp:true, def:true},
-    {id:'automata', name:'Automata', desc:'Lets the AI run your trade and estates.', gameplay:true, ironman:false, mp:false, def:false},
-    {id:'lifespan', name:'Lifespan fix', desc:'Fixes the lifespan of long-lived races in Anbennar.', gameplay:true, ironman:true, mp:false, def:true},
-  ]},
-  {id:'trade-helper', name:'Trade helper', version:'0.9.2', gameplay:true, ironman:true, mp:false, modules:[]},
+ {
+  "id": "anvil-overlay",
+  "name": "Anvil overlay",
+  "version": "1.22.0",
+  "gameplay": false,
+  "ironman": false,
+  "mp": false,
+  "standard": true,
+  "desc": "Standard plugin: in-game notifications about skipped plugins, the previous crash, safe mode, ironman, multiplayer and, opt-in, a newer Anvil release, a badge with Anvil's version in the main menu, and a panel (Ctrl+Shift+F12 or a click on the badge) with the status, the crash report, the log and every plugin's settings.",
+  "modules": []
+ },
+ {
+  "id": "anvil-inspector",
+  "name": "Anvil inspector",
+  "version": "1.22.0",
+  "gameplay": false,
+  "ironman": false,
+  "mp": false,
+  "standard": true,
+  "desc": "Standard plugin for modders: a window of the overlay with the flags, variables and timed modifiers of the province whose view is open, of its owner and of your country, with their rulers, heirs and consorts. It only reads, and it is off until you turn it on.",
+  "modules": []
+ },
+ {
+  "id": "anvil-game",
+  "name": "Anvil game",
+  "version": "1.22.0",
+  "gameplay": false,
+  "ironman": false,
+  "mp": false,
+  "standard": true,
+  "desc": "Standard plugin: game readiness, a frame event, work on the main thread, the game date and its events, read-only provinces, countries, units, rulers, flags and variables, a session event with ironman and multiplayer, which Anvil uses to suspend gameplay plugins, and the unit panel's commands for gameplay plugins.",
+  "modules": []
+ },
+ {
+  "id": "anvil-map",
+  "name": "Anvil map",
+  "version": "1.22.0",
+  "gameplay": false,
+  "ironman": false,
+  "mp": false,
+  "standard": true,
+  "desc": "Standard plugin: map modes from plugins, with a button on the minimap's list, a colour for each province and lines in the province's tooltip.",
+  "modules": []
+ },
+ {
+  "id": "anvil-script",
+  "name": "Anvil script",
+  "version": "1.22.0",
+  "gameplay": false,
+  "ironman": false,
+  "mp": false,
+  "standard": true,
+  "desc": "Standard plugin: gameplay plugins add effects of their own to the game's script language, which mods use in events, decisions and scripted effects, and mods ask has_dlc = \"anvil:<id>\" whether a plugin acts.",
+  "modules": []
+ },
+ {
+  "id": "anvil-script-profiler",
+  "name": "Anvil script profiler",
+  "version": "1.22.0",
+  "gameplay": false,
+  "ironman": false,
+  "mp": false,
+  "standard": true,
+  "desc": "Standard plugin for modders: a window of the overlay that times the game's triggers and effects by the event, decision, on_action, casus belli, triggered modifier or mission they belong to, and writes the results to a CSV file. It hooks nothing until you start a measurement, and the game runs slower while it measures.",
+  "modules": []
+ },
+ {
+  "id": "anvil-log-throttle",
+  "name": "Anvil log throttle",
+  "version": "1.22.0",
+  "gameplay": false,
+  "ironman": false,
+  "mp": false,
+  "standard": true,
+  "desc": "Standard plugin: a line that repeats in the game's error.log is written a few times, then counted, with a report of the count every minute and when the game closes the log; for modders, a panel of the script errors with their counts (off by default).",
+  "modules": []
+ },
+ {
+  "id": "bellows",
+  "name": "Bellows",
+  "version": "1.8.0",
+  "gameplay": false,
+  "ironman": false,
+  "mp": false,
+  "standard": false,
+  "desc": "Faster Europa Universalis IV start-up, simulation and saves, with no change to game files or rules.",
+  "modules": [
+   {
+    "id": "mimalloc",
+    "name": "mimalloc",
+    "desc": "Faster memory allocator for the game's C runtime: for the whole game session, or only until the main menu (later allocations use the Windows heap).",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "open_warmup",
+    "name": "Open warm-up",
+    "desc": "Opens the files the game will need ahead of it on parallel threads (meant for the first start after a reboot).",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "ram_prefetch",
+    "name": "RAM prefetch",
+    "desc": "Reads and unpacks the DLC archive members the game will need into RAM on worker threads.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "verifypath_listing",
+    "name": "PhysFS path checks",
+    "desc": "Answers PhysFS path checks from directory listings.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "listing_lookup",
+    "name": "PhysFS lookups from listings",
+    "desc": "Start-up: answers the file system's second look at a folder (does the file exist, open a file that is not there) from the directory listings of PhysFS path checks (used while verifypath_listing is on). Existing files are still opened by the game. Saves the failed opens a big mod set such as Anbennar makes in every folder it overrides. Verify asks the game every time and counts differences.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": false
+   },
+   {
+    "id": "exists_index",
+    "name": "File existence index",
+    "desc": "Answers \"does this file exist\" for the modifier icon check.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "trigger_intern",
+    "name": "Trigger profile lookup",
+    "desc": "Faster lookup of each trigger in the game's trigger profile at the end of loading.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "metascript_subst",
+    "name": "Parameter substitution",
+    "desc": "Single-pass $parameter$ substitution in scripted effects and triggers.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "metascript_blocks",
+    "name": "Conditional blocks",
+    "desc": "Single-pass resolution of [[parameter] ...] blocks in scripted effects and triggers (big gain on mods with large scripted effects, e.g. Anbennar).",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "attr_cache",
+    "name": "Missing-file cache",
+    "desc": "Remembers \"file not found\" answers for game and mod files during start-up (at most ~0.1 s next to the other modules).",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": false
+   },
+   {
+    "id": "token_dict_cache",
+    "name": "Tokenizer keyword cache",
+    "desc": "Caches the script tokenizer's keyword lookups.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "range_witness",
+    "name": "Country range check",
+    "desc": "Simulation, not start-up: answers the country range check from the province that was in range last time; same answers as the game's code.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "frame_pacing",
+    "name": "Frame pacing at speed 5",
+    "desc": "Simulation: at the fastest speed, draws frames from inside the daily tick less often while you do nothing (see the interval), so a year passes about 10% sooner; a key press or click still gets a frame at once. The simulation is the same; the map updates about 16 instead of 22 times a second at speed 5.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "pops_pacing",
+    "name": "Online service pacing",
+    "desc": "Simulation: at the fastest speed, runs the game's Paradox online-service callbacks every 500 ms instead of twice a frame. With nothing to deliver, each run makes the main thread sleep 1 ms. Multiplayer keeps the game's rate. Verify runs them as the game does and counts what would be left out.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "never_throttle",
+    "name": "Full speed while minimized",
+    "desc": "Simulation: while a single-player game runs at speed 5, the game skips its own waits of up to 100 ms a frame, which it makes while the window is minimized. A minimized year then takes about 40-60% less time; with the window visible nothing changes. Uses more processor time per second while minimized at speed 5. Pauses, menus, other speeds and multiplayer keep the game's waits.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": false
+   },
+   {
+    "id": "modifier_merge",
+    "name": "Modifier merge index",
+    "desc": "Simulation: adds large modifier lists (each country's modifiers to every unit's in the monthly update) with an index instead of a scan per entry, so a year at speed 5 passes about 5% sooner; the same entries, order and values. Verify runs the game's merge and compares.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "port_table",
+    "name": "Port table",
+    "desc": "Simulation: rebuilds a country's table of the nearest port from one list of its ports instead of walking its provinces and relations again for every province of the map; the same table. Verify runs the game's function and compares.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "province_modifier_view",
+    "name": "Province modifier view",
+    "desc": "Simulation: reads one value from a province's modifiers in place instead of copying the whole list first (in the daily country update and the AI); the same value. Verify runs the game's copy and compares.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "army_search_memo",
+    "name": "AI army search memo",
+    "desc": "Simulation: in the AI's daily search for each army, in a path search and when a unit's moves from a province are listed, works out once whether the army ignores forts' zones of control and what its speed modifier is, instead of for every move; the same answers. Verify runs the game's check every time and compares.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "save_compress",
+    "name": "Save compression",
+    "desc": "Saving: compressed saves (compress_autosave and the like) without the game's byte-at-a-time CRC-32; the file is byte for byte the game's. Verify runs the game's own compression as well, writes its result and compares the two.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "transfer_skip",
+    "name": "Skip transfer compression",
+    "desc": "Loading in single player: does not compress a text save for a multiplayer transfer that nobody receives; the game loads the same file as before. Hosted multiplayer is left as it is. Verify keeps the game's copy and checks that nothing reads it.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "history_add",
+    "name": "Dated lists while loading",
+    "desc": "Loading: adds an entry the game just read to a dated list without first walking the whole list to see whether that new entry is in it. The list comes out the same. Verify lets the game walk and compares.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "checksum_defer",
+    "name": "Checksum after the databases",
+    "desc": "Loading: the game's checksum task starts reading files only once the databases are loaded, so it no longer competes with them for the file system lock. Same files, order and checksum shown in the menu; about 1 s off the start of a big mod set such as Anbennar, nothing measurable on the base game. Verify only logs the task's times.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": false
+   }
+  ]
+ },
+ {
+  "id": "smithy",
+  "name": "Smithy",
+  "version": "0.0.0",
+  "gameplay": false,
+  "ironman": false,
+  "mp": false,
+  "standard": false,
+  "desc": "Fixes and controls EU4 leaves out, ported from europagiga by guge (MIT), each a module you turn on or off on its own.",
+  "modules": [
+   {
+    "id": "ui_size_fix",
+    "name": "Large country views at a raised GUI scale",
+    "desc": "At GUI scale 1.2 on a 1080p screen, and at 2.4 on 2160p, the game computes its interface height one pixel short, so the country views fall back to their small layout. This rounds the size correctly.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "sharp_text",
+    "name": "Tooltip and label text at twice the resolution",
+    "desc": "Draws text baked into textures at twice the resolution. Only sharper with a font mod that ships double-resolution fonts.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": false
+   },
+   {
+    "id": "trade_pop_icons",
+    "name": "Hide racial pop icons on the trade map",
+    "desc": "Leaves Anbennar's racial pop modifiers out of the trade map mode's icons. Nothing changes in other mods.",
+    "gameplay": false,
+    "ironman": false,
+    "mp": false,
+    "def": true
+   },
+   {
+    "id": "drill_all",
+    "name": "Drill all selected armies",
+    "desc": "With two or more armies selected, the drill key starts drilling every one of them, or stops them all when all of them drill.",
+    "gameplay": true,
+    "ironman": true,
+    "mp": true,
+    "def": true
+   },
+   {
+    "id": "speed_keys",
+    "name": "Keys for the game speed",
+    "desc": "A key for each of the five game speeds. It sets the speed as clicks on the speed bar would, so in multiplayer only the host can use it.",
+    "gameplay": true,
+    "ironman": true,
+    "mp": true,
+    "def": false
+   },
+   {
+    "id": "siege_all",
+    "name": "Siege with all selected armies",
+    "desc": "A key that adds each selected army's map area to its autonomous siege, or takes it out, as a click in the siege map mode would.",
+    "gameplay": true,
+    "ironman": true,
+    "mp": true,
+    "def": true
+   },
+   {
+    "id": "rebels_all_areas",
+    "name": "Rebel suppression with all selected armies",
+    "desc": "A key that adds each selected army's map area to its rebel hunt, or takes it out, as a click in the rebel-suppression map mode would.",
+    "gameplay": true,
+    "ironman": true,
+    "mp": true,
+    "def": true
+   }
+  ]
+ },
+ {
+  "id": "whetstone",
+  "name": "Whetstone",
+  "version": "0.0.0",
+  "gameplay": false,
+  "ironman": false,
+  "mp": false,
+  "standard": false,
+  "desc": "Better interface at a raised GUI scale: the country views keep their large layout at GUI scale 1.2, and tooltip text can be drawn at twice the resolution for double-resolution fonts. A port of two europagiga features by guge (MIT).",
+  "modules": []
+ },
+ {
+  "id": "sieve",
+  "name": "Sieve",
+  "version": "0.0.0",
+  "gameplay": false,
+  "ironman": false,
+  "mp": false,
+  "standard": false,
+  "desc": "Keeps Anbennar's racial pop icons off the trade map mode, where they cover the map and slow it down. A port of a europagiga feature by guge (MIT).",
+  "modules": []
+ },
+ {
+  "id": "hoard",
+  "name": "Hoard",
+  "version": "0.0.0",
+  "gameplay": false,
+  "ironman": false,
+  "mp": false,
+  "standard": false,
+  "desc": "Keeps your last autosaves and the last save of each sitting, per campaign.",
+  "modules": []
+ },
+ {
+  "id": "lodestone",
+  "name": "Lodestone",
+  "version": "0.0.0",
+  "gameplay": true,
+  "ironman": false,
+  "mp": false,
+  "standard": false,
+  "desc": "Trade links turn during a campaign: the richer end of a link starts to pull trade toward itself.",
+  "modules": []
+ },
+ {
+  "id": "mei",
+  "name": "Mei",
+  "version": "0.8.0",
+  "gameplay": false,
+  "ironman": false,
+  "mp": false,
+  "standard": false,
+  "desc": "Chinese, Japanese and Korean text for a translation mod: UTF-8 and EU4DLL encodings, fonts, line breaks, pinyin search and typing. A port of EU4 Unicode Patch by VulonLok.",
+  "modules": []
+ },
+ {
+  "id": "tongs",
+  "name": "Tongs",
+  "version": "0.34.0",
+  "gameplay": true,
+  "ironman": true,
+  "mp": true,
+  "standard": false,
+  "desc": "Control EU4 from scripts and agents: a local command pipe that reads the state of a running game and, when allowed, uses its keyboard and mouse and runs console commands.",
+  "modules": []
+ }
 ];
-// settings.toml of each plugin. `module` is the PROPOSED key; variant 0 ignores it, as Anvil does today.
 const SETTINGS = {
-  europagiga: [
-    {name:'panel_key', type:'key', label:'Panel key', def:'Ctrl+Shift+E', group:'', restart:false, desc:'Opens and closes the Europagiga panel.'},
-    {name:'ledger_cols', type:'bool', label:'Extra ledger columns', def:true, group:'Whetstone', module:'whetstone', restart:false},
-    {name:'merge_key', type:'key', label:'Merge hotkey', def:'Ctrl+M', group:'Muster', module:'muster', restart:false},
-    {name:'keep_one', type:'bool', label:'Keep one regiment home', def:true, group:'Muster', module:'muster', restart:true, desc:'Muster leaves one regiment in each home province.'},
-    {name:'trade_steer', type:'enum', label:'Trade steering', def:'balanced', group:'Automata', module:'automata', restart:true,
-     values:[['off','Off'],['balanced','Balanced'],['greedy','Greedy']], desc:'How hard Automata steers trade towards your capital.'},
-  ],
-  bellows: [{name:'ram_prefetch_budget_mb', type:'int', label:'RAM prefetch budget (MB)', def:1024, group:'RAM prefetch', restart:true, desc:'RAM for unpacked archive members the game has not taken yet.'}],
-  'trade-helper': [{name:'highlight', type:'bool', label:'Highlight the best node', def:true, group:'', restart:false}],
+ "anvil-overlay": [
+  {
+   "name": "panel_key",
+   "type": "key",
+   "label": "Panel key",
+   "def": "Ctrl+Shift+F12",
+   "group": "",
+   "restart": false,
+   "desc": "Opens and closes the Anvil panel."
+  },
+  {
+   "name": "notifications",
+   "type": "bool",
+   "label": "Show notifications",
+   "def": true,
+   "group": "",
+   "restart": false,
+   "desc": "Notices about skipped plugins, the previous crash and safe mode when the game is ready. The ironman notice is always shown; the multiplayer notice too, until you close it."
+  },
+  {
+   "name": "notification_seconds",
+   "type": "int",
+   "label": "Notification time (s)",
+   "def": 30,
+   "group": "",
+   "restart": false,
+   "desc": "How long a notification stays; 0 keeps it until it is closed.",
+   "min": 0,
+   "max": 600
+  },
+  {
+   "name": "scale",
+   "type": "float",
+   "label": "Scale",
+   "def": 1.0,
+   "group": "",
+   "restart": false,
+   "desc": "The size of the panel and the notifications.",
+   "min": 0.75,
+   "max": 2.5
+  },
+  {
+   "name": "menu_badge",
+   "type": "bool",
+   "label": "Show Anvil in the main menu",
+   "def": true,
+   "group": "",
+   "restart": false,
+   "desc": "A small badge with Anvil's version on the left edge of the game's main menu; a click opens the panel. Never shown in a game."
+  },
+  {
+   "name": "language",
+   "type": "enum",
+   "label": "Language",
+   "def": "game",
+   "group": "",
+   "restart": false,
+   "desc": "The language of the panel and the notices. Like the game: EU4's language, or with Mei the Chinese, Japanese or Korean of Steam or Windows, or Polish when Steam is in Polish. The Manager follows it too.",
+   "values": [
+    [
+     "game",
+     "Like the game"
+    ],
+    [
+     "en",
+     "English"
+    ],
+    [
+     "fr",
+     "French"
+    ],
+    [
+     "de",
+     "German"
+    ],
+    [
+     "es",
+     "Spanish"
+    ],
+    [
+     "zh_hans",
+     "Chinese (Simplified)"
+    ],
+    [
+     "zh_hant",
+     "Chinese (Traditional)"
+    ],
+    [
+     "ja",
+     "Japanese"
+    ],
+    [
+     "ko",
+     "Korean"
+    ],
+    [
+     "pl",
+     "Polish"
+    ]
+   ]
+  },
+  {
+   "name": "release_check",
+   "type": "enum",
+   "label": "Check for new Anvil releases",
+   "def": "ask",
+   "group": "",
+   "restart": false,
+   "desc": "When the game is ready, ask GitHub (api.github.com) once for Anvil's latest release and, when it is newer, show a notice with a link to its page. Nothing is downloaded. Ask: follow your answer in Anvil Manager, or ask once in the game. A Manager that never asked follows On or Off here, and then also reads the list of the team's plugins at its start to show their updates.",
+   "values": [
+    [
+     "ask",
+     "Ask (or follow Anvil Manager)"
+    ],
+    [
+     "on",
+     "On"
+    ],
+    [
+     "off",
+     "Off"
+    ]
+   ]
+  }
+ ],
+ "anvil-inspector": [
+  {
+   "name": "window",
+   "type": "bool",
+   "label": "Inspector window",
+   "def": false,
+   "group": "",
+   "restart": false,
+   "desc": "For modders: a window of the overlay with the flags, variables and timed modifiers of the province whose view is open, of its owner and of your country, read from the running game. On: the window opens, at every start too; once closed, it is in the Status tab of the Anvil panel. Off: the plugin does nothing."
+  }
+ ],
+ "anvil-script-profiler": [
+  {
+   "name": "days",
+   "type": "int",
+   "label": "Days to measure",
+   "def": 30,
+   "group": "",
+   "restart": false,
+   "desc": "How many game days the window's \"Measure N days\" button measures before it stops by itself.",
+   "min": 1,
+   "max": 3650
+  },
+  {
+   "name": "rows",
+   "type": "int",
+   "label": "Rows per list",
+   "def": 20,
+   "group": "",
+   "restart": false,
+   "desc": "How many of the longest triggers and of the longest effects the window lists; the CSV file has them all.",
+   "min": 5,
+   "max": 200
+  }
+ ],
+ "anvil-log-throttle": [
+  {
+   "name": "full_log",
+   "type": "bool",
+   "label": "Write every line",
+   "def": false,
+   "group": "",
+   "restart": false,
+   "desc": "Turns throttling off: every line reaches the log, and repeats counted so far are reported."
+  },
+  {
+   "name": "repeats",
+   "type": "int",
+   "label": "Lines kept per message",
+   "def": 10,
+   "group": "",
+   "restart": false,
+   "desc": "How many times a line is written before its repeats are only counted.",
+   "min": 1,
+   "max": 1000000
+  },
+  {
+   "name": "report_seconds",
+   "type": "int",
+   "label": "Report every (s)",
+   "def": 60,
+   "group": "",
+   "restart": false,
+   "desc": "How often the count of a throttled line is written to the log, while the log is written; the last count is written when the game closes the log.",
+   "min": 1,
+   "max": 3600
+  },
+  {
+   "name": "logs",
+   "type": "string",
+   "label": "Logs",
+   "def": "error.log",
+   "group": "",
+   "restart": true,
+   "desc": "The game's log files to throttle, separated by commas (e.g. \"error.log, game.log\"), or * for all of them."
+  },
+  {
+   "name": "panel",
+   "type": "bool",
+   "label": "Script errors panel",
+   "def": false,
+   "group": "",
+   "restart": false,
+   "desc": "For modders: a window of the overlay with the messages of the throttled logs, grouped by kind, with their counts as they happen. On: Anvil keeps every message from then on, and the window opens, at every start too; once closed, it is in the Status tab of the Anvil panel."
+  }
+ ],
+ "bellows": [
+  {
+   "name": "mimalloc",
+   "type": "enum",
+   "label": "mimalloc",
+   "def": "startup",
+   "group": "Start-up",
+   "restart": true,
+   "desc": "Faster memory allocator for the game's C runtime: for the whole game session, or only until the main menu (later allocations use the Windows heap).",
+   "values": [
+    [
+     "on",
+     "On"
+    ],
+    [
+     "startup",
+     "Start-up only"
+    ],
+    [
+     "off",
+     "Off"
+    ]
+   ],
+   "module": "mimalloc"
+  },
+  {
+   "name": "verifypath_listing",
+   "type": "enum",
+   "label": "PhysFS path checks",
+   "def": "on",
+   "group": "Start-up",
+   "restart": true,
+   "desc": "Answers PhysFS path checks from directory listings.",
+   "values": [
+    [
+     "on",
+     "On"
+    ],
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "verifypath_listing"
+  },
+  {
+   "name": "exists_index",
+   "type": "enum",
+   "label": "File existence index",
+   "def": "on",
+   "group": "Start-up",
+   "restart": true,
+   "desc": "Answers \"does this file exist\" for the modifier icon check.",
+   "values": [
+    [
+     "on",
+     "On"
+    ],
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "exists_index"
+  },
+  {
+   "name": "trigger_intern",
+   "type": "enum",
+   "label": "Trigger profile lookup",
+   "def": "on",
+   "group": "Start-up",
+   "restart": true,
+   "desc": "Faster lookup of each trigger in the game's trigger profile at the end of loading.",
+   "values": [
+    [
+     "on",
+     "On"
+    ],
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "trigger_intern"
+  },
+  {
+   "name": "metascript_subst",
+   "type": "enum",
+   "label": "Parameter substitution",
+   "def": "on",
+   "group": "Start-up",
+   "restart": true,
+   "desc": "Single-pass $parameter$ substitution in scripted effects and triggers.",
+   "values": [
+    [
+     "on",
+     "On"
+    ],
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "metascript_subst"
+  },
+  {
+   "name": "metascript_blocks",
+   "type": "enum",
+   "label": "Conditional blocks",
+   "def": "on",
+   "group": "Start-up",
+   "restart": true,
+   "desc": "Single-pass resolution of [[parameter] ...] blocks in scripted effects and triggers (big gain on mods with large scripted effects, e.g. Anbennar).",
+   "values": [
+    [
+     "on",
+     "On"
+    ],
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "metascript_blocks"
+  },
+  {
+   "name": "open_warmup",
+   "type": "enum",
+   "label": "Open warm-up",
+   "def": "on",
+   "group": "Start-up",
+   "restart": true,
+   "desc": "Opens the files the game will need ahead of it on parallel threads (meant for the first start after a reboot).",
+   "values": [
+    [
+     "on",
+     "On"
+    ],
+    [
+     "off",
+     "Off"
+    ]
+   ],
+   "module": "open_warmup"
+  },
+  {
+   "name": "ram_prefetch",
+   "type": "enum",
+   "label": "RAM prefetch",
+   "def": "on",
+   "group": "Start-up",
+   "restart": true,
+   "desc": "Reads and unpacks the DLC archive members the game will need into RAM on worker threads.",
+   "values": [
+    [
+     "on",
+     "On"
+    ],
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "ram_prefetch"
+  },
+  {
+   "name": "ram_prefetch_budget_mb",
+   "type": "int",
+   "label": "RAM prefetch budget (MB)",
+   "def": 1024,
+   "group": "Start-up",
+   "restart": true,
+   "desc": "RAM for unpacked archive members the game has not taken yet. A start uses at most a quarter of the memory free at that moment.",
+   "min": 64,
+   "max": 8192,
+   "module": "ram_prefetch"
+  },
+  {
+   "name": "attr_cache",
+   "type": "enum",
+   "label": "Missing-file cache",
+   "def": "off",
+   "group": "Start-up",
+   "restart": true,
+   "desc": "Remembers \"file not found\" answers for game and mod files during start-up (at most ~0.1 s next to the other modules).",
+   "values": [
+    [
+     "on",
+     "On"
+    ],
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "attr_cache"
+  },
+  {
+   "name": "token_dict_cache",
+   "type": "enum",
+   "label": "Tokenizer keyword cache",
+   "def": "on",
+   "group": "Start-up",
+   "restart": true,
+   "desc": "Caches the script tokenizer's keyword lookups.",
+   "values": [
+    [
+     "on",
+     "On"
+    ],
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "token_dict_cache"
+  },
+  {
+   "name": "verifypath_session",
+   "type": "enum",
+   "label": "PhysFS path checks after start-up",
+   "def": "on",
+   "group": "Loading",
+   "restart": true,
+   "desc": "Loading: keeps answering PhysFS path checks from directory listings after the main menu is up (used while verifypath_listing is on), so loading a save finds its textures about 1.8 s sooner. A listing is read again once it is 30 s old.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ]
+   ]
+  },
+  {
+   "name": "history_add",
+   "type": "enum",
+   "label": "Dated lists while loading",
+   "def": "on",
+   "group": "Loading",
+   "restart": true,
+   "desc": "Loading: adds an entry the game just read to a dated list without first walking the whole list to see whether that new entry is in it. The list comes out the same. Verify lets the game walk and compares.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "history_add"
+  },
+  {
+   "name": "listing_lookup",
+   "type": "enum",
+   "label": "PhysFS lookups from listings",
+   "def": "off",
+   "group": "Start-up",
+   "restart": true,
+   "desc": "Start-up: answers the file system's second look at a folder (does the file exist, open a file that is not there) from the directory listings of PhysFS path checks (used while verifypath_listing is on). Existing files are still opened by the game. Saves the failed opens a big mod set such as Anbennar makes in every folder it overrides. Verify asks the game every time and counts differences.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "listing_lookup"
+  },
+  {
+   "name": "checksum_defer",
+   "type": "enum",
+   "label": "Checksum after the databases",
+   "def": "off",
+   "group": "Loading",
+   "restart": true,
+   "desc": "Loading: the game's checksum task starts reading files only once the databases are loaded, so it no longer competes with them for the file system lock. Same files, order and checksum shown in the menu; about 1 s off the start of a big mod set such as Anbennar, nothing measurable on the base game. Verify only logs the task's times.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "checksum_defer"
+  },
+  {
+   "name": "range_witness",
+   "type": "enum",
+   "label": "Country range check",
+   "def": "on",
+   "group": "Simulation",
+   "restart": true,
+   "desc": "Simulation, not start-up: answers the country range check from the province that was in range last time; same answers as the game's code.",
+   "values": [
+    [
+     "on",
+     "On"
+    ],
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "range_witness"
+  },
+  {
+   "name": "modifier_merge",
+   "type": "enum",
+   "label": "Modifier merge index",
+   "def": "on",
+   "group": "Simulation",
+   "restart": true,
+   "desc": "Simulation: adds large modifier lists (each country's modifiers to every unit's in the monthly update) with an index instead of a scan per entry, so a year at speed 5 passes about 5% sooner; the same entries, order and values. Verify runs the game's merge and compares.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "modifier_merge"
+  },
+  {
+   "name": "pops_pacing",
+   "type": "enum",
+   "label": "Online service pacing",
+   "def": "on",
+   "group": "Simulation",
+   "restart": true,
+   "desc": "Simulation: at the fastest speed, runs the game's Paradox online-service callbacks every 500 ms instead of twice a frame. With nothing to deliver, each run makes the main thread sleep 1 ms. Multiplayer keeps the game's rate. Verify runs them as the game does and counts what would be left out.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "pops_pacing"
+  },
+  {
+   "name": "province_modifier_view",
+   "type": "enum",
+   "label": "Province modifier view",
+   "def": "on",
+   "group": "Simulation",
+   "restart": true,
+   "desc": "Simulation: reads one value from a province's modifiers in place instead of copying the whole list first (in the daily country update and the AI); the same value. Verify runs the game's copy and compares.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "province_modifier_view"
+  },
+  {
+   "name": "port_table",
+   "type": "enum",
+   "label": "Port table",
+   "def": "on",
+   "group": "Simulation",
+   "restart": true,
+   "desc": "Simulation: rebuilds a country's table of the nearest port from one list of its ports instead of walking its provinces and relations again for every province of the map; the same table. Verify runs the game's function and compares.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "port_table"
+  },
+  {
+   "name": "army_search_memo",
+   "type": "enum",
+   "label": "AI army search memo",
+   "def": "on",
+   "group": "Simulation",
+   "restart": true,
+   "desc": "Simulation: in the AI's daily search for each army, in a path search and when a unit's moves from a province are listed, works out once whether the army ignores forts' zones of control and what its speed modifier is, instead of for every move; the same answers. Verify runs the game's check every time and compares.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "army_search_memo"
+  },
+  {
+   "name": "frame_pacing",
+   "type": "enum",
+   "label": "Frame pacing at speed 5",
+   "def": "on",
+   "group": "Simulation",
+   "restart": true,
+   "desc": "Simulation: at the fastest speed, draws frames from inside the daily tick less often while you do nothing (see the interval), so a year passes about 10% sooner; a key press or click still gets a frame at once. The simulation is the same; the map updates about 16 instead of 22 times a second at speed 5.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ]
+   ],
+   "module": "frame_pacing"
+  },
+  {
+   "name": "frame_pacing_interval_ms",
+   "type": "int",
+   "label": "Frame pacing interval (ms)",
+   "def": 100,
+   "group": "Simulation",
+   "restart": false,
+   "desc": "Shortest time between frames drawn inside the daily tick at the fastest speed (the game's own is 50 ms; a shorter value keeps the game's). 0 keeps the game's interval and only counts frames. Applies at once while frame pacing is on.",
+   "min": 0,
+   "max": 1000,
+   "module": "frame_pacing"
+  },
+  {
+   "name": "frame_pacing_input",
+   "type": "enum",
+   "label": "Frame pacing while you play",
+   "def": "draw",
+   "group": "Simulation",
+   "restart": false,
+   "desc": "What frame pacing does when you press a key, click or turn the wheel at speed 5: draw a frame at once, so the game reacts at least as fast as without frame pacing (frames are skipped only while you do nothing), or wait for the longer interval (0.12.0). Applies at once while frame pacing is on.",
+   "values": [
+    [
+     "draw",
+     "React at once"
+    ],
+    [
+     "wait",
+     "Wait for the interval"
+    ]
+   ],
+   "module": "frame_pacing"
+  },
+  {
+   "name": "never_throttle",
+   "type": "enum",
+   "label": "Full speed while minimized",
+   "def": "off",
+   "group": "Simulation",
+   "restart": true,
+   "desc": "Simulation: while a single-player game runs at speed 5, the game skips its own waits of up to 100 ms a frame, which it makes while the window is minimized. A minimized year then takes about 40-60% less time; with the window visible nothing changes. Uses more processor time per second while minimized at speed 5. Pauses, menus, other speeds and multiplayer keep the game's waits.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ]
+   ],
+   "module": "never_throttle"
+  },
+  {
+   "name": "save_compress",
+   "type": "enum",
+   "label": "Save compression",
+   "def": "on",
+   "group": "Saving",
+   "restart": true,
+   "desc": "Saving: compressed saves (compress_autosave and the like) without the game's byte-at-a-time CRC-32; the file is byte for byte the game's. Verify runs the game's own compression as well, writes its result and compares the two.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "save_compress"
+  },
+  {
+   "name": "save_compress_parallel",
+   "type": "enum",
+   "label": "Parallel save compression",
+   "def": "off",
+   "group": "Saving",
+   "restart": true,
+   "desc": "Saving, with save compression on: compresses large members of a compressed save (the gamestate) on several threads. The save is a valid archive that the game and other tools read as before, but its compressed bytes differ from the game's. Verify decodes each member again before writing it.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "save_compress"
+  },
+  {
+   "name": "transfer_skip",
+   "type": "enum",
+   "label": "Skip transfer compression",
+   "def": "on",
+   "group": "Saving",
+   "restart": true,
+   "desc": "Loading in single player: does not compress a text save for a multiplayer transfer that nobody receives; the game loads the same file as before. Hosted multiplayer is left as it is. Verify keeps the game's copy and checks that nothing reads it.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ],
+    [
+     "verify",
+     "Verify"
+    ]
+   ],
+   "module": "transfer_skip"
+  },
+  {
+   "name": "tick_profile",
+   "type": "enum",
+   "label": "Daily tick profile",
+   "def": "off",
+   "group": "Diagnostics",
+   "restart": true,
+   "desc": "Diagnostic: time of each stage of the daily, monthly and yearly tick and of the frames drawn inside it, per game day, in tick_profile*.tsv.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ]
+   ]
+  },
+  {
+   "name": "army_search_profile",
+   "type": "enum",
+   "label": "AI army search profile",
+   "def": "off",
+   "group": "Diagnostics",
+   "restart": true,
+   "desc": "Diagnostic: calls, time and repeated answers of the AI army search, in army_search*.tsv.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ]
+   ]
+  },
+  {
+   "name": "score_probe",
+   "type": "enum",
+   "label": "AI scoring probe",
+   "def": "off",
+   "group": "Diagnostics",
+   "restart": true,
+   "desc": "Diagnostic: how often the inputs of the AI army search's scoring functions repeat within a game day, in score_probe.tsv.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ]
+   ]
+  },
+  {
+   "name": "monthly_probe",
+   "type": "enum",
+   "label": "Monthly tick probe",
+   "def": "off",
+   "group": "Diagnostics",
+   "restart": true,
+   "desc": "Diagnostic: time of the monthly tick's country, province and unit updates, modifier merges and random draws, in monthly_probe*.tsv.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ]
+   ]
+  },
+  {
+   "name": "zip_profile",
+   "type": "enum",
+   "label": "ZIP read profile",
+   "def": "off",
+   "group": "Diagnostics",
+   "restart": true,
+   "desc": "Diagnostic: time spent in ZIP reads and inflate per thread, in anvil.log.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ]
+   ]
+  },
+  {
+   "name": "token_dict_profile",
+   "type": "enum",
+   "label": "Tokenizer lookup profile",
+   "def": "off",
+   "group": "Diagnostics",
+   "restart": true,
+   "desc": "Diagnostic: the tokenizer's keyword lookups. Shares its call site with the tokenizer keyword cache; turn that off for clean counts.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ]
+   ]
+  },
+  {
+   "name": "range_profile",
+   "type": "enum",
+   "label": "Range check profile",
+   "def": "off",
+   "group": "Diagnostics",
+   "restart": true,
+   "desc": "Diagnostic: counters of the country range check in range_profile*.tsv. Turn the country range check off for the game's own walk.",
+   "values": [
+    [
+     "off",
+     "Off"
+    ],
+    [
+     "on",
+     "On"
+    ]
+   ]
+  }
+ ],
+ "smithy": [
+  {
+   "name": "picture_prefix",
+   "type": "string",
+   "label": "Picture prefix of the hidden modifiers",
+   "def": "pop_icon_",
+   "group": "Trade map",
+   "restart": true,
+   "desc": "trade_pop_icons: modifiers whose picture name starts with this are left out of the trade map's icons. Anbennar's racial pops use pop_icon_. Empty hides nothing.",
+   "module": "trade_pop_icons"
+  },
+  {
+   "name": "drill_key",
+   "type": "key",
+   "label": "Drill key",
+   "def": "J",
+   "group": "Drill",
+   "restart": false,
+   "desc": "drill_all: the key it listens to. The game's drill shortcut is J (army_drill_button in shortcuts.txt); set this to the same key if you changed it there. The game still gets the press. Nothing happens while you type in a text field.",
+   "module": "drill_all"
+  },
+  {
+   "name": "speed_1_key",
+   "type": "key",
+   "label": "Key for speed 1",
+   "def": "",
+   "group": "Speed",
+   "restart": false,
+   "desc": "speed_keys: sets the game speed to 1 (the slowest), as clicks on the speed bar would. Empty: no key. The game does not see the press. The digits are the game's view tabs, so a key with Ctrl or Alt is a good choice.",
+   "module": "speed_keys"
+  },
+  {
+   "name": "speed_2_key",
+   "type": "key",
+   "label": "Key for speed 2",
+   "def": "",
+   "group": "Speed",
+   "restart": false,
+   "desc": "speed_keys: sets the game speed to 2, as clicks on the speed bar would. Empty: no key. The game does not see the press. The digits are the game's view tabs, so a key with Ctrl or Alt is a good choice.",
+   "module": "speed_keys"
+  },
+  {
+   "name": "speed_3_key",
+   "type": "key",
+   "label": "Key for speed 3",
+   "def": "",
+   "group": "Speed",
+   "restart": false,
+   "desc": "speed_keys: sets the game speed to 3, as clicks on the speed bar would. Empty: no key. The game does not see the press. The digits are the game's view tabs, so a key with Ctrl or Alt is a good choice.",
+   "module": "speed_keys"
+  },
+  {
+   "name": "speed_4_key",
+   "type": "key",
+   "label": "Key for speed 4",
+   "def": "",
+   "group": "Speed",
+   "restart": false,
+   "desc": "speed_keys: sets the game speed to 4, as clicks on the speed bar would. Empty: no key. The game does not see the press. The digits are the game's view tabs, so a key with Ctrl or Alt is a good choice.",
+   "module": "speed_keys"
+  },
+  {
+   "name": "speed_5_key",
+   "type": "key",
+   "label": "Key for speed 5",
+   "def": "",
+   "group": "Speed",
+   "restart": false,
+   "desc": "speed_keys: sets the game speed to 5 (the fastest), as clicks on the speed bar would. Empty: no key. The game does not see the press. The digits are the game's view tabs, so a key with Ctrl or Alt is a good choice.",
+   "module": "speed_keys"
+  },
+  {
+   "name": "siege_key",
+   "type": "key",
+   "label": "Siege key",
+   "def": "",
+   "group": "Siege and rebels",
+   "restart": false,
+   "desc": "siege_all: with armies selected, each one's map area joins its autonomous siege, or leaves it, as a click on the area in the siege map mode would. Empty: no key. The game does not see the press.",
+   "module": "siege_all"
+  },
+  {
+   "name": "rebels_key",
+   "type": "key",
+   "label": "Rebel suppression key",
+   "def": "",
+   "group": "Siege and rebels",
+   "restart": false,
+   "desc": "rebels_all_areas: with armies selected, each one's map area joins its rebel hunt, or leaves it, as a click on the area in the rebel-suppression map mode would. Empty: no key. The game does not see the press.",
+   "module": "rebels_all_areas"
+  }
+ ],
+ "whetstone": [
+  {
+   "name": "gui_size_fix",
+   "type": "bool",
+   "label": "Large country views at a raised GUI scale",
+   "def": true,
+   "group": "GUI scale",
+   "restart": true,
+   "desc": "At GUI scale 1.2 on a screen 1080 pixels high (1920x1080, 2560x1080), and at 2.4 on 2160p, the game computes its interface height one pixel short, 899 instead of 900, so the estates, government, trade and other country views fall back to their small layout. This rounds the size correctly."
+  },
+  {
+   "name": "sharp_baked_text",
+   "type": "bool",
+   "label": "Draw tooltip and label text at twice the resolution",
+   "def": false,
+   "group": "GUI scale",
+   "restart": false,
+   "desc": "Text the game draws into a texture (tooltips, most labels and buttons) is drawn at twice the resolution. It only gets sharper with a font mod that ships double-resolution fonts: the game's own fonts are 1x bitmaps, which look the same either way. Uses a little more video memory."
+  }
+ ],
+ "sieve": [
+  {
+   "name": "hide_pop_icons",
+   "type": "bool",
+   "label": "Hide racial pop icons on the trade map",
+   "def": true,
+   "group": "Trade map",
+   "restart": false,
+   "desc": "Anbennar's racial pop modifiers have trade effects, so the trade map mode shows a pop icon on nearly every province and slows down. This leaves them out of the trade map's icons; the modifiers themselves and their effects do not change."
+  },
+  {
+   "name": "picture_prefix",
+   "type": "string",
+   "label": "Picture prefix of the hidden modifiers",
+   "def": "pop_icon_",
+   "group": "Trade map",
+   "restart": true,
+   "desc": "Modifiers whose picture name starts with this are left out of the trade map's icons. Anbennar's racial pops use pop_icon_. Empty hides nothing."
+  }
+ ],
+ "hoard": [
+  {
+   "name": "max_copies",
+   "type": "int",
+   "label": "Copies per campaign",
+   "def": 10,
+   "group": "",
+   "restart": false,
+   "desc": "How many of the newest copies Hoard keeps for each campaign. Older ones are deleted after the next copy.",
+   "min": 1,
+   "max": 200
+  },
+  {
+   "name": "sittings_kept",
+   "type": "int",
+   "label": "Sittings to keep",
+   "def": 5,
+   "group": "",
+   "restart": false,
+   "desc": "Also keeps the last save of this many sittings (one start of the game to its exit), so a long evening of autosaves does not push out last week's save. 0 turns this off.",
+   "min": 0,
+   "max": 100
+  },
+  {
+   "name": "max_gb",
+   "type": "float",
+   "label": "Disk limit (GB)",
+   "def": 10.0,
+   "group": "",
+   "restart": false,
+   "desc": "The most space all copies together may take. Past it, the oldest copies of any campaign go first, but never the copy just made.",
+   "min": 0.1,
+   "max": 1000.0
+  },
+  {
+   "name": "ironman",
+   "type": "bool",
+   "label": "Also copy ironman saves",
+   "def": false,
+   "group": "",
+   "restart": false,
+   "desc": "Off by default, because a copy of an ironman save lets you undo a decision. Hoard never restores anything itself, but this one is your call."
+  }
+ ],
+ "lodestone": [
+  {
+   "name": "enabled",
+   "type": "bool",
+   "label": "Turn trade links",
+   "def": true,
+   "group": "",
+   "restart": false,
+   "desc": "Off: every turned link goes back to its original direction at the next month, and nothing turns any more."
+  },
+  {
+   "name": "flip_ratio",
+   "type": "float",
+   "label": "Turn a link at this wealth ratio",
+   "def": 1.5,
+   "group": "",
+   "restart": false,
+   "desc": "A link turns when its upstream node's own trade value is this many times its downstream node's.",
+   "min": 1.1,
+   "max": 10.0
+  },
+  {
+   "name": "revert_ratio",
+   "type": "float",
+   "label": "Turn it back below this ratio",
+   "def": 1.2,
+   "group": "",
+   "restart": false,
+   "desc": "A turned link goes back when the ratio falls below this. Keep it under the value above, so a link does not flicker.",
+   "min": 1.0,
+   "max": 10.0
+  },
+  {
+   "name": "cooldown_months",
+   "type": "int",
+   "label": "Months between two turns of a link",
+   "def": 24,
+   "group": "",
+   "restart": false,
+   "desc": "",
+   "min": 1,
+   "max": 600
+  },
+  {
+   "name": "max_flipped",
+   "type": "int",
+   "label": "Most links turned at once",
+   "def": 8,
+   "group": "",
+   "restart": false,
+   "desc": "",
+   "min": 0,
+   "max": 64
+  },
+  {
+   "name": "max_changes_per_month",
+   "type": "int",
+   "label": "Most changes in one month",
+   "def": 1,
+   "group": "",
+   "restart": false,
+   "desc": "",
+   "min": 1,
+   "max": 16
+  },
+  {
+   "name": "min_value",
+   "type": "float",
+   "label": "Least own value for a node to count",
+   "def": 1.0,
+   "group": "",
+   "restart": false,
+   "desc": "A link turns only when both its nodes have at least this trade value of their own.",
+   "min": 0.0,
+   "max": 100.0
+  },
+  {
+   "name": "log_flows",
+   "type": "bool",
+   "label": "Log the value on turned links",
+   "def": false,
+   "group": "",
+   "restart": false,
+   "desc": "Writes one line per turned link to anvil.log every month: the value the game moved over it."
+  },
+  {
+   "name": "estimates",
+   "type": "bool",
+   "label": "Real income in the fleet mission lists",
+   "def": false,
+   "group": "",
+   "restart": false,
+   "desc": "Experimental. The tooltip of a node in the Protect Trade and Privateer lists shows your whole monthly trade income without and with the fleet, from two runs of the game's trade update."
+  }
+ ],
+ "mei": [
+  {
+   "name": "search",
+   "type": "bool",
+   "label": "Chinese and pinyin search",
+   "def": true,
+   "group": "",
+   "restart": true,
+   "desc": "The diplomacy country list and the province finder also match Chinese characters, full pinyin, initials and mixed input."
+  },
+  {
+   "name": "utf8_localization",
+   "type": "bool",
+   "label": "UTF-8 localisation",
+   "def": true,
+   "group": "",
+   "restart": true,
+   "desc": "The game keeps its localisation in UTF-8 and draws it, and EU4DLL translation packs' escapes become UTF-8. Keep the search on with it: the game's own search misses accented names in UTF-8."
+  },
+  {
+   "name": "utf8_scripts",
+   "type": "bool",
+   "label": "UTF-8 in scripts and saves",
+   "def": true,
+   "group": "",
+   "restart": true,
+   "desc": "Script files and saves may be in UTF-8, with or without a signature, and EU4DLL escapes in them become UTF-8, so names from a supplementary translation mod show as they read. Saves written with it keep those names in UTF-8."
+  },
+  {
+   "name": "bundled_fonts",
+   "type": "bool",
+   "label": "Mei's fonts",
+   "def": true,
+   "group": "",
+   "restart": true,
+   "desc": "Where the game would use one of its own fonts, which have no Chinese, Japanese or Korean letters, it uses Mei's (Source Han Sans) instead. Fonts that a translation mod brings with such letters stay."
+  },
+  {
+   "name": "utf8_input",
+   "type": "bool",
+   "label": "UTF-8 text input",
+   "def": true,
+   "group": "",
+   "restart": true,
+   "desc": "Typed and IME-committed text reaches text fields as UTF-8, so Chinese, Japanese and Korean can be typed. Keys, the mouse, selections, undo and paste step by character."
+  },
+  {
+   "name": "utf8_save_names",
+   "type": "bool",
+   "label": "UTF-8 save names",
+   "def": true,
+   "group": "",
+   "restart": true,
+   "desc": "Saves keep the country's name and the name you type as they read, such as 奥斯曼1444_11_11.eu4, instead of Latin letters, so two countries no longer get the same file name. A game with EU4DLL shows such names garbled."
+  },
+  {
+   "name": "cjk_dates",
+   "type": "bool",
+   "label": "Dates and battle titles in CJK word order",
+   "def": true,
+   "group": "",
+   "restart": true,
+   "desc": "With a Chinese, Japanese or Korean translation, dates read 1444年11月11日 or 1444년 11월 11일, and battles, sieges and occupations put the place first, such as 瓦尔纳战役 or 바르나 전투."
+  },
+  {
+   "name": "typo_tolerance",
+   "type": "bool",
+   "label": "Allow one typo in long pinyin",
+   "def": true,
+   "group": "",
+   "restart": true,
+   "desc": "Full pinyin of 5 or more letters still matches with one letter inserted, deleted, replaced or two neighbours swapped."
+  },
+  {
+   "name": "fuzzy_pinyin",
+   "type": "bool",
+   "label": "Fuzzy pinyin",
+   "def": false,
+   "group": "",
+   "restart": true,
+   "desc": "zh/z, ch/c, sh/s, n/l, en/eng and in/ing match each other."
+  }
+ ],
+ "tongs": [
+  {
+   "name": "enabled",
+   "type": "bool",
+   "label": "Open the pipe",
+   "def": false,
+   "group": "",
+   "restart": true,
+   "desc": "Opens the local pipe \\\\.\\pipe\\tongs for the current Windows user, so that scripts and agents can read the game's state."
+  },
+  {
+   "name": "input",
+   "type": "bool",
+   "label": "Keyboard, mouse and navigation commands",
+   "def": false,
+   "group": "",
+   "restart": true,
+   "desc": "Also accepts the keyboard and mouse commands (pause, speed, run_until, key, text, click...): input queued in the game's own SDL input, as a player's would be, and a hook so that the interface sees the mouse pointer; and navigation (province open, province goto), which moves the camera and opens a province's view as the game's own links do."
+  },
+  {
+   "name": "journal",
+   "type": "bool",
+   "label": "Command journal",
+   "def": true,
+   "group": "",
+   "restart": true,
+   "desc": "Writes every command a script or agent sends on the pipe, with its outcome and the game date, to anvil/data/tongs/journal/ (one file per game start, the newest 20 kept), so a test can be followed and repeated. Nothing of it goes into the game, its saves or multiplayer."
+  },
+  {
+   "name": "game_calls",
+   "type": "bool",
+   "label": "Game calls (console commands)",
+   "def": false,
+   "group": "Game calls",
+   "restart": true,
+   "desc": "Also accepts `console LINE`: console commands run by the game's own code on its main thread. They CHANGE GAME STATE; every call is counted and logged. enable_all_commands and the achievement and social commands are always refused."
+  },
+  {
+   "name": "console_allow",
+   "type": "string",
+   "label": "Allowed danger commands",
+   "def": "",
+   "group": "Game calls",
+   "restart": true,
+   "desc": "Danger commands that game calls may run besides the safe ones, as names separated by commas or spaces, e.g. \"leak\"."
+  },
+  {
+   "name": "game_calls_ironman",
+   "type": "bool",
+   "label": "Game calls in ironman",
+   "def": false,
+   "group": "Game calls",
+   "restart": true,
+   "desc": "Game calls in an ironman game. Anvil also has to allow Tongs in ironman (allow_ironman = [\"tongs\"] in anvil/anvil.toml)."
+  },
+  {
+   "name": "game_calls_multiplayer",
+   "type": "bool",
+   "label": "Game calls in multiplayer",
+   "def": false,
+   "group": "Game calls",
+   "restart": true,
+   "desc": "Game calls in a multiplayer game. Anvil also has to allow Tongs in multiplayer (allow_multiplayer = [\"tongs\"] in anvil/anvil.toml)."
+  },
+  {
+   "name": "bridge",
+   "type": "bool",
+   "label": "Loopback socket under Wine",
+   "def": false,
+   "group": "Wine and Proton",
+   "restart": true,
+   "desc": "Under Wine and Proton, also serves the pipe's commands on a socket on 127.0.0.1, so that a native Linux client can reach Tongs without a relay. It needs Open the pipe. The port and a token go to bridge.json in the folder below, which only you should be able to enter. Ignored on Windows."
+  },
+  {
+   "name": "bridge_folder",
+   "type": "string",
+   "label": "Folder of bridge.json",
+   "def": "",
+   "group": "Wine and Proton",
+   "restart": true,
+   "desc": "Where bridge.json goes, as a Unix path such as /run/user/1000/tongs or a Windows path. Empty means ~/.local/state/tongs. Whoever can read the token can drive the game, so use a folder only you can enter."
+  }
+ ]
 };
 const LISTS = ['disabled_plugins','enabled_modules','disabled_modules','allow_ironman','allow_multiplayer'];
-let toml = {disabled_plugins:[], enabled_modules:[], disabled_modules:[], allow_ironman:['europagiga.lifespan'], allow_multiplayer:[]};
+let toml = {disabled_plugins:[], enabled_modules:[], disabled_modules:[], allow_ironman:['smithy.drill_all', 'tongs'], allow_multiplayer:[]};
 let lastStart = JSON.parse(JSON.stringify(toml));   // what the running (or last) game started with
 let values = {}, lastValues = {};                    // the player's settings: saved / in effect
 let running = false, SESSION = {ironman:true, mp:false}, CTX = 'manager', message = null;
-let ui = {selected:'europagiga', oselected:'europagiga', mode:'ironman', omode:'ironman', tab:'plugins', otab:'plugins',
-          settingsPlugin:'europagiga', osettings:'europagiga', open:new Set()};
+let ui = {selected:'smithy', oselected:'smithy', mode:'ironman', omode:'ironman', tab:'plugins', otab:'plugins',
+          settingsPlugin:'smithy', osettings:'smithy', open:new Set()};
 
 // ---- the model --------------------------------------------------------------------------
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
