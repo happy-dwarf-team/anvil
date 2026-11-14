@@ -64,6 +64,15 @@ if(MSVC)
     target_compile_options(anvil_semver PRIVATE /W4 /WX /utf-8 /permissive- /EHsc)
 endif()
 
+# anvil_ui_model: the view model of the Plugins tab that the Manager and
+# anvil-overlay share (ADR 0013, point 9): what loads, what waits, search,
+# filters, dependency chains and resets. No ImGui, no files.
+add_library(anvil_ui_model STATIC src/ui/plugin_model.cpp)
+target_include_directories(anvil_ui_model PUBLIC src)
+if(MSVC)
+    target_compile_options(anvil_ui_model PRIVATE /W4 /WX /utf-8 /permissive- /EHsc)
+endif()
+
 # anvil_net: the opt-in release check the Manager and anvil-overlay share
 # (design §15, ADR 0005): one HTTPS GET with WinHTTP, the GitHub release it
 # answers, the version comparison and the Manager's answer to its question.
@@ -411,6 +420,11 @@ if(ANVIL_BUILD_TESTS)
     target_include_directories(anvil_overlay_tests PRIVATE src/control)
     target_link_libraries(anvil_overlay_tests PRIVATE anvil_loader anvil_i18n anvil_net)
     add_test(NAME anvil_overlay_tests COMMAND anvil_overlay_tests)
+
+    # The Plugins tab's view model (tests/ui_model_tests.cpp).
+    add_executable(anvil_ui_model_tests tests/ui_model_tests.cpp)
+    target_link_libraries(anvil_ui_model_tests PRIVATE anvil_ui_model anvil_core)
+    add_test(NAME anvil_ui_model_tests COMMAND anvil_ui_model_tests)
 
     # The player's language (issue #158): messages by code, the language from
     # EU4's settings, and catalogs that translate every marked text of the
