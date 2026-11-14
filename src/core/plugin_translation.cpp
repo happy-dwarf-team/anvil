@@ -147,6 +147,7 @@ std::vector<std::string> plugin_texts(const Manifest& manifest, const SettingsFi
         if (!text.empty() && seen.insert(text).second) out.push_back(text);
     };
     add(manifest.description);
+    for (const Module& m : manifest.modules) add(m.group);  // ADR 0013, point 3
     if (settings != nullptr) {
         for (const Setting& s : settings->settings) {
             add(s.label);

@@ -23,7 +23,7 @@ const std::set<std::string> kKnownKeys = {
 };
 const std::set<std::string> kKnownDependencyKeys = {"id", "version", "optional"};
 const std::set<std::string> kKnownModuleKeys = {"id",           "name",           "description",      "affects_gameplay",
-                                                "allow_ironman", "allow_multiplayer", "default"};
+                                                "allow_ironman", "allow_multiplayer", "default",          "group"};
 
 // A module id: [a-z][a-z0-9_]*, at most 32 characters (ADR 0011).
 bool is_valid_module_id(std::string_view id) {
@@ -414,6 +414,7 @@ ManifestResult parse_manifest(std::string_view text, const std::filesystem::path
             Module mod;
             if (!read_string(*entry, "id", mod.id, error) || !read_string(*entry, "name", mod.name, error) ||
                 !read_string(*entry, "description", mod.description, error) ||
+                !read_string(*entry, "group", mod.group, error) ||
                 !read_bool(*entry, "affects_gameplay", mod.affects_gameplay, error) ||
                 !read_allow(*entry, "allow_ironman", mod.allow_ironman, error) ||
                 !read_allow(*entry, "allow_multiplayer", mod.allow_multiplayer, error) ||

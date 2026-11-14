@@ -15,9 +15,11 @@
 namespace anvil {
 namespace {
 
-const std::set<std::string_view> kTopKeys = {"setting"};
-const std::set<std::string_view> kSettingKeys = {"type",   "default", "min",         "max",   "step",
-                                                 "values", "label",   "description", "group", "restart"};
+const std::set<std::string_view> kTopKeys = {"setting", "retired"};
+const std::set<std::string_view> kSettingKeys = {"type",  "default", "min",    "max",      "step",
+                                                 "values", "label",  "description", "group", "restart",
+                                                 "module", "advanced", "affects_gameplay"};
+const std::set<std::string_view> kRetiredKeys = {"module", "off"};
 const std::set<std::string_view> kOptionKeys = {"name", "label"};
 
 struct Fail {
@@ -267,10 +269,15 @@ Setting parse_setting(const std::string& name, const toml::node& node, uint32_t 
                 s.description = get_string(*item, key, true);
             } else if (key == "group") {
                 s.group = get_string(*item, key, true);
-            } else if (key == "restart") {
+            } else if (key == "restart" || key == "advanced" || key == "affects_gameplay") {
                 const auto* b = item->as_boolean();
-                if (b == nullptr) throw Fail{"restart must be true or false"};
-                s.restart = b->get();
+                if (b == nullptr) throw Fail{key + " must be true or false"};
+                if (key == "restart") s.restart = b->get();
+                else if (key == "advanced") s.advanced = b->get();
+                else s.affects_gameplay = b->get();
+            } else if (key == "module") {
+                s.module = get_string(*item, key, false);
+                s.module_line = line;
             }
         });
     }
@@ -283,6 +290,74 @@ Setting parse_setting(const std::string& name, const toml::node& node, uint32_t 
         throw Fail{"default: " + problem, entry("default")->line};
     }
     return s;
+}
+
+// A scalar of `off`: bool, int, float or string.
+std::optional<RetiredValue> retired_value(const toml::node& node) {
+    RetiredValue v;
+    if (const auto* b = node.as_boolean()) {
+        v.kind = RetiredValue::Kind::Bool;
+        v.integer = b->get() ? 1 : 0;
+    } else if (const auto* i = node.as_integer()) {
+        v.kind = RetiredValue::Kind::Int;
+        v.integer = i->get();
+    } else if (const auto* f = node.as_floating_point()) {
+        v.kind = RetiredValue::Kind::Float;
+        v.real = f->get();
+    } else if (const auto* s = node.as_string()) {
+        v.kind = RetiredValue::Kind::String;
+        v.text = s->get();
+    } else {
+        return std::nullopt;
+    }
+    return v;
+}
+
+RetiredSetting parse_retired(const std::string& name, const toml::node& node, uint32_t table_line) {
+    const auto* table = node.as_table();
+    if (table == nullptr) throw Fail{"must be a table"};
+    RetiredSetting r;
+    r.name = name;
+    bool has_module = false, has_off = false;
+    for (const auto& [key, item, line] : in_file_order(*table)) {
+        at_line(line, [&] {
+            if (!kRetiredKeys.contains(key)) throw Fail{"unknown key '" + key + "'"};
+            if (key == "module") {
+                r.module = get_string(*item, key, false);
+                r.module_line = line;
+                has_module = true;
+                return;
+            }
+            const auto* array = item->as_array();
+            if (array == nullptr || array->empty()) {
+                throw Fail{"off must be a non-empty array of the values that meant off, such as [\"off\", false]"};
+            }
+            for (const auto& value : *array) {
+                auto v = retired_value(value);
+                if (!v) throw Fail{"each of off must be a bool, an integer, a number or a string", line_of(value.source())};
+                r.off.push_back(std::move(*v));
+            }
+            has_off = true;
+        });
+    }
+    if (!has_module) throw Fail{"missing 'module' (the [[modules]] id whose switch replaces the setting)", table_line};
+    if (!has_off) throw Fail{"missing 'off' (the values that turn the module off)", table_line};
+    return r;
+}
+
+bool retired_matches(const RetiredSetting& r, const toml::node& node) {
+    const auto v = retired_value(node);
+    if (!v) return false;
+    using Kind = RetiredValue::Kind;
+    const auto number = [](const RetiredValue& x) { return x.kind == Kind::Int ? static_cast<double>(x.integer) : x.real; };
+    const auto numeric = [](Kind k) { return k == Kind::Int || k == Kind::Float; };
+    return std::any_of(r.off.begin(), r.off.end(), [&](const RetiredValue& o) {
+        if (numeric(o.kind) && numeric(v->kind)) {
+            return o.kind == Kind::Int && v->kind == Kind::Int ? o.integer == v->integer : number(o) == number(*v);
+        }
+        if (o.kind != v->kind) return false;
+        return o.kind == Kind::String ? o.text == v->text : o.integer == v->integer;
+    });
 }
 
 // ---- key names ------------------------------------------------------------------
@@ -352,6 +427,47 @@ const Setting* SettingsFile::find(std::string_view name) const {
         if (s.name == name) return &s;
     }
     return nullptr;
+}
+
+const RetiredSetting* SettingsFile::find_retired(std::string_view name) const {
+    for (const auto& r : retired) {
+        if (r.name == name) return &r;
+    }
+    return nullptr;
+}
+
+std::string settings_module_error(const SettingsFile& file, const Manifest& manifest, uint32_t& line) {
+    const auto declared = [&](const std::string& id) {
+        return std::any_of(manifest.modules.begin(), manifest.modules.end(), [&](const Module& m) { return m.id == id; });
+    };
+    const auto problem = [&](const std::string& what, const std::string& id) {
+        return "settings.toml: " + what + ": module '" + id + "' is not declared in plugin.toml" +
+               (manifest.modules.empty() ? std::string(", which has no [[modules]]") : std::string(" [[modules]]"));
+    };
+    for (const auto& s : file.settings) {
+        if (!s.module.empty() && !declared(s.module)) {
+            line = s.module_line;
+            return problem("setting " + s.name, s.module);
+        }
+    }
+    for (const auto& r : file.retired) {
+        if (!declared(r.module)) {
+            line = r.module_line;
+            return problem("retired " + r.name, r.module);
+        }
+    }
+    return {};
+}
+
+bool setting_counts(const Setting& setting, const Manifest& manifest) {
+    bool owner_affects = manifest.affects_gameplay;
+    if (!setting.module.empty()) {
+        owner_affects = false;
+        for (const Module& m : manifest.modules) {
+            if (m.id == setting.module) owner_affects = m.affects_gameplay;
+        }
+    }
+    return owner_affects && setting.affects_gameplay.value_or(setting.type != SettingType::Key);
 }
 
 std::optional<int64_t> parse_key(std::string_view text) {
@@ -506,6 +622,26 @@ SettingsFileResult parse_settings_text(std::string_view text) {
                 file.settings.push_back(std::move(s));
             }
         }
+        where.clear();
+        if (const auto* node = table.get("retired")) {
+            const auto* retired = node->as_table();
+            if (retired == nullptr) {
+                throw Fail{"retired must be a table of [retired.<name>] tables", line_of(node->source())};
+            }
+            for (const auto& [name, item, line] : in_file_order(*retired)) {
+                where = "retired " + name + ": ";
+                RetiredSetting r;
+                at_line(line, [&] {
+                    if (!valid_name(name)) throw Fail{"the name must match [a-z][a-z0-9_]* (max 64 characters)"};
+                    if (file.find(name) != nullptr) {
+                        throw Fail{"a setting of this name is declared; a retired setting is one the plugin no longer has"};
+                    }
+                    r = parse_retired(name, *item, line);
+                });
+                r.line = line;
+                file.retired.push_back(std::move(r));
+            }
+        }
     } catch (const Fail& f) {
         result.error = "settings.toml: " + where + f.message;
         result.line = f.line;
@@ -608,7 +744,90 @@ std::string player_settings_text(const SettingsFile& schema, const std::vector<S
 
 bool write_player_settings(const SettingsFile& schema, const std::vector<SettingValue>& values,
                            const std::filesystem::path& file, std::string& error) {
-    const std::string text = player_settings_text(schema, values);
+    return replace_text_file(file, player_settings_text(schema, values), error);
+}
+
+namespace {
+
+// A value of the player's file as TOML wrote it, for the log.
+std::string node_text(const toml::node& node) {
+    if (const auto* b = node.as_boolean()) return b->get() ? "true" : "false";
+    if (const auto* i = node.as_integer()) return std::to_string(i->get());
+    if (const auto* f = node.as_floating_point()) return format_float(f->get());
+    if (const auto* s = node.as_string()) return toml_string(s->get());
+    return node.is_array() ? "[...]" : "{...}";
+}
+
+bool only_comments(std::string_view text) {
+    size_t start = 0;
+    while (start < text.size()) {
+        size_t end = text.find('\n', start);
+        if (end == std::string_view::npos) end = text.size();
+        const std::string_view line = text.substr(start, end - start);
+        const size_t first = line.find_first_not_of(" \t\r");
+        if (first != std::string_view::npos && line[first] != '#') return false;
+        start = end + 1;
+    }
+    return true;
+}
+
+}  // namespace
+
+std::optional<RetiredMove> plan_retired_move(const SettingsFile& schema, std::string_view text, std::string& error) {
+    RetiredMove move;
+    if (schema.retired.empty()) return move;
+    toml::table table;
+    try {
+        table = toml::parse(text);
+    } catch (const toml::parse_error& e) {
+        std::ostringstream message;
+        message << "line " << e.source().begin.line << ": " << e.description();
+        error = message.str();
+        return std::nullopt;
+    }
+    std::vector<std::pair<uint32_t, uint32_t>> drop;  // 1-based lines, inclusive
+    toml::table expected = table;
+    for (const auto& [name, node, line] : in_file_order(table)) {
+        const RetiredSetting* r = schema.find_retired(name);
+        if (r == nullptr) continue;
+        if (const auto* t = node->as_table(); t != nullptr && !t->is_inline()) {
+            error = "line " + std::to_string(line) + ": '" + name + "' is a table, not a value";
+            return std::nullopt;
+        }
+        RetiredMove::Item item;
+        item.name = name;
+        item.module = r->module;
+        item.value = node_text(*node);
+        item.line = line;
+        item.turns_off = retired_matches(*r, *node);
+        move.items.push_back(std::move(item));
+        drop.emplace_back(line, std::max(line, static_cast<uint32_t>(node->source().end.line)));
+        expected.erase(name);
+    }
+    if (move.items.empty()) return move;
+    std::string out;
+    uint32_t number = 1;
+    for (size_t start = 0; start < text.size(); ++number) {
+        size_t end = text.find('\n', start);
+        end = end == std::string_view::npos ? text.size() : end + 1;
+        const bool dropped = std::any_of(drop.begin(), drop.end(), [&](const auto& d) { return number >= d.first && number <= d.second; });
+        if (!dropped) out.append(text.substr(start, end - start));
+        start = end;
+    }
+    try {
+        if (toml::parse(out) != expected) {
+            error = "the file would not read back as itself without the retired values";
+            return std::nullopt;
+        }
+    } catch (const toml::parse_error&) {
+        error = "the file would not parse without the retired values";
+        return std::nullopt;
+    }
+    move.text = only_comments(out) ? std::string() : std::move(out);
+    return move;
+}
+
+bool replace_text_file(const std::filesystem::path& file, const std::string& text, std::string& error) {
     std::error_code ec;
     if (text.empty()) {
         std::filesystem::remove(file, ec);

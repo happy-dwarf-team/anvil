@@ -235,23 +235,81 @@ void check_lock(const CheckOptions& options, const SymbolFile& file, const std::
 
 // The first Anvil that reads [[modules]] (ADR 0011).
 constexpr const char* kFirstWithModules = "1.22.0";
+// The first Anvil that reads a setting's `module`, `advanced` and
+// `affects_gameplay`, [retired.<name>] and a module's `group` (ADR 0013).
+constexpr const char* kFirstWithModuleSettings = "1.23.0";
+
+// Whether the plugin's `anvil` range admits a release before `first`, checked
+// minor by minor.
+bool admits_older(const Manifest& m, const char* first_text) {
+    const Version first = *Version::parse(first_text);
+    bool admits = !m.anvil;
+    for (unsigned minor = 0; !admits && minor < first.minor; ++minor) {
+        admits = m.anvil->matches(Version{first.major, minor, 0, {}}) ||
+                 m.anvil->matches(Version{first.major, minor, 99, {}});
+    }
+    return admits;
+}
+
+std::string range_warning(const Manifest& m, const std::string& what, const char* first, const std::string& key) {
+    return what + " needs Anvil " + first + ", but anvil = \"" + (m.anvil ? m.anvil->text() : std::string("*")) +
+           "\" admits older releases, which skip the plugin with \"unknown key '" + key + "'\": declare anvil = \">=" +
+           first + "\"";
+}
 
 // A plugin with modules whose `anvil` range also admits an older Anvil: that
 // Anvil skips it with "unknown key 'modules'", so the player sees an error
-// instead of "needs Anvil 1.22.0". Checks the releases before the first one with
-// modules, minor by minor.
+// instead of "needs Anvil 1.22.0".
 std::string modules_range_warning(const Manifest& m) {
-    if (m.modules.empty()) return {};
-    const Version first = *Version::parse(kFirstWithModules);
-    bool admits_older = !m.anvil;
-    for (unsigned minor = 0; !admits_older && minor < first.minor; ++minor) {
-        admits_older = m.anvil->matches(Version{first.major, minor, 0, {}}) ||
-                       m.anvil->matches(Version{first.major, minor, 99, {}});
+    if (m.modules.empty() || !admits_older(m, kFirstWithModules)) return {};
+    return range_warning(m, "[[modules]]", kFirstWithModules, "modules");
+}
+
+// The keys of ADR 0013, the first of them the plugin uses: in plugin.toml (a
+// module's `group`) or in settings.toml; "" when it uses none.
+std::string module_settings_key(const Manifest& m, const SettingsFile* settings) {
+    for (const Module& mod : m.modules) {
+        if (!mod.group.empty()) return "group";
     }
-    if (!admits_older) return {};
-    return std::string("[[modules]] needs Anvil ") + kFirstWithModules + ", but anvil = \"" +
-           (m.anvil ? m.anvil->text() : std::string("*")) + "\" admits older releases, which skip the plugin with "
-           "\"unknown key 'modules'\": declare anvil = \">=" + kFirstWithModules + "\"";
+    if (settings == nullptr) return {};
+    if (!settings->retired.empty()) return "retired";
+    for (const Setting& s : settings->settings) {
+        if (!s.module.empty()) return "module";
+        if (s.advanced) return "advanced";
+        if (s.affects_gameplay) return "affects_gameplay";
+    }
+    return {};
+}
+
+// The warnings of ADR 0013 on settings.toml: a setting named as a module (a
+// second switch for it, point 5), and a setting of an owner that offers
+// multiplayer without affects_gameplay (point 14), which then counts for the
+// game by its type alone.
+void module_settings_warnings(const Manifest& m, const SettingsFile& file, const std::string& path,
+                              std::vector<Problem>& warnings) {
+    for (const Setting& s : file.settings) {
+        for (const Module& mod : m.modules) {
+            if (mod.id == s.name) {
+                warnings.push_back({path, s.line, "setting " + s.name + " has the name of module " + mod.id +
+                                                      ": a setting must not repeat the module's switch, which "
+                                                      "turns it on and off; retire the setting into the module "
+                                                      "([retired." + s.name + "])"});
+            }
+        }
+        if (s.affects_gameplay || s.type == SettingType::Key) continue;
+        const Module* owner = nullptr;
+        for (const Module& mod : m.modules) {
+            if (mod.id == s.module) owner = &mod;
+        }
+        const bool offers = owner != nullptr ? owner->affects_gameplay && owner->allow_multiplayer == Allow::OptIn
+                                             : s.module.empty() && m.affects_gameplay && m.allow_multiplayer == Allow::OptIn;
+        if (!offers) continue;
+        warnings.push_back({path, s.line, "setting " + s.name + " of " +
+                                              (owner != nullptr ? "module " + owner->id : std::string("the plugin")) +
+                                              ", which offers multiplayer, counts in the multiplayer code and is locked "
+                                              "in a multiplayer game: say affects_gameplay = true, or false for a "
+                                              "setting that does not change the result (keys, logging, drawing)"});
+    }
 }
 
 std::string allow_text(Allow allow, const char* mode) {
@@ -505,10 +563,21 @@ CheckReport check_plugin(const CheckOptions& options) {
             if (!headers.error.empty()) {
                 report.problems.push_back({settings_path, headers.line, without_prefix(headers.error, "settings.toml: ")});
             }
+            uint32_t line = 0;
+            if (const std::string error = settings_module_error(*settings.file, m, line); !error.empty()) {
+                report.problems.push_back({settings_path, line, without_prefix(error, "settings.toml: ")});
+                if (report.skip_reason.empty()) set_skip(report, i18n::Message(error));
+            }
+            module_settings_warnings(m, *settings.file, settings_path, report.warnings);
         } else {
             report.problems.push_back({settings_path, settings.line, without_prefix(settings.error, "settings.toml: ")});
             if (report.skip_reason.empty()) set_skip(report, settings.error);
         }
+    }
+    if (const std::string key = module_settings_key(m, settings_file ? &*settings_file : nullptr);
+        !key.empty() && admits_older(m, kFirstWithModuleSettings)) {
+        report.warnings.push_back(
+            {manifest_path, 0, range_warning(m, "'" + key + "' (ADR 0013)", kFirstWithModuleSettings, key)});
     }
     // translations/ (design §5.4): once the texts they translate are known.
     if (options.translations && (m.settings.empty() || settings_file)) {

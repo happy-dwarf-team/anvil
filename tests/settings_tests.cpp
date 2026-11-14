@@ -1,6 +1,8 @@
 // settings.toml (design §5.3, §11): the schema, key bindings, the player's
 // values, ANVIL_<ID>_<NAME> overrides and changes while the game runs.
+#include "core/discovery.hpp"
 #include "core/plugin_settings.hpp"
+#include "core/retired_move.hpp"
 #include "core/settings.hpp"
 #include "test_support.hpp"
 #include "ui/settings_order.hpp"
@@ -110,6 +112,231 @@ PluginSettings::Environment environment(std::map<std::string, std::string> value
         if (it == values.end()) return std::nullopt;
         return it->second;
     };
+}
+
+bool contains(const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; }
+
+// A plugin that changes the game, with a module that does and one that does not.
+constexpr const char* kModular = R"toml(id = "lode"
+name = "Lode"
+version = "1.2.0"
+api = 2
+entry = "lode.dll"
+affects_gameplay = true
+allow_multiplayer = "opt-in"
+
+[[modules]]
+id = "flows"
+name = "Flows"
+group = "Trade"
+affects_gameplay = true
+allow_multiplayer = "opt-in"
+
+[[modules]]
+id = "log"
+name = "Log"
+affects_gameplay = false
+)toml";
+
+constexpr const char* kModuleSettings = R"toml([setting.flip_ratio]
+type = "float"
+default = 1.5
+label = "Flip ratio"
+module = "flows"
+
+[setting.log_flows]
+type = "bool"
+default = false
+label = "Log flows"
+module = "flows"
+affects_gameplay = false
+advanced = true
+
+[setting.cooldown_months]
+type = "int"
+default = 24
+label = "Cooldown"
+
+[setting.panel_key]
+type = "key"
+default = "F9"
+label = "Panel key"
+
+[setting.verbose]
+type = "bool"
+default = false
+label = "Verbose"
+module = "log"
+
+[retired.flows_mode]
+module = "flows"
+off = ["off", false, 0]
+)toml";
+
+void module_settings_tests() {
+    run("settings: module, advanced and affects_gameplay (ADR 0013)", [] {
+        const SettingsFileResult r = parse_settings_text(kModuleSettings);
+        CHECK(r.file.has_value());
+        if (!r.file) return;
+        const SettingsFile& f = *r.file;
+        CHECK(f.settings.size() == 5 && f.settings[0].module == "flows" && f.settings[0].module_line == 5);
+        CHECK(!f.settings[0].advanced && !f.settings[0].affects_gameplay && f.settings[1].advanced);
+        CHECK(f.settings[1].affects_gameplay == false && f.settings[2].module.empty());
+        CHECK(f.retired.size() == 1 && f.retired[0].name == "flows_mode" && f.retired[0].module == "flows" &&
+              f.retired[0].line == 31 && f.retired[0].module_line == 32 && f.retired[0].off.size() == 3);
+        CHECK(f.find_retired("flows_mode") == &f.retired[0] && f.find_retired("flip_ratio") == nullptr);
+        CHECK(fails("type = \"bool\"\ndefault = true\nlabel = \"X\"\nadvanced = 1\n", "advanced must be true or false", 5));
+        CHECK(fails("type = \"bool\"\ndefault = true\nlabel = \"X\"\nmodule = \"\"\n", "module must not be empty", 5));
+        CHECK(fails("type = \"bool\"\ndefault = true\nlabel = \"X\"\naffects_gameplay = \"no\"\n",
+                    "affects_gameplay must be true or false", 5));
+
+        const Manifest m = manifest(kModular);
+        CHECK(m.modules[0].group == "Trade" && m.modules[1].group.empty());
+        uint32_t line = 0;
+        CHECK(settings_module_error(f, m, line).empty());
+        // Which settings count: the owner changes the game, and the setting does not say false.
+        CHECK(setting_counts(f.settings[0], m));    // flows, float
+        CHECK(!setting_counts(f.settings[1], m));   // affects_gameplay = false
+        CHECK(setting_counts(f.settings[2], m));    // the plugin's own, which affects gameplay
+        CHECK(!setting_counts(f.settings[3], m));   // a key defaults to false
+        CHECK(!setting_counts(f.settings[4], m));   // module log does not change the game
+        Setting key = f.settings[3];
+        key.affects_gameplay = true;
+        CHECK(setting_counts(key, m));
+        const Manifest calm = manifest(plugin_toml("calm"));
+        Setting own = f.settings[2];
+        own.affects_gameplay = true;
+        CHECK(!setting_counts(own, calm));  // nothing of calm changes the game
+    });
+
+    run("settings: module must name a [[modules]] id, retired names are checked", [] {
+        const Manifest m = manifest(kModular);
+        uint32_t line = 0;
+        auto r = parse_settings_text("[setting.a]\ntype = \"bool\"\ndefault = true\nlabel = \"A\"\nmodule = \"flow\"\n");
+        CHECK(r.file && settings_module_error(*r.file, m, line) ==
+                            "settings.toml: setting a: module 'flow' is not declared in plugin.toml [[modules]]" &&
+              line == 5);
+        r = parse_settings_text("[retired.old]\nmodule = \"gone\"\noff = [false]\n");
+        CHECK(r.file && settings_module_error(*r.file, m, line) ==
+                            "settings.toml: retired old: module 'gone' is not declared in plugin.toml [[modules]]" &&
+              line == 2);
+        CHECK(r.file && contains(settings_module_error(*r.file, manifest(plugin_toml("flat")), line), "which has no [[modules]]"));
+
+        const auto error = [](const std::string& text, const std::string& part, uint32_t at) {
+            const SettingsFileResult bad = parse_settings_text(text);
+            const bool ok = !bad.file && contains(bad.error, part) && bad.line == at;
+            if (!ok) std::printf("  expected \"%s\" at %u, got \"%s\" at %u\n", part.c_str(), at, bad.error.c_str(), bad.line);
+            return ok;
+        };
+        CHECK(error("[retired.old]\noff = [false]\n", "retired old: missing 'module'", 1));
+        CHECK(error("[retired.old]\nmodule = \"m\"\n", "retired old: missing 'off'", 1));
+        CHECK(error("[retired.old]\nmodule = \"m\"\noff = []\n", "off must be a non-empty array", 3));
+        CHECK(error("[retired.old]\nmodule = \"m\"\noff = [[1]]\n", "each of off must be a bool", 3));
+        CHECK(error("[retired.old]\nmodule = \"m\"\noff = [1]\nlabel = \"x\"\n", "retired old: unknown key 'label'", 4));
+        CHECK(error("[retired.Old]\nmodule = \"m\"\noff = [1]\n", "the name must match", 1));
+        CHECK(error("[setting.old]\ntype = \"bool\"\ndefault = true\nlabel = \"O\"\n[retired.old]\nmodule = \"m\"\noff = [1]\n",
+                    "retired old: a setting of this name is declared", 5));
+        CHECK(error("retired = 1\n", "retired must be a table", 1));
+    });
+
+    run("settings: the retire move on the player's text (ADR 0013, point 4)", [] {
+        const SettingsFileResult r = parse_settings_text(kModuleSettings);
+        if (!r.file) {
+            CHECK(false);
+            return;
+        }
+        std::string error;
+        // A value in `off`, another setting kept, a comment kept.
+        auto move = plan_retired_move(*r.file, "# mine\nflows_mode = \"off\"\ncooldown_months = 12\n", error);
+        CHECK(move && move->items.size() == 1 && move->items[0].turns_off && move->items[0].module == "flows" &&
+              move->items[0].value == "\"off\"" && move->items[0].line == 2);
+        CHECK(move && move->text == "# mine\ncooldown_months = 12\n");
+        // false and 0 are in `off` too; 0.0 compares as a number.
+        for (const char* value : {"false", "0", "0.0"}) {
+            move = plan_retired_move(*r.file, std::string("flows_mode = ") + value + "\n", error);
+            CHECK(move && move->items.size() == 1 && move->items[0].turns_off && move->text.empty());
+        }
+        // A value not in `off` is removed as well, and turns nothing off.
+        move = plan_retired_move(*r.file, "flows_mode = \"verify\"\r\nverbose = true\r\n", error);
+        CHECK(move && move->items.size() == 1 && !move->items[0].turns_off && move->items[0].value == "\"verify\"");
+        CHECK(move && move->text == "verbose = true\r\n");
+        move = plan_retired_move(*r.file, "flows_mode = true\n", error);
+        CHECK(move && !move->items[0].turns_off);  // true is not false
+        // Nothing retired in the file: nothing to do.
+        move = plan_retired_move(*r.file, "verbose = true\n", error);
+        CHECK(move && move->items.empty());
+        // A multi-line value goes with all its lines; only comments left: no file.
+        move = plan_retired_move(*r.file, "flows_mode = \"\"\"\noff\"\"\"\n# end\n", error);
+        CHECK(move && move->items.size() == 1 && move->text.empty());
+        // A file that does not parse waits.
+        CHECK(!plan_retired_move(*r.file, "flows_mode = \n", error) && contains(error, "line 1"));
+        CHECK(!plan_retired_move(*r.file, "[flows_mode]\na = 1\n", error) && contains(error, "is a table"));
+        // A schema without retired settings never reads the text.
+        const SettingsFile plain = schema();
+        move = plan_retired_move(plain, "not toml at all = = =", error);
+        CHECK(move && move->items.empty());
+    });
+
+    run("settings: the retire move on the files, before modules resolve", [] {
+        const SettingsFileResult r = parse_settings_text(kModuleSettings);
+        if (!r.file) {
+            CHECK(false);
+            return;
+        }
+        const Manifest m = manifest(kModular);
+        const auto dir = scratch("retire");
+        const auto player = dir / "data" / "lode" / "settings.toml";
+        const auto toml = dir / "anvil.toml";
+        write(toml, "# the player's\nenabled_modules = [\"other.thing\"]\n");
+        write(player, "flows_mode = \"off\"\ncooldown_months = 12\n");
+        std::vector<std::string> disabled;
+        auto notes = move_retired_settings(m, *r.file, player, toml, disabled);
+        CHECK(disabled == std::vector<std::string>{"lode.flows"});
+        CHECK(read(toml) == "# the player's\nenabled_modules = [\"other.thing\"]\ndisabled_modules = [\"lode.flows\"]\n");
+        CHECK(read(player) == "cooldown_months = 12\n");
+        CHECK(notes.size() == 2 && notes[0].level == ANVIL_LOG_INFO &&
+              notes[0].message == "retired setting flows_mode = \"off\" (settings.toml line 1) meant module lode.flows "
+                                  "off: added it to disabled_modules in anvil.toml, off from this start");
+        CHECK(notes.size() == 2 &&
+              notes[1].message == "removed the retired setting(s) flows_mode = \"off\" from settings.toml");
+        // Once: the next start finds nothing to move.
+        CHECK(move_retired_settings(m, *r.file, player, toml, disabled).empty() && disabled.size() == 1);
+        // The module is off at this start through the list the loader reads.
+        AnvilSettings start;
+        start.disabled_modules = disabled;
+        CHECK(!module_enabled(start, "lode.flows", true));
+
+        // A value not in `off`: removed, the module keeps its switch.
+        write(player, "flows_mode = \"on\"\n");
+        disabled.clear();
+        std::filesystem::remove(toml);
+        notes = move_retired_settings(m, *r.file, player, toml, disabled);
+        CHECK(disabled.empty() && !std::filesystem::exists(toml) && !std::filesystem::exists(player));
+        CHECK(notes.size() == 1 && contains(notes[0].message, "flows_mode = \"on\"") &&
+              contains(notes[0].message, "the file is removed"));
+
+        // Listed already: no second entry, the value still goes.
+        write(player, "flows_mode = false\n");
+        disabled = {"lode.flows"};
+        notes = move_retired_settings(m, *r.file, player, toml, disabled);
+        CHECK(disabled.size() == 1 && !std::filesystem::exists(player) && !std::filesystem::exists(toml));
+        CHECK(!notes.empty() && contains(notes[0].message, "it is in disabled_modules already"));
+
+        // anvil.toml cannot be written (it does not parse): the player's file stays for the next start.
+        write(toml, "disabled_modules = [\n");
+        write(player, "flows_mode = \"off\"\n");
+        disabled.clear();
+        notes = move_retired_settings(m, *r.file, player, toml, disabled);
+        CHECK(disabled.empty() && read(player) == "flows_mode = \"off\"\n" && notes.size() == 1 &&
+              notes[0].level == ANVIL_LOG_WARNING && contains(notes[0].message, "the value stays for the next start"));
+
+        // A player's file that does not parse: a warning, nothing changes.
+        write(player, "flows_mode = \n");
+        notes = move_retired_settings(m, *r.file, player, dir / "none.toml", disabled);
+        CHECK(notes.size() == 1 && notes[0].level == ANVIL_LOG_WARNING && read(player) == "flows_mode = \n");
+        // No player's file: nothing.
+        CHECK(move_retired_settings(m, *r.file, dir / "missing.toml", toml, disabled).empty());
+    });
 }
 
 }  // namespace
@@ -349,4 +576,6 @@ void settings_tests() {
         CHECK(store.get_int(1) == 512 && notes.size() == 1 &&
               notes[0].message == "setting budget_mb = 512 from ANVIL_ENV_TEST_BUDGET_MB (environment)");
     });
+
+    module_settings_tests();
 }
