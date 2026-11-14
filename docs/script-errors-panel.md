@@ -53,7 +53,8 @@ From the top:
      Code** (`vscode://file/<path>:<line>`, opened by Windows) and **Copy the path and line**;
    - for an event target or an unknown tag, **Find '<name>' in the playset's script**: a search
      of `events`, `common`, `decisions`, `missions` and `history/countries` of every layer for the
-     name as a whole word, outside comments. The lines that save it as an event target come
+     name as a whole word, outside comments, leaving out a layer's folder that a later mod replaces
+     (`replace_path`, as Anbennar replaces `events`). The lines that save it as an event target come
      first, then other uses, each a button that opens the file at its line.
    - for a context that names an event or an option, **Find '<key>' in events**, and for a
      mission, **Find '<mission>' in missions**: the same search in that folder alone, with a dot
@@ -76,8 +77,7 @@ Decisions, casus belli, the AI's checks, music weights, tooltips and `Undefined 
 none. In the lab's logs it was on none of 209 run-time script lines of vanilla, 2 of 10 of Anbennar
 in normal play and 88 of 251 on a save of 1582, so it helps big gameplay mods on event errors, not
 every line. The context is game text: it is shown as it is, and only a script name taken from it
-(letters, digits, `_`, `.`, `-`) is searched for, never used as a path. Find looks in every layer's
-folder, including the game's own when a mod replaces it (`replace_path`).
+(letters, digits, `_`, `.`, `-`) is searched for, never used as a path.
 
 The panel's own words come in the overlay's language, from its own table
 (`plugins/anvil-log-throttle/src/texts.cpp`), since `anvil-overlay.panel` translates nothing and

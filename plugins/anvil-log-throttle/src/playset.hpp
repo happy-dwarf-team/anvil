@@ -17,6 +17,7 @@ namespace script_errors {
 struct Layer {
     std::string name;  // "game" or the mod's name
     std::filesystem::path path;
+    std::vector<std::string> replaced;  // the mod's replace_path folders, "events"
 };
 
 // EU4's user folder: -userdir=<path> on the command line, else Documents.
@@ -33,7 +34,8 @@ std::vector<Layer> playset_layers(const std::filesystem::path& dlc_load, const s
 bool resolve(const std::vector<Layer>& layers, std::string_view file, std::string& path, std::string& layer);
 
 // The uses of `token` as a whole word in the .txt files of the folders `in`
-// names, in every layer, comments left out: the lines that define it first
+// names, in every layer whose folder no later mod replaces (replace_path),
+// comments left out: the lines that define it first
 // (FindIn), then other uses. For FindIn::script the folders are events,
 // common, decisions, missions and history/countries; for events and
 // missions, that folder alone, and a dot is part of a name.

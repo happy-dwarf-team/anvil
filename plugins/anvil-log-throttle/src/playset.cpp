@@ -23,18 +23,45 @@ std::string read_file(const std::filesystem::path& path) {
     return s.str();
 }
 
-// key="value" in a .mod file.
-std::string value_of(std::string_view text, std::string_view key) {
+// Every key="value" of a key in a .mod file, in order.
+std::vector<std::string> values_of(std::string_view text, std::string_view key) {
+    std::vector<std::string> out;
     for (std::size_t at = text.find(key); at != std::string_view::npos; at = text.find(key, at + 1)) {
         if (at != 0 && !std::isspace(static_cast<unsigned char>(text[at - 1]))) continue;
         const std::size_t q = text.find('"', at + key.size());
         const std::size_t eq = text.find('=', at + key.size());
         if (q == std::string_view::npos || eq == std::string_view::npos || eq > q) continue;
         const std::size_t end = text.find('"', q + 1);
-        if (end == std::string_view::npos) return {};
-        return std::string(text.substr(q + 1, end - q - 1));
+        if (end == std::string_view::npos) break;
+        out.emplace_back(text.substr(q + 1, end - q - 1));
+        at = end;
     }
-    return {};
+    return out;
+}
+
+// The first key="value" of a key in a .mod file.
+std::string value_of(std::string_view text, std::string_view key) {
+    std::vector<std::string> values = values_of(text, key);
+    return values.empty() ? std::string{} : std::move(values.front());
+}
+
+// "events", "common/ideas": forward slashes, no slash at either end.
+std::string folder_key(std::string folder) {
+    std::replace(folder.begin(), folder.end(), '\\', '/');
+    while (!folder.empty() && folder.back() == '/') folder.pop_back();
+    while (!folder.empty() && folder.front() == '/') folder.erase(folder.begin());
+    return folder;
+}
+
+// Whether a later layer replaces `folder` (replace_path), so the game reads
+// none of the earlier layers' files under it.
+bool replaced_after(const std::vector<Layer>& layers, std::size_t index, const std::string& folder) {
+    for (std::size_t j = index + 1; j < layers.size(); ++j) {
+        for (const std::string& r : layers[j].replaced) {
+            if (folder == r || folder.starts_with(r + "/")) return true;
+        }
+    }
+    return false;
 }
 
 // In an event key or an option's name ('ns.1', 'ns.1.a') a dot is part of
@@ -156,7 +183,12 @@ std::vector<Layer> playset_layers(const std::filesystem::path& dlc_load, const s
         if (path.empty()) continue;
         std::filesystem::path p = path_of(path);
         if (p.is_relative()) p = user / p;
-        layers.push_back({name.empty() ? mod_file : log_throttle::utf8_text(name), p});
+        Layer& added = layers.emplace_back();
+        added.name = name.empty() ? mod_file : log_throttle::utf8_text(name);
+        added.path = p;
+        for (std::string& r : values_of(mod, "replace_path")) {
+            if (std::string key = folder_key(std::move(r)); !key.empty()) added.replaced.push_back(std::move(key));
+        }
     }
     return layers;
 }
@@ -187,8 +219,10 @@ Search search(const std::vector<Layer>& layers, std::string_view token, FindIn i
         in == FindIn::events ? kEvents : in == FindIn::missions ? kMissions : kScript;
     const bool dots = in != FindIn::script;
     std::vector<Hit> uses;
-    for (const Layer& layer : layers) {
+    for (std::size_t index = 0; index < layers.size(); ++index) {
+        const Layer& layer = layers[index];
         for (const wchar_t* folder : folders) {
+            if (replaced_after(layers, index, folder_key(utf8_of(folder)))) continue;
             std::error_code ec;
             const std::filesystem::path dir = layer.path / folder;
             if (!std::filesystem::is_directory(dir, ec)) continue;
@@ -217,7 +251,8 @@ Search search(const std::vector<Layer>& layers, std::string_view token, FindIn i
                         }
                         Hit h;
                         h.abs = utf8_of(it->path());
-                        std::string rel = utf8_of(std::filesystem::relative(it->path(), layer.path, ec));
+                        // Lexical: a game folder of junctions stays under the layer.
+                        std::string rel = utf8_of(it->path().lexically_relative(layer.path));
                         std::replace(rel.begin(), rel.end(), '\\', '/');
                         h.rel = rel;
                         h.line = number;

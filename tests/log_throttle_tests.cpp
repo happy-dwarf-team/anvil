@@ -586,6 +586,18 @@ void panel_tests(const fs::path& source_dir) {
         CHECK(mission.total == 2 && mission.hits.size() == 2 && mission.hits[0].defines && mission.hits[0].line == 2 &&
               !mission.hits[1].defines && mission.hits[1].line == 5);
         CHECK(se::search(layers, "flavor_spiked_log.1", se::FindIn::none).total == 0);
+        // A later mod's replace_path hides the folder of every earlier layer, as in the game
+        // (Anbennar replaces events: the game's own event 6033 is not in it).
+        put(root / "user" / "mod" / "r.mod", "name=\"Replacer\"\nreplace_path=\"common/ideas\"\nreplace_path=\"events/\"\npath=\"mod/r\"\n");
+        put(root / "user" / "mod" / "r" / "events" / "R.txt", "province_event = {\n\tid = flavor_spiked_log.1\n}\n");
+        put(root / "user" / "dlc_load.json", "{\"enabled_mods\":[\"mod/m.mod\",\"mod/r.mod\"],\"disabled_dlcs\":[]}");
+        const std::vector<se::Layer> replaced = se::playset_layers(root / "user" / "dlc_load.json", root / "user", root / "game");
+        const std::vector<std::string> folders{"common/ideas", "events"};
+        CHECK(replaced.size() == 3 && replaced[1].replaced.empty() && replaced[2].replaced == folders);
+        const se::Search only = se::search(replaced, "flavor_spiked_log.1", se::FindIn::events);
+        CHECK(only.total == 1 && only.hits.size() == 1 && only.hits[0].defines && only.hits[0].rel == "events/R.txt");
+        const se::Search dest = se::search(replaced, "dest");
+        CHECK(dest.total == 1 && dest.hits.size() == 1 && dest.hits[0].rel == "common/b.txt");
         CHECK(se::vscode_uri("C:\\Program Files (x86)\\a b.txt", 12) == "vscode://file/C:/Program%20Files%20%28x86%29/a%20b.txt:12");
         fs::remove_all(root, ec);
     });
