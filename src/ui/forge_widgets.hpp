@@ -1,16 +1,20 @@
 // The components of Forge (docs/ui-design-system.md, "Components") that every
 // view of the Manager and the overlay shares beyond the Plugins tab's own
 // controls (plugin_widgets.hpp): banners, text buttons, tags, chips, cards,
-// facts, state rows, titles, the monospace text and the dialog's frame. A view draws a state, an action or
-// a dialog with these, not with its own colours and spacings.
+// facts, state rows, list rows, checkboxes, titles, the monospace text, the
+// code view and the dialog's frame. A view draws a state, an action or a
+// dialog with these, not with its own colours and spacings.
 #pragma once
 
 #include "ui/imgui_colors.hpp"
 #include "ui/plugin_widgets.hpp"
+#include "ui/text_wrap.hpp"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <initializer_list>
 #include <string>
@@ -70,8 +74,16 @@ inline void strong(const char* text) {
 // The same, wrapped: a notice's title.
 inline void strong_wrapped(const char* text) {
     if (g_title_font != nullptr) ImGui::PushFont(g_title_font, ImGui::GetFontSize());
-    ImGui::TextWrapped("%s", text);
+    text_wrapped(text);
     if (g_title_font != nullptr) ImGui::PopFont();
+}
+
+// A name in semibold drawn at `at` without an item, in a list row; its width.
+inline float draw_strong(ImDrawList* draw, ImVec2 at, ImU32 color, const char* text) {
+    ImFont* font = g_title_font != nullptr ? g_title_font : ImGui::GetFont();
+    const float size = ImGui::GetFontSize();
+    draw->AddText(font, size, at, color, text);
+    return font->CalcTextSizeA(size, FLT_MAX, 0.0f, text).x;
 }
 
 // Text in the monospace font between these two: a log or a report.
@@ -79,6 +91,36 @@ inline void begin_mono() {
     ImGui::PushFont(g_mono_font, g_mono_font != nullptr ? g_mono_font->LegacySize : ImGui::GetFontSize());
 }
 inline void end_mono() { ImGui::PopFont(); }
+
+// The code view: a log or a report in the monospace font on `bg0` with a
+// `line` hairline. Read-only, but its text can be selected and copied.
+inline void code_text(const char* id, const std::string& text, ImVec2 size) {
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, kBackground);
+    ImGui::PushStyleColor(ImGuiCol_Border, kLine);
+    begin_mono();
+    ImGui::InputTextMultiline(id, const_cast<char*>(text.c_str()), text.size() + 1, size, ImGuiInputTextFlags_ReadOnly);
+    end_mono();
+    ImGui::PopStyleColor(2);
+}
+
+// A checkbox whose outline shows it can be ticked: `control_outline`, 3:1 on
+// the panels, where the frames' `border` is decorative.
+inline bool checkbox(const char* label, bool* value) {
+    ImGui::PushStyleColor(ImGuiCol_Border, kControlOutline);
+    const bool changed = ImGui::Checkbox(label, value);
+    ImGui::PopStyleColor();
+    return changed;
+}
+
+// A weak line under a checkbox, aligned with its label: what the choice covers.
+inline void checkbox_note(const std::string& text) {
+    const float indent = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x;
+    ImGui::Indent(indent);
+    ImGui::PushStyleColor(ImGuiCol_Text, kTextWeak);
+    text_wrapped(text);
+    ImGui::PopStyleColor();
+    ImGui::Unindent(indent);
+}
 
 // A filter chip: a small pill that toggles, ember while on. True when clicked.
 inline bool chip(const char* label, bool on) {
@@ -92,8 +134,13 @@ inline bool chip(const char* label, bool on) {
 }
 
 // A secondary action that is a link rather than a step: "Page", "Copy",
-// "Open the folder". Info text, no frame until hovered.
+// "Open the folder". Info text, no frame until hovered. At the start of a line
+// its text lines up with the text above it; its hover frame reaches into the margin.
 inline bool text_button(const char* label) {
+    const ImGuiWindow* window = ImGui::GetCurrentWindowRead();
+    if (window->DC.CursorPos.x <= window->Pos.x + window->DC.Indent.x + window->DC.ColumnsOffset.x + 0.5f) {
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() - ImGui::GetStyle().FramePadding.x);
+    }
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, kFrameHovered);
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, kFrameActive);
@@ -125,7 +172,7 @@ inline void state_row(Glyph glyph, const std::string& text, const ImVec4& color 
     draw_glyph(ImGui::GetWindowDrawList(), ImGui::GetCursorScreenPos(), line, glyph);
     ImGui::Indent(indent);
     ImGui::PushStyleColor(ImGuiCol_Text, color);
-    ImGui::TextWrapped("%s", text.c_str());
+    text_wrapped(text);
     ImGui::PopStyleColor();
     ImGui::Unindent(indent);
 }
@@ -135,7 +182,7 @@ inline void state_note(const std::string& text) {
     const float indent = ImGui::GetTextLineHeight() + ImGui::GetStyle().ItemInnerSpacing.x * 2;
     ImGui::Indent(indent);
     ImGui::PushStyleColor(ImGuiCol_Text, kTextWeak);
-    ImGui::TextWrapped("%s", text.c_str());
+    text_wrapped(text);
     ImGui::PopStyleColor();
     ImGui::Unindent(indent);
 }
@@ -174,7 +221,7 @@ inline void end_banner(Tone tone) {
 // A banner of one wrapped text.
 inline void banner(const char* id, Tone tone, const std::string& text) {
     begin_banner(id, tone);
-    ImGui::TextWrapped("%s", text.c_str());
+    text_wrapped(text);
     end_banner(tone);
 }
 
@@ -193,6 +240,30 @@ inline void begin_card(const char* id) {
 
 inline void end_card() { ImGui::EndChild(); }
 
+// A list row (docs/ui-design-system.md, "List row"): a selectable `lines`
+// lines high, hover `raised`, the selection ember at 16 % with a 3 px ember
+// bar at its left edge, as the sidebar draws its page. The caller draws the
+// glyph, the name (draw_strong) and the lines under it from row_text_x.
+inline bool list_row(const char* id, bool selected, int lines) {
+    const float pad = ImGui::GetStyle().FramePadding.y;
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, selected ? ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered) : kRaised);
+    const bool clicked = ImGui::Selectable(id, selected, ImGuiSelectableFlags_None,
+                                           ImVec2(0, ImGui::GetTextLineHeight() * static_cast<float>(lines) + pad * 2));
+    ImGui::PopStyleColor();
+    if (selected) {
+        const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+        const float bar = std::round(3.0f * ImGui::GetFontSize() / 17.0f);
+        ImGui::GetWindowDrawList()->AddRectFilled(min, ImVec2(min.x + bar, max.y), ImGui::GetColorU32(kEmber));
+    }
+    return clicked;
+}
+
+// Where a row's glyph and text start: the glyph past the bar, the text past the glyph.
+inline float row_glyph_x(ImVec2 row) { return row.x + std::round(6.0f * ImGui::GetFontSize() / 17.0f); }
+inline float row_text_x(ImVec2 row) {
+    return row_glyph_x(row) + ImGui::GetTextLineHeight() + ImGui::GetStyle().ItemInnerSpacing.x * 2;
+}
+
 // Facts as names and values: the name weak in its own column.
 inline bool begin_facts(const char* id) {
     if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_NoSavedSettings)) return false;
@@ -204,9 +275,9 @@ inline bool begin_facts(const char* id) {
 inline void fact(const char* name, const std::string& value) {
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
-    ImGui::TextDisabled("%s", name);
+    ImGui::TextColored(kTextWeak, "%s", name);
     ImGui::TableNextColumn();
-    ImGui::TextWrapped("%s", value.c_str());
+    text_wrapped(value);
 }
 
 inline void end_facts() { ImGui::EndTable(); }

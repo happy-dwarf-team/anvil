@@ -20,8 +20,9 @@ namespace {
 
 using i18n::tr;
 using i18n::trf;
+using i18n::trn;
 
-void wrapped(const std::string& text) { ImGui::TextWrapped("%s", text.c_str()); }
+void wrapped(const std::string& text) { text_wrapped(text); }
 
 void colored_wrapped(const ImVec4& color, const std::string& text) {
     ImGui::PushStyleColor(ImGuiCol_Text, color);
@@ -111,7 +112,7 @@ std::string entry_line(const EntryLine& line) {
     if (line.modules > 0) {
         add(trf("{0} of {1} modules on", {std::to_string(line.modules_on), std::to_string(line.modules)}));
     } else if (line.settings > 0) {
-        add(trf("{0} setting(s)", {std::to_string(line.settings)}));
+        add(trn("{0} setting|{0} settings", static_cast<long long>(line.settings)));
     }
     if (line.changed > 0) add(trf("{0} changed", {std::to_string(line.changed)}));
     if (text.empty() && line.changes_game) add(tr("changes the game"));
@@ -166,7 +167,7 @@ void PluginsTab::draw_waiting(const Snapshot& model) {
         const std::string label = p.update_waits.empty() ? p.name : trf("{0} (update to {1})", {p.name, p.update_waits});
         ImGui::SameLine();
         if (ImGui::GetContentRegionAvail().x < button_width(label.c_str())) ImGui::NewLine();
-        if (ImGui::SmallButton((label + "##wait-" + p.id).c_str())) selected = p.id;
+        if (text_button((label + "##wait-" + p.id).c_str())) selected = p.id;
     }
     end_banner(Tone::Warn);
 }
@@ -175,7 +176,7 @@ void PluginsTab::draw_pending(const Snapshot& model, PluginsHost& host) {
     const size_t pending = pending_count(model);
     if (pending == 0) return;
     begin_banner("pending", Tone::Info);
-    ImGui::TextUnformatted(trf("{0} change(s) wait for the next start.", {std::to_string(pending)}).c_str());
+    ImGui::TextUnformatted(trn("{0} change waits for the next start.|{0} changes wait for the next start.", static_cast<long long>(pending)).c_str());
     ImGui::SameLine();
     ImGui::BeginDisabled(host.read_only());
     if (text_button(tr("Undo them"))) host.apply(undo_pending(model));
@@ -250,7 +251,7 @@ void PluginsTab::draw_list(const Snapshot& model, PluginsHost& host) {
         ImGui::AlignTextToFramePadding();
         weak(trf("{0} of {1} plugins", {std::to_string(shown), std::to_string(model.plugins.size())}));
         ImGui::SameLine();
-        if (ImGui::SmallButton(tr("Clear"))) {
+        if (text_button(tr("Clear"))) {
             find.clear();
             chips = 0;
         }
@@ -307,20 +308,13 @@ void PluginsTab::draw_list(const Snapshot& model, PluginsHost& host) {
             const bool third = match.where == Match::Where::Module || match.where == Match::Where::Setting;
             const float pad = ImGui::GetStyle().FramePadding.y;
             const ImVec2 at = ImGui::GetCursorScreenPos();
-            if (ImGui::Selectable(("##entry-" + p.id).c_str(), p.id == selected, ImGuiSelectableFlags_None,
-                                  ImVec2(0, line * (third ? 3 : 2) + pad * 2))) {
-                selected = p.id;
-            }
+            if (list_row(("##entry-" + p.id).c_str(), p.id == selected, third ? 3 : 2)) selected = p.id;
             if (ImGui::IsItemHovered()) ImGui::SetItemTooltip("%s", (p.id + " " + p.version).c_str());
             ImDrawList* draw = ImGui::GetWindowDrawList();
-            const float x = at.x + line + ImGui::GetStyle().ItemInnerSpacing.x * 2;
-            draw_glyph(draw, ImVec2(at.x + 2, at.y + pad), line, v.glyph);
-            const ImU32 name_color = ImGui::GetColorU32(v.load.loads ? kText : kTextWeak);
-            draw->AddText(ImVec2(x, at.y + pad), name_color, p.name.c_str());
-            if (v.pending > 0) {
-                const float w = ImGui::CalcTextSize(p.name.c_str()).x;
-                draw_pending_dot(draw, ImVec2(x + w + line * 0.5f, at.y + pad + line * 0.5f), line * 0.18f);
-            }
+            const float x = row_text_x(at);
+            draw_glyph(draw, ImVec2(row_glyph_x(at), at.y + pad), line, v.glyph);
+            const float w = draw_strong(draw, ImVec2(x, at.y + pad), ImGui::GetColorU32(v.load.loads ? kText : kTextWeak), p.name.c_str());
+            if (v.pending > 0) draw_pending_dot(draw, ImVec2(x + w + line * 0.5f, at.y + pad + line * 0.5f), line * 0.18f);
             draw->AddText(ImVec2(x, at.y + pad + line), ImGui::GetColorU32(entry_color(v.line)), entry_line(v.line).c_str());
             if (third) {
                 const std::string where = match.where == Match::Where::Module ? trf("found in module: {0}", {match.what})
@@ -345,7 +339,7 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
     glyph_item(v.glyph);
     ImGui::SameLine();
     ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(p.name.c_str());
+    strong(p.name.c_str());
     ImGui::SameLine();
     weak(p.version);
     ImGui::SameLine(0, ImGui::GetStyle().ItemSpacing.x * 3);
@@ -396,7 +390,7 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
                                        : (through.empty() ? trf("Needs {0}, which does not load, so it does not load either.", {name})
                                                           : trf("Needs {0} (through {1}), which does not load, so it does not load either.", {name, through}));
         begin_banner("needs", Tone::Warn);
-        ImGui::TextWrapped("%s", text.c_str());
+        text_wrapped(text);
         const Chain chain = turn_on_chain(model, p.id);
         if (!chain.steps.empty()) {
             std::vector<std::string> others;
@@ -496,14 +490,15 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
             ImGui::TextColored(kInfo, "%s", tr("at the next start"));
         }
     };
-    // Its name, what it does, then its switch: a checkbox, or where it runs when it changes the game.
+    // Its name, what it does, then its switch: a checkbox, or where it runs when it
+    // changes the game. Every name, description and control under it starts in one
+    // column: past the checkbox's box.
+    const float column = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x;
     const auto describe = [&] {
-        if (mod.description.empty()) return;
-        ImGui::Indent();
-        weak_wrapped(mod.description);
-        ImGui::Unindent();
+        if (!mod.description.empty()) weak_wrapped(mod.description);
     };
     if (mod.changes_game) {
+        ImGui::Indent(column);
         ImGui::BeginDisabled(disabled);
         ImGui::TextUnformatted(mod.name.c_str());
         ImGui::EndDisabled();
@@ -514,16 +509,16 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
     } else {
         bool on = mod.saved.on;
         ImGui::BeginDisabled(disabled);
-        if (ImGui::Checkbox(mod.name.c_str(), &on)) host.apply(set_switch(p, mod.id, Which::On, on));
+        if (checkbox(mod.name.c_str(), &on)) host.apply(set_switch(p, mod.id, Which::On, on));
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetItemTooltip("%s", (p.id + "." + mod.id).c_str());
         in_game();
+        ImGui::Indent(column);
         describe();
     }
     const SettingsLayout layout = settings_layout(p, mod.id);
     const size_t n = layout.shown.size() + layout.advanced.size();
     if (n > 0) {
-        ImGui::Indent();
         if (mod.saved.on) {
             draw_settings_of(model, i, mod.id, disabled, host);
         } else if (ImGui::TreeNode(trf("Settings ({0}), kept while it is off", {std::to_string(n)}).c_str())) {
@@ -533,13 +528,13 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
         const std::vector<Edit> reset = reset_module_settings(p, mod.id);
         if (reset.size() > 1) {
             ImGui::BeginDisabled(disabled);
-            if (ImGui::SmallButton(trf("Reset settings ({0})...", {std::to_string(reset.size())}).c_str())) {
+            if (text_button(trf("Reset settings ({0})...", {std::to_string(reset.size())}).c_str())) {
                 ask_edits(model, host, trf("Reset the settings of {0}", {mod.name}), tr("Reset"), reset);
             }
             ImGui::EndDisabled();
         }
-        ImGui::Unindent();
     }
+    ImGui::Unindent(column);
     ImGui::Spacing();
     ImGui::PopID();
 }
@@ -612,7 +607,7 @@ void PluginsTab::draw_setting(const Snapshot& model, size_t i, size_t s, bool di
         ImGui::TextColored(kInfo, "%s", changed.c_str());
         ImGui::SameLine();
         ImGui::BeginDisabled(disabled || locked);
-        if (ImGui::SmallButton(tr("Reset"))) host.apply(reset_setting(p, snap.name));
+        if (text_button(tr("Reset"))) host.apply(reset_setting(p, snap.name));
         ImGui::EndDisabled();
     }
     ImGui::PopID();
@@ -656,7 +651,7 @@ void PluginsTab::ask_edits(const Snapshot& model, const PluginsHost& host, std::
 void PluginsTab::ask_turn_on(const Snapshot& model, const Chain& chain) {
     Confirm c;
     std::vector<Edit> edits = edits_of(model, chain);
-    c.title = trf("Turn on {0} plugin(s)", {std::to_string(edits.size())});
+    c.title = trn("Turn on {0} plugin|Turn on {0} plugins", static_cast<long long>(edits.size()));
     c.button = c.title;
     for (const Chain::Step& step : chain.steps) {
         c.lines.push_back(step.needed_by.empty() ? name_of(model, step.id)

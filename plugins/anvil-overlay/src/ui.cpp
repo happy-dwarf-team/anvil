@@ -47,6 +47,7 @@ namespace {
 using anvil::i18n::N_;
 using anvil::i18n::tr;
 using anvil::i18n::trf;
+using anvil::i18n::trn;
 
 enum class Tab { None, Plugins, Crash, Log };
 
@@ -141,7 +142,7 @@ void say(std::string text, bool error) {
 
 // A translated text as one ImGui line or a wrapped one.
 void line(const std::string& text) { ImGui::TextUnformatted(text.c_str()); }
-void wrapped(const std::string& text) { ImGui::TextWrapped("%s", text.c_str()); }
+void wrapped(const std::string& text) { anvil::ui::text_wrapped(text); }
 void weak(const std::string& text) { ImGui::TextDisabled("%s", text.c_str()); }
 void weak_wrapped(const std::string& text) {
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
@@ -702,7 +703,7 @@ void draw_panel_switches() {
     shared().panels.each([](AnvilPanel& panel) {
         bool shown = panel.shown;
         ImGui::PushID(static_cast<int>(panel.index));
-        if (ImGui::Checkbox(panel.title.c_str(), &shown)) shared().panels.set_shown_locked(panel, shown);
+        if (anvil::ui::checkbox(panel.title.c_str(), &shown)) shared().panels.set_shown_locked(panel, shown);
         ImGui::PopID();
         ImGui::SameLine();
     });
@@ -775,7 +776,7 @@ void draw_notice(const Notice& notice, bool* closed, float& y, int index) {
             ImGui::SameLine(right - button);
             if (ImGui::SmallButton("x")) *closed = true;
         }
-        for (const std::string& line : notice.lines) ImGui::TextWrapped("%s", line.c_str());
+        for (const std::string& line : notice.lines) anvil::ui::text_wrapped(line);
         // The steps as buttons, the links as text buttons.
         bool first = true;
         for (const NoticeAction& action : notice.actions) {
@@ -889,15 +890,20 @@ void draw_badge(ULONGLONG now) {
 
 // The game the player is in, as a whole sentence (the words differ by language).
 std::string session_text(const AnvilControlStatus& s) {
-    const char* mode = s.ironman && s.multiplayer ? (s.gameplay_active > 0 ? N_("In an ironman multiplayer game; {0} gameplay plugin(s) act ({1}).")
-                                                                           : N_("In an ironman multiplayer game; no gameplay plugin acts."))
-                       : s.ironman ? (s.gameplay_active > 0 ? N_("In an ironman game; {0} gameplay plugin(s) act ({1}).")
-                                                            : N_("In an ironman game; no gameplay plugin acts."))
-                       : s.multiplayer ? (s.gameplay_active > 0 ? N_("In a multiplayer game; {0} gameplay plugin(s) act ({1}).")
-                                                                : N_("In a multiplayer game; no gameplay plugin acts."))
-                                       : (s.gameplay_active > 0 ? N_("In a single-player game; {0} gameplay plugin(s) act ({1}).")
-                                                                : N_("In a single-player game; no gameplay plugin acts."));
-    return trf(mode, {std::to_string(s.gameplay_active), s.gameplay_hash});
+    if (s.gameplay_active > 0) {
+        const char* mode = s.ironman && s.multiplayer ? N_("In an ironman multiplayer game; {0} gameplay plugin acts ({1}).|"
+                                                           "In an ironman multiplayer game; {0} gameplay plugins act ({1}).")
+                           : s.ironman ? N_("In an ironman game; {0} gameplay plugin acts ({1}).|In an ironman game; {0} gameplay plugins act ({1}).")
+                           : s.multiplayer ? N_("In a multiplayer game; {0} gameplay plugin acts ({1}).|"
+                                                "In a multiplayer game; {0} gameplay plugins act ({1}).")
+                                           : N_("In a single-player game; {0} gameplay plugin acts ({1}).|"
+                                                "In a single-player game; {0} gameplay plugins act ({1}).");
+        return trn(mode, static_cast<long long>(s.gameplay_active), {s.gameplay_hash});
+    }
+    return tr(s.ironman && s.multiplayer ? N_("In an ironman multiplayer game; no gameplay plugin acts.")
+              : s.ironman                ? N_("In an ironman game; no gameplay plugin acts.")
+              : s.multiplayer            ? N_("In a multiplayer game; no gameplay plugin acts.")
+                                         : N_("In a single-player game; no gameplay plugin acts."));
 }
 
 // The game's own restart through anvil-game (ADR 0012), after a confirmation
@@ -955,7 +961,8 @@ void draw_status_lines() {
                           trf("Safe mode: the last {0} starts ended before the game was ready.", {std::to_string(s.unfinished_starts)}));
     } else if (s.unfinished_starts > 0) {
         anvil::ui::banner("unfinished", Tone::Warn,
-                          trf("{0} earlier start(s) ended before the game was ready.", {std::to_string(s.unfinished_starts)}));
+                          trn("{0} earlier start ended before the game was ready.|{0} earlier starts ended before the game was ready.",
+                              static_cast<long long>(s.unfinished_starts)));
     }
     if (u.latest && s.anvil_version != nullptr && anvil::net::newer_release(u.latest->tag, s.anvil_version)) {
         anvil::ui::begin_banner("release", Tone::Info);
@@ -979,7 +986,7 @@ void draw_status_lines() {
     if (any_panel) draw_panel_switches();
     if (!u.warnings.empty() && ImGui::TreeNode((trf("Warnings ({0})", {std::to_string(u.warnings.size())}) + "###warnings").c_str())) {
         if (ImGui::BeginChild("warnings", ImVec2(0.0f, ImGui::GetTextLineHeightWithSpacing() * 5.0f), ImGuiChildFlags_Borders)) {
-            for (const std::string& w : u.warnings) ImGui::TextWrapped("%s", w.c_str());
+            for (const std::string& w : u.warnings) anvil::ui::text_wrapped(w);
         }
         ImGui::EndChild();
         ImGui::TreePop();
@@ -1104,7 +1111,7 @@ void setting_control(size_t i, size_t s) {
     switch (info.type) {
     case ANVIL_CONTROL_SETTING_BOOL: {
         bool value = saved == "true";
-        if (ImGui::Checkbox(label, &value)) {
+        if (anvil::ui::checkbox(label, &value)) {
             AnvilControlValue v{value ? 1 : 0, 0.0, nullptr};
             report(control.set(plugin, id, v));
         }
@@ -1182,7 +1189,7 @@ void setting_control(size_t i, size_t s) {
         ImGui::TextUnformatted(label);
         if (!saved.empty()) {
             ImGui::SameLine();
-            if (ImGui::SmallButton(tr("Clear"))) {
+            if (anvil::ui::text_button(tr("Clear"))) {
                 AnvilControlValue v{0, 0.0, nullptr};
                 report(control.set(plugin, id, v));
             }
@@ -1320,21 +1327,13 @@ void draw_crash() {
         }
     }
     ImGui::Spacing();
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, anvil::ui::kPanel);
-    const bool shown = ImGui::BeginChild("report", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
-    ImGui::PopStyleColor();
-    if (shown) {
-        anvil::ui::begin_mono();
-        ImGui::TextUnformatted(c.report.data(), c.report.data() + c.report.size());
-        anvil::ui::end_mono();
-    }
-    ImGui::EndChild();
+    anvil::ui::code_text("##report", c.report, ImVec2(-1.0f, -1.0f));
 }
 
 void draw_log() {
     Ui& u = ui();
     const ULONGLONG now = GetTickCount64();
-    ImGui::Checkbox(tr("Follow"), &u.log_follow);
+    anvil::ui::checkbox(tr("Follow"), &u.log_follow);
     ImGui::SameLine();
     const bool refresh_now = anvil::ui::text_button(tr("Refresh"));
     ImGui::SameLine();

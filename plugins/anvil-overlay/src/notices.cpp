@@ -199,7 +199,7 @@ std::vector<Notice> start_notices(const StartFacts& facts) {
     for (const ModRow& m : facts.mod_plugins) {
         if (!m.waiting()) continue;
         const std::string what = m.state == "update-pending" ? trf("an update; the approved {0} runs", {m.approved_version})
-                                 : m.state == "conflict"     ? trf("the same id as mod(s) {0}", {m.others})
+                                 : m.state == "conflict"     ? trf("the same id as a plugin in {0}", {m.others})
                                                              : std::string(tr("new"));
         waiting.push_back(trf("{0} from mod '{1}': {2}", {m.id + (m.version.empty() ? "" : " " + m.version), m.mod, what}));
     }

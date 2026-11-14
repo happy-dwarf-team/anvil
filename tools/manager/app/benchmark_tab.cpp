@@ -48,7 +48,7 @@ std::string text_of(const Json& v) {
 }
 
 // `one` and `many` hold {0} for the number.
-std::string plural(int64_t n, const char* one, const char* many) { return trf(n == 1 ? one : many, {std::to_string(n)}); }
+std::string plural(int64_t n, const char* forms) { return i18n::trn(forms, n); }
 
 // Chips that wrap at the end of the line.
 void chip(const std::string& label, const ImVec4& color, bool& first, float right_edge) {
@@ -203,12 +203,12 @@ void BenchmarkTab::draw_setup(const BenchmarkContext& context) {
     }
     if (checked_report_ != context.report || checked_plugin_ != plugin_) check(context);
 
-    // The series' two choices as facts: the plugin compared and the warm starts per arm.
+    // The series' two choices as facts: the plugin compared and the warm starts it needs with and without it.
     if (begin_facts("series")) {
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
         ImGui::AlignTextToFramePadding();
-        ImGui::TextDisabled("%s", tr("Compare"));
+        ImGui::TextColored(::anvil::ui::kTextWeak, "%s", tr("Compare"));
         ImGui::TableNextColumn();
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16);
         if (ImGui::BeginCombo("##compare", plugin_.c_str())) {
@@ -221,7 +221,7 @@ void BenchmarkTab::draw_setup(const BenchmarkContext& context) {
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
         ImGui::AlignTextToFramePadding();
-        ImGui::TextDisabled("%s", tr("Valid warm starts per arm:"));
+        ImGui::TextColored(::anvil::ui::kTextWeak, "%s", tr("Valid warm starts"));
         ImGui::TableNextColumn();
         const std::string labels[] = {std::to_string(kTargets[0]), std::to_string(kTargets[1]), std::to_string(kTargets[2])};
         const char* names[] = {labels[0].c_str(), labels[1].c_str(), labels[2].c_str()};
@@ -231,17 +231,37 @@ void BenchmarkTab::draw_setup(const BenchmarkContext& context) {
             target_ = kTargets[chosen];
         }
         ImGui::SameLine();
-        weak(trf("about {0} starts, about {1} minutes",
+        weak(trf("each without and with the plugin; about {0} starts in all, about {1} minutes",
                  {std::to_string(2 * target_), std::to_string((2 * target_ * kSecondsPerStart + 59) / 60)}));
         end_facts();
     }
 
-    // The checks as states: a tick, or the problem's glyph and what fixes it under it.
+    // The checks as states: each problem with its glyph and what fixes it, then
+    // the checks that pass in one line, which unfolds (ui-guidelines §2: the usual is quiet).
     ImGui::Spacing();
     ImGui::SeparatorText(tr("Before the series"));
+    size_t passing = 0;
     for (const SetupCheck& c : checks_) {
-        state_row(c.ok ? ::anvil::ui::Glyph::On : c.blocks ? ::anvil::ui::Glyph::CannotLoad : ::anvil::ui::Glyph::Attention, c.text);
-        if (!c.ok) state_note(c.fix);
+        if (c.ok) {
+            ++passing;
+            continue;
+        }
+        state_row(c.blocks ? ::anvil::ui::Glyph::CannotLoad : ::anvil::ui::Glyph::Attention, c.text);
+        state_note(c.fix);
+    }
+    if (passing > 0) {
+        const std::string passed = passing == checks_.size()
+                                       ? i18n::trn("Ready: {0} check passes.|Ready: all {0} checks pass.", static_cast<long long>(passing))
+                                       : i18n::trn("{0} other check passes.|{0} other checks pass.", static_cast<long long>(passing));
+        state_row(::anvil::ui::Glyph::On, passed);
+        ImGui::Indent(ImGui::GetTextLineHeight() + ImGui::GetStyle().ItemInnerSpacing.x * 2);
+        if (ImGui::TreeNode("passed", "%s", tr("Show them"))) {
+            for (const SetupCheck& c : checks_) {
+                if (c.ok) ::anvil::ui::state_row(::anvil::ui::Glyph::On, c.text, ::anvil::ui::kTextWeak);
+            }
+            ImGui::TreePop();
+        }
+        ImGui::Unindent(ImGui::GetTextLineHeight() + ImGui::GetStyle().ItemInnerSpacing.x * 2);
     }
     ImGui::Spacing();
     wrapped(tr("Please leave the computer alone while the series runs. Keyboard and mouse use is recorded next to "
@@ -285,7 +305,7 @@ void BenchmarkTab::draw_kept(const BenchmarkContext& context) {
         ImGui::TextUnformatted(k.sent ? tr("sent") : "");
         ImGui::TableNextColumn();
         ImGui::BeginDisabled(!k.readable);
-        if (ImGui::SmallButton(tr("Open"))) {
+        if (text_button(tr("Open"))) {
             std::string error;
             const auto text = read_text_file(k.file, 1 << 20);
             if (auto doc = text ? parse_json(*text, error) : std::nullopt) {
@@ -446,7 +466,7 @@ void BenchmarkTab::draw_running() {
     weak(phase);
 
     ImGui::Spacing();
-    ImGui::TextUnformatted(tr("Valid warm starts per arm"));
+    ImGui::TextUnformatted(tr("Valid warm starts, without and with the plugin"));
     for (const Arm a : {Arm::Without, Arm::With}) {
         const std::string label = std::to_string(s.warm(a)) + " / " + std::to_string(s.target());
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 12);
@@ -514,8 +534,8 @@ void BenchmarkTab::draw_result() {
         if (from_series_ && !series_note_.empty()) weak_wrapped(series_note_);
         end_banner(Tone::Warn);
     }
-    weak_wrapped(trf("{0}, {1} of {2} extra starts used, target {3} valid warm starts per arm.",
-             {plural(static_cast<int64_t>(r["starts"].items().size()), N_("{0} start"), N_("{0} starts")),
+    weak_wrapped(trf("{0}, {1} of {2} extra starts used, target {3} valid warm starts without and with the plugin each.",
+             {plural(static_cast<int64_t>(r["starts"].items().size()), N_("{0} start|{0} starts")),
               std::to_string(result["extra_starts_used"].as_integer()), std::to_string(kMaxExtraStarts),
               std::to_string(series["target"].as_integer())}));
 
@@ -633,7 +653,7 @@ void BenchmarkTab::draw_preview() {
     const Json& r = *report_;
     const Json& result = r["result"];
     ImGui::Spacing();
-    if (ImGui::SmallButton(tr("< Result"))) screen_ = Screen::Result;
+    if (text_button(tr("< Result"))) screen_ = Screen::Result;
     ImGui::SameLine();
     ImGui::TextUnformatted(tr("The report, exactly as it is sent"));
 
@@ -650,11 +670,9 @@ void BenchmarkTab::draw_preview() {
         line += "; " + signed_difference(result["difference"]["ms"].as_number(), result["difference"]["percent"].as_number());
     }
     wrapped(line + ".");
-    weak(plural(static_cast<int64_t>(r["starts"].items().size()), N_("{0} start"), N_("{0} starts")) + ", " +
-         plural(static_cast<int64_t>(result["cold"]["starts"].items().size()), N_("{0} cold start"), N_("{0} cold starts")) +
-         ", " +
-         plural(static_cast<int64_t>(result["not_counted"].items().size()), N_("{0} start that does not count"),
-                N_("{0} starts that do not count")) +
+    weak(plural(static_cast<int64_t>(r["starts"].items().size()), N_("{0} start|{0} starts")) + ", " +
+         plural(static_cast<int64_t>(result["cold"]["starts"].items().size()), N_("{0} cold start|{0} cold starts")) + ", " +
+         plural(static_cast<int64_t>(result["not_counted"].items().size()), N_("{0} start that does not count|{0} starts that do not count")) +
          ".");
 
     ImGui::SeparatorText(tr("Your computer"));
@@ -675,7 +693,7 @@ void BenchmarkTab::draw_preview() {
                  std::to_string(m["files"].as_integer()), std::to_string(m["size_mb"].as_integer())}));
     bool include = include_ids_;
     ImGui::BeginDisabled(sent_ || sending_.valid() || !workshop_ids_);
-    if (ImGui::Checkbox(tr("Include the Workshop ids of my mods"), &include)) switch_workshop_ids(include);
+    if (::anvil::ui::checkbox(tr("Include the Workshop ids of my mods"), &include)) switch_workshop_ids(include);
     ImGui::EndDisabled();
     if (m["workshop_ids"].is_array()) {
         std::vector<std::string> ids;
@@ -805,9 +823,7 @@ void BenchmarkTab::draw_preview() {
 
     ImGui::Spacing();
     if (ImGui::CollapsingHeader((std::string(tr("Show the JSON")) + "###json-header").c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
-        begin_mono();
-        ImGui::InputTextMultiline("##json", &report_text_, ImVec2(-1, ImGui::GetTextLineHeight() * 18), ImGuiInputTextFlags_ReadOnly);
-        end_mono();
+        ::anvil::ui::code_text("##json", report_text_, ImVec2(-1, ImGui::GetTextLineHeight() * 18));
         weak_wrapped(tr("These are exactly the bytes kept on this computer, sent and copied."));
     }
     draw_send();

@@ -146,13 +146,11 @@ struct ManagerApp::PluginsHost final : mui::PluginsHost {
         const cli::GameReport& report = *app.snapshot_->report;
         return origin == mui::Origin::FromMod && (!report.mod_warnings.empty() || !report.playset_found);
     }
-    void draw_section_note(mui::Origin origin, const mui::SectionCounts& counts) override {
+    void draw_section_note(mui::Origin origin, const mui::SectionCounts&) override {
         if (origin != mui::Origin::FromMod) return;
+        // The header counts what waits and what cannot load (docs/ui-design-system.md,
+        // "Section header"); only the playset's warnings are added here.
         const cli::GameReport& report = *app.snapshot_->report;
-        std::string summary = trf("{0} plugin(s) in {1} enabled mod(s)", {std::to_string(counts.plugins), std::to_string(report.enabled_mods)});
-        if (counts.waits_for_approval > 0) summary += ", " + trf("{0} waiting for approval", {std::to_string(counts.waits_for_approval)});
-        if (counts.cannot_load > 0) summary += ", " + trf("{0} cannot load", {std::to_string(counts.cannot_load)});
-        weak_wrapped(summary);
         if (!report.playset_found || !report.mod_warnings.empty()) {
             begin_banner("playset", Tone::Warn);
             if (!report.playset_found) wrapped(trf("No dlc_load.json in {0}: no mods are enabled.", {report.user_dir}));

@@ -60,7 +60,7 @@ inline void log_chips(const std::vector<LogLine>& lines, LogFilter& filter) {
     if (chip((i18n::trf("Errors ({0})", {std::to_string(errors)}) + "##errors").c_str(), filter.errors)) filter.errors = !filter.errors;
 }
 
-// The lines that pass `filter` in a bordered child that fills the rest of the
+// The lines that pass `filter` in the code view that fills the rest of the
 // view; `to_end` scrolls to the last line once.
 inline void log_lines(const char* id, const std::vector<LogLine>& lines, const LogFilter& filter, bool to_end) {
     std::vector<size_t> rows;
@@ -68,9 +68,11 @@ inline void log_lines(const char* id, const std::vector<LogLine>& lines, const L
     for (size_t i = 0; i < lines.size(); ++i) {
         if (filter.shows(lines[i].level)) rows.push_back(i);
     }
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, kPanel);
+    // The code view (forge_widgets.hpp, code_text): bg0 with a line hairline.
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, kBackground);
+    ImGui::PushStyleColor(ImGuiCol_Border, kLine);
     const bool open = ImGui::BeginChild(id, ImVec2(0, 0), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
-    ImGui::PopStyleColor();
+    ImGui::PopStyleColor(2);
     if (open) {
         begin_mono();
         const float line = ImGui::GetTextLineHeight();

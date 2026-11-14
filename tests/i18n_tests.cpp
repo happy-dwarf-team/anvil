@@ -1,7 +1,7 @@
 // The player's language (issue #158): messages by code, their English words,
 // the language chosen from EU4's settings (and with Mei from Steam or Windows),
 // and the catalogs, which must translate every text the overlay and the
-// Manager mark (tr, trf, N_) with the same placeholders and only characters
+// Manager mark (tr, trf, trn, N_) with the same placeholders and only characters
 // their fonts have: the Latin font's, or for Chinese, Japanese and Korean
 // those of the language's font in src/i18n/fonts, read with ImGui's own
 // stb_truetype.
@@ -19,6 +19,7 @@
 #include <imstb_truetype.h>
 #pragma warning(pop)
 
+#include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
@@ -67,11 +68,11 @@ bool in_fonts(uint32_t cp) {
            (cp >= 0x2018 && cp <= 0x201E) || cp == 0x2022 || cp == 0x2026;
 }
 
-// The C string literals right after tr(, trf( and N_( in a source file,
+// The C string literals right after tr(, trf(, trn( and N_( in a source file,
 // adjacent literals joined, escapes resolved.
 std::vector<std::string> marked_texts(const std::string& source) {
     std::vector<std::string> out;
-    for (const std::string_view call : {"tr(", "trf(", "N_("}) {
+    for (const std::string_view call : {"tr(", "trf(", "trn(", "N_("}) {
         for (size_t at = source.find(call); at != std::string::npos; at = source.find(call, at + 1)) {
             if (at > 0) {
                 const char before = source[at - 1];
@@ -350,6 +351,69 @@ int main(int argc, char** argv) {
         set_language(Language::English);
     });
 
+    run("plural forms follow each language's rules", [] {
+        CHECK(plural_form(Language::English, 1) == 0 && plural_form(Language::English, 0) == 1 && plural_form(Language::English, 2) == 1);
+        CHECK(plural_form(Language::French, 0) == 0 && plural_form(Language::French, 1) == 0 && plural_form(Language::French, 2) == 1);
+        for (const long long n : {1LL}) CHECK(plural_form(Language::Polish, n) == 0);
+        for (const long long n : {2LL, 3LL, 4LL, 22LL, 104LL}) CHECK(plural_form(Language::Polish, n) == 1);
+        for (const long long n : {0LL, 5LL, 11LL, 12LL, 14LL, 21LL, 112LL}) CHECK(plural_form(Language::Polish, n) == 2);
+        CHECK(plural_form(Language::Japanese, 1) == 0 && plural_form(Language::Japanese, 7) == 0);
+        CHECK(trn(Language::English, "{0} setting|{0} settings", 1) == "1 setting");
+        CHECK(trn(Language::English, "{0} setting|{0} settings", 3) == "3 settings");
+        CHECK(trn(Language::English, "{0} change in {1}|{0} changes in {1}", 2, {"x"}) == "2 changes in x");
+        // A text no catalog has stays English, with the English rule.
+        CHECK(trn(Language::Polish, "{0} zork|{0} zorks", 3) == "3 zorks");
+    });
+
+    // The Catalog page shows the plugin catalog's summaries and notes in the
+    // player's language: the CJK fonts carry their characters too
+    // (tools/i18n/cjk-fonts.py), so they are not drawn with Windows' fallback font.
+    run("CJK fonts: the plugin catalog's texts", [&] {
+        const std::string json = read_file(root / "catalog" / "plugins.json");
+        CHECK(!json.empty());
+        for (const Language l : kLanguages) {
+            if (!is_cjk(l)) continue;
+            const TrueType font(cjk_font(l));
+            const std::string key = "\"" + std::string(language_code(l)) + "\": {";
+            size_t blocks = 0;
+            for (size_t at = json.find(key); at != std::string::npos; at = json.find(key, at + 1)) {
+                ++blocks;
+                const size_t end = json.find('}', at);
+                for (const uint32_t cp : code_points(std::string_view(json).substr(at, end - at))) {
+                    if (cp >= 0x80 && !in_fonts(cp) && !font.has(cp)) {
+                        std::printf("  %s: U+%04X of catalog/plugins.json is not in the font\n", name_of(l), cp);
+                        CHECK(false);
+                    }
+                }
+            }
+            CHECK(blocks > 0);
+        }
+    });
+
+    // The Manager's About quotes the overlay's setting and its options in the
+    // overlay's own words (plugins/anvil-overlay/translations), which differ from
+    // the catalogs' "On" and "Off" in some languages.
+    run("About quotes the overlay's release setting in the overlay's words", [&] {
+        const char* sentence = "The game follows this answer unless the Anvil panel's setting \"Check for new Anvil releases\" says On or Off.";
+        for (const Language l : kLanguages) {
+            if (l == Language::English) continue;
+            const std::string toml = read_file(root / "plugins" / "anvil-overlay" / "translations" / (std::string(language_code(l)) + ".toml"));
+            const std::string translated = tr(l, sentence);
+            for (const char* english : {"Check for new Anvil releases", "On", "Off"}) {
+                const std::string key = "\n\"" + std::string(english) + "\" = \"";
+                const size_t at = toml.find(key);
+                CHECK(at != std::string::npos);
+                if (at == std::string::npos) continue;
+                const size_t begin = at + key.size();
+                const std::string words = toml.substr(begin, toml.find('"', begin) - begin);
+                if (translated.find(words) == std::string::npos) {
+                    std::printf("  %s: About does not quote the overlay's \"%s\"\n", name_of(l), words.c_str());
+                    CHECK(false);
+                }
+            }
+        }
+    });
+
     const std::set<std::string> keys = catalog_keys(root);
     run("the sources mark their texts", [&] {
         CHECK(keys.size() > 300);
@@ -398,6 +462,14 @@ int main(int argc, char** argv) {
                 if (translated.empty()) {
                     std::printf("  %s: empty: %s\n", name_of(l), english.c_str());
                     CHECK(false);
+                }
+                // A count's forms: as many as the language has, each with the English placeholders.
+                if (english.find('|') != std::string::npos) {
+                    const size_t forms = static_cast<size_t>(std::count(translated.begin(), translated.end(), '|')) + 1;
+                    if (forms != static_cast<size_t>(plural_forms(l))) {
+                        std::printf("  %s: %zu plural forms, not %d: %s\n", name_of(l), forms, plural_forms(l), english.c_str());
+                        CHECK(false);
+                    }
                 }
                 if (placeholders(english) != placeholders(translated)) {
                     std::printf("  %s: placeholders differ: %s\n", name_of(l), english.c_str());

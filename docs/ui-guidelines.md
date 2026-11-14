@@ -37,9 +37,12 @@ order: what does this do to my game, is it on now, and when does my change take 
   | skipped / failed | did not load: a check refused it / it crashed or returned an error | broken |
 
 - **Translatable as a whole.** Every string goes through `tr` / `trf` as a complete sentence
-  with `{0}` placeholders; never glue translated fragments together. Leave room for German
+  with `{0}` placeholders; never glue translated fragments together. A count takes its
+  plural form from `trn` ("1 setting", "3 settings"), never "setting(s)". Leave room for German
   (about 40 % longer than English) and for CJK line breaking: widths come from
-  `CalcTextSize` of the translated text, as the overlay's "Next start" column does.
+  `CalcTextSize` of the translated text, as the overlay's "Next start" column does, and
+  wrapped text goes through `text_wrapped` (`src/ui/text_wrap.hpp`), which breaks Chinese and
+  Japanese between characters and a path after its separators.
 - **Wrap, do not clip.** Text that carries meaning (a name, a description, a reason) wraps
   to the width it has. A longer explanation sits behind a "More" link or in a tooltip, never
   behind an ellipsis the player cannot open.

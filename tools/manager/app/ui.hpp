@@ -43,7 +43,7 @@ inline std::string u8(const std::filesystem::path& path) {
     return std::string(text.begin(), text.end());
 }
 
-inline void wrapped(const std::string& text) { ImGui::TextWrapped("%s", text.c_str()); }
+inline void wrapped(const std::string& text) { ::anvil::ui::text_wrapped(text); }
 
 inline void colored_wrapped(const ImVec4& color, const std::string& text) {
     ImGui::PushStyleColor(ImGuiCol_Text, color);
