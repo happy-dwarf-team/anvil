@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.23.0](https://github.com/happy-dwarf-team/anvil/compare/v1.22.0...v1.23.0) (2026-11-14)
+
+
+### Features
+
+* **api:** restart the game through the game's own restart ([#362](https://github.com/happy-dwarf-team/anvil/issues/362)) ([fe27e12](https://github.com/happy-dwarf-team/anvil/commit/fe27e1296defc491027054dfe32c2890b940320a))
+* **api:** the player's own and observed tags in anvil-game.world ([#364](https://github.com/happy-dwarf-team/anvil/issues/364)) ([ef610c3](https://github.com/happy-dwarf-team/anvil/commit/ef610c3c4981cd1ba565a0e3dbe3babc55a1ee58))
+* **core:** anvil.control shows the modules, settings and dependencies of plugins that are off ([#377](https://github.com/happy-dwarf-team/anvil/issues/377)) ([e06963c](https://github.com/happy-dwarf-team/anvil/commit/e06963cf86690f21d936b0e3d2b8680f35c1b8d5))
+* **core:** anvil.control writes switches and opt-ins for the next start ([#370](https://github.com/happy-dwarf-team/anvil/issues/370)) ([f130ef1](https://github.com/happy-dwarf-team/anvil/commit/f130ef159f725727a7b3e0fc3006c906146eede1))
+* **core:** record what each start used in data/anvil/last-start.toml ([#369](https://github.com/happy-dwarf-team/anvil/issues/369)) ([1d935d1](https://github.com/happy-dwarf-team/anvil/commit/1d935d19b1837e63438ba50f6856e90761fb3de1))
+* **core:** retired settings can turn a module on and allow it in ironman or multiplayer ([#374](https://github.com/happy-dwarf-team/anvil/issues/374)) ([3ea0b05](https://github.com/happy-dwarf-team/anvil/commit/3ea0b05cac3ea929716395581730b11686848574))
+* **core:** settings that change the game count in the multiplayer code and lock in a multiplayer game ([#373](https://github.com/happy-dwarf-team/anvil/issues/373)) ([d4db69b](https://github.com/happy-dwarf-team/anvil/commit/d4db69bad998a247da7273420f97726f7d30e54b))
+* **log-throttle:** the errors panel shows the game's Context: text and finds its event ([#376](https://github.com/happy-dwarf-team/anvil/issues/376)) ([8269a3b](https://github.com/happy-dwarf-team/anvil/commit/8269a3b08a2775c6a91f752e9bca81bd35b2ef63))
+* **manager:** one Plugins tab on the view model, and a screenshot mode ([#375](https://github.com/happy-dwarf-team/anvil/issues/375)) ([f943441](https://github.com/happy-dwarf-team/anvil/commit/f9434418e7e7c6d8ad099ab78adc4f6baf989c76))
+* **manager:** sidebar shell, Forge title bar and window icon ([#383](https://github.com/happy-dwarf-team/anvil/issues/383)) ([b0af31e](https://github.com/happy-dwarf-team/anvil/commit/b0af31e8e7dc6d9cecb8f6967beba78db5f1ad1a))
+* **manifest:** settings of modules, advanced settings and retired settings ([#367](https://github.com/happy-dwarf-team/anvil/issues/367)) ([7bd1ed3](https://github.com/happy-dwarf-team/anvil/commit/7bd1ed30b21931eb56bbf47b144f203535c64ea0))
+* **overlay:** one Plugins tab, drawn like the Manager's (ADR 0013) ([#382](https://github.com/happy-dwarf-team/anvil/issues/382)) ([79fc8e6](https://github.com/happy-dwarf-team/anvil/commit/79fc8e6c9806f6e8e098051ddad5455fd008bbb8))
+* **ui:** the Forge style for the Manager and the overlay ([#368](https://github.com/happy-dwarf-team/anvil/issues/368)) ([a30ad31](https://github.com/happy-dwarf-team/anvil/commit/a30ad3123f3d938fdbaad88653172c46bd85da06))
+* **ui:** the Plugins tab's view model shared by the Manager and the overlay ([#371](https://github.com/happy-dwarf-team/anvil/issues/371)) ([67c0af1](https://github.com/happy-dwarf-team/anvil/commit/67c0af1c842f23726ffc8f3b38a6ae6e33cb3e7f))
+
+
+### Bug Fixes
+
+* **core:** a module of a plugin that failed before its load answers failed ([#365](https://github.com/happy-dwarf-team/anvil/issues/365)) ([1340dc2](https://github.com/happy-dwarf-team/anvil/commit/1340dc22cffcda184dfb2f8375eeb735555b85ea))
+* **core:** name a crash in a module's change through one plugin set ([#359](https://github.com/happy-dwarf-team/anvil/issues/359)) ([f505a0d](https://github.com/happy-dwarf-team/anvil/commit/f505a0d914e41270f7556a56ea39440ff959adc7))
+* **manager:** a zip whose modules change the game says so before install ([#372](https://github.com/happy-dwarf-team/anvil/issues/372)) ([8cc18c0](https://github.com/happy-dwarf-team/anvil/commit/8cc18c03cefbaadec0dc97f6a31bf05d20312402))
+
 ## [1.22.0](https://github.com/happy-dwarf-team/anvil/compare/v1.21.0...v1.22.0) (2026-11-13)
 
 ### Features
