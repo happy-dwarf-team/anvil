@@ -107,6 +107,17 @@ pre.toml .chg{color:var(--info)}
 .gsep .acts{order:3}
 .note{font-size:12px;color:var(--weak);margin:4px 0}
 .seg.small button{padding:1px 8px;font-size:12px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
+.dlg{background:#1e1e22;border:1px solid #6e6e80;max-width:560px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,.6)}
+.dlg .dt{background:#2a2a30;padding:6px 12px;font-size:12px;color:#ccc}
+.dlg .db{padding:12px}
+.dlg .da{display:flex;gap:8px;justify-content:flex-end;padding:0 12px 12px}
+.dlg ul{margin:6px 0;padding-left:20px}
+.facts{display:grid;grid-template-columns:max-content 1fr;gap:2px 12px;font-size:13px;margin:8px 0}
+.facts .k{color:var(--weak)}
+.banner.warn{background:rgba(245,184,66,.08);border-color:rgba(245,184,66,.4)}
+.li.held{opacity:.6}
+.chg{font-size:11px;padding:0 5px;border-radius:3px;border:1px solid var(--bs);color:#ccc;white-space:nowrap}
 .held{opacity:.55}
 .held .cb.dis{opacity:1}
 .held .seg button:disabled{opacity:1}
@@ -2096,7 +2107,8 @@ const getVal = (pid, s, v = values) => valKey(pid, s) in v ? v[valKey(pid, s)] :
 const setPending = (pid, s) => getVal(pid, s) !== getVal(pid, s, lastValues);
 const settingsOf = (pid, moduleId) => (SETTINGS[pid] || []).filter(s => (s.module || null) === moduleId);
 const show = v => v === true ? 'on' : v === false ? 'off' : String(v);
-const pendingCount = () => items().filter(isPending).length + PLUGINS.flatMap(p => (SETTINGS[p.id] || []).filter(s => setPending(p.id, s))).length;
+const pendingCount = () => items().filter(isPending).length + PLUGINS.flatMap(p => (SETTINGS[p.id] || []).filter(s => setPending(p.id, s))).length
+  + PLUGINS.filter(p => p.fromMod && trustOf(toml, p) !== trustOf(lastStart, p)).length;
 
 // ---- shared bits ---------------------------------------------------------------------
 function cb(label, on, act, key, extra = {}){
@@ -2132,8 +2144,11 @@ function control(pid, s, disabled){
   else c = `<input type="${s.type === 'int' ? 'number' : 'text'}" data-set="${k}" value="${esc(v)}" ${dis}> <span>${esc(s.label)}</span>`;
   const p = setPending(pid, s) ? `<span class="pending">&#9679; at the next start${running ? ` (now ${esc(show(getVal(pid, s, lastValues)))})` : ''}</span>` : '';
   const when = `<span class="weak" style="font-size:12px">${s.restart ? 'next start' : 'applies at once'}</span>`;
-  const reset = v !== s.def && !disabled ? `<button class="small" data-act="reset" data-key="${k}">Reset</button>` : '';
-  return `<div class="set">${c}${help(s.desc)}${p || when}${reset}</div>`;
+  const def = esc(show(s.def) || 'none');
+  // B5: a changed value says so in words and shows the default; the (?) always carries the default.
+  const changed = v !== s.def && variant === 'B5' ? `<span class="chg">changed</span> <span class="weak" style="font-size:12px">default: ${def}</span>` : '';
+  const reset = v !== s.def && !disabled ? `<button class="small" data-act="reset" data-key="${k}" title="Back to ${def}">Reset</button>` : '';
+  return `<div class="set">${c}${help((s.desc ? s.desc + '\n' : '') + (variant === 'B5' ? 'Default: ' + def : ''))}${changed}${p || when}${reset}</div>`;
 }
 function settingsBlock(pid, moduleId, disabled, offNote){
   const list = settingsOf(pid, moduleId);
@@ -2455,7 +2470,7 @@ function useBellows(which){
   ui.bellows = which;
   ui.bellows3 = which !== 'today';
 }
-const bellowsDefault = v => v === 'B3' || v === 'B4' ? 'v3b' : v === 'B2' ? 'v3' : 'today';
+const bellowsDefault = v => v === 'B3' || v === 'B4' || v === 'B5' ? 'v3b' : v === 'B2' ? 'v3' : 'today';
 const ADVANCED = g => g === 'Diagnostics' || g === 'Advanced';
 const groupOpen = (key, g) => ADVANCED(g) ? ui.open.has(key) : !ui.open.has(key);
 const dependents = p => PLUGINS.filter(x => (x.deps || []).includes(p.id) && pluginOn(toml, x)).map(x => x.name);
@@ -2654,15 +2669,210 @@ function variantB4(){
   return `<div class="split"><div class="list">${list}</div><div class="detail">${d}</div></div>`;
 }
 
+// ---- Variant B5: B, fifth iteration ---------------------------------------------------
+// B4 plus: plugins from mods in the same list (approval in the detail), dependencies (a plugin whose
+// dependency is off is greyed with "needs X", and turning it on asks to turn on the whole chain), the
+// overlay cannot turn off itself or what it needs, and settings show their default and reset per
+// setting, per module and per plugin. The two plugins from mods are SAMPLE data, not real mods.
+const MOD_SAMPLES = [
+  {id:'hello', name:'Hello', version:'1.0.0', gameplay:false, ironman:false, mp:false, standard:false,
+   desc:'Sample plugin from a Workshop mod: logs a line at each new month.', modules:[], deps:['anvil-game'],
+   fromMod:{mod:'Hello', workshop:'3290499798', authors:'Sample author', repository:'github.com/example/hello', symbols:0,
+            hash:'5f2c0b17…9a1e', approvedVersion:'', approved:''}},
+  {id:'trade-tweaks', name:'Trade Tweaks', version:'1.1.0', gameplay:false, ironman:false, mp:false, standard:false,
+   desc:'Sample plugin from a Workshop mod: trade node tooltips and an AI trade rule.', deps:['anvil-game','anvil-overlay'],
+   modules:[{id:'node_tooltips', name:'Node tooltips', desc:'Shows in a node\'s tooltip how much value it sends on.', gameplay:false, ironman:false, mp:false, def:true},
+            {id:'ai_merchants', name:'AI merchant steering', desc:'AI merchants follow the richest links.', gameplay:true, ironman:true, mp:false, def:false}],
+   fromMod:{mod:'Trade Tweaks', workshop:'3301122334', authors:'Sample author', repository:'github.com/example/trade-tweaks', symbols:3,
+            hash:'c41d77e0…02bb', approvedVersion:'1.0.2', approved:'2026-11-02'}}];
+const MOD_SETTINGS = {'trade-tweaks':[{name:'tooltip_decimals', type:'int', label:'Decimals in tooltips', def:1, min:0, max:3, group:'', restart:false, desc:'', module:'node_tooltips'}]};
+function useMods(on){
+  PLUGINS = PLUGINS.filter(p => !p.fromMod);
+  for (const id of Object.keys(MOD_SETTINGS)) delete SETTINGS[id];
+  if (!on) return;
+  PLUGINS = PLUGINS.concat(JSON.parse(JSON.stringify(MOD_SAMPLES)));
+  Object.assign(SETTINGS, JSON.parse(JSON.stringify(MOD_SETTINGS)));
+  for (const t of [toml, lastStart]) if (!t.trust) t.trust = {hello:'waits', 'trade-tweaks':'update'};
+}
+const plug = id => PLUGINS.find(p => p.id === id);
+const trustOf = (t, p) => p.fromMod ? (t.trust || {})[p.id] || 'waits' : 'local';
+const depsOf = p => (p.deps || []).map(plug).filter(Boolean);
+// Does it load at the next start (t = toml) or did it at this one (t = lastStart)?
+function loads(t, p, path = []){
+  if (path.includes(p.id) || !pluginOn(t, p) || trustOf(t, p) === 'waits') return false;
+  return depsOf(p).every(d => loads(t, d, path.concat(p.id)));
+}
+// The first dependency that keeps it from loading; .via names the plugins in between.
+function blocker(t, p, path = []){
+  for (const d of depsOf(p)){
+    if (path.includes(d.id)) continue;
+    if (!pluginOn(t, d) || trustOf(t, d) === 'waits') return {...d, via: []};
+    const deeper = blocker(t, d, path.concat(p.id)); if (deeper) return {...deeper, via: [d.name, ...deeper.via]};
+  }
+  return null;
+}
+const viaText = b => b.via.length ? ` (through ${esc(b.via.join(', '))})` : '';
+// The plugins that are off on the way to p (dependencies first), p included when it is off.
+function offChain(p, path = [], out = []){
+  for (const d of depsOf(p)) if (!path.includes(d.id)) offChain(d, path.concat(p.id), out);
+  if (!pluginOn(toml, p) && !out.includes(p)) out.push(p);
+  return out;
+}
+const dependentsAll = p => PLUGINS.filter(x => x !== p && (x.deps || []).includes(p.id) && pluginOn(toml, x));
+// The overlay cannot turn off itself or anything it needs.
+function overlayNeeds(){ const out = new Set(), walk = p => { if (!p || out.has(p.id)) return; out.add(p.id); depsOf(p).forEach(walk); }; walk(plug('anvil-overlay')); return out; }
+const changedSettings = (pid, moduleId) => (SETTINGS[pid] || []).filter(s => (moduleId === undefined || (s.module || null) === moduleId) && getVal(pid, s) !== s.def);
+function changesOf(p){
+  const out = changedSettings(p.id).map(s => ({kind:'Settings', text:`${s.label}: ${show(getVal(p.id, s)) || 'none'} &rarr; ${show(s.def) || 'none'}`, s}));
+  for (const it of [item(p.id), ...p.modules.map(m => item(p.id + '.' + m.id))]){
+    if (it.mod && chosen(toml, it) !== it.mod.def) out.push({kind:'Modules', text:`${esc(it.name)}: ${chosen(toml, it) ? 'on' : 'off'} &rarr; ${it.mod.def ? 'on' : 'off'}`, it});
+    for (const mode of ['ironman','mp']) if (allowed(toml, it, mode)) out.push({kind:'Ironman and multiplayer', text:`${esc(it.name)}: allowed in ${MODE[mode]} &rarr; not allowed`, it, mode});
+  }
+  return out;
+}
+function b5State(p){
+  if (inGame()){
+    if (!loads(lastStart, p)) return trustOf(lastStart, p) === 'waits' ? '<span class="warn">waits for approval</span>' : '<span class="weak">off in this game</span>';
+    return stateWord(item(p.id));
+  }
+  if (trustOf(toml, p) === 'waits') return '<span class="warn">waits for approval</span>';
+  if (!pluginOn(toml, p)) return '<span class="weak">off</span>';
+  const b = blocker(toml, p);
+  if (b) return `<span class="weak">off: needs ${esc(b.name)}</span>`;   // the detail says through what
+  return trustOf(toml, p) === 'update' ? '<span class="good">on</span> <span class="info">&middot; update waits</span>' : '<span class="good">on</span>';
+}
+function b5Entry(p, sel){
+  const anyPending = items().some(i => i.plugin === p && isPending(i)) || (SETTINGS[p.id] || []).some(s => setPending(p.id, s)) || trustOf(toml, p) !== trustOf(lastStart, p);
+  const mods = p.modules.length ? `${p.modules.length} modules, ${p.modules.filter(m => chosen(toml, item(p.id + '.' + m.id))).length} on` : (p.gameplay ? 'changes the game' : `${(SETTINGS[p.id] || []).length} settings`);
+  const ch = changedSettings(p.id).length;
+  return `<div class="li ${sel === p.id ? 'sel' : ''}${loads(toml, p) || trustOf(toml, p) === 'waits' ? '' : ' held'}" data-act="select" data-key="${CTX}:${p.id}">
+    <div class="mrow"><span>${esc(p.name)} <span class="weak">${esc(p.version)}</span></span><span style="font-size:12px">${b5State(p)}</span></div>
+    <div class="weak" style="font-size:12px">${mods}${ch ? ` &middot; ${ch} changed` : ''}${anyPending ? ' &middot; <span class="pending">&#9679; next start</span>' : ''}</div></div>`;
+}
+function b5Module(it, live, heldWhy){
+  const own = chosen(toml, it), on = live && own, n = settingsOf(it.plugin.id, it.mod.id).length, ch = changedSettings(it.plugin.id, it.mod.id).length;
+  const sw = it.gameplay ? '' : cb('', own, 'on', it.key, {disabled: !live, title: live ? '' : heldWhy});
+  const moreKey = `${CTX}:more:${it.key}`;
+  let h = `<div class="mod${live ? '' : ' held'}" style="padding:6px 0"><div class="mrow"><span>${sw} ${esc(it.name)}${tag(it)}</span>
+    <span>${inGame() ? stateWord(it) : ''} ${pend(it)} ${ch && live ? `<button class="expander" data-act="askResetMod" data-key="${esc(it.key)}">Reset settings (${ch})...</button>` : ''}</span></div>
+    <div class="mdesc full">${esc(it.mod.desc)}${it.mod.details ? ` <button class="expander" data-act="toggle" data-key="${esc(moreKey)}">${ui.open.has(moreKey) ? 'Less' : 'More'}</button>` : ''}</div>
+    ${it.mod.details && ui.open.has(moreKey) ? `<div class="more">${esc(it.mod.details)}</div>` : ''}`;
+  if (it.gameplay) h += `<div style="margin:6px 0 0 22px">${segment(it, !live, true)}<div class="note">${live ? whereText(it, true) : 'Kept: ' + whereText(it, true)}</div></div>`;
+  if (n){
+    if (on) h += `<div style="margin-left:22px">${b2Settings(it.plugin.id, it.mod.id, false)}</div>`;
+    else {
+      const key = openKey(it.key);
+      h += `<div style="margin-left:22px"><button class="expander" data-act="toggle" data-key="${esc(key)}">${ui.open.has(key) ? '&#9662;' : '&#9656;'} Settings (${n}${ch ? `, ${ch} changed` : ''}), kept while ${live ? 'it' : 'its plugin'} is off</button>
+        ${ui.open.has(key) ? b2Settings(it.plugin.id, it.mod.id, true, '') : ''}</div>`;
+    }
+  }
+  return h + '</div>';
+}
+function b5ModCard(p){
+  const f = p.fromMod, tr = trustOf(toml, p), was = trustOf(lastStart, p);
+  const facts = `<div class="facts"><span class="k">Mod</span><span>${esc(f.mod)} &middot; Workshop item ${esc(f.workshop)}</span>
+    <span class="k">Authors</span><span>${esc(f.authors)}</span><span class="k">Source</span><span>${esc(f.repository)}</span>
+    <span class="k">Changes the game</span><span>${p.modules.some(m => m.gameplay) ? 'some modules: ' + esc(p.modules.filter(m => m.gameplay).map(m => m.name).join(', ')) : p.gameplay ? 'yes' : 'no'}</span>
+    <span class="k">Game addresses</span><span>${f.symbols}</span><span class="k">Folder hash</span><span>${esc(f.hash)}</span></div>`;
+  if (tr === 'waits') return `<div class="banner warn" style="display:block;margin:8px 0"><b>Waits for your approval.</b> It is native code from a mod: it runs with the same rights as the game, so approve only what you trust.
+      ${facts}<button data-act="askApprove" data-key="${p.id}">Approve...</button>${was !== tr ? ' <span class="pending">&#9679; revoked at the next start</span>' : ''}</div>`;
+  if (tr === 'update') return `<div class="banner" style="display:block;margin:8px 0"><b>Version ${esc(p.version)} waits for your approval.</b> ${esc(f.approvedVersion)}, approved on ${esc(f.approved)}, runs until you approve it.
+      ${facts}<button data-act="askApprove" data-key="${p.id}">Approve ${esc(p.version)}...</button></div>`;
+  return `<div class="note">From the mod ${esc(f.mod)} (Workshop item ${esc(f.workshop)}) &middot; ${was !== tr ? '<span class="pending">&#9679; approved; loads at the next start</span>' : `approved on ${esc(f.approved || 'today')}`}
+    &middot; <button class="expander" data-act="askRevoke" data-key="${p.id}">Revoke approval...</button></div>`;
+}
+function variantB5(){
+  const sel = inGame() ? ui.oselected : ui.selected;
+  const ours = PLUGINS.filter(p => !p.standard && !p.fromMod), mods = PLUGINS.filter(p => p.fromMod), std = PLUGINS.filter(p => p.standard);
+  const section = (key, title, list, openByDefault) => {
+    const k = `${CTX}:${key}`, open = (openByDefault ? !ui.open.has(k) : ui.open.has(k)) || list.some(p => p.id === sel);
+    return `<div class="lhdr" data-act="toggle" data-key="${k}">${open ? '&#9662;' : '&#9656;'} ${title}</div>` + (open ? list.map(p => b5Entry(p, sel)).join('') : '');
+  };
+  const waiting = mods.filter(p => trustOf(toml, p) !== 'approved').length;
+  const list = ours.map(p => b5Entry(p, sel)).join('')
+    + section('mods', `From mods <span class="weak">&middot; ${mods.length} plugins${waiting ? `, <span class="warn">${waiting} wait for approval</span>` : ''}</span>`, mods, true)
+    + section('std', `Comes with Anvil <span class="weak">&middot; ${std.length} plugins, ${std.filter(p => pluginOn(toml, p)).length} on</span>`, std, false);
+  const p = plug(sel) || ours[0], pi = item(p.id), pOn = pluginOn(toml, p), tr = trustOf(toml, p);
+  const live = loads(toml, p), b = pOn && tr !== 'waits' ? blocker(toml, p) : null;
+  const locked = inGame() && overlayNeeds().has(p.id);
+  const changes = changesOf(p);
+  let d = `<div class="mrow"><div style="font-size:16px">${esc(p.name)} <span class="weak" style="font-size:13px">${esc(p.version)} &middot; ${esc(p.id)}${p.standard ? ' &middot; comes with Anvil' : ''}</span></div>
+    <div>${changes.length ? `<button class="small" data-act="askReset" data-key="${p.id}">Reset to defaults...</button> ` : ''}${p.fromMod ? '' : removeBtn(p)}</div></div>
+    <div class="note" style="font-size:13px">${esc(p.desc)}</div>`;
+  if (p.id === 'bellows') d += `<div style="margin:6px 0"><span class="seg small">
+      <button class="${ui.bellows === 'today' ? 'cur' : ''}" data-act="bellows" data-key="today">Bellows as it is</button>
+      <button class="${ui.bellows === 'v3b' ? 'cur' : ''}" data-act="bellows" data-key="v3b">Proposed for 2.0</button></span></div>`;
+  if (p.fromMod) d += b5ModCard(p);
+  const swTitle = locked ? 'The overlay needs it. Turn it off in Anvil Manager.' : tr === 'waits' ? 'Approve it first.' : '';
+  d += `<div style="margin:10px 0 4px">${pOn ? cb('On', true, 'on', p.id, {disabled: locked || tr === 'waits', title: swTitle})
+                                             : cb('On', false, 'askOn', p.id, {disabled: tr === 'waits', title: swTitle})} ${pend(pi)} ${inGame() ? stateWord(pi) : ''}</div>`;
+  if (locked) d += `<div class="note">The overlay needs it, so it cannot be turned off here. Turn it off in Anvil Manager.</div>`;
+  const deps = dependentsAll(p);
+  if (deps.length) d += `<div class="note">Needed by ${esc(deps.map(x => x.name).join(', '))}. ${pOn ? `Turning it off stops ${deps.length > 1 ? 'them' : 'it'} too; ${deps.length > 1 ? 'they keep their' : 'it keeps its'} own switch.` : `${deps.length > 1 ? 'They do' : 'It does'} not load while this one is off.`}</div>`;
+  if (b) d += `<div class="banner" style="margin:8px 0;display:flex;gap:8px;align-items:baseline"><span class="info">&#9432;</span><span>Needs ${esc(b.name)}${viaText(b)}, which is ${trustOf(toml, b) === 'waits' ? 'waiting for approval' : 'off'}, so it does not load.
+      ${trustOf(toml, b) === 'waits' ? '' : `<button class="small" data-act="askDeps" data-key="${p.id}">Turn on ${esc(offChain(p).filter(x => x !== p).map(x => x.name).join(' and '))}...</button>`}</span></div>`;
+  const heldWhy = tr === 'waits' ? 'Approve the plugin first; this choice is kept.' : !pOn ? 'Its plugin is off; this switch is kept.' : b ? `Its plugin needs ${b.name}; this switch is kept.` : '';
+  if (!live && pOn === false && p.modules.length) d += `<div class="banner" style="margin:8px 0;display:flex;gap:8px;align-items:baseline"><span class="info">&#9432;</span><span>The plugin is off, so none of its modules load.
+    Each module keeps its switch and its settings; they apply again when you turn the plugin on.</span></div>`;
+  if (p.gameplay && !p.modules.length) d += `<div style="margin:8px 0">Where it runs ${tag(pi)}<div style="margin-top:4px">${segment(pi, !live)}</div><div class="note">${whereText(pi)}</div></div>`;
+  const general = b2Settings(p.id, null, !live, 'Kept while the plugin does not load.');
+  if (general) d += `<div class="section">Settings</div>${general}`;
+  if (p.modules.length){
+    if (p.modules.some(m => m.gameplay)) d += `<p class="note">${POLICY}</p>`;
+    const groups = [];
+    for (const m of p.modules){ const g = m.group || ''; let e = groups.find(x => x.g === g); if (!e){ e = {g, its:[]}; groups.push(e); } e.its.push(item(p.id + '.' + m.id)); }
+    const foldAll = p.modules.length > 12;
+    for (const {g, its} of groups){
+      const key = `${CTX}:grp5:${p.id}:${g}`, toggled = ui.open.has(key), open = foldAll ? toggled : !toggled;
+      const on = its.filter(i => chosen(toml, i)).length, pendN = its.filter(isPending).length;
+      const ch = its.reduce((n, i) => n + changedSettings(p.id, i.mod.id).length, 0);
+      d += `<div class="gsep${live ? '' : ' held'}" data-act="toggle" data-key="${esc(key)}">${open ? '&#9662;' : '&#9656;'} ${esc(g || 'Modules')}
+        <span class="weak">&middot; ${on} of ${its.length} on${ch ? `, ${ch} setting(s) changed` : ''}</span>${pendN ? ` <span class="pending">&#9679; ${pendN} at the next start</span>` : ''}</div>`;
+      if (open) d += its.map(it => b5Module(it, live, heldWhy)).join('');
+    }
+  }
+  return `<div class="split"><div class="list">${list}</div><div class="detail">${d}</div></div>`;
+}
+function dialog(){
+  const c = ui.confirm;
+  if (!c) return '';
+  return `<div class="modal"><div class="dlg" role="dialog" aria-modal="true"><div class="dt">${c.ctx === 'overlay' ? 'Anvil overlay, in the game' : 'Anvil Manager'}</div>
+    <div class="db"><div style="font-size:15px;margin-bottom:6px">${c.title}</div>${c.body}</div>
+    <div class="da"><button data-act="confirmOk">${c.ok}</button><button data-act="confirmCancel" style="background:#3a3a40">Cancel</button></div></div></div>`;
+}
+const listHtml = xs => `<ul>${xs.map(x => `<li>${x}</li>`).join('')}</ul>`;
+function askOnChain(p, chain){
+  const others = chain.filter(x => x !== p);
+  if (!others.length){ setOn(item(p.id), true); return; }
+  const self = chain.includes(p);
+  ui.confirm = {ctx:CTX, title: self ? `Turn on ${esc(p.name)}?` : `Turn on what ${esc(p.name)} needs?`, ok:`Turn on ${chain.length} plugin${chain.length > 1 ? 's' : ''}`, act:'turnon', key:chain.map(x => x.id).join(','),
+    body:`<p>${esc(p.name)} needs ${others.length > 1 ? 'these plugins, which are off' : esc(others[0].name) + ', which is off'}. ${self ? 'Turning it on turns on' : 'This turns on'}, at the next start:</p>
+      ${listHtml(chain.map(x => `${esc(x.name)}${x === p ? '' : ` <span class="weak">needed by ${esc(PLUGINS.filter(y => (y.deps || []).includes(x.id) && (chain.includes(y) || pluginOn(toml, y))).map(y => y.name).join(', '))}</span>`}`))}`};
+}
+function confirmed(c){
+  if (c.act === 'turnon') for (const id of c.key.split(',')) setOn(item(id), true);
+  else if (c.act === 'approve'){ toml.trust = {...toml.trust, [c.key]:'approved'}; message = inGame() ? {text:`${plug(c.key).name} is approved; it loads at the next start.`, error:false} : message; }
+  else if (c.act === 'revoke'){ toml.trust = {...toml.trust, [c.key]:'waits'}; }
+  else if (c.act === 'reset' || c.act === 'resetmod'){
+    const [pid, mid] = c.key.split('|'), p = plug(pid);
+    for (const ch of (c.act === 'reset' ? changesOf(p) : changedSettings(pid, mid).map(s => ({s})))){
+      if (ch.s) setSetting(valKey(pid, ch.s), ch.s.def);
+      else if (ch.mode) setAllowed(ch.it, ch.mode, false);
+      else setOn(ch.it, ch.it.mod.def);
+    }
+  }
+}
+
 // ---- the two apps --------------------------------------------------------------------
 const VARIANTS = {'0':['Today', variant0], A:['Matrix table', variantA], B:['List and detail, one choice per module', variantB],
                   C:['By game mode', variantC], B2:['B, second iteration', variantB2], B3:['B, third iteration', variantB3],
-                  B4:['B, fourth iteration', variantB4]};
-const KEYS = ['0', 'B3', 'B4'];   // A, B, C and B2 stay reachable with ?variant=A, B, C or B2
-let variant = (new URLSearchParams(location.search).get('variant') || 'B4').toUpperCase();
-if (!VARIANTS[variant]) variant = 'B4';
+                  B4:['B, fourth iteration', variantB4], B5:['B, fifth iteration', variantB5]};
+const KEYS = ['0', 'B4', 'B5'];   // A, B, C, B2 and B3 stay reachable with ?variant=...
+let variant = (new URLSearchParams(location.search).get('variant') || 'B5').toUpperCase();
+if (!VARIANTS[variant]) variant = 'B5';
 ui.selected = ui.oselected = 'bellows';
 useBellows(bellowsDefault(variant));
+useMods(variant === 'B5');
 const today = () => variant === '0';
 
 function pendingBar(){
@@ -2723,6 +2933,9 @@ function tomlText(){
 }
 function render(){
   manager(); overlay();
+  let m = document.getElementById('modal');
+  if (!m){ m = document.createElement('div'); m.id = 'modal'; document.body.appendChild(m); }
+  m.innerHTML = dialog();
   document.getElementById('toml').innerHTML = tomlText();
   document.getElementById('switcher').innerHTML = `<button data-act="prev" aria-label="Previous variant">&larr;</button>
     <span class="lbl">${variant} (${esc(VARIANTS[variant][0])})</span><button data-act="next" aria-label="Next variant">&rarr;</button>`;
@@ -2732,6 +2945,10 @@ function render(){
 function go(step){
   variant = KEYS[(Math.max(0, KEYS.indexOf(variant)) + step + KEYS.length) % KEYS.length];
   useBellows(bellowsDefault(variant));
+  useMods(variant === 'B5');
+  if (!plug(ui.selected)) ui.selected = 'bellows';
+  if (!plug(ui.oselected)) ui.oselected = 'bellows';
+  ui.confirm = null;
   const u = new URL(location.href); u.searchParams.set('variant', variant); history.replaceState(null, '', u);
   render();
 }
@@ -2755,6 +2972,41 @@ function act(el){
   else if (a === 'select'){ const [c, id] = k.split(':'); if (c === 'overlay') ui.oselected = id; else ui.selected = id; }
   else if (a === 'mode'){ const [c, m] = k.split(':'); if (c === 'overlay') ui.omode = m; else ui.mode = m; }
   else if (a === 'bellows') useBellows(k);
+  else if (a === 'confirmOk'){ const c = ui.confirm; ui.confirm = null; CTX = c.ctx; confirmed(c); CTX = 'manager'; }
+  else if (a === 'confirmCancel') ui.confirm = null;
+  else if (a === 'askOn' || a === 'askDeps'){
+    CTX = el.closest('#map') ? 'overlay' : 'manager';
+    const p = plug(k), chain = offChain(p);
+    if (a === 'askDeps' && pluginOn(toml, p)) askOnChain(p, chain); else askOnChain(p, chain.includes(p) ? chain : chain.concat(p));
+    CTX = 'manager';
+  }
+  else if (a === 'askApprove'){
+    const p = plug(k), f = p.fromMod, ctx = el.closest('#map') ? 'overlay' : 'manager';
+    ui.confirm = {ctx, act:'approve', key:k, ok:'Approve', title:`Approve ${esc(p.name)} ${esc(p.version)}?`,
+      body:`<p>From the mod ${esc(f.mod)} (Workshop item ${esc(f.workshop)}), by ${esc(f.authors)}. It is native code: it runs with the same rights as the game.
+        Anvil loads exactly the files with the hash <b>${esc(f.hash)}</b>; a change to them waits for a new approval.</p>
+        <p class="note">It loads at the next start.${p.modules.some(m => m.gameplay) ? ' Its modules that change the game stay out of ironman and multiplayer unless you allow them.' : ''}</p>`};
+  }
+  else if (a === 'askRevoke'){
+    const p = plug(k);
+    ui.confirm = {ctx: el.closest('#map') ? 'overlay' : 'manager', act:'revoke', key:k, ok:'Revoke', title:`Revoke the approval of ${esc(p.name)}?`,
+      body:`<p>It stops loading at the next start and waits for approval again. Its modules and settings are kept.</p>`};
+  }
+  else if (a === 'askReset'){
+    const p = plug(k), ctx = el.closest('#map') ? 'overlay' : 'manager';
+    CTX = ctx; const ch = changesOf(p); CTX = 'manager';
+    const kinds = [...new Set(ch.map(c => c.kind))];
+    ui.confirm = {ctx, act:'reset', key:k, ok:`Reset ${ch.length} change(s)`, title:`Reset ${esc(p.name)} to its defaults?`,
+      body: kinds.map(kd => `<div style="margin-top:6px">${kd}</div>${listHtml(ch.filter(c => c.kind === kd).map(c => c.text))}`).join('')
+        + `<p class="note">The plugin's own switch stays as it is. Settings that apply at once change now${running ? ' in this game' : ''}; the rest at the next start.</p>`};
+  }
+  else if (a === 'askResetMod'){
+    const [pid] = k.split('.'), mid = k.slice(pid.length + 1), p = plug(pid), m = p.modules.find(x => x.id === mid);
+    const list = changedSettings(pid, mid);
+    ui.confirm = {ctx: el.closest('#map') ? 'overlay' : 'manager', act:'resetmod', key:`${pid}|${mid}`, ok:`Reset ${list.length} setting(s)`,
+      title:`Reset the settings of ${esc(m.name)}?`, body: listHtml(list.map(s => `${esc(s.label)}: ${esc(show(getVal(pid, s)) || 'none')} &rarr; ${esc(show(s.def) || 'none')}`))
+        + `<p class="note">The module stays on.</p>`};
+  }
   else if (a === 'groupcb'){
     const [pid, g] = k.split('|'), its = items().filter(i => i.mod && i.plugin.id === pid && (i.mod.group || '') === g);
     const allOn = its.every(i => isOn(toml, i));
