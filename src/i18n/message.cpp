@@ -276,7 +276,14 @@ std::optional<Language> language_of_steam(std::string_view steam_language) {
     return std::nullopt;
 }
 
+namespace {
+std::optional<Language> g_process_language;  // force_process_language
+}  // namespace
+
+void force_process_language(std::optional<Language> language) { g_process_language = language; }
+
 std::optional<Language> forced_language() {
+    if (g_process_language) return g_process_language;
     char forced[16] = {};
     const DWORD n = GetEnvironmentVariableA("ANVIL_LANGUAGE", forced, sizeof(forced));
     if (n == 0 || n >= sizeof(forced)) return std::nullopt;
@@ -299,7 +306,7 @@ SystemLanguages read_system_languages() {
 }
 
 LanguageChoice choose_language(const std::filesystem::path& user_dir, bool cjk_text, const SystemLanguages& system) {
-    if (const auto language = forced_language()) return {*language, "ANVIL_LANGUAGE"};
+    if (const auto language = forced_language()) return {*language, g_process_language ? "--lang" : "ANVIL_LANGUAGE"};
     bool says_english = false;  // settings.txt names English
     if (!user_dir.empty()) {
         std::ifstream file(user_dir / "settings.txt", std::ios::binary);

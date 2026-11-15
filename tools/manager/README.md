@@ -11,9 +11,11 @@ without focus and without moving the cursor (issue #106):
 
 - The Manager speaks the language of EU4's settings, or the Chinese,
   Japanese or Korean of Steam or Windows, so labels and their
-  positions differ by language. Start it with `ANVIL_LANGUAGE=en` in its
-  environment for the English layout, or point `userdir.txt` in the copy at
-  a folder whose `settings.txt` sets `language` to test another one.
+  positions differ by language. Start it with `--lang en` for the English
+  layout (the Manager's own language: a game it starts does not get it), or
+  with `ANVIL_LANGUAGE=en` in its environment for the Manager and the game it
+  starts, or point `userdir.txt` in the copy at a folder whose `settings.txt`
+  sets `language` to test another one.
 - Start it on a copy of a game folder: `AnvilManager.exe --game <copy>`. It
   remembers the folder in `%LOCALAPPDATA%\Anvil\manager.toml`; remove that file
   after the test.

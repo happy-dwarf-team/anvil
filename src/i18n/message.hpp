@@ -90,7 +90,14 @@ std::optional<Language> cjk_language_of_locale(std::string_view locale_name);
 // without a translation mod: "polish".
 std::optional<Language> language_of_steam(std::string_view steam_language);
 
-// ANVIL_LANGUAGE, when it names a language Anvil speaks.
+// The language of this process only, ahead of ANVIL_LANGUAGE (the Manager's
+// --lang); nullopt takes it back. It leaves the environment alone, so a
+// process this one starts (the game) does not inherit it. Set it before other
+// threads choose a language.
+void force_process_language(std::optional<Language> language);
+
+// force_process_language's language, else ANVIL_LANGUAGE when it names a
+// language Anvil speaks.
 std::optional<Language> forced_language();
 
 // What the system says, for choose_language; read_system_languages() asks
@@ -103,10 +110,10 @@ SystemLanguages read_system_languages();
 
 struct LanguageChoice {
     Language language = Language::English;
-    std::string source;  // "ANVIL_LANGUAGE", "settings.txt", "Steam", "Windows" or "default"
+    std::string source;  // "--lang", "ANVIL_LANGUAGE", "settings.txt", "Steam", "Windows" or "default"
 };
 // The player's language (design §15):
-// 1. ANVIL_LANGUAGE when set;
+// 1. force_process_language's, else ANVIL_LANGUAGE when set;
 // 2. French, German or Spanish from settings.txt in EU4's user folder (only read);
 // 3. with `cjk_text` (Mei, which shows a translation mod's Chinese, Japanese or
 //    Korean text, loads): Steam's language, then Windows', when it is one of those;
