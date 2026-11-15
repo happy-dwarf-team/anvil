@@ -597,6 +597,13 @@ off = [false]
         AnvilSettings lists = read_anvil_settings(toml);
         move_retired_settings(m, *r.file, player, toml, lists);
         CHECK(lists.disabled_modules.empty() && read_anvil_settings(toml).disabled_modules.empty());
+        // A value the record of moved retired settings holds does not move again, so it overrules
+        // nothing: the new "on" moves.
+        lists = {};
+        lists.disabled_modules = {"lode.flows"};
+        const RetiredMovePlan after_record = plan_retired_settings(m, *r.file, std::string("flows_mode = \"off\"\nflows_switch = true\n"),
+                                                                   lists, true, {{"flows_mode", "\"off\""}});
+        CHECK(lists.disabled_modules.empty() && after_record.edits.size() == 1);
         // A benchmark start: the same rule for its lists.
         write(player, "flows_switch = true\nflows_mode = \"off\"\n");
         lists = {};
