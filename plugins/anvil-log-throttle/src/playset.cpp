@@ -54,11 +54,13 @@ std::string folder_key(std::string folder) {
 }
 
 // Whether a later layer replaces `folder` (replace_path), so the game reads
-// none of the earlier layers' files under it.
+// none of the earlier layers' files directly in it. Its subfolders stay: with
+// replace_path = "events" EU4 1.37.5 still loads the game's events/<sub>/*.txt
+// (checked in the game on 15.11.2026).
 bool replaced_after(const std::vector<Layer>& layers, std::size_t index, const std::string& folder) {
     for (std::size_t j = index + 1; j < layers.size(); ++j) {
         for (const std::string& r : layers[j].replaced) {
-            if (folder == r || folder.starts_with(r + "/")) return true;
+            if (folder == r) return true;
         }
     }
     return false;
@@ -222,20 +224,16 @@ Search search(const std::vector<Layer>& layers, std::string_view token, FindIn i
     for (std::size_t index = 0; index < layers.size(); ++index) {
         const Layer& layer = layers[index];
         for (const wchar_t* folder : folders) {
-            if (replaced_after(layers, index, folder_key(utf8_of(folder)))) continue;
             std::error_code ec;
             const std::filesystem::path dir = layer.path / folder;
             if (!std::filesystem::is_directory(dir, ec)) continue;
             for (auto it = std::filesystem::recursive_directory_iterator(dir, ec);
                  !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
-                // A subfolder a later layer replaces (replace_path = "common/ideas"): the game reads none of it here.
-                if (it->is_directory(ec)) {
-                    if (replaced_after(layers, index, folder_key(utf8_of(it->path().lexically_relative(layer.path))))) {
-                        it.disable_recursion_pending();
-                    }
-                    continue;
-                }
                 if (!it->is_regular_file(ec) || it->path().extension() != L".txt") continue;
+                // A folder a later layer replaces (replace_path = "events", "common/ideas"): the game
+                // reads none of the files directly in it here, but still those of its subfolders.
+                const std::string parent = folder_key(utf8_of(it->path().parent_path().lexically_relative(layer.path)));
+                if (replaced_after(layers, index, parent)) continue;
                 const std::string text = read_file(it->path());
                 if (text.find(token) == std::string::npos) continue;
                 bool counted_file = false;

@@ -605,6 +605,13 @@ void panel_tests(const fs::path& source_dir) {
         bool in_ideas = false;
         for (const se::Hit& h : ideas.hits) in_ideas = in_ideas || h.rel.starts_with("common/ideas/");
         CHECK(!in_ideas && ideas.total == 3);  // common/y.txt and the two in missions/lorent.txt
+        // replace_path hides only the files directly in the folder: the game (1.37.5) still loads an
+        // earlier layer's events/<sub>/*.txt with replace_path = "events".
+        put(root / "user" / "mod" / "m" / "events" / "sub" / "S.txt", "country_event = {\n\tid = flavor_spiked_log.1\n}\n");
+        const se::Search sub = se::search(replaced, "flavor_spiked_log.1", se::FindIn::events);
+        bool in_sub = false;
+        for (const se::Hit& h : sub.hits) in_sub = in_sub || h.rel == "events/sub/S.txt";
+        CHECK(sub.total == 2 && sub.files == 2 && in_sub);  // events/R.txt and events/sub/S.txt, not events/Flavour.txt
         CHECK(se::vscode_uri("C:\\Program Files (x86)\\a b.txt", 12) == "vscode://file/C:/Program%20Files%20%28x86%29/a%20b.txt:12");
         fs::remove_all(root, ec);
     });

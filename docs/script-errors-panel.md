@@ -53,8 +53,9 @@ From the top:
      Code** (`vscode://file/<path>:<line>`, opened by Windows) and **Copy the path and line**;
    - for an event target or an unknown tag, **Find '<name>' in the playset's script**: a search
      of `events`, `common`, `decisions`, `missions` and `history/countries` of every layer for the
-     name as a whole word, outside comments, leaving out a layer's folder that a later mod replaces
-     (`replace_path`, as Anbennar replaces `events`). The lines that save it as an event target come
+     name as a whole word, outside comments, leaving out the files directly in a layer's folder that
+     a later mod replaces (`replace_path`, as Anbennar replaces `events`; the game still reads that
+     folder's subfolders, so the search does too). The lines that save it as an event target come
      first, then other uses, each a button that opens the file at its line.
    - for a context that names an event or an option, **Find '<key>' in events**, and for a
      mission, **Find '<mission>' in missions**: the same search in that folder alone, with a dot
