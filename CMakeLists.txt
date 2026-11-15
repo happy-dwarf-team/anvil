@@ -528,6 +528,10 @@ if(ANVIL_BUILD_TESTS)
         "the detour does not match the signature symbols.toml declares.*sym::Types::add_one")
     set_tests_properties(anvil_wrong_call PROPERTIES PASS_REGULAR_EXPRESSION
         "the arguments do not match the signature symbols.toml declares.*sym::Types::twice")
+    # Both build in this build tree: two MSBuild runs at once (ctest -j) write the same
+    # .tlog files of the targets they share, and one fails with MSB3491 instead of the
+    # static_assert. One at a time.
+    set_tests_properties(anvil_wrong_detour anvil_wrong_call PROPERTIES RESOURCE_LOCK anvil_build_tree)
 
     add_test(NAME anvil_cli_version COMMAND anvil --version)
     set_tests_properties(anvil_cli_version PROPERTIES PASS_REGULAR_EXPRESSION "^anvil ${PROJECT_VERSION}[\r\n]*$")
