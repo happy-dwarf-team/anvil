@@ -9,6 +9,7 @@
 #include "i18n/translate.hpp"
 #include "manager_app.hpp"
 #include "mods.hpp"
+#include "platform.hpp"
 #include "ui.hpp"
 #include "ui/plugin_widgets.hpp"
 
@@ -34,7 +35,7 @@ std::string mod_source(const cli::GameModPlugin& p) {
 // What a plugin from a mod waits for, or does, in the player's words.
 std::string mod_state_text(const cli::GameModPlugin& p) {
     if (p.state == "approved") return p.status == "loaded" ? std::string(tr("approved: loads")) : trf("approved, but {0}", {i18n::text(p.skip_why)});
-    if (p.state == "update-pending") return trf("an update waits for approval; the approved {0} loads", {p.approved_version});
+    if (p.state == "update-pending") return trf("An update to {0} waits for your approval; the approved {1} loads.", {p.version, p.approved_version});
     if (p.state == "pending") return tr("waits for approval: does not load");
     if (p.state == "conflict") return tr("conflict: does not load");
     if (p.state == "shadowed") return tr("a plugin in anvil/plugins has this id and loads instead");
@@ -90,17 +91,21 @@ struct ManagerApp::PluginsHost final : mui::PluginsHost {
     bool has_header_buttons(size_t i) const override {
         return app.plugins_->model.plugins[i].origin == mui::Origin::Own && !source(i).folder.empty();
     }
+    float header_buttons_width(size_t) const override { return mui::button_width(tr("Remove...")); }
     void draw_header_buttons(size_t i) override {
-        ImGui::SameLine();
         if (ImGui::Button(tr("Remove..."))) app.ask_remove(source(i).folder);
     }
 
     void draw_facts(size_t i) override {
         const PluginSource& src = source(i);
+        // Who and where from on one line: id, authors, the mod.
+        std::string who;
         if (src.manifest) {
             const Manifest& m = *src.manifest;
-            weak_wrapped(m.authors.empty() ? trf("id {0}", {m.id}) : trf("id {0}, by {1}", {m.id, join(m.authors)}));
+            who = m.authors.empty() ? trf("id {0}", {m.id}) : trf("id {0}, by {1}", {m.id, join(m.authors)});
         }
+        if (src.mod != nullptr) who += (who.empty() ? "" : " · ") + trf("from {0}", {mod_source(*src.mod)});
+        if (!who.empty()) weak_wrapped(who);
         if (src.mod != nullptr) app.draw_mod_approval(i);
     }
 
@@ -349,37 +354,38 @@ void ManagerApp::draw_setting_control(size_t i, size_t s, bool disabled) {
 }
 
 void ManagerApp::draw_mod_approval(size_t i) {
-    const cli::GameModPlugin& m = *plugins_->sources[i].mod;
-    weak_wrapped(trf("from {0}", {mod_source(m)}));
-    const bool good = m.state == "approved" && m.status == "loaded";
-    const bool waits = m.state == "pending" || m.state == "update-pending" || m.state == "conflict";
-    if (good) {
-        state_row(anvil::ui::Glyph::On, mod_state_text(m));
-        if (!m.others.empty()) weak_wrapped(trf("Other mods with this id: {0}", {join(m.others)}));
+    const PluginSource& src = plugins_->sources[i];
+    const cli::GameModPlugin& m = *src.mod;
+    mui::ModApproval a;
+    a.good = m.state == "approved" && m.status == "loaded";
+    a.tone = m.state == "pending" || m.state == "update-pending" || m.state == "conflict" ? Tone::Warn : Tone::Bad;
+    a.state = mod_state_text(m);
+    // Waiting: the state says what the reason would (the version that waits, the one that loads).
+    if (!a.good && m.state != "update-pending" && m.state != "pending") a.details.push_back(m.why.code.empty() && m.why.text.empty() ? m.reason : i18n::text(m.why));
+    if (!m.others.empty()) a.details.push_back(trf("Other mods with this id: {0}", {join(m.others)}));
+    for (const cli::Problem& problem : problems_shown(m.offered())) a.details.push_back(problem.message);
+    if (!m.approved_hash.empty()) {
+        a.approved = trf("Approved: {0} on {1} (hash {2})", {m.approved_version, m.approved_date.substr(0, 10), m.approved_hash.substr(0, 8)});
     }
-    const Tone tone = waits ? Tone::Warn : Tone::Bad;
-    if (!good) {
-        begin_banner("mod-state", tone);
-        wrapped(mod_state_text(m));
-        weak_wrapped(m.why.code.empty() && m.why.text.empty() ? m.reason : i18n::text(m.why));
-        if (!m.others.empty()) weak_wrapped(trf("Other mods with this id: {0}", {join(m.others)}));
-    }
-    for (const cli::Problem& problem : problems_shown(m.offered())) wrapped(problem.message);
-    ImGui::BeginDisabled(read_only());
-    if (can_approve_shown(m)) {
-        if (mui::primary_button(m.state == "update-pending" ? tr("Approve the update...") : tr("Approve..."))) {
-            approve_ = m;
-            open_approve_ = true;
-        }
-        if (!m.approved_hash.empty()) ImGui::SameLine();
-    }
-    if (!m.approved_hash.empty() && ImGui::Button(tr("Revoke the approval"))) {
+    if (src.manifest) a.repository = src.manifest->repository;
+    a.can_approve = can_approve_shown(m);
+    a.update = m.state == "update-pending";
+    a.can_revoke = !m.approved_hash.empty();
+    a.disabled = read_only();
+    switch (mui::draw_mod_approval(a)) {
+    case mui::ModAction::Approve:
+        approve_ = m;
+        open_approve_ = true;
+        break;
+    case mui::ModAction::Revoke: {
         std::string error;
         if (!revoke_shown_plugin(game_, m, error)) failed(tr("The approval was not revoked"), error, false);
         refresh();
+        break;
     }
-    ImGui::EndDisabled();
-    if (!good) end_banner(tone);
+    case mui::ModAction::OpenRepository: open_url(a.repository); break;
+    case mui::ModAction::None: break;
+    }
 }
 
 void ManagerApp::save_plugin_settings(size_t i) {

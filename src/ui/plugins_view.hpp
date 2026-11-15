@@ -7,6 +7,7 @@
 // with its own Dear ImGui.
 #pragma once
 
+#include "ui/forge_widgets.hpp"
 #include "ui/plugin_model.hpp"
 
 #include <imgui.h>
@@ -49,7 +50,10 @@ public:
     // Parts of the detail only the app knows, in their place: buttons after
     // Reset in the header; facts under the header (id, authors, approval);
     // notes after the description (problems, updates).
+    // draw_header_buttons draws them on one line, without a SameLine before the first;
+    // header_buttons_width is that line's width, so the switch keeps its place.
     virtual bool has_header_buttons(std::size_t /*plugin*/) const { return false; }
+    virtual float header_buttons_width(std::size_t /*plugin*/) const { return 0; }
     virtual void draw_header_buttons(std::size_t /*plugin*/) {}
     virtual void draw_facts(std::size_t /*plugin*/) {}
     virtual void draw_notes(std::size_t /*plugin*/) {}
@@ -58,6 +62,24 @@ public:
     virtual bool show_empty_section(Origin /*origin*/) const { return false; }
     virtual void draw_section_note(Origin /*origin*/, const SectionCounts& /*counts*/) {}
 };
+
+// A plugin from a mod: where its approval stands, as both apps draw it in the
+// detail (ui-guidelines §5, "Plugins from mods"). Good: a state row; otherwise
+// a banner in `tone` with the buttons inside it.
+struct ModApproval {
+    bool good = false;
+    Tone tone = Tone::Warn;
+    std::string state;                // "An update to 1.8.0 waits for your approval; the approved 1.4.0 loads."
+    std::vector<std::string> details; // only what the state does not already say
+    std::string approved;             // "Approved 1.4.0 on 2026-11-09, hash 48e37e44"; "" when it is not
+    std::string repository;           // its source, opened by a text button; "" when unknown
+    bool can_approve = false;
+    bool update = false;              // "Approve the update..." rather than "Approve..."
+    bool can_revoke = false;
+    bool disabled = false;
+};
+enum class ModAction { None, Approve, Revoke, OpenRepository };
+ModAction draw_mod_approval(const ModApproval& approval);
 
 // A question before edits or another action (ui-guidelines §4).
 struct Confirm {
