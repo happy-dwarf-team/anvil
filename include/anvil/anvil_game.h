@@ -543,7 +543,8 @@ typedef struct AnvilGameDiplomacyStatus {
 
 /* The two tags the game keeps for the local player and the one it acts on.
  * In a normal game `tag` and `own` are the player's country, also after the
- * console's `tag` or a formed nation, and `observed` is "". In observe mode
+ * console's `tag` or a formed nation, and `observed` is as the game stores it:
+ * usually "", but it can hold a tag left over. In observe mode
  * `own` is the observer's pseudo-country, ANVIL_GAME_PLAYER_OBSERVER is set,
  * and `tag` is `observed`, the country watched, while there is one. */
 typedef struct AnvilGamePlayer {
