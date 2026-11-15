@@ -37,8 +37,9 @@ public:
 
     // Nothing can be changed now (the Manager while the game runs).
     virtual bool read_only() const = 0;
-    // Writes the edits; the host refreshes its snapshot as it needs.
-    virtual void apply(const std::vector<Edit>& edits) = 0;
+    // Writes the edits; the host refreshes its snapshot as it needs. After a
+    // refusal it stops or goes on as `on_refusal` says (apply_in_order).
+    virtual void apply(const std::vector<Edit>& edits, OnRefusal on_refusal) = 0;
     // The plugin's plugin.toml was read: its switch, modules and settings can be drawn.
     virtual bool known(std::size_t plugin) const = 0;
     // Why the plugin's own switch cannot change here; "" when it can.
@@ -90,6 +91,7 @@ struct Confirm {
     std::string button;
     std::vector<std::string> lines;
     std::vector<Edit> edits;
+    OnRefusal on_refusal = OnRefusal::Stop;  // GoOn for a reset; a chain stops
     std::function<void()> action;  // instead of the edits (the Manager's Remove)
 };
 

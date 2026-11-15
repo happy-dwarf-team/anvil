@@ -13,6 +13,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -140,6 +141,17 @@ struct Edit {
     std::string key() const { return module.empty() ? plugin : plugin + "." + module; }
     bool operator==(const Edit&) const = default;
 };
+
+// What an app does with the rest of a list when it refuses one edit. A chain
+// of dependencies stops there, so no plugin is turned on without the one it
+// needs; a reset or an Undo goes on, so one refusal does not leave the rest
+// of what the player confirmed undone.
+enum class OnRefusal { Stop, GoOn };
+
+// Writes the edits in order through `write`, which answers "" or why it
+// refused the edit, and returns the first refusal ("" when none).
+std::string apply_in_order(const std::vector<Edit>& edits, OnRefusal on_refusal,
+                           const std::function<std::string(const Edit&)>& write);
 
 // --- What the player sees ---------------------------------------------------
 

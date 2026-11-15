@@ -196,7 +196,7 @@ void PluginsTab::draw_pending(const Snapshot& model, PluginsHost& host) {
     if (!undo.empty()) {
         ImGui::SameLine();
         ImGui::BeginDisabled(host.read_only());
-        if (text_button(tr("Undo them"))) host.apply(undo);
+        if (text_button(tr("Undo them"))) host.apply(undo, OnRefusal::GoOn);
         ImGui::EndDisabled();
     }
     end_banner(Tone::Info);
@@ -459,13 +459,13 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
     if (toggle("##on", p.saved.on, p.saved.on ? tr("On") : tr("Off"), locked || !known || !refusal.empty(), false,
                refusal.empty() ? nullptr : refusal.c_str())) {
         if (p.saved.on) {
-            host.apply(set_switch(p, "", Which::On, false));
+            host.apply(set_switch(p, "", Which::On, false), OnRefusal::Stop);
         } else {
             const Chain chain = turn_on_chain(model, p.id);
             if (chain.steps.size() > 1 || !chain.missing.empty()) {
                 ask_turn_on(model, chain);
             } else {
-                host.apply(set_switch(p, "", Which::On, true));
+                host.apply(set_switch(p, "", Which::On, true), OnRefusal::Stop);
             }
         }
     }
@@ -577,7 +577,7 @@ void PluginsTab::draw_where(const Snapshot& model, size_t i, std::string_view mo
     if (without_off) shown.on = true;
     const int current = static_cast<int>(where(shown)) - skip;
     const int chosen = segmented("where", labels + skip, enabled + skip, tips + skip, 5 - skip, current, disabled);
-    if (chosen >= 0) host.apply(set_where(p, module, choices[chosen + skip]));
+    if (chosen >= 0) host.apply(set_where(p, module, choices[chosen + skip]), OnRefusal::Stop);
     weak_wrapped(where_sentence(saved.on || without_off ? shown : saved, offers));
 }
 
@@ -680,7 +680,7 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
         }
     }
     ImGui::SetCursorScreenPos(ImVec2(toggle_x, at.y + (h - frame) * 0.5f));
-    if (toggle("##on", on, room ? (on ? tr("On") : tr("Off")) : nullptr, disabled, true)) host.apply(set_switch(p, mod.id, Which::On, !on));
+    if (toggle("##on", on, room ? (on ? tr("On") : tr("Off")) : nullptr, disabled, true)) host.apply(set_switch(p, mod.id, Which::On, !on), OnRefusal::Stop);
     ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + h));
     ImGui::Dummy(ImVec2(0, 0));
     if (!open) {
@@ -802,7 +802,7 @@ void PluginsTab::draw_setting(const Snapshot& model, size_t i, size_t s, bool di
         ImGui::TextColored(kInfo, "%s", changed.c_str());
         ImGui::SameLine();
         ImGui::BeginDisabled(disabled || locked);
-        if (text_button(tr("Reset"))) host.apply(reset_setting(p, snap.name));
+        if (text_button(tr("Reset"))) host.apply(reset_setting(p, snap.name), OnRefusal::GoOn);
         ImGui::EndDisabled();
     }
     ImGui::PopID();
@@ -840,6 +840,7 @@ void PluginsTab::ask_edits(const Snapshot& model, const PluginsHost& host, std::
         }
     }
     c.edits = std::move(edits);
+    c.on_refusal = OnRefusal::GoOn;  // a reset: one refusal leaves the rest to go on
     ask(std::move(c));
 }
 
@@ -854,6 +855,7 @@ void PluginsTab::ask_turn_on(const Snapshot& model, const Chain& chain) {
     }
     for (const std::string& id : chain.missing) c.lines.push_back(trf("{0} is not installed: install it first.", {id}));
     c.edits = std::move(edits);
+    c.on_refusal = OnRefusal::Stop;  // dependencies first: none is turned on past one that was refused
     ask(std::move(c));
 }
 
@@ -878,7 +880,7 @@ void PluginsTab::draw_confirm(PluginsHost& host) {
         if (c.action) {
             c.action();
         } else {
-            host.apply(c.edits);
+            host.apply(c.edits, c.on_refusal);
         }
     }
     ImGui::EndDisabled();

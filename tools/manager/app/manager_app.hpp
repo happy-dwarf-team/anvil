@@ -139,7 +139,7 @@ private:
     void draw_setting_control(size_t i, size_t s, bool disabled);
     void draw_plugins_confirm();
     void draw_mod_approval(size_t i);
-    void apply_edits(const std::vector<anvil::ui::Edit>& edits);
+    void apply_edits(const std::vector<anvil::ui::Edit>& edits, anvil::ui::OnRefusal on_refusal);
     void save_plugin_settings(size_t i);
     void ask_remove(const std::string& folder);
     void show_message(std::string title, std::string text);

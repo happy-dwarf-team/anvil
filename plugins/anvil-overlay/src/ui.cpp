@@ -1114,34 +1114,32 @@ std::string shown_setting_value(const OverlaySetting& o, const std::string& valu
 
 // The model's edits through anvil.control: switches and opt-ins into anvil.toml
 // for the next start, settings into the player's file (and at once when they can).
-void apply_edits(const std::vector<anvil::ui::Edit>& edits) {
+// The first refusal is reported; a chain stops there, a reset or an Undo goes on.
+void apply_edits(const std::vector<anvil::ui::Edit>& edits, anvil::ui::OnRefusal on_refusal) {
     Ui& u = ui();
     const ControlClient& control = shared().control;
     if (!u.model) return;
-    std::string first_error;
-    for (const anvil::ui::Edit& e : edits) {
-        std::string error;
+    const std::string first_error = anvil::ui::apply_in_order(edits, on_refusal, [&](const anvil::ui::Edit& e) {
         if (e.kind == anvil::ui::Edit::Kind::Switch) {
             const uint32_t which = e.which == anvil::ui::Which::On        ? ANVIL_CONTROL_SWITCH_ON
                                    : e.which == anvil::ui::Which::Ironman ? ANVIL_CONTROL_SWITCH_IRONMAN
                                                                           : ANVIL_CONTROL_SWITCH_MULTIPLAYER;
-            error = control.switch_set(e.key(), which, e.on);
-        } else {
-            const auto& plugins = u.model->model.plugins;
-            for (size_t i = 0; i < plugins.size(); ++i) {
-                if (plugins[i].id != e.plugin) continue;
-                for (size_t s = 0; s < plugins[i].settings.size(); ++s) {
-                    if (plugins[i].settings[s].name != e.setting) continue;
-                    const AnvilSetting id = u.model->sources[i].settings[s].id;
-                    error = e.value == plugins[i].settings[s].default_value ? control.reset(e.plugin, id)
-                                                                            : control.set_text(e.plugin, id, e.value);
-                    u.text_edits.erase(edit_key(e.plugin, id));
-                }
+            return control.switch_set(e.key(), which, e.on);
+        }
+        std::string error;
+        const auto& plugins = u.model->model.plugins;
+        for (size_t i = 0; i < plugins.size(); ++i) {
+            if (plugins[i].id != e.plugin) continue;
+            for (size_t s = 0; s < plugins[i].settings.size(); ++s) {
+                if (plugins[i].settings[s].name != e.setting) continue;
+                const AnvilSetting id = u.model->sources[i].settings[s].id;
+                error = e.value == plugins[i].settings[s].default_value ? control.reset(e.plugin, id)
+                                                                        : control.set_text(e.plugin, id, e.value);
+                u.text_edits.erase(edit_key(e.plugin, id));
             }
         }
-        // One refusal does not stop the rest of a confirmed list; the first is reported.
-        if (!error.empty() && first_error.empty()) first_error = error;
-    }
+        return error;
+    });
     if (!first_error.empty()) report(first_error);
     u.model_stale = true;
 }
@@ -1262,7 +1260,7 @@ struct OverlayHost final : anvil::ui::PluginsHost {
 
     // Until every plugin was processed, what the core reports is not complete.
     bool read_only() const override { return !ui().status.loading_done; }
-    void apply(const std::vector<anvil::ui::Edit>& edits) override { apply_edits(edits); }
+    void apply(const std::vector<anvil::ui::Edit>& edits, anvil::ui::OnRefusal on_refusal) override { apply_edits(edits, on_refusal); }
     bool known(size_t i) const override { return source(i).known; }
     std::string switch_refusal(size_t i) const override {
         if (source(i).refusal == "needed") return tr("The overlay needs it, so it stays on here; turn it off in Anvil Manager.");
