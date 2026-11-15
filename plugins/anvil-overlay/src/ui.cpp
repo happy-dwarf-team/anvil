@@ -333,10 +333,9 @@ void dismiss_release_notice() {
     out << u.latest->tag << "\n";
 }
 
-// Opens a release page in the browser, on a thread of its own: ShellExecute
-// wants COM and may take a while.
-void open_link(const std::string& url) {
-    if (!url.starts_with(std::string(anvil::net::kReleasesUrl) + "/")) return;
+// Opens `url` in the browser, on a thread of its own: ShellExecute wants COM
+// and may take a while. Callers check what they open.
+void open_in_browser(const std::string& url) {
     const int chars = MultiByteToWideChar(CP_UTF8, 0, url.c_str(), -1, nullptr, 0);
     if (chars <= 0) return;
     std::wstring wide(static_cast<size_t>(chars), L'\0');
@@ -349,6 +348,16 @@ void open_link(const std::string& url) {
         }).detach();
     } catch (const std::exception&) {
     }
+}
+
+// Opens a release page of Anvil (the release notice).
+void open_link(const std::string& url) {
+    if (url.starts_with(std::string(anvil::net::kReleasesUrl) + "/")) open_in_browser(url);
+}
+
+// Opens the repository a mod's plugin names (repository_link: https:// only).
+void open_repository(const std::string& url) {
+    if (!url.empty() && url == anvil::ui::repository_link(url)) open_in_browser(url);
 }
 
 // The question's buttons: the setting, as the panel's editor writes it.
@@ -1286,12 +1295,12 @@ struct OverlayHost final : anvil::ui::PluginsHost {
         if (!m.approved_hash.empty()) {
             a.approved = trf("Approved: {0} on {1} (hash {2})", {m.approved_version, m.approved_date.substr(0, 10), m.approved_hash.substr(0, 8)});
         }
-        a.repository = m.repository;
+        a.repository = anvil::ui::repository_link(m.repository);
         a.can_approve = m.can_approve && !m.approved_next;
         a.update = m.state == "update-pending";
         a.can_revoke = m.can_revoke;
         const anvil::ui::ModAction action = anvil::ui::draw_mod_approval(a);
-        if (action == anvil::ui::ModAction::OpenRepository) open_link(m.repository);
+        if (action == anvil::ui::ModAction::OpenRepository) open_repository(a.repository);
         if (action == anvil::ui::ModAction::Revoke) revoke(m);
         if (action == anvil::ui::ModAction::Approve) {
             anvil::ui::Confirm c;
