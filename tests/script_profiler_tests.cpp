@@ -274,6 +274,7 @@ struct PanelRowCopy {
     uint64_t id;
 };
 std::vector<PanelRowCopy> g_rows;
+int g_set_rows_calls = 0;  // every set_rows, to tell a panel never republished from one with other rows
 AnvilPanelClick g_click = nullptr;
 void* g_click_context = nullptr;
 std::string g_title;
@@ -284,6 +285,7 @@ AnvilResult fake_create(const char* title, AnvilPanel** out) {
     return ANVIL_OK;
 }
 AnvilResult fake_set_rows(AnvilPanel*, const AnvilPanelRow* rows, uint32_t count, uint32_t) {
+    ++g_set_rows_calls;
     g_rows.clear();
     for (uint32_t i = 0; i < count; ++i) {
         g_rows.push_back({rows[i].kind, rows[i].label ? rows[i].label : "", rows[i].value ? rows[i].value : "", rows[i].id});
@@ -314,6 +316,24 @@ std::uint64_t button(const std::string& label) {
     }
     return 0;
 }
+
+// What the panel showed, printed when a check of it fails: the check at
+// "Start hooks the gate" failed twice under a parallel ctest (-j 8, -j 2) and
+// passed alone (night review, 15.11.2026), so the next failure says what the
+// panel had instead.
+void print_rows() {
+    std::printf("    panel after %d set_rows calls, %zu rows:\n", g_set_rows_calls, g_rows.size());
+    for (const PanelRowCopy& r : g_rows) {
+        std::printf("      kind %u, id %llu: %s | %s\n", r.kind, static_cast<unsigned long long>(r.id), r.label.c_str(),
+                    r.value.c_str());
+    }
+}
+#define CHECK_PANEL(cond)                                \
+    do {                                                 \
+        const int failures_before = g_failures;          \
+        CHECK(cond);                                     \
+        if (g_failures != failures_before) print_rows(); \
+    } while (0)
 
 // The texts a source file hands to the table: t("…"), t.f("…"), N_("…"), texts()("…").
 std::set<std::string> used_texts(const fs::path& file) {
@@ -643,7 +663,7 @@ int main(int argc, char** argv) {
         CHECK(p != nullptr && changes.count(p->owner) == 0);
         if (p == nullptr) return;
         CHECK(g_title == "Script profiler" && g_shown == 0 && g_click != nullptr);
-        CHECK(row_labelled("Load a game to measure.") != nullptr && button("Start") == 0);
+        CHECK_PANEL(row_labelled("Load a game to measure.") != nullptr && button("Start") == 0);
         CHECK(contains(log, "anvil-script-profiler: idle: no hooks until a profiling span starts in the panel (9 owner "
                             "classes known)"));
         plugin = p;
@@ -709,11 +729,11 @@ int main(int argc, char** argv) {
 
     run("profiler plugin: Start hooks the gate and the effect blocks, Stop removes them and writes the CSV", [&] {
         session(ANVIL_GAME_SESSION_STARTED, 0);
-        CHECK(button("Start") != 0 && button("Measure 30 days") != 0);
+        CHECK_PANEL(button("Start") != 0 && button("Measure 30 days") != 0);
         play();  // before the span: nothing is hooked, nothing recorded
         CHECK(changes.count(plugin->owner) == 0);
         click("Start");
-        CHECK(changes.count(plugin->owner) == 3 && button("Stop") != 0);
+        CHECK_PANEL(changes.count(plugin->owner) == 3 && button("Stop") != 0);
         CHECK(contains(log, "anvil-script-profiler: profiling span started: hooks on CAndTrigger::Evaluate, "
                             "CEffect::Execute and CScriptedTrigger::Evaluate"));
         g_evaluated = g_executed = 0;
@@ -722,7 +742,7 @@ int main(int argc, char** argv) {
         day();
         day();
         click("Stop");
-        CHECK(changes.count(plugin->owner) == 0 && button("Start") != 0);
+        CHECK_PANEL(changes.count(plugin->owner) == 0 && button("Start") != 0);
         CHECK(any_starts(log, "anvil-script-profiler: profiling span ended (complete): 2 days"));
         const auto files = csv_files();
         CHECK(files.size() == 1);
@@ -738,7 +758,7 @@ int main(int argc, char** argv) {
         CHECK(text.find(",scripted_trigger,my_scripted,,trigger,1,") != std::string::npos);
         CHECK(text.find(",church_aspect,organised_through_bishops,,trigger,1,") != std::string::npos);
         CHECK(text.find("\nscripted_trigger,1,scripted_trigger,my_scripted,,,1,") != std::string::npos);
-        CHECK(row_labelled("Event test_events.1 \xC2\xB7 trigger") != nullptr &&
+        CHECK_PANEL(row_labelled("Event test_events.1 \xC2\xB7 trigger") != nullptr &&
               row_labelled("Decision my_decision_with_a_long_name \xC2\xB7 potential") != nullptr);
         const PanelRowCopy* saved = row_labelled("Saved to logs");
         CHECK(saved != nullptr);
@@ -751,14 +771,14 @@ int main(int argc, char** argv) {
         CHECK(plugin->record->settings().set_text(0, "3").applied);
         run_work();
         click("Measure 3 days");
-        CHECK(changes.count(plugin->owner) == 3 && row_labelled("State") != nullptr &&
+        CHECK_PANEL(changes.count(plugin->owner) == 3 && row_labelled("State") != nullptr &&
               row_labelled("State")->value.rfind("Measuring: 0 of 3 days", 0) == 0);
         play();
         day();
         day();
         CHECK(changes.count(plugin->owner) == 3);
         day();
-        CHECK(changes.count(plugin->owner) == 0 && button("Measure 3 days") != 0);
+        CHECK_PANEL(changes.count(plugin->owner) == 0 && button("Measure 3 days") != 0);
         CHECK(csv_files().size() == 2);  // a second file, even within the same second
     });
 
@@ -768,13 +788,13 @@ int main(int argc, char** argv) {
         play();
         day();
         session(ANVIL_GAME_SESSION_ENDED, 0);
-        CHECK(changes.count(plugin->owner) == 0 && row_labelled("Load a game to measure.") != nullptr);
-        CHECK(row_labelled("Interrupted: the game was loaded or left.") != nullptr);
+        CHECK_PANEL(changes.count(plugin->owner) == 0 && row_labelled("Load a game to measure.") != nullptr);
+        CHECK_PANEL(row_labelled("Interrupted: the game was loaded or left.") != nullptr);
         CHECK(any_starts(log, "anvil-script-profiler: profiling span ended (interrupted: the session ended): 1 days"));
         const auto files = csv_files();
         CHECK(!files.empty() && read_text(files.back()).find(" status=interrupted_session ") != std::string::npos);
         session(ANVIL_GAME_SESSION_STARTED, 1);
-        CHECK(row_labelled("In multiplayer the measurement slows your game down") != nullptr && button("Start") != 0);
+        CHECK_PANEL(row_labelled("In multiplayer the measurement slows your game down") != nullptr && button("Start") != 0);
     });
 
     if (g_failures) {
