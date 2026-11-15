@@ -443,6 +443,16 @@ unsafe extern "C" fn map_id(mode: *const AnvilMapMode) -> *const c_char {
     }
 }
 
+static MAP_SHOWS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+unsafe extern "C" fn map_show(mode: *const AnvilMapMode) -> AnvilResult {
+    if mode != MAP_MODE {
+        return ANVIL_ERROR_INVALID_ARGUMENT;
+    }
+    MAP_SHOWS.fetch_add(1, Ordering::Relaxed);
+    ANVIL_OK
+}
+
 static FAKE_MAP: Shared<AnvilMapModesService> = Shared(AnvilMapModesService {
     size: std::mem::size_of::<AnvilMapModesService>() as u32,
     register_mode: Some(map_register),
@@ -450,6 +460,7 @@ static FAKE_MAP: Shared<AnvilMapModesService> = Shared(AnvilMapModesService {
     mode_id: Some(map_mode_id),
     shown: Some(map_shown),
     id: Some(map_id),
+    show: Some(map_show),
 });
 
 // --- a fake day end service: refuses after two subscriptions ----------------------
@@ -1562,6 +1573,9 @@ fn map_modes_register_paint_and_cut_tooltips_at_a_whole_character() {
         (modes.shown(), modes.id(mode)),
         (Some(mode), Some("p.cores"))
     );
+    let shows = MAP_SHOWS.load(Ordering::Relaxed);
+    modes.show(mode).unwrap();
+    assert_eq!(MAP_SHOWS.load(Ordering::Relaxed), shows + 1);
 
     let (describe, context) = with(|r| r.describes[0]);
     let describe: unsafe extern "C" fn(

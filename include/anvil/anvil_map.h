@@ -156,6 +156,21 @@ typedef struct AnvilMapModesService {
 
     /* The id of `mode`; NULL for NULL. */
     const char *(*id)(const AnvilMapMode *mode);
+
+    /* Since anvil-map 1.24.0; check with ANVIL_MAP_HAS(service, show). */
+
+    /* Shows `mode` on the map, as its button on the minimap does: anvil-map's
+     * next step (after the next frame of the main loop) calls the game's own
+     * CEU3Idler::SetCurrentMapMode, and ANVIL_MAP_EVENT_SHOWN follows there.
+     * It changes only what the map shows. The last request before a step
+     * wins; one for the mode already shown does nothing. Callable from any
+     * thread while a session runs; a request still waiting when the session
+     * ends is dropped.
+     * ANVIL_ERROR_INVALID_ARGUMENT: NULL, or a mode anvil-map did not
+     * register. ANVIL_ERROR_WRONG_PHASE: no session runs.
+     * ANVIL_ERROR_UNSUPPORTED: anvil-map runs without its hooks (another
+     * loader of map modes). */
+    AnvilResult (*show)(const AnvilMapMode *mode);
 } AnvilMapModesService;
 
 /* Nonzero when `service` provides `field`. */

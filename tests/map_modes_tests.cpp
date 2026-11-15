@@ -25,6 +25,34 @@ AnvilMapModeInfo info(const char* id, const char* label = "Cores", std::uint32_t
     return i;
 }
 
+void show_tests() {
+    run("map modes: a show request waits for the step, the last one wins", [] {
+        Registry r;
+        const AnvilMapMode* a = nullptr;
+        const AnvilMapMode* b = nullptr;
+        std::string why;
+        AnvilMapModeInfo ia = info("p.a"), ib = info("p.b");
+        CHECK(r.add(&ia, false, &a, why) == ANVIL_OK && r.add(&ib, false, &b, why) == ANVIL_OK);
+        CHECK(r.take_show() == nullptr);
+        CHECK(r.owns(a) && r.owns(b) && !r.owns(nullptr));
+        CHECK(r.request_show(a) && r.request_show(b));
+        CHECK(r.take_show() == b && r.take_show() == nullptr);
+        // A mode of another registry, a forged handle and NULL are refused.
+        Registry other;
+        const AnvilMapMode* c = nullptr;
+        AnvilMapModeInfo ic = info("p.c");
+        CHECK(other.add(&ic, false, &c, why) == ANVIL_OK);
+        CHECK(!r.owns(c) && !r.request_show(c) && !r.request_show(nullptr));
+        AnvilMapMode forged;
+        forged.number = a->number;
+        CHECK(!r.request_show(&forged) && r.take_show() == nullptr);
+        // The end of a session drops a waiting request.
+        CHECK(r.request_show(a));
+        r.clear_session();
+        CHECK(r.take_show() == nullptr);
+    });
+}
+
 void id_tests() {
     run("map modes: ids are <plugin-id>.<name>", [] {
         CHECK(valid_id("player-cores.cores"));
@@ -185,6 +213,7 @@ int main() {
     id_tests();
     registry_tests();
     color_tests();
+    show_tests();
     text_tests();
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

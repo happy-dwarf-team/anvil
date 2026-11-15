@@ -18,7 +18,8 @@
 // nothing the player sees changes.
 //
 // The step runs after each frame of the main loop (anvil-game.frame) while a
-// session runs: shown/hidden when the current map mode changes, the shown
+// session runs: a mode show() asked for is set through the game's
+// SetCurrentMapMode, then shown/hidden when the current map mode changes, the shown
 // mode marked dirty after a new buffer, and describe() for the province the
 // tooltip asked for. anvil-game.world may be read there.
 #include <anvil/anvil.hpp>
@@ -88,6 +89,7 @@ anvil::HookOf<sym::mapmode_tooltip> g_tooltip;
 sym::Types::cstring_from_text::Pointer g_cstring = nullptr;
 sym::Types::text_append::Pointer g_append = nullptr;
 sym::Types::set_map_mode_dirty::Pointer g_dirty = nullptr;
+sym::Types::set_current_map_mode::Pointer g_set_mode = nullptr;
 
 const AnvilGameWorldService* g_world = nullptr;
 
@@ -242,6 +244,30 @@ void on_tooltip(void* province, std::uint8_t flag, const void* other, void* tool
 
 // ---- the step ------------------------------------------------------------------
 
+// No objects with destructors here: the body runs under __try.
+bool call_set_mode(std::uintptr_t session, std::int32_t number, unsigned long* code) noexcept {
+    __try {
+        g_set_mode(reinterpret_cast<void*>(session), number, 0, 0);
+        return true;
+    } __except (*code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// A mode show() asked for: the game's own switch, as the minimap's button.
+void show_asked() {
+    AnvilMapMode* asked = g_registry.take_show();
+    if (asked == nullptr) return;
+    std::uintptr_t session = 0;
+    std::int32_t number = -1;
+    if (!current_mode(session, number) || number == asked->number) return;
+    unsigned long code = 0;
+    if (!call_set_mode(session, asked->number, &code)) {
+        const anvil::Host host;
+        host.warn("show {}: SetCurrentMapMode faulted ({:#x})", asked->id, code);
+    }
+}
+
 void describe_asked(AnvilMapMode* shown) {
     AnvilMapMode* asked = g_asked_mode.exchange(nullptr, std::memory_order_acq_rel);
     if (asked == nullptr || asked != shown || asked->describe == nullptr) return;
@@ -263,6 +289,7 @@ void step() {
     if (g_world != nullptr && g_province_limit.load(std::memory_order_relaxed) == 0) {
         g_province_limit.store(g_world->province_limit(), std::memory_order_relaxed);
     }
+    show_asked();
     std::uintptr_t session = 0;
     std::int32_t number = -1;
     AnvilMapMode* shown = current_mode(session, number) ? plugin_mode(number) : nullptr;
@@ -350,8 +377,16 @@ const AnvilMapMode* svc_shown() { return g_shown.load(std::memory_order_acquire)
 
 const char* svc_id(const AnvilMapMode* mode) { return mode != nullptr ? mode->id.c_str() : nullptr; }
 
+AnvilResult svc_show(const AnvilMapMode* mode) {
+    if (g_off.load(std::memory_order_relaxed)) return ANVIL_ERROR_UNSUPPORTED;
+    if (!g_registry.owns(mode)) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (!g_in_session.load(std::memory_order_acquire)) return ANVIL_ERROR_WRONG_PHASE;
+    g_registry.request_show(mode);
+    return ANVIL_OK;
+}
+
 const AnvilMapModesService kService = {
-    sizeof(AnvilMapModesService), &svc_register, &svc_set_colors, &svc_mode_id, &svc_shown, &svc_id,
+    sizeof(AnvilMapModesService), &svc_register, &svc_set_colors, &svc_mode_id, &svc_shown, &svc_id, &svc_show,
 };
 
 bool other_loader() { return GetModuleHandleW(L"eu4agent.dll") != nullptr; }
@@ -373,6 +408,7 @@ struct AnvilMap : anvil::Plugin {
         g_cstring = host.function(sym::cstring_from_text);
         g_append = host.function(sym::text_append);
         g_dirty = host.function(sym::set_map_mode_dirty);
+        g_set_mode = host.function(sym::set_current_map_mode);
 
         if (const auto* mei = host.service<MeiTextService>(kMeiTextService, 1);
             mei != nullptr && mei->size >= sizeof(MeiTextService) && mei->game_text_utf8 != nullptr) {
