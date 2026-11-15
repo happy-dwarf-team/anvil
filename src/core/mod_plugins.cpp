@@ -282,14 +282,6 @@ ModDiscovery discover_mod_plugins(const fs::path& anvil_dir, const fs::path& use
     return d;
 }
 
-bool make_approved_copy(const fs::path& anvil_dir, const ModPlugin& plugin, std::string& error) {
-    if (plugin.state != ModPluginState::Approved || !plugin.approval) {
-        error = "not an approved plugin";
-        return false;
-    }
-    return copy_verified(anvil_dir, plugin.id, plugin.folder, plugin.approval->hash, error);
-}
-
 bool copy_approved(const fs::path& anvil_dir, const std::string& id, const fs::path& folder, const std::string& hash,
                    std::string& error) {
     return copy_verified(anvil_dir, id, folder, hash, error);
@@ -351,22 +343,6 @@ bool revoke_mod_plugin(const fs::path& anvil_dir, const std::string& id, const s
     }
     remove_copies_except(anvil_dir, id, {keep_hash});
     return true;
-}
-
-void prune_approved_copies(const fs::path& anvil_dir, const TrustFile& trust) {
-    if (!trust.error.empty()) return;
-    const fs::path dir = anvil_dir / "data" / "anvil" / "approved";
-    std::error_code ec;
-    std::vector<fs::path> ids;
-    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) ids.push_back(it->path());
-    for (const fs::path& id_dir : ids) {
-        const TrustEntry* e = trust.find(narrow(id_dir.filename().wstring()));
-        if (e == nullptr) {
-            remove_tree(id_dir);
-        } else {
-            remove_copies_except(anvil_dir, e->id, {e->hash});
-        }
-    }
 }
 
 }  // namespace anvil

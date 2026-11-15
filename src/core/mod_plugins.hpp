@@ -88,10 +88,9 @@ void decide_mod_plugins(std::vector<ModPlugin>& plugins, const TrustFile& trust,
 // What the log and the player read when trust.toml does not parse; "" when it does.
 std::string trust_warning(const TrustFile& trust);
 
-// The copy of an Approved plugin whose copy is missing, made from its mod
-// folder and checked against the approved hash. False with `error`.
-bool make_approved_copy(const std::filesystem::path& anvil_dir, const ModPlugin& plugin, std::string& error);
-// The same for a plugin `id` whose folder `folder` has the approved `hash`.
+// The approved copy of plugin `id` (a start plan's PlannedCopy), made from
+// its mod's folder `folder` and checked against the approved `hash`. False
+// with `error`.
 bool copy_approved(const std::filesystem::path& anvil_dir, const std::string& id, const std::filesystem::path& folder,
                    const std::string& hash, std::string& error);
 
@@ -108,10 +107,5 @@ bool approve_mod_plugin(const std::filesystem::path& anvil_dir, const ModPlugin&
 // than `keep_hash`. True also when there was none.
 bool revoke_mod_plugin(const std::filesystem::path& anvil_dir, const std::string& id, const std::string& keep_hash,
                        std::string& error);
-
-// Removes the approved copies trust.toml no longer names (revoked ids, older
-// hashes, unfinished copies). The loader calls it before any plugin loads.
-// Nothing is removed while trust.toml does not parse.
-void prune_approved_copies(const std::filesystem::path& anvil_dir, const TrustFile& trust);
 
 }  // namespace anvil

@@ -205,17 +205,15 @@ int main(int argc, char** argv) {
         CHECK(!contains(log, kRunning) && !game.approved_hash().empty() && fs::exists(new_copy));
     });
 
-    run("start-up: a local plugin wins; two mods with one id load neither until one is approved", [&] {
+    // Two mods with one id and no approval load neither: a start plan test
+    // ("two mods with one id load neither until the player approves one").
+    // Here what needs a process: the approved one loads, a local one wins.
+    run("start-up: of two mods with one id the approved one loads; a local plugin wins over both", [&] {
         Game game(probe);
         game.mod("Mod A");
         game.mod("Mod B");
-        std::string log = game.start();
-        CHECK(contains(log, "mod-probe: skipped — from mod 'Mod A' (local mod): 2 enabled mods have a plugin 'mod-probe'"));
-        CHECK(contains(log, "mod-probe: skipped — from mod 'Mod B' (local mod): 2 enabled mods have a plugin 'mod-probe'"));
-        CHECK(!contains(log, kRunning));
-
         CHECK(game.approve("Mod B"));
-        log = game.start();
+        std::string log = game.start();
         CHECK(contains(log, "mod-probe from mod 'Mod B' (local mod): approved on ") && contains(log, kRunning));
         CHECK(contains(log, "mod-probe: skipped — from mod 'Mod A' (local mod): mod 'Mod B' has this plugin too"));
 

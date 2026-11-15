@@ -4,6 +4,7 @@
 #include "core/game_build.hpp"
 #include "core/plugin_symbols.hpp"
 #include "core/pe_image.hpp"
+#include "core/plugin_check.hpp"
 #include "core/symbol_check.hpp"
 #include "core/symbols.hpp"
 #include "test_image.hpp"
@@ -614,7 +615,7 @@ signature = "const char* ()"
         CHECK(!patches.read_original(mapped.address() + TestImage::kSize - 4, copy, 8));
     });
 
-    run("loader: check_plugin_symbols applies the build of the file", [&] {
+    run("loader: the plugin check applies the build of symbols.toml", [&] {
         const MappedImage mapped(test_image);
         ChangeRegistry patches(mapped.address(), TestImage::kSize);
         const auto folder = std::filesystem::temp_directory_path() /
@@ -625,12 +626,30 @@ signature = "const char* ()"
             std::ofstream out(file, std::ios::binary);
             out << "\xEF\xBB\xBF" << kGoodSymbols;  // with a UTF-8 BOM
         }
+        std::ofstream(folder / "plugin.toml", std::ios::binary)
+            << "id = \"probe\"\nname = \"Probe\"\nversion = \"1.0.0\"\napi = 2\nentry = \"probe.dll\"\nphase = \"main\"\n"
+               "affects_gameplay = false\nsymbols = \"symbols.toml\"\n";
+        std::ofstream(folder / "probe.dll", std::ios::binary) << "MZ";
+        // The loader's one check of a plugin folder (ADR 0014), against the game as it shipped:
+        // why it cannot load, and with none the verified symbols and the file with their bytes.
+        const auto checked = [&](const char* build, SymbolVerification* verified = nullptr, SymbolFile* declared = nullptr,
+                                 i18n::Message unknown = i18n::Message("build_unknown", {})) {
+            const OriginalImageReader reader(patches, mapped.address());
+            const PluginCheck check = check_plugin_folder(folder, game_image(reader, build, std::move(unknown)));
+            if (check.skip.empty() && check.symbols) {
+                if (verified != nullptr) *verified = check.verification;
+                if (declared != nullptr) {
+                    *declared = *check.symbols;
+                    adopt_verified_bytes(*declared, check.verification);
+                }
+            }
+            return check.skip;
+        };
         SymbolVerification verified;
-        CHECK(check_plugin_symbols(file, "test-build", patches, mapped.address(), &verified).empty());
+        CHECK(checked("test-build", &verified).empty());
         CHECK(verified.symbols.size() == 6 && value_of(verified.symbols[1], "root") == 0x3008);
-        CHECK(contains(english(check_plugin_symbols(file, nullptr, patches, mapped.address())), "game build unknown"));
-        CHECK(contains(english(check_plugin_symbols(file, nullptr, patches, mapped.address(), nullptr, nullptr,
-                                                    i18n::Message("build_unknown_gog", {known_gog_version()}))),
+        CHECK(contains(english(checked(nullptr)), "game build unknown"));
+        CHECK(contains(english(checked(nullptr, nullptr, nullptr, i18n::Message("build_unknown_gog", {known_gog_version()}))),
                        "Anvil runs on 1.37.5.2. If yours is older, update it in GOG Galaxy"));
         // Both GOG builds of 1.37.5 are known, by header and by hash; the advice names the newer one.
         const KnownBuild* gog0 = find_known_build_by_sha256(
@@ -646,14 +665,14 @@ signature = "const char* ()"
         CHECK(unknown_build_reason(folder).code == "build_unknown");
         std::ofstream(folder / "goggame-2057001589.info") << "{}";
         CHECK(unknown_build_reason(folder).code == "build_unknown_gog");
-        CHECK(contains(english(check_plugin_symbols(file, "eu4-9.9.9", patches, mapped.address())),
+        CHECK(contains(english(checked("eu4-9.9.9")),
                        "symbols.toml is for build test-build, the game is eu4-9.9.9"));
         {
             std::ofstream out(file, std::ios::binary);
             out << "build = \"test-build\"\n[symbol.s]\nrva = 0x1000\nbytes = \"00\"\nmemory = \"code\"\n"
                    "[symbol.t]\nrva = 0x1000\nbytes = \"01\"\nmemory = \"code\"\n";
         }
-        const std::string reason = english(check_plugin_symbols(file, "test-build", patches, mapped.address()));
+        const std::string reason = english(checked("test-build"));
         CHECK(contains(reason, "symbol s (rva 0x1000): byte +0x0") && contains(reason, "and 1 more"));
         // Several builds: the game's build is selected and verified.
         {
@@ -663,14 +682,12 @@ signature = "const char* ()"
                    "build.\"build-b\" = { rva = 0x1010, bytes = \"48 8B 05\" }\n";
         }
         SymbolFile declared;
-        CHECK(check_plugin_symbols(file, "build-b", patches, mapped.address(), &verified, &declared).empty());
+        CHECK(checked("build-b", &verified, &declared).empty());
         CHECK(declared.build == "build-b" && verified.symbols[0].rva == 0x1010 && value_of(verified.symbols[0], "reg") == 0x05);
-        CHECK(check_plugin_symbols(file, "build-a", patches, mapped.address(), &verified).empty());
+        CHECK(checked("build-a", &verified).empty());
         CHECK(verified.symbols[0].rva == 0x1000 && value_of(verified.symbols[0], "reg") == 0x81);
-        CHECK(contains(english(check_plugin_symbols(file, "build-c", patches, mapped.address())),
+        CHECK(contains(english(checked("build-c")),
                        "symbols.toml is for builds build-a, build-b, the game is build-c"));
-        CHECK(contains(english(check_plugin_symbols(folder / "missing.toml", "test-build", patches, mapped.address())),
-                       "cannot read missing.toml"));
         // A digest: after verification the declaration holds the image's bytes, for the
         // checks of a later change and for values.
         {
@@ -678,7 +695,7 @@ signature = "const char* ()"
             out << "build = \"test-build\"\n[symbol.s]\nrva = 0x1010\nsha256 = \"" << digest_at(*file_reader, 0x1010, 13)
                 << "\"\nsize = 13\nmemory = \"code\"\nvalues.date = { at = 9, size = 4, is = 0x1DD0 }\n";
         }
-        CHECK(check_plugin_symbols(file, "test-build", patches, mapped.address(), &verified, &declared).empty());
+        CHECK(checked("test-build", &verified, &declared).empty());
         CHECK(value_of(verified.symbols[0], "date") == 0x1DD0 && declared.symbols[0].bytes[0] == 0x48 &&
               declared.symbols[0].bytes[9] == 0xD0);
         std::error_code ignored;
