@@ -179,8 +179,11 @@ typedef struct AnvilGameService {
      * sets it (ANVIL_GAME_COMMAND_SPEED). */
     int (*speed)(int32_t *out);
     /* Whether the game is paused, by the game speed's own check: nonzero while a
-     * session runs and is paused, with *flags set to its reasons
-     * (ANVIL_GAME_PAUSE_*); 0 while it runs on or no session runs (*flags 0).
+     * session runs and is paused, with *flags set to one reason
+     * (ANVIL_GAME_PAUSE_*): PLAYER while the player's pause is on, whether or
+     * not the game holds a pause of its own as well, else GAME; 0 while it runs
+     * on or no session runs (*flags 0). After the player resumes, the game may
+     * stay paused, and paused() says GAME from the next frame.
      * As of the last frame of the main loop; callable from any thread; `flags`
      * may be NULL. Whether a pause came from going out of sync is
      * out_of_sync()'s ANVIL_GAME_OOS_PAUSED. */
@@ -203,7 +206,8 @@ typedef struct AnvilGameService {
  * toggle. */
 #define ANVIL_GAME_PAUSE_PLAYER 0x1u
 /* paused(): in single player, the game's own list of pauses is not empty
- * (paused for a reason other than the player's). */
+ * (paused for a reason other than the player's), and the player's pause is
+ * off; never together with ANVIL_GAME_PAUSE_PLAYER. */
 #define ANVIL_GAME_PAUSE_GAME 0x2u
 
 /* Nonzero when `service` provides `field`. */
