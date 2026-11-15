@@ -598,6 +598,13 @@ void panel_tests(const fs::path& source_dir) {
         CHECK(only.total == 1 && only.hits.size() == 1 && only.hits[0].defines && only.hits[0].rel == "events/R.txt");
         const se::Search dest = se::search(replaced, "dest");
         CHECK(dest.total == 1 && dest.hits.size() == 1 && dest.hits[0].rel == "common/b.txt");
+        // A replaced subfolder of a searched folder: common is read, common/ideas of the earlier layers is not.
+        put(root / "user" / "mod" / "m" / "common" / "ideas" / "i.txt", "lor_ideas = { lor_unite_the_lake = yes }\n");
+        put(root / "user" / "mod" / "m" / "common" / "y.txt", "lor_unite_the_lake = { }\n");
+        const se::Search ideas = se::search(replaced, "lor_unite_the_lake");
+        bool in_ideas = false;
+        for (const se::Hit& h : ideas.hits) in_ideas = in_ideas || h.rel.starts_with("common/ideas/");
+        CHECK(!in_ideas && ideas.total == 3);  // common/y.txt and the two in missions/lorent.txt
         CHECK(se::vscode_uri("C:\\Program Files (x86)\\a b.txt", 12) == "vscode://file/C:/Program%20Files%20%28x86%29/a%20b.txt:12");
         fs::remove_all(root, ec);
     });
