@@ -288,6 +288,19 @@ int main(int argc, char** argv) {
         CHECK(!contains(log, "meant module mod-probe.flows"));
         CHECK(read(game.anvil / "anvil.toml") == toml && read(player) == "flows_mode = \"off\"\n");
 
+        // The first folder of the id fails another check (it asks for a newer Anvil) and the second one
+        // loads: the first one's retired rules leave the loaded one's data alone too.
+        const std::string manifest = read(local / "plugin.toml");
+        write(local / "plugin.toml", "anvil = \">=99.0.0\"\n" + manifest);
+        write(local / "settings.toml", retired);
+        write(twin / "settings.toml", "[setting.level]\ntype = \"int\"\ndefault = 1\nlabel = \"Level\"\n\n"
+                                      "[setting.flows_mode]\ntype = \"string\"\ndefault = \"on\"\nlabel = \"Mode\"\n");
+        log = game.start();
+        CHECK(contains(log, "skipped") && contains(log, kRunning));
+        CHECK(!contains(log, "meant module mod-probe.flows"));
+        CHECK(read(game.anvil / "anvil.toml") == toml && read(player) == "flows_mode = \"off\"\n");
+        write(local / "plugin.toml", manifest);
+
         // Alone again with its retired setting, a normal start moves it: into anvil.toml, out of the player's file.
         fs::remove_all(twin);
         write(local / "settings.toml", retired);
