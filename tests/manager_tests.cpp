@@ -243,6 +243,11 @@ int main(int argc, char** argv) {
             CHECK(same_file(games[0], library / "steamapps" / "common" / "EU4 Custom"));
             CHECK(same_file(games[1], steam / "steamapps" / "common" / "Europa Universalis IV"));
         }
+        // Play starts Steam's own folder: a folder Steam does not list (a copy) is told so.
+        CHECK(steam_starts_instead(games, steam / "steamapps" / "common" / "Europa Universalis IV").empty());
+        CHECK(steam_starts_instead({}, temp.dir / "Copy").empty());  // no Steam: nothing to say
+        make_game(temp.dir / "Copy");
+        if (!games.empty()) CHECK(same_file(steam_starts_instead(games, temp.dir / "Copy"), games[0]));
         // An installdir that would leave steamapps/common is not followed.
         write(library / "steamapps" / "appmanifest_236850.acf", "\"AppState\" { \"installdir\" \"..\\\\..\" }");
         CHECK(find_steam_games(steam).size() == 1);

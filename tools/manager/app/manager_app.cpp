@@ -232,9 +232,14 @@ std::vector<const CatalogPlugin*> ManagerApp::catalog_updates_here() const {
     return catalog_updates(*catalog_, in.build, in.anvil_version, in.local, in.mods);
 }
 
+std::string ManagerApp::steam_elsewhere_text() const {
+    return trf("Steam starts EU4 from {0}, not from this folder: the Manager cannot start the game here.", {u8(steam_elsewhere_)});
+}
+
 void ManagerApp::choose_game(const fs::path& dir) {
     game_ = dir.lexically_normal();
     gog_ = is_gog_folder(game_);
+    steam_elsewhere_ = gog_ ? fs::path() : steam_starts_instead(steam_games_, game_);
     follow_language(game_);
     snapshot_.reset();
     plugins_.reset();
@@ -417,7 +422,7 @@ void ManagerApp::draw_sidebar(bool rail) {
     // Play EU4: the window's main action, on top of everything else.
     const bool no_game = snapshot_ && !snapshot_->folder.error.empty();  // nothing here to start
     ImGui::SetCursorPosX(pad);
-    ImGui::BeginDisabled(running_ || no_game || benchmark_.busy());
+    ImGui::BeginDisabled(running_ || no_game || benchmark_.busy() || !steam_elsewhere_.empty());
     const fs::path gog_start = gog_ ? gog_program(game_) : fs::path();
     const std::string play = rail ? std::string("###play") : std::string(tr("Play EU4")) + "###play";
     const float play_width = ImGui::GetContentRegionAvail().x - pad;
@@ -437,11 +442,13 @@ void ManagerApp::draw_sidebar(bool rail) {
     }
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        const char* tip = gog_ ? tr("Opens the Paradox launcher, as GOG does. Press Play there.") : tr("Starts the game through Steam");
+        const std::string tip = !steam_elsewhere_.empty() ? steam_elsewhere_text()
+                                : gog_ ? tr("Opens the Paradox launcher, as GOG does. Press Play there.")
+                                       : tr("Starts the game through Steam");
         if (rail) {
-            ImGui::SetTooltip("%s\n%s", tr("Play EU4"), tip);
+            ImGui::SetTooltip("%s\n%s", tr("Play EU4"), tip.c_str());
         } else {
-            ImGui::SetTooltip("%s", tip);
+            ImGui::SetTooltip("%s", tip.c_str());
         }
     }
 
@@ -582,6 +589,16 @@ void ManagerApp::draw_notices() {
             choose_game(chosen);
         }
         end_banner(Tone::Warn);
+    }
+    if (!steam_elsewhere_.empty() && !running_ && running_elsewhere_.empty() && !benchmark_.busy()) {
+        // Play is off: steam://rungameid would start Steam's own folder, not this one.
+        begin_banner("steam-elsewhere", Tone::Info);
+        wrapped(steam_elsewhere_text());
+        if (text_button(tr("Switch to that folder"))) {
+            const fs::path chosen = steam_elsewhere_;  // choose_game sets steam_elsewhere_ again
+            choose_game(chosen);
+        }
+        end_banner(Tone::Info);
     }
     if (anvil_missed_ && !running_ && !benchmark_.busy()) {
         begin_banner("missed", Tone::Warn);

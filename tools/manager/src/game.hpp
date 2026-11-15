@@ -38,6 +38,13 @@ std::vector<std::filesystem::path> steam_libraries(const VdfNode& libraryfolders
 // folder.
 std::vector<std::filesystem::path> find_steam_games(const std::filesystem::path& steam_root);
 
+// The folder Steam starts on Play (steam://rungameid/236850) when it is not
+// `game_dir`: Steam runs its own install, whatever folder the Manager shows
+// (a copy of the game, a second install). Empty when `game_dir` is one of
+// `steam_games` or Steam lists none.
+std::filesystem::path steam_starts_instead(const std::vector<std::filesystem::path>& steam_games,
+                                           const std::filesystem::path& game_dir);
+
 // Steam's folder from the registry (HKCU Software\Valve\Steam SteamPath,
 // then HKLM's InstallPath); empty when Steam is not installed.
 std::filesystem::path steam_root_from_registry();

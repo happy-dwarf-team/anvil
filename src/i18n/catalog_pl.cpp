@@ -722,6 +722,8 @@ extern const Translation kPolish[] = {
      "Steam działa"},
     {"Steam started",
      "Steam uruchomiony"},
+    {"Steam starts EU4 from {0}, not from this folder: the Manager cannot start the game here.",
+     "Steam uruchamia EU4 z {0}, a nie z tego folderu: Manager nie może tu uruchomić gry."},
     {"Steam, the mods or the compared plugin changed during the series.",
      "Steam, mody albo porównywana wtyczka zmieniły się w trakcie serii."},
     {"Stop",

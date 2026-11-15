@@ -221,6 +221,14 @@ std::vector<fs::path> find_steam_games(const fs::path& steam_root) {
     return games;
 }
 
+fs::path steam_starts_instead(const std::vector<fs::path>& steam_games, const fs::path& game_dir) {
+    if (steam_games.empty()) return {};
+    for (const fs::path& game : steam_games) {
+        if (same_file(game, game_dir)) return {};
+    }
+    return steam_games.front();  // the library that lists the game comes first
+}
+
 fs::path steam_root_from_registry() {
     std::wstring path = registry_string(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", L"SteamPath", 0);
     if (path.empty()) path = registry_string(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Valve\\Steam", L"InstallPath", RRF_SUBKEY_WOW6432KEY);

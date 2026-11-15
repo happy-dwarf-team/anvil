@@ -722,6 +722,8 @@ extern const Translation kSimplifiedChinese[] = {
      "Steam 正在运行"},
     {"Steam started",
      "Steam 已启动"},
+    {"Steam starts EU4 from {0}, not from this folder: the Manager cannot start the game here.",
+     "Steam 会从 {0} 启动 EU4，而不是从此文件夹启动，所以 Manager 无法在这里启动游戏。"},
     {"Steam, the mods or the compared plugin changed during the series.",
      "测试期间 Steam、模组或对比的插件发生了变化。"},
     {"Stop",

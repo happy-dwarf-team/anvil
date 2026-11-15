@@ -90,6 +90,7 @@ private:
     };
 
     void choose_game(const std::filesystem::path& dir);
+    std::string steam_elsewhere_text() const;  // why Play is off while steam_elsewhere_ is set
     // The release check and, with it, the catalog (ADR 0005, ADR 0006): once
     // per start and when the player turns the check on; what is already being
     // asked is not asked again.
@@ -159,6 +160,7 @@ private:
 
     std::filesystem::path game_;
     bool gog_ = false;  // game_ is a GOG install: Play, the Workshop and the benchmark's checks do without Steam
+    std::filesystem::path steam_elsewhere_;  // a Steam game_ that Steam does not start: the folder Play would start instead
     bool launcher_opened_ = false;  // Play opened the Paradox launcher in a GOG install and the game has not started yet
     std::optional<Snapshot> snapshot_;
     std::future<Snapshot> pending_;
