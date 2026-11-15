@@ -820,7 +820,9 @@ typedef struct AnvilGameWorldService {
      * The province last selected on the map (a click, the outliner, a link):
      * the session's selection object keeps it until another one is selected,
      * also after its province view closed. *province 0 while none has been
-     * selected in this session. */
+     * selected in this session. In the game's map mode 0x25 a selection
+     * stores another value there instead (from the code, most likely none,
+     * so *province 0); not checked in the game. */
     AnvilResult (*selected_province)(int32_t *province);
     /* The province under the point (x, y) of the game window's client area, in
      * pixels, as the game's hover finds it: the game's own
