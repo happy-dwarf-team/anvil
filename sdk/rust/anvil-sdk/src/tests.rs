@@ -598,11 +598,27 @@ unsafe extern "C" fn game_paused(flags: *mut u32) -> core::ffi::c_int {
     1
 }
 
+unsafe extern "C" fn game_user_dir() -> *const u16 {
+    static DIR: [u16; 9] = [
+        b'C' as u16,
+        b':' as u16,
+        b'\\' as u16,
+        b'u' as u16,
+        b's' as u16,
+        b'e' as u16,
+        b'r' as u16,
+        0x00EB,
+        0,
+    ];
+    DIR.as_ptr()
+}
+
 static FAKE_GAME: Shared<AnvilGameService> = Shared({
     let mut table: AnvilGameService = unsafe { std::mem::zeroed() };
     table.size = std::mem::size_of::<AnvilGameService>() as u32;
     table.speed = Some(game_speed);
     table.paused = Some(game_paused);
+    table.user_dir = Some(game_user_dir);
     table
 });
 
@@ -2004,6 +2020,10 @@ fn game_reads_the_speed_and_the_pause() {
     assert_eq!(g.speed(), Some(3));
     let pause = g.paused().unwrap();
     assert!(pause.player() && !pause.game());
+    assert_eq!(
+        g.user_dir(),
+        Some(std::path::PathBuf::from("C:\\user\u{EB}"))
+    );
     // In the table's size but not filled in: None.
     assert_eq!(g.out_of_sync(), None);
 }

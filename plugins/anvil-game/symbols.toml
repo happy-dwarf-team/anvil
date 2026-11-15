@@ -280,6 +280,16 @@ bytes = """
 B8 01 00 00 00 75 05 B8 02 00 00 00 83 F8 02 0F 95 C0 48 83 C4 20 5B C3
 """
 
+# --- the game's write folder ---
+# PhysFS' write directory, which the game sets at start-up (Documents\Paradox
+# Interactive\Europa Universalis IV, or what -userdir and userdir.txt choose).
+# The same declaration as Tongs'.
+
+[symbol.physfs_get_write_dir]
+export = "PHYSFS_getWriteDir"
+signature = "const char* ()"
+note = "PhysFS' write directory, UTF-8; NULL until the game set it"
+
 # --- the keyboard of the game's GUI ---
 # Read on a key press, never written. A focused text field stores its text
 # receiver in the GUI, and the shortcut editor takes every key while it has

@@ -169,7 +169,8 @@ typedef struct AnvilGameService {
      * waits changes nothing but its flags. */
     AnvilResult (*restart)(AnvilPlugin *self, uint32_t flags);
 
-    /* Since anvil-game 1.24.0; check with ANVIL_GAME_HAS(service, speed). */
+    /* Since anvil-game 1.24.0; check with ANVIL_GAME_HAS(service, speed) or
+     * ANVIL_GAME_HAS(service, user_dir). */
 
     /* The game speed as the speed bar shows it, 1 to 5: nonzero and *out set
      * while a session runs, 0 otherwise (*out untouched). It keeps its value
@@ -184,6 +185,15 @@ typedef struct AnvilGameService {
      * may be NULL. Whether a pause came from going out of sync is
      * out_of_sync()'s ANVIL_GAME_OOS_PAUSED. */
     int (*paused)(uint32_t *flags);
+    /* The game's own write folder, where it keeps "save games", "logs" and
+     * settings.txt: PhysFS' write directory (by default
+     * Documents\Paradox Interactive\Europa Universalis IV, or what -userdir
+     * and userdir.txt choose), with backslashes and no trailing one. NULL until the
+     * game set it at start-up (it has by anvil-game.ready) and on a build that
+     * declares the symbol absent. The string belongs to anvil-game, does not
+     * change once given and stays valid until the process exits; callable
+     * from any thread. */
+    const wchar_t *(*user_dir)(void);
 } AnvilGameService;
 
 /* restart(): the player accepted closing a running single-player campaign. */

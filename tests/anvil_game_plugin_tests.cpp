@@ -12,6 +12,7 @@
 #include "../plugins/anvil-game/src/commands.hpp"
 #include "../plugins/anvil-game/src/restart.hpp"
 #include "../plugins/anvil-game/src/session.hpp"
+#include "../plugins/anvil-game/src/user_dir.hpp"
 #include "../plugins/anvil-game/src/work_queue.hpp"
 #include "../plugins/anvil-game/src/world.hpp"
 
@@ -49,6 +50,9 @@ void fake_frame_body() {
     if (g_inside_frame != nullptr) g_inside_frame();
 }
 
+// What the stand-in of PHYSFS_getWriteDir answers.
+const char* g_write_dir = nullptr;
+
 // The types of the events the stand-in of SDL_PushEvent got, and its time stamp.
 std::vector<uint32_t> g_pushed;
 int fake_push_event_rest(const void* event) {
@@ -61,7 +65,8 @@ int fake_push_event_rest(const void* event) {
 // eu4.exe's size and sections, reserved; pages are committed only where the
 // symbols of anvil-game lie:
 //   .text  0x1000    code   the declared bytes; frame and is_multiplayer callable
-//   .rdata 0x1B66000 read   the game session's vtable 0x1CB8460, the front end's 0x1D5A8C8
+//   .rdata 0x1B66000 read   the export table (PHYSFS_getWriteDir), the game session's
+//                           vtable 0x1CB8460, the front end's 0x1D5A8C8
 //   .data  0x1FB0000 write  root global 0x233FE78, ready flag 0x233FF4E
 struct FakeEu4 {
     static constexpr uint32_t kSize = 0x25E0000;
@@ -74,6 +79,7 @@ struct FakeEu4 {
                               0x1432000u, 0x10DB000u, 0x14C2000u, 0x1732000u, 0x1746000u, 0x1761000u}) {
             commit(page, PAGE_EXECUTE_READWRITE);
         }
+        commit(0x1B66000, PAGE_READWRITE);
         commit(0x1CB8000, PAGE_READWRITE);
         commit(0x1D5A000, PAGE_READWRITE);
         commit(0x1FB0000, PAGE_READWRITE);
@@ -135,6 +141,25 @@ struct FakeEu4 {
         put_pointer(0x1746BA6, reinterpret_cast<uintptr_t>(&fake_push_event_rest));
         put(0x1746BAE, {0xFF, 0xD0, 0x48, 0x83, 0xC4, 0x20, 0x5F, 0xC3});
         put(0x1761F20, {0xB8, 0xD2, 0x04, 0x00, 0x00, 0xC3});  // SDL_GetTicks: mov eax,1234; ret
+        // PHYSFS_getWriteDir, exported: mov rax, &g_write_dir; mov rax,[rax]; ret.
+        put(0x1761F40, {0x48, 0xB8});
+        put_pointer(0x1761F42, reinterpret_cast<uintptr_t>(&g_write_dir));
+        put(0x1761F4A, {0x48, 0x8B, 0x00, 0xC3});
+        IMAGE_EXPORT_DIRECTORY exports{};
+        exports.Name = 0x1B661A0;
+        exports.Base = 1;
+        exports.NumberOfFunctions = 1;
+        exports.NumberOfNames = 1;
+        exports.AddressOfFunctions = 0x1B66140;
+        exports.AddressOfNames = 0x1B66150;
+        exports.AddressOfNameOrdinals = 0x1B66160;
+        std::memcpy(base + 0x1B66100, &exports, sizeof(exports));
+        const uint32_t function = 0x1761F40, name = 0x1B66170;
+        std::memcpy(base + 0x1B66140, &function, sizeof(function));
+        std::memcpy(base + 0x1B66150, &name, sizeof(name));
+        std::memset(base + 0x1B66160, 0, 2);
+        std::memcpy(base + 0x1B66170, "PHYSFS_getWriteDir", sizeof("PHYSFS_getWriteDir"));
+        std::memcpy(base + 0x1B661A0, "eu4.exe", sizeof("eu4.exe"));
         // The front end's state change, which stores the state at frontend+0x900.
         put(0x10DB037, {0x41, 0x8B, 0x8E, 0x00, 0x09, 0x00, 0x00, 0x49, 0x8B, 0x86, 0xE8, 0x08, 0x00, 0x00, 0x48, 0x8B,
                         0x0C, 0xC8, 0x48, 0x8B, 0x01, 0xFF, 0x50, 0x18, 0x41, 0x89, 0xBE, 0x00, 0x09, 0x00, 0x00});
@@ -174,6 +199,7 @@ struct FakeEu4 {
         nt.OptionalHeader.SizeOfImage = kSize;
         nt.OptionalHeader.SizeOfHeaders = 0x400;
         nt.OptionalHeader.NumberOfRvaAndSizes = IMAGE_NUMBEROF_DIRECTORY_ENTRIES;
+        nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT] = {0x1B66100, 0x100};
         std::memcpy(base + 0x80, &nt, sizeof(nt));
         struct Layout {
             const char* name;
@@ -1842,7 +1868,7 @@ int main(int argc, char** argv) {
         start.add(gp_toml);
         start.add(plugin_toml("other"));
         start.make();
-        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 167);
+        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 168);
         AnvilPlugin* p = start.load(ANVIL_GAME_ID);
         CHECK(p != nullptr);
         if (p == nullptr) return;
@@ -2229,6 +2255,37 @@ int main(int argc, char** argv) {
         game.set_session(game.session);
         frame(game.app, 1);
         CHECK(service->session(nullptr) == 1 && service->out_of_sync() == 0);
+    });
+
+    run("anvil-game: the game's write folder from PhysFS, once it is set", [&] {
+        CHECK(ANVIL_GAME_HAS(service, user_dir));
+        if (!ANVIL_GAME_HAS(service, user_dir)) return;
+        g_write_dir = nullptr;
+        CHECK(service->user_dir() == nullptr);
+        g_write_dir = "";
+        CHECK(service->user_dir() == nullptr);
+        g_write_dir = "C:/Users/Zo\xC3\xAB/Documents/Paradox Interactive/Europa Universalis IV/";
+        const wchar_t* dir = service->user_dir();
+        CHECK(dir != nullptr && std::wstring(dir) == L"C:\\Users\\Zo\u00EB\\Documents\\Paradox Interactive\\Europa Universalis IV");
+        // Given once, it stays: the same string, whatever PhysFS says later.
+        g_write_dir = "D:/other/";
+        CHECK(service->user_dir() == dir);
+        std::wstring from_thread;
+        std::thread([&] { from_thread = service->user_dir(); }).join();
+        CHECK(from_thread == dir);
+        g_write_dir = nullptr;
+        CHECK(service->user_dir() == dir);
+    });
+
+    run("anvil-game: the write folder's path", [&] {
+        using anvil_game::user_dir_path;
+        CHECK(user_dir_path("").empty());
+        CHECK(user_dir_path("C:\\Games\\EU4\\\\") == L"C:\\Games\\EU4");
+        CHECK(user_dir_path("C:/") == L"C:\\");
+        CHECK(user_dir_path("\\\\server\\share/eu4") == L"\\\\server\\share\\eu4");
+        CHECK(user_dir_path("C:/\xE6\x97\xA5\xE6\x9C\xAC") == L"C:\\\u65E5\u672C");
+        // Not UTF-8: the ANSI code page, whatever it is, gives one character for the byte.
+        CHECK(user_dir_path("C:/Zo\xEB").size() == 6);
     });
 
     run("anvil-game: the speed from the root and the pause from the game-speed object", [&] {
