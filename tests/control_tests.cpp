@@ -694,6 +694,15 @@ default = false
         CHECK(set("smithy", ANVIL_CONTROL_SWITCH_MULTIPLAYER, 1).first == ANVIL_ERROR_NOT_DECLARED);
         CHECK(set("nope", ANVIL_CONTROL_SWITCH_ON, 0).first == ANVIL_ERROR_NOT_FOUND);
         CHECK(set("smithy", 9, 1).first == ANVIL_ERROR_INVALID_ARGUMENT);
+        // "Disable at the next start" refuses the same plugins as the switch.
+        for (const char* needed : {"anvil-overlay", "anvil-game"}) {
+            AnvilControlResult r{};
+            r.size = sizeof(r);
+            CHECK(svc.disable_next_start(needed, &r) == ANVIL_ERROR_UNSUPPORTED && r.saved == 0 &&
+                  contains_text(r.error, "turn it off in Anvil Manager"));
+            s = state(needed, ANVIL_CONTROL_SWITCH_ON);
+            CHECK(s && s->next_start == 1);
+        }
         CHECK(read_file(toml) == before);
         // anvil.toml that does not parse: INTERNAL, the state stays.
         write_file(toml, "disabled_plugins = [\n");

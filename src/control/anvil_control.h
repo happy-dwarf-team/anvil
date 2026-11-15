@@ -335,7 +335,11 @@ typedef struct AnvilControlService {
     /* --- "disable at the next start" --- */
     /* Adds the id to disabled_plugins in anvil/anvil.toml, keeping the rest
      * of the file and its comments, written atomically. Only on the player's
-     * request. ANVIL_OK when it is listed (also when it already was). */
+     * request. ANVIL_OK when it is listed (also when it already was);
+     * NOT_FOUND: no such plugin at this start; INTERNAL: anvil.toml could not
+     * be written. Since 1.24 UNSUPPORTED, with "turn it off in Anvil Manager"
+     * in `error`, for anvil-overlay and a plugin it needs, as switch_set
+     * refuses them (switch_state's refusal "needed"). */
     AnvilResult (*disable_next_start)(const char *plugin_id, AnvilControlResult *out);
 
     /* --- plugins in mods (appended in 1.3, design §14) --- */
