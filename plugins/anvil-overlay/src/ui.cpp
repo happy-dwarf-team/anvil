@@ -797,9 +797,8 @@ void draw_notice(const Notice& notice, bool* closed, float& y, int index) {
         ImGui::Indent(indent);
         const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
         const float button = ImGui::GetFrameHeight();
-        ImGui::PushTextWrapPos(closed != nullptr ? right - button : 0.0f);
-        anvil::ui::strong_wrapped(notice.title.c_str());
-        ImGui::PopTextWrapPos();
+        // A closable notice's title wraps short of its "x", in every language.
+        anvil::ui::strong_wrapped(notice.title.c_str(), closed != nullptr ? right - button - ImGui::GetStyle().ItemSpacing.x : 0.0f);
         if (closed != nullptr) {
             ImGui::SameLine(right - button);
             if (ImGui::SmallButton("x")) *closed = true;

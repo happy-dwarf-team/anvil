@@ -433,10 +433,24 @@ if(ANVIL_BUILD_TESTS)
     add_executable(anvil_ui_model_tests tests/ui_model_tests.cpp)
     target_link_libraries(anvil_ui_model_tests PRIVATE anvil_ui_model anvil_core)
     add_test(NAME anvil_ui_model_tests COMMAND anvil_ui_model_tests)
-    # The shared widgets, drawn in a Dear ImGui context without a window
-    # (tests/ui_widgets_tests.cpp).
-    add_executable(anvil_ui_widgets_tests tests/ui_widgets_tests.cpp)
-    target_link_libraries(anvil_ui_widgets_tests PRIVATE anvil_ui_model anvil_manager_imgui)
+    # The shared widgets and the Plugins tab, drawn in a Dear ImGui context
+    # without a window (tests/ui_widgets_tests.cpp). Its own Dear ImGui, built
+    # with the test engine's hooks, tells the test where each item was drawn.
+    FetchContent_GetProperties(imgui)
+    add_library(anvil_ui_test_imgui STATIC
+        ${imgui_SOURCE_DIR}/imgui.cpp
+        ${imgui_SOURCE_DIR}/imgui_draw.cpp
+        ${imgui_SOURCE_DIR}/imgui_tables.cpp
+        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+        ${imgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp)
+    target_include_directories(anvil_ui_test_imgui PUBLIC ${imgui_SOURCE_DIR})
+    target_compile_definitions(anvil_ui_test_imgui PUBLIC IMGUI_DISABLE_OBSOLETE_FUNCTIONS IMGUI_ENABLE_TEST_ENGINE)
+    set_target_properties(anvil_ui_test_imgui PROPERTIES COMPILE_WARNING_AS_ERROR OFF)
+    add_executable(anvil_ui_widgets_tests tests/ui_widgets_tests.cpp src/ui/plugins_view.cpp)
+    target_link_libraries(anvil_ui_widgets_tests PRIVATE anvil_ui_model anvil_i18n anvil_ui_test_imgui)
+    if(MSVC)
+        target_compile_options(anvil_ui_widgets_tests PRIVATE /W4 /WX /utf-8 /permissive- /EHsc)
+    endif()
     add_test(NAME anvil_ui_widgets_tests COMMAND anvil_ui_widgets_tests)
 
     # The player's language (issue #158): messages by code, the language from

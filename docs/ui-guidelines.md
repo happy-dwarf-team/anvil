@@ -197,7 +197,10 @@ settled it is variant B5 of `tools/manager/prototype/module-switches.html` on th
 - **The plugin's own switch is a toggle in the detail's header**, at its right edge, with
   its state as a word ("On", "Off"). It decides about every module, so it is bigger than
   theirs. Reset and Remove sit before it, behind a separator. It keeps its place from
-  plugin to plugin and when clicked, and stays in sight while the modules scroll.
+  plugin to plugin and when clicked, and stays in sight while the modules scroll. On a
+  pane too narrow for them all, the switch takes a line of its own under the buttons (and
+  the buttons one each when they do not fit side by side), still at the right edge;
+  nothing is drawn over another.
 - **A module is one row**: its name, then in weak words what its switch does not say (its
   settings, "1 changed" in the info colour, "changes the game" while it is off, and in the
   overlay what this game does with it), a chevron, and its small toggle with its word,
