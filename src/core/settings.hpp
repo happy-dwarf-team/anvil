@@ -148,9 +148,9 @@ struct RetiredMove {
 std::optional<RetiredMove> plan_retired_move(const SettingsFile& schema, std::string_view player_text,
                                              std::string& error);
 
-// Writes `text` to `file` through a temporary file in the same folder and
-// replaces it in one step; an empty `text` removes the file. False with
-// `error` on failure.
+// Writes `text` to `file` through write_file_atomic (a flushed temporary
+// file in the same folder, then one replace); an empty `text` removes the
+// file. False with `error` on failure.
 bool replace_text_file(const std::filesystem::path& file, const std::string& text, std::string& error);
 
 // Why `value` is not valid for the setting (wrong type, out of range, not an

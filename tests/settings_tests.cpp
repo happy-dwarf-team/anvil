@@ -646,7 +646,7 @@ void settings_tests() {
         const auto file = dir / "data" / "x" / "settings.toml";
         std::string error;
         CHECK(write_player_settings(f, values, file, error) && read(file) == text && error.empty());
-        CHECK(!std::filesystem::exists(file.string() + ".tmp"));
+        CHECK(!std::filesystem::exists(file.string() + ".tmp") && !std::filesystem::exists(file.string() + ".anvil-new"));
         CHECK(load_player_settings(f, file).values[1]->integer == 2048);
         for (const auto& s : f.settings) values[s.id] = s.default_value;
         CHECK(write_player_settings(f, values, file, error) && !std::filesystem::exists(file));
