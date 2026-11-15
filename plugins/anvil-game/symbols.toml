@@ -2051,6 +2051,75 @@ build."eu4-1.37.5-steam-win64" = { rva = 0x1347A89 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x1341BE9 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1341BE9 }
 
+# The selected province: the selection object keeps the last province selected
+# on the map at +0 (selected_province(), 1.24.0). The same site as Tongs'.
+
+[symbol.selected_province]
+memory = "code"
+values.province_id = { at = 42, size = 1 }
+note = "province selection: selection+0 = the province (mov [rbx],rsi) unless the session's map mode is 0x25"
+
+[symbol.selected_province.build."eu4-1.37.5-steam-win64"]
+rva = 0x139C860
+bytes = "41 83 79 2C 25 48 89 74 24 38 8B F5 49 0F 45 F2 48 89 33 49 8B 89 A0 5B 00 00 E8 41 82 0D 00 48 85 F6 0F 84 8F 02 00 00 39 6E 20"
+
+[symbol.selected_province.build."eu4-1.37.5.2-gog-win64"]
+rva = 0x13969C0
+bytes = "41 83 79 24 25 48 89 74 24 38 8B F5 49 0F 45 F2 48 89 33 49 8B 89 90 5B 00 00 E8 61 7F 0D 00 48 85 F6 0F 84 8F 02 00 00 39 6E 20"
+
+[symbol.selected_province.build."eu4-1.37.5.0-gog-win64"]
+rva = 0x13969C0
+bytes = "41 83 79 24 25 48 89 74 24 38 8B F5 49 0F 45 F2 48 89 33 49 8B 89 90 5B 00 00 E8 61 7F 0D 00 48 85 F6 0F 84 8F 02 00 00 39 6E 20"
+
+# The province under a point (province_at(), 1.24.0): the session's map input
+# holds the graphical map, whose own pick answers the province the game's hover
+# finds. The same declarations as Tongs', there checked live for its cursor.
+
+[symbol.map_of_session]
+memory = "code"
+values.graphical_map = { at = 3, size = 4 }
+values.map = { at = 26, size = 4 }
+note = "CInGameMapInput::UpdateCursor: the graphical map is *(*(session+0x330)+0x360), passed to GetSelectable with the pointer as two floats"
+
+[symbol.map_of_session.build."eu4-1.37.5-steam-win64"]
+rva = 0x116EA39
+bytes = "48 8B 88 30 03 00 00 C6 44 24 20 01 45 33 C9 4C 8D 45 A7 48 8D 55 77 48 8B 89 60 03 00 00"
+
+[symbol.map_of_session.build."eu4-1.37.5.2-gog-win64"]
+rva = 0x1168D99
+bytes = "48 8B 88 28 03 00 00 C6 44 24 20 01 45 33 C9 4C 8D 45 A7 48 8D 55 77 48 8B 89 60 03 00 00"
+
+[symbol.map_of_session.build."eu4-1.37.5.0-gog-win64"]
+rva = 0x1168D99
+bytes = "48 8B 88 28 03 00 00 C6 44 24 20 01 45 33 C9 4C 8D 45 A7 48 8D 55 77 48 8B 89 60 03 00 00"
+
+[symbol.graphical_map_vtable]
+memory = "read"
+note = "CEU3GraphicalMap's vtable: the object at the map path, checked before the call below"
+build."eu4-1.37.5-steam-win64" = { rva = 0x1D57E38, points_to = 0x10A3840 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x1D40928, points_to = 0x10A2040 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x1D40928, points_to = 0x10A2040 }
+
+[symbol.province_from_point]
+# push rbx; sub rsp,30h; mov rax,[root]; mov rbx,rcx; cmp qword [rax+1E00h],0
+bytes = "40 53 48 83 EC 30 48 8B 05 ?? ?? ?? ?? 48 8B D9 48 83 B8 00 1E 00 00 00 74 50"
+memory = "code"
+signature = "int32_t (void* map, const float* point)"
+note = "CEU3GraphicalMap::GetProvinceIDFromMouse: the province of the map's province bitmap where the pick ray through the client point meets the terrain; -1 off the map or without a session"
+build."eu4-1.37.5-steam-win64" = { rva = 0x10A3DD0 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x10A25D0 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x10A25D0 }
+
+[symbol.selectable_at_point]
+# mov rax,rsp; mov [rax+20h],r9b; mov [rax+18h],r8; mov [rax+10h],rdx; push rbp, rbx, rsi, rdi, r12, r13
+bytes = "48 8B C4 44 88 48 20 4C 89 40 18 48 89 50 10 55 53 56 57 41 54 41 55"
+memory = "code"
+signature = "void* (void* map, const float* point, void* selection, uint8_t a, uint8_t b)"
+note = "CEU3GraphicalMap::GetSelectable: the unit or province the map picks at the client point, as UpdateCursor asks it (an empty selection, false, true)"
+build."eu4-1.37.5-steam-win64" = { rva = 0x10A46C0 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x10A2EC0 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x10A2EC0 }
+
 [symbol.dialog_window_part]
 memory = "code"
 values.window_part = { at = 10, size = 1 }

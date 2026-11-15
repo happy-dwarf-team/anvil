@@ -1164,6 +1164,96 @@ AnvilResult read_province_view(const WorldLayout& l, std::int32_t& province) {
     return ANVIL_OK;
 }
 
+AnvilResult read_selected_province(const WorldLayout& l, std::int32_t& province) {
+    if (!l.selected || l.view_holder == 0) return ANVIL_ERROR_NOT_DECLARED;
+    std::uintptr_t root = 0, session = 0, holder = 0, selected = 0;
+    if (!read_root(l, root) || !read(root + l.session, session) || session == 0 || !read(session + l.view_holder, holder)) {
+        return ANVIL_ERROR_INTERNAL;
+    }
+    std::int32_t id = 0;
+    if (holder != 0 && (!read(holder, selected) || !province_id_of(l, selected, id))) return ANVIL_ERROR_INTERNAL;
+    province = id;
+    return ANVIL_OK;
+}
+
+namespace {
+
+// No objects with destructors here: the bodies run under __try.
+bool call_pick(std::int32_t (*pick)(void*, const float*), std::uintptr_t map, const float* point, std::int32_t* out) {
+    __try {
+        *out = pick(reinterpret_cast<void*>(map), point);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool call_pick_object(void* (*pick)(void*, const float*, void*, std::uint8_t, std::uint8_t), std::uintptr_t map,
+                      const float* point, void** out) {
+    __try {
+        // An empty CSelectionList, as CInGameMapInput::UpdateCursor passes one: head, tail, count.
+        alignas(8) unsigned char selection[0x20] = {};
+        *out = pick(reinterpret_cast<void*>(map), point, selection, 0, 1);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// The session's graphical map, checked by its class's vtable.
+AnvilResult graphical_map(const WorldLayout& l, std::uintptr_t& map) {
+    std::uintptr_t root = 0, session = 0, holder = 0, vtable = 0;
+    if (!read_root(l, root) || !read(root + l.session, session) || session == 0 ||
+        !read(session + l.graphical_map, holder)) {
+        return ANVIL_ERROR_INTERNAL;
+    }
+    if (holder == 0 || !read(holder + l.map, map) || map == 0 || !read(map, vtable) || vtable != l.map_vtable) {
+        return ANVIL_ERROR_INTERNAL;  // the map is not the game's map
+    }
+    return ANVIL_OK;
+}
+
+}  // namespace
+
+AnvilResult pick_province(const WorldLayout& l, std::int32_t x, std::int32_t y, std::int32_t& province) {
+    if (l.pick == nullptr) return ANVIL_ERROR_NOT_DECLARED;
+    std::uintptr_t map = 0;
+    if (const AnvilResult r = graphical_map(l, map); r != ANVIL_OK) return r;
+    const float point[2] = {static_cast<float>(x), static_cast<float>(y)};
+    std::int32_t id = -1;
+    if (!call_pick(l.pick, map, point, &id)) return ANVIL_ERROR_INTERNAL;
+    if (id <= 0) {
+        province = 0;
+        return ANVIL_OK;
+    }
+    std::uintptr_t at = 0;
+    if (province_at(l, id, at) != ANVIL_OK) return ANVIL_ERROR_INTERNAL;  // not a province of the array
+    province = id;
+    return ANVIL_OK;
+}
+
+AnvilResult pick_unit(const WorldLayout& l, std::int32_t x, std::int32_t y, AnvilGameUnitRef& out) {
+    if (l.pick_object == nullptr || l.kind_slot == 0) return ANVIL_ERROR_NOT_DECLARED;
+    std::uintptr_t map = 0;
+    if (const AnvilResult r = graphical_map(l, map); r != ANVIL_OK) return r;
+    const float point[2] = {static_cast<float>(x), static_cast<float>(y)};
+    void* picked = nullptr;
+    if (!call_pick_object(l.pick_object, map, point, &picked)) return ANVIL_ERROR_INTERNAL;
+    if (picked == nullptr) return ANVIL_ERROR_NOT_FOUND;
+    const auto object = reinterpret_cast<std::uintptr_t>(picked);
+    // The kind from its vtable's constant getter, read rather than called, as selected_units() does.
+    std::int64_t kind = 0;
+    if (!constant_of(l, object, l.kind_slot, kind)) return ANVIL_ERROR_INTERNAL;
+    if (kind != ANVIL_GAME_UNIT_ARMY && kind != ANVIL_GAME_UNIT_NAVY) return ANVIL_ERROR_NOT_FOUND;
+    AnvilGameUnitRef ref{};
+    std::uint64_t country = 0;
+    if (!read(object + l.unit_id, ref.id) || !read(object + l.unit_country, country)) return ANVIL_ERROR_INTERNAL;
+    ref.country = tag_text(country, l);
+    ref.kind = static_cast<std::uint32_t>(kind);
+    out = ref;
+    return ANVIL_OK;
+}
+
 // ---- diplomacy (1.22.0) -------------------------------------------------------------
 
 namespace {

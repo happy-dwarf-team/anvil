@@ -814,6 +814,26 @@ typedef struct AnvilGameWorldService {
      * as player(), so it is there wherever the service is. Set out->size;
      * ANVIL_ERROR_INVALID_ARGUMENT for NULL or a size below `size`'s own. */
     AnvilResult (*player_tags)(AnvilGamePlayer *out);
+    /* Since anvil-game 1.24.0, for the three calls below: the map. Each
+     * answers ANVIL_ERROR_NOT_DECLARED when a port declared its symbols absent.
+     *
+     * The province last selected on the map (a click, the outliner, a link):
+     * the session's selection object keeps it until another one is selected,
+     * also after its province view closed. *province 0 while none has been
+     * selected in this session. */
+    AnvilResult (*selected_province)(int32_t *province);
+    /* The province under the point (x, y) of the game window's client area, in
+     * pixels, as the game's hover finds it: the game's own
+     * CEU3GraphicalMap::GetProvinceIDFromMouse, where the pick ray through the
+     * point meets the terrain, so it follows the camera. Sea and wasteland
+     * provinces count; *province 0 off the map. It calls that function and
+     * changes nothing; a call costs about as much as one hover. */
+    AnvilResult (*province_at)(int32_t x, int32_t y, int32_t *province);
+    /* The army or navy the map picks at the same point, as the game's cursor
+     * does (CEU3GraphicalMap::GetSelectable with an empty selection): its id,
+     * owner and kind. ANVIL_ERROR_NOT_FOUND when the map picks no unit there
+     * (a province, or nothing). Any country's unit, as the game shows it. */
+    AnvilResult (*unit_at)(int32_t x, int32_t y, AnvilGameUnitRef *out);
 } AnvilGameWorldService;
 
 /* Nonzero when `service` provides `field`. */

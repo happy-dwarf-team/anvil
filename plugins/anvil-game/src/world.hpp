@@ -206,6 +206,14 @@ struct WorldLayout {
     std::uint32_t view_window = 0;          // view: its window's full object
     std::uint32_t window_part = 0;          // full window object: its widget
     std::uint32_t widget_shown = 0;         // widget: byte, nonzero while it is shown
+    bool selected = false;                  // selection object+0: the last selected CProvince*; false when absent
+
+    // The province under a point: `pick` null when absent on this build.
+    std::uint32_t graphical_map = 0;        // session: the map input's holder
+    std::uint32_t map = 0;                  // holder: the CEU3GraphicalMap
+    std::uintptr_t map_vtable = 0;          // the address of its class's vtable
+    std::int32_t (*pick)(void* map, const float* point) = nullptr;
+    void* (*pick_object)(void* map, const float* point, void* selection, std::uint8_t a, std::uint8_t b) = nullptr;
 
     // Diplomacy: `diplomacy` 0 when absent on this build. Each kind of relation
     // is a CPdxArray in the country's CCountryDiplomacy of 16-byte entries: the
@@ -331,6 +339,12 @@ AnvilResult read_country_timed(const WorldLayout& l, std::string_view tag, std::
 AnvilResult read_province_timed(const WorldLayout& l, std::int32_t province, std::vector<TimedEntry>& out);
 // NOT_FOUND while no province view is shown.
 AnvilResult read_province_view(const WorldLayout& l, std::int32_t& province);
+// 0 while none has been selected.
+AnvilResult read_selected_province(const WorldLayout& l, std::int32_t& province);
+// Calls the game's pick at the client point; 0 off the map.
+AnvilResult pick_province(const WorldLayout& l, std::int32_t x, std::int32_t y, std::int32_t& province);
+// Calls the game's pick of a selectable at the client point; NOT_FOUND for no unit.
+AnvilResult pick_unit(const WorldLayout& l, std::int32_t x, std::int32_t y, AnvilGameUnitRef& out);
 
 // `kind` is ANVIL_GAME_RELATION_*; the caller checks it. Each relation must
 // name the country as `first` or `second`.
