@@ -330,7 +330,7 @@ std::vector<Edit> reset_setting(const PluginSnap& plugin, std::string_view setti
 std::vector<Edit> reset_module_settings(const PluginSnap& plugin, std::string_view module) {
     std::vector<Edit> out;
     for (const SettingSnap& s : plugin.settings) {
-        if (s.module == module && setting_changed(s)) out.push_back(setting_edit(plugin, s, s.default_value));
+        if (s.module == module && !s.locked && setting_changed(s)) out.push_back(setting_edit(plugin, s, s.default_value));
     }
     return out;
 }
@@ -338,7 +338,7 @@ std::vector<Edit> reset_module_settings(const PluginSnap& plugin, std::string_vi
 std::vector<Edit> reset_plugin(const PluginSnap& plugin) {
     std::vector<Edit> out;
     for (const SettingSnap& s : plugin.settings) {
-        if (setting_changed(s)) out.push_back(setting_edit(plugin, s, s.default_value));
+        if (!s.locked && setting_changed(s)) out.push_back(setting_edit(plugin, s, s.default_value));
     }
     for (const ModuleSnap& m : plugin.modules) {
         switch_edits(plugin, m.id, m.saved, Switches{m.default_on, false, false}, out);
@@ -355,7 +355,7 @@ std::vector<Edit> undo_pending(const PluginSnap& plugin) {
     switch_edits(plugin, "", plugin.saved, plugin.in_effect, out);
     for (const ModuleSnap& m : plugin.modules) switch_edits(plugin, m.id, m.saved, m.in_effect, out);
     for (const SettingSnap& s : plugin.settings) {
-        if (setting_pending(s)) out.push_back(setting_edit(plugin, s, s.in_effect));
+        if (!s.locked && setting_pending(s)) out.push_back(setting_edit(plugin, s, s.in_effect));
     }
     return out;
 }

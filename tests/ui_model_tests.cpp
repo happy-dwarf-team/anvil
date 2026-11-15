@@ -225,6 +225,18 @@ void pending_tests() {
         CHECK(edits[0].kind == Edit::Kind::Switch && edits[0].key() == "p.a" && edits[0].which == Which::On && edits[0].on);
         CHECK(edits[1].kind == Edit::Kind::Setting && edits[1].value == "1" && edits[1].old_value == "5");
     });
+    run("undo has nothing to take back when only an approval or a locked setting waits", [] {
+        PluginSnap p = plugin("p");
+        p.origin = Origin::FromMod;
+        p.approved = true;  // approved for the next start
+        CHECK(pending_count(p) == 1 && undo_pending(p).empty());
+        p.settings = {setting("x", "1", "1")};
+        p.settings[0].saved = "5";
+        p.settings[0].locked = true;  // in a multiplayer game
+        CHECK(pending_count(p) == 2 && undo_pending(p).empty());
+        p.settings[0].locked = false;
+        CHECK(undo_pending(p).size() == 1);
+    });
 }
 
 void where_tests() {
@@ -316,6 +328,17 @@ void reset_tests() {
             own_switch = own_switch || (e.kind == Edit::Kind::Switch && e.key() == "p" && e.which == Which::On);
         }
         CHECK(!own_switch);
+    });
+    run("resets leave settings locked in a multiplayer game alone", [] {
+        PluginSnap p = plugin("p");
+        p.modules = {module("m")};
+        p.settings = {setting("x", "2", "1"), setting("y", "a", "b", "m"), setting("z", "3", "1", "m")};
+        p.settings[0].locked = true;
+        p.settings[1].locked = true;
+        const std::vector<Edit> module_reset = reset_module_settings(p, "m");
+        CHECK(module_reset.size() == 1 && module_reset[0].setting == "z");
+        const std::vector<Edit> all = reset_plugin(p);
+        CHECK(all.size() == 1 && all[0].setting == "z");
     });
 }
 

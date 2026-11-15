@@ -231,6 +231,7 @@ Chain turn_on_chain(const Snapshot& snapshot, std::string_view id);
 std::vector<Edit> edits_of(const Snapshot& snapshot, const Chain& chain);
 
 // Resets. One setting acts at once; the others are confirmed with their list.
+// None of them, nor Undo, touches a setting `locked` in a multiplayer game.
 std::vector<Edit> reset_setting(const PluginSnap& plugin, std::string_view setting);
 std::vector<Edit> reset_module_settings(const PluginSnap& plugin, std::string_view module);
 // Settings, modules' switches and opt-ins, and the plugin's opt-ins; never the

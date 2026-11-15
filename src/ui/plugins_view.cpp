@@ -178,10 +178,14 @@ void PluginsTab::draw_pending(const Snapshot& model, PluginsHost& host) {
     if (pending == 0) return;
     begin_banner("pending", Tone::Info);
     ImGui::TextUnformatted(trn("{0} change waits for the next start.|{0} changes wait for the next start.", static_cast<long long>(pending)).c_str());
-    ImGui::SameLine();
-    ImGui::BeginDisabled(host.read_only());
-    if (text_button(tr("Undo them"))) host.apply(undo_pending(model));
-    ImGui::EndDisabled();
+    // Approvals and locked settings wait too, but Undo does not take them back: no button for nothing.
+    const std::vector<Edit> undo = undo_pending(model);
+    if (!undo.empty()) {
+        ImGui::SameLine();
+        ImGui::BeginDisabled(host.read_only());
+        if (text_button(tr("Undo them"))) host.apply(undo);
+        ImGui::EndDisabled();
+    }
     end_banner(Tone::Info);
 }
 
