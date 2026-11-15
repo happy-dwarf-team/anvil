@@ -90,8 +90,12 @@ std::vector<RetiredMoveNote> move_retired_settings(const Manifest& manifest, con
         return notes;
     }
     if (!edits.empty() && !set_listed(anvil_toml, edits, error)) {
+        // The module is still as the player chose at this start (ADR 0013 point 4), as at a
+        // benchmark start; the files stay, so the next start moves the values again.
+        lists = std::move(after);
         notes.push_back({ANVIL_LOG_WARNING, "retired settings not moved: cannot write anvil.toml (" + error +
-                                                "); the values stay for the next start"});
+                                                "); their modules are switched as they say at this start only, "
+                                                "and the values stay for the next start"});
         return notes;
     }
     lists = std::move(after);

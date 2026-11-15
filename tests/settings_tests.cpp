@@ -341,13 +341,16 @@ void module_settings_tests() {
         CHECK(notes.size() == 2 && contains(notes[0].message, "at this benchmark start; anvil.toml is not written") &&
               contains(notes[1].message, "stay for the next start"));
 
-        // anvil.toml cannot be written (it does not parse): the player's file stays for the next start.
+        // anvil.toml cannot be written (it does not parse): the module is off at this start all the
+        // same (ADR 0013 point 4), and the player's file stays for the next start.
         write(toml, "disabled_modules = [\n");
         write(player, "flows_mode = \"off\"\n");
         lists = {};
         notes = move_retired_settings(m, *r.file, player, toml, lists);
-        CHECK(lists.disabled_modules.empty() && read(player) == "flows_mode = \"off\"\n" && notes.size() == 1 &&
-              notes[0].level == ANVIL_LOG_WARNING && contains(notes[0].message, "the values stay for the next start"));
+        CHECK(lists.disabled_modules == std::vector<std::string>{"lode.flows"});
+        CHECK(read(toml) == "disabled_modules = [\n" && read(player) == "flows_mode = \"off\"\n" && notes.size() == 1 &&
+              notes[0].level == ANVIL_LOG_WARNING && contains(notes[0].message, "at this start only") &&
+              contains(notes[0].message, "the values stay for the next start"));
 
         // A value that waits like this survives a rewrite of the player's file from the schema
         // (the overlay or the Manager saving another setting), so the next start can still move it.
