@@ -72,7 +72,6 @@ int main(int argc, char** argv) {
     run("resolver: order, dependencies, builds", [] {
         ResolveInput in;
         in.host_api = kManifestApi;
-        in.game_build = "eu4-1.37.5-steam-win64";
         in.manifests = {
             manifest(plugin_toml("ui", "[[dependencies]]\nid = \"core\"\nversion = \">=1.0.0\"\n")),
             manifest(plugin_toml("core")),
@@ -87,7 +86,6 @@ int main(int argc, char** argv) {
     run("resolver: failures cascade", [] {
         ResolveInput in;
         in.host_api = kManifestApi;
-        in.game_build = nullptr;  // unknown build
         in.manifests = {
             manifest(plugin_toml("old-api")),
             manifest(plugin_toml("wants-v2", "[[dependencies]]\nid = \"lib\"\nversion = \">=2\"\n")),
@@ -135,11 +133,11 @@ int main(int argc, char** argv) {
     benchmark_tests();
     translation_tests();
     plugin_set_tests();
+    start_plan_tests();
 
-    run("resolver: verify skips plugins and dependents", [] {
+    run("resolver: a failed check skips the plugin and its dependents", [] {
         ResolveInput in;
         in.host_api = kManifestApi;
-        in.game_build = "eu4-1.37.5-steam-win64";
         in.manifests = {
             manifest(plugin_toml("bad")),
             manifest(plugin_toml("needs-bad", "[[dependencies]]\nid = \"bad\"\n")),
@@ -147,16 +145,14 @@ int main(int argc, char** argv) {
             manifest(plugin_toml("off")),
         };
         in.disabled = {"off"};
-        std::vector<std::string> verified;
-        in.verify = [&](const Manifest& m) {
-            verified.push_back(m.id);
-            return m.id == "bad" ? std::string("bytes differ") : std::string();
-        };
+        // By manifest: the plugin inventory's check of each (ADR 0014).
+        in.check_failures = {i18n::Message("bytes differ"), {}, {}, i18n::Message("bytes differ too")};
         auto r = resolve(in);
         CHECK(skip_reason(r, "bad") == "bytes differ");
         CHECK(skipped(r, "needs-bad"));
         CHECK((ids(r) == std::vector<std::string>{"fine"}));
-        CHECK((verified == std::vector<std::string>{"bad", "needs-bad", "fine"}));  // not called for disabled plugins
+        // The player's switch comes first: a plugin that is off is not a fault.
+        CHECK(skip_reason(r, "off") == "disabled in anvil.toml");
     });
 
     run("manifest + resolver: minimum Anvil version", [] {
@@ -167,7 +163,6 @@ int main(int argc, char** argv) {
 
         ResolveInput in;
         in.host_api = kManifestApi;
-        in.game_build = "eu4-1.37.5-steam-win64";
         in.manifests = {*ok.manifest, manifest(plugin_toml("any")),
                         manifest(plugin_toml("needs-new-dep", "[[dependencies]]\nid = \"needs-new\"\n"))};
         in.host_version = Version::parse("0.1.0");

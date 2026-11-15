@@ -13,12 +13,22 @@ namespace {
 
 bool contains(const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; }
 
-cli::GamePlugin folder_plugin(const std::string& id, const std::string& version, const std::string& status) {
+// A plugin of anvil/plugins and its entry in the report's start plan.
+void folder_plugin(cli::GameReport& game, const std::string& id, const std::string& version, NotLoading not_loading,
+                   const std::string& reason = "", bool early = false) {
     cli::GamePlugin p;
     p.folder = id;
     p.report.manifest = manifest(plugin_toml(id, "", version));
-    p.status = status;
-    return p;
+    if (early) p.report.manifest->phase = Phase::Early;
+    PlannedPlugin planned;
+    planned.id = id;
+    planned.local = static_cast<int>(game.plugins.size());
+    planned.manifest = p.report.manifest;
+    planned.not_loading = not_loading;
+    planned.reason = reason;
+    planned.disabled = not_loading == NotLoading::Off;
+    (not_loading == NotLoading::None ? game.plan.load : game.plan.skipped).push_back(std::move(planned));
+    game.plugins.push_back(std::move(p));
 }
 
 }  // namespace
@@ -50,28 +60,28 @@ void manager_report_tests() {
 
     run("problem report: versions, build, plugins with their reasons, the log", [] {
         cli::GameReport game;
-        game.enabled = true;
-        game.disabled_plugins = {"tongs"};
-        game.playset_found = true;
-        game.enabled_mods = 3;
-        game.plugins.push_back(folder_plugin("anvil-game", "1.8.0", "loaded"));
-        game.plugins.push_back(folder_plugin("bellows", "0.19.0", "skipped"));
-        game.plugins.push_back(folder_plugin("tongs", "0.26.0", "disabled"));
-        game.load_order.push_back({"anvil-game", "1.8.0", "early", "anvil-game", ""});
-        cli::SkippedPlugin skipped;
-        skipped.id = "bellows";
-        skipped.folder = "bellows";
-        skipped.reason = "symbols.toml is for build eu4-1.37.5-steam-win64, the game is eu4-1.37.5.2-gog-win64";
-        game.skipped.push_back(skipped);
+        game.choices.anvil_toml.enabled = true;
+        game.choices.anvil_toml.disabled_plugins = {"tongs"};
+        game.inventory.playset.found = true;
+        game.inventory.playset.mods.resize(3);
+        folder_plugin(game, "anvil-game", "1.8.0", NotLoading::None, "", true);
+        folder_plugin(game, "bellows", "0.19.0", NotLoading::CannotLoad,
+                      "symbols.toml is for build eu4-1.37.5-steam-win64, the game is eu4-1.37.5.2-gog-win64");
+        folder_plugin(game, "tongs", "0.26.0", NotLoading::Off, "disabled in anvil.toml");
         cli::GameModPlugin mod;
         mod.id = "hamweard";
         mod.mod = "Hamweard | Back to Main Menu";
         mod.workshop_id = "3832650792";
         mod.version = "1.0.0";
-        mod.state = "pending";
-        mod.status = "skipped";
+        mod.state = ModPluginState::Pending;
         mod.reason = "waits for the player's approval";
         game.mod_plugins.push_back(mod);
+        PlannedPlugin waiting;
+        waiting.id = "hamweard";
+        waiting.mod = 0;
+        waiting.not_loading = NotLoading::WaitsForApproval;
+        waiting.reason = "waits for the player's approval";
+        game.plan.skipped.push_back(waiting);
 
         ProblemReportInput input;
         input.manager_version = "1.9.0";

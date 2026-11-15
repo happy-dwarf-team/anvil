@@ -17,21 +17,37 @@ bool listed(const std::vector<std::string>& list, const std::string& id) {
 
 fs::path widen(const std::string& text) { return fs::path(std::u8string(text.begin(), text.end())); }
 
-// The resolver's reasons that the model works out itself: the player's
-// switch and dependencies that do not load.
-bool model_reason(const i18n::Message& why) {
-    return why.code == "disabled" || why.code == "all_disabled" || why.code == "requires_missing" ||
-           why.code == "needs_anvil_game";
-}
-
+// The required plugins, for turn_on_chain and needed_by: the plan's manifest
+// has the dependency on anvil-game that affects_gameplay implies.
 std::vector<std::string> required(const Manifest& m) {
     std::vector<std::string> ids;
     for (const Dependency& d : m.dependencies) {
         if (!d.optional) ids.push_back(d.id);
     }
-    // affects_gameplay = true needs anvil-game (design §13), which the resolver adds.
-    if (affects_gameplay_anywhere(m) && m.id != "anvil-game" && !listed(ids, "anvil-game")) ids.push_back("anvil-game");
     return ids;
+}
+
+// A reason for the player: from a mod, the card already names the mod.
+i18n::Message own_reason(const i18n::Message& why) {
+    return why.code == "from_mod" && why.args.size() == 3 ? why.args[2] : why;
+}
+
+// The plan's verdict on a plugin (ADR 0014), as the model takes it.
+mui::LoadState verdict(const PlannedPlugin& p) {
+    mui::LoadState s;
+    s.loads = p.loads();
+    switch (p.not_loading) {
+    case NotLoading::None: s.why = mui::LoadState::Why::None; break;
+    case NotLoading::Off: s.why = mui::LoadState::Why::Off; break;
+    case NotLoading::NeedsPlugin: s.why = mui::LoadState::Why::NeedsPlugin; break;
+    case NotLoading::NotInstalled: s.why = mui::LoadState::Why::NotInstalled; break;
+    case NotLoading::WaitsForApproval: s.why = mui::LoadState::Why::WaitsForApproval; break;
+    case NotLoading::CannotLoad: s.why = mui::LoadState::Why::CannotLoad; break;
+    }
+    s.missing = p.missing;
+    s.through = p.through;
+    if (s.why == mui::LoadState::Why::CannotLoad) s.reason = i18n::text(own_reason(p.why.empty() ? i18n::Message(p.reason) : p.why));
+    return s;
 }
 
 void fill_from_manifest(mui::PluginSnap& p, PluginSource& source, const Manifest& m, const AnvilSettings& toml,
@@ -98,16 +114,21 @@ void fill_settings(mui::PluginSnap& p, PluginSource& source, const fs::path& gam
 
 std::string value_text(const Setting& setting, const SettingValue& value) { return setting_toml(setting, value); }
 
-PluginsSnapshot build_plugins_snapshot(const fs::path& game_dir, const cli::GameReport& report, const AnvilSettings& toml,
+PluginsSnapshot build_plugins_snapshot(const fs::path& game_dir, const cli::GameReport& report,
                                        const std::vector<std::string>& standard_plugins, const PluginText& text) {
     PluginsSnapshot out;
+    // anvil.toml as the next start applies it: after the retired settings
+    // move (ADR 0013, point 4), so a module a retired value turns off shows
+    // off before that start, as it will be.
+    const AnvilSettings& toml = report.plan.lists;
     for (const cli::GamePlugin& plugin : report.plugins) {
         mui::PluginSnap p;
         PluginSource source;
         source.folder = plugin.folder;
-        if (const auto& m = plugin.report.manifest) {
-            fill_from_manifest(p, source, *m, toml, text);
-            source.standard = listed(standard_plugins, m->id);
+        const PlannedPlugin* planned = cli::planned(report, plugin);
+        if (planned != nullptr && planned->manifest) {
+            fill_from_manifest(p, source, *planned->manifest, toml, text);
+            source.standard = listed(standard_plugins, planned->id);
             p.origin = source.standard ? mui::Origin::WithAnvil : mui::Origin::Own;
             fill_settings(p, source, game_dir, text);
         } else {
@@ -115,15 +136,8 @@ PluginsSnapshot build_plugins_snapshot(const fs::path& game_dir, const cli::Game
             p.id = plugin.folder;
             p.name = plugin.folder;
             p.saved.on = !listed(toml.disabled_plugins, plugin.folder);
-            p.blocked = mui::Blocked::CannotLoad;
         }
-        const auto skipped = std::find_if(report.skipped.begin(), report.skipped.end(), [&](const cli::SkippedPlugin& s) {
-            return s.mod.empty() && s.folder == plugin.folder;
-        });
-        if (skipped != report.skipped.end() && !skipped->disabled && !model_reason(skipped->why)) {
-            p.blocked = mui::Blocked::CannotLoad;
-            p.blocked_reason = i18n::text(skipped->why);
-        }
+        if (planned != nullptr) p.next = verdict(*planned);
         p.in_effect = p.saved;
         out.model.plugins.push_back(std::move(p));
         out.sources.push_back(std::move(source));
@@ -132,7 +146,12 @@ PluginsSnapshot build_plugins_snapshot(const fs::path& game_dir, const cli::Game
         mui::PluginSnap p;
         PluginSource source;
         source.mod = &mod;
-        const auto& manifest = mod.report.manifest ? mod.report.manifest : mod.offered().manifest;
+        const PlannedPlugin* planned = cli::planned(report, mod);
+        std::optional<Manifest> manifest = planned != nullptr && planned->manifest ? planned->manifest : std::nullopt;
+        if (!manifest) manifest = mod.report.manifest ? mod.report.manifest : mod.offered().manifest;
+        // Its texts and settings.toml from the folder that is there: the copy
+        // the next start makes does not exist yet.
+        if (manifest && mod.report.manifest) manifest->folder = mod.report.manifest->folder;
         if (manifest) {
             fill_from_manifest(p, source, *manifest, toml, text);
             fill_settings(p, source, game_dir, text);
@@ -142,19 +161,17 @@ PluginsSnapshot build_plugins_snapshot(const fs::path& game_dir, const cli::Game
             p.saved.on = !listed(toml.disabled_plugins, mod.id);
         }
         p.origin = mui::Origin::FromMod;
-        p.version = mod.state == "update-pending" ? mod.approved_version : mod.version;
-        p.approved = !mod.approved_hash.empty();
+        const bool update_waits = mod.state == ModPluginState::UpdatePending;
+        p.version = update_waits ? mod.approved_version : mod.version;
+        p.approved = !mod.approved_hash.empty() && mod.state != ModPluginState::Pending;
         p.approved_in_effect = p.approved;
-        if (mod.state == "update-pending") p.update_waits = mod.version;
-        if (mod.state == "pending") {
-            p.blocked = mui::Blocked::WaitsForApproval;
-            p.approved = p.approved_in_effect = false;
-        } else if (mod.state != "approved" && mod.state != "update-pending") {
-            p.blocked = mui::Blocked::CannotLoad;  // conflict, shadowed, invalid
-            p.blocked_reason = mod.why.code.empty() && mod.why.text.empty() ? mod.reason : i18n::text(mod.why);
-        } else if (mod.status != "loaded" && !model_reason(mod.skip_why) && !mod.skip_reason.empty()) {
-            p.blocked = mui::Blocked::CannotLoad;
-            p.blocked_reason = i18n::text(mod.skip_why);
+        if (update_waits) p.update_waits = mod.version;
+        if (planned != nullptr) {
+            p.next = verdict(*planned);
+        } else {
+            // Shadowed: a local plugin with its id loads instead.
+            p.next.why = mui::LoadState::Why::CannotLoad;
+            p.next.reason = mod.why.empty() ? mod.reason : i18n::text(mod.why);
         }
         p.in_effect = p.saved;
         out.model.plugins.push_back(std::move(p));

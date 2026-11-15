@@ -4,9 +4,11 @@
 #include "crash_history.hpp"
 #include "gameplay_policy.hpp"
 #include "mod_plugins.hpp"
+#include "plugin_inventory.hpp"
 #include "plugin_translation.hpp"
 #include "resolver.hpp"
 #include "settings.hpp"
+#include "start_plan.hpp"
 
 #include <atomic>
 #include <filesystem>
@@ -60,6 +62,9 @@ struct ControlSources {
     // plugin without one is not listed.
     std::map<std::string, PluginTranslation, std::less<>> translations;
     std::map<uint32_t, PluginTranslation> mod_translations;
+    // This start's plugin inventory (ADR 0014), which the next start's plan
+    // is made from; may be null (then there is none).
+    const PluginInventory* inventory = nullptr;
 };
 
 // The core's private service for anvil-overlay (src/control/anvil_control.h,
@@ -130,6 +135,11 @@ public:
     bool switch_state(std::string_view key, uint32_t which, AnvilControlSwitch& out) const;
     AnvilResult switch_set(std::string_view key, uint32_t which, bool on, std::string& error);
     const std::string& last_start() const { return sources_.last_start; }
+    // The next start's plan of a plugin (ADR 0014): from this start's
+    // inventory and the choices saved now, made again after each change this
+    // object writes.
+    bool next_start(std::string_view plugin_id, AnvilControlNextStart& out) const;
+    bool mod_plugin_next_start(uint32_t index, AnvilControlNextStart& out) const;
     // anvil-overlay and the plugins it needs, by id: the overlay does not
     // turn them off.
     bool needed_by_overlay(std::string_view plugin_id) const { return needed_.contains(plugin_id); }
@@ -196,6 +206,14 @@ private:
     std::vector<ModView> mod_views_;
     std::map<std::string, Binding, std::less<>> bindings_;  // under mutex_
     std::string running_hash(const std::string& id) const;  // the approved copy this start loaded for the id
+
+    // The next start's plan, made on first use; mutex_ held. Each write
+    // (a switch, disable_next_start, an approval) drops it.
+    const StartPlan* next_plan() const;
+    void fill_next(const PlannedPlugin& p, AnvilControlNextStart& out) const;  // mutex_ held
+    const char* intern(std::string text) const;                                 // mutex_ held
+    mutable std::unique_ptr<StartPlan> next_plan_;                              // under mutex_
+    mutable std::set<std::string, std::less<>> strings_;                        // under mutex_, never shrinks
 };
 
 // The value as text, as parse_setting_text reads it back: true/false, a

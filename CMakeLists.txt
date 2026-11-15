@@ -105,11 +105,15 @@ add_library(anvil_core STATIC
     src/core/pe_image.cpp
     src/core/platform.cpp
     src/core/playset.cpp
+    src/core/plugin_check.cpp
     src/core/plugin_hash.cpp
+    src/core/plugin_inventory.cpp
     src/core/plugin_translation.cpp
     src/core/resolver.cpp
     src/core/retired_move.cpp
+    src/core/safe_mode.cpp
     src/core/settings.cpp
+    src/core/start_plan.cpp
     src/core/symbols.cpp
     src/core/trust.cpp)
 target_include_directories(anvil_core PUBLIC include src)
@@ -139,7 +143,6 @@ add_library(anvil_loader STATIC
     src/core/plugin_settings.cpp
     src/core/plugin_symbols.cpp
     src/core/runtime.cpp
-    src/core/safe_mode.cpp
     src/core/seh_guard.cpp
     src/core/services.cpp
     src/core/suspension.cpp
@@ -281,7 +284,8 @@ if(ANVIL_BUILD_TESTS)
     enable_testing()
     add_executable(anvil_tests tests/test_main.cpp tests/manifest_tests.cpp tests/resolver_tests.cpp
         tests/change_tests.cpp tests/gameplay_tests.cpp tests/settings_tests.cpp tests/control_tests.cpp
-        tests/benchmark_tests.cpp tests/translation_tests.cpp tests/plugin_set_tests.cpp)
+        tests/benchmark_tests.cpp tests/translation_tests.cpp tests/plugin_set_tests.cpp
+        tests/start_plan_tests.cpp)
     target_link_libraries(anvil_tests PRIVATE anvil_loader)
     target_compile_definitions(anvil_tests PRIVATE ANVIL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_dependencies(anvil_tests version_dll)

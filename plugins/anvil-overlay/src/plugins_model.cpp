@@ -12,13 +12,6 @@ bool listed(const std::vector<std::string>& list, const std::string& id) {
     return std::find(list.begin(), list.end(), id) != list.end();
 }
 
-// The resolver's reasons that the model works out itself: the player's
-// switch and dependencies that do not load.
-bool model_reason(const anvil::i18n::Message& why) {
-    return why.code == "disabled" || why.code == "all_disabled" || why.code == "requires_missing" ||
-           why.code == "needs_anvil_game";
-}
-
 // "<plugin>.<module>" -> "<module>"
 std::string module_id(const ModuleRow& m) {
     const size_t dot = m.key.find('.');
@@ -118,14 +111,49 @@ std::vector<std::string> required(const ControlClient& control, const std::strin
     return ids;
 }
 
-// How the start ended for a plugin, when the reason is its own.
-void fill_blocked(mui::PluginSnap& p, const PluginRow& row) {
+// The next start's plan of the plugin, as the core computes it (ADR 0014).
+mui::LoadState next_state(const NextStartRow& n) {
+    mui::LoadState s;
+    s.loads = n.loads;
+    using W = mui::LoadState::Why;
+    s.why = n.why == "off"             ? W::Off
+            : n.why == "needs"         ? W::NeedsPlugin
+            : n.why == "not-installed" ? W::NotInstalled
+            : n.why == "approval"      ? W::WaitsForApproval
+            : n.loads                  ? W::None
+                                       : W::CannotLoad;
+    s.missing = n.needs;
+    s.through = n.through;
+    if (s.why == W::CannotLoad) s.reason = n.reason_text();
+    return s;
+}
+
+// A core before 1.24 has no plan of the next start: this start's outcome
+// stands in for it.
+mui::LoadState next_state_of_row(const PluginRow& row, bool known) {
+    mui::LoadState s;
+    using W = mui::LoadState::Why;
+    if (!known) {
+        s.why = W::CannotLoad;
+    } else if (row.disabled_next) {
+        s.why = W::Off;
+    } else if (row.awaiting_approval) {
+        s.why = W::WaitsForApproval;
+    } else if (row.state == "skipped" && !row.disabled) {
+        s.why = W::CannotLoad;
+        s.reason = row.reason_text();
+    } else {
+        s.loads = true;
+    }
+    return s;
+}
+
+// How this start ended for the plugin.
+void fill_outcome(mui::PluginSnap& p, const PluginRow& row) {
+    p.runs = row.state == "loaded";
     if (row.state == "failed") {
-        p.blocked = mui::Blocked::Failed;
-        p.blocked_reason = row.reason_text();
-    } else if (row.state == "skipped" && !row.disabled && !row.awaiting_approval && !model_reason(row.why)) {
-        p.blocked = mui::Blocked::CannotLoad;
-        p.blocked_reason = row.reason_text();
+        p.failed = true;
+        p.failed_reason = row.reason_text();
     }
 }
 
@@ -165,8 +193,9 @@ OverlayPlugins build_overlay_plugins(const ControlClient& control, const AnvilCo
         p.requires_ids = required(control, row.id);
         fill_modules(control, p, row.modules);
         fill_settings(control, p, source, row.modules);
-        if (!source.known) p.blocked = mui::Blocked::CannotLoad;
-        fill_blocked(p, row);
+        const auto next = control.next_start(row.id);
+        p.next = next ? next_state(*next) : next_state_of_row(row, source.known);
+        fill_outcome(p, row);
         out.model.plugins.push_back(std::move(p));
         out.sources.push_back(std::move(source));
     }
@@ -201,14 +230,21 @@ OverlayPlugins build_overlay_plugins(const ControlClient& control, const AnvilCo
         p.approved_in_effect = !m.approved_hash.empty();
         p.approved = m.approved_next || (p.approved_in_effect && !m.revoked_next);
         if (m.state == "update-pending" && !m.approved_next) p.update_waits = m.version;
-        if (m.state == "pending") {
-            p.blocked = mui::Blocked::WaitsForApproval;
+        if (const auto next = control.mod_plugin_next_start(m.index)) {
+            p.next = next_state(*next);
+        } else if (control.has_next_start()) {
+            // Shadowed: the next start loads a local plugin with this id instead.
+            p.next.why = mui::LoadState::Why::CannotLoad;
+            p.next.reason = m.reason_text();
+        } else if (m.state == "pending") {
+            p.next.why = mui::LoadState::Why::WaitsForApproval;
         } else if (m.state != "approved" && m.state != "update-pending") {
-            p.blocked = mui::Blocked::CannotLoad;  // conflict, shadowed, invalid
-            p.blocked_reason = m.reason_text();
+            p.next.why = mui::LoadState::Why::CannotLoad;  // conflict, shadowed, invalid
+            p.next.reason = m.reason_text();
         } else if (row != plugins.end()) {
-            fill_blocked(p, *row);
+            p.next = next_state_of_row(*row, true);
         }
+        if (row != plugins.end()) fill_outcome(p, *row);
         out.model.plugins.push_back(std::move(p));
         out.sources.push_back(std::move(source));
     }

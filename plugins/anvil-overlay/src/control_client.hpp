@@ -84,6 +84,19 @@ struct Requirement {
     bool implied = false;
 };
 
+// The next start's plan of a plugin (ADR 0014, Anvil 1.24): whether it
+// loads with the files and choices saved now, and why not.
+struct NextStartRow {
+    bool loads = false;
+    std::string why;      // "off", "needs", "not-installed", "approval", "cannot-load"; "" when it loads
+    std::string reason;   // the English words
+    anvil::i18n::Message why_message;  // `reason` by code
+    std::string needs;    // "needs", "not-installed": the plugin id
+    std::vector<std::string> through;
+
+    std::string reason_text() const { return why_message.empty() ? reason : anvil::i18n::text(why_message); }
+};
+
 struct CrashInfo {
     std::string name, level, summary, issues, report;
     std::vector<std::string> plugins;
@@ -142,6 +155,13 @@ public:
     std::optional<SwitchRow> switch_state(const std::string& key, uint32_t which) const;
     std::string switch_set(const std::string& key, uint32_t which, bool on) const;  // "" on success, otherwise why
     std::vector<Requirement> requirements(const std::string& plugin) const;
+
+    // Anvil 1.24 (ADR 0014): the next start's plan of a plugin, by id or by
+    // its index among mod_plugins(); nullopt from an older core, without a
+    // plan (Anvil is off), or for a plugin the next start does not see.
+    bool has_next_start() const;
+    std::optional<NextStartRow> next_start(const std::string& plugin) const;
+    std::optional<NextStartRow> mod_plugin_next_start(uint32_t index) const;
 
 private:
     const AnvilControlService* service_;

@@ -12,6 +12,8 @@
 #include "install.hpp"
 #include "mods.hpp"
 #include "core/trust.hpp"
+#include "core/anvil_toml_edit.hpp"
+#include "core/retired_move.hpp"
 #include "plugin_zip.hpp"
 #include "plugins_snapshot.hpp"
 #include "net/release_check.hpp"
@@ -997,7 +999,7 @@ int main(int argc, char** argv) {
         options.game_dir = game;
         options.user_dir = user;
         cli::GameReport report = cli::check_game(options);
-        CHECK(report.mod_plugins.size() == 1 && report.mod_plugins[0].state == "pending");
+        CHECK(report.mod_plugins.size() == 1 && report.mod_plugins[0].state == ModPluginState::Pending);
         std::string error;
         CHECK(!revoke_shown_plugin(game, report.mod_plugins[0], error) && contains(error, "no approval binds probe"));
 
@@ -1009,8 +1011,8 @@ int main(int argc, char** argv) {
         shown = report.mod_plugins[0];
         CHECK(approve_shown_plugin(game, user, report, shown, error));
         report = cli::check_game(options);
-        CHECK(report.mod_plugins[0].state == "approved" && report.mod_plugins[0].status == "loaded");
-        CHECK(report.load_order.size() == 1 && report.load_order[0].mod == "M");
+        CHECK(report.mod_plugins[0].state == ModPluginState::Approved && std::string(cli::status_name(cli::planned(report, report.mod_plugins[0]))) == "loaded");
+        CHECK(report.plan.load.size() == 1 && report.plan.load[0].mod_name == "M");
 
         // The mod is no longer enabled.
         write(user / "dlc_load.json", "{\"enabled_mods\":[]}");
@@ -1034,12 +1036,12 @@ int main(int argc, char** argv) {
         options.game_dir = game;
         options.user_dir = user;
         cli::GameReport report = cli::check_game(options);
-        CHECK(report.mod_plugins[0].state == "pending" && can_approve_shown(report.mod_plugins[0]));
+        CHECK(report.mod_plugins[0].state == ModPluginState::Pending && can_approve_shown(report.mod_plugins[0]));
         CHECK(!report.mod_plugins[0].update && !report.mod_plugins[0].offered().manifest->affects_gameplay);
         std::string error;
         CHECK(approve_shown_plugin(game, user, report, report.mod_plugins[0], error));
         report = cli::check_game(options);
-        CHECK(report.mod_plugins[0].state == "approved" && !can_approve_shown(report.mod_plugins[0]));
+        CHECK(report.mod_plugins[0].state == ModPluginState::Approved && !can_approve_shown(report.mod_plugins[0]));
 
         // The update changes the game: the copy that still loads says otherwise.
         std::string changed = plugin_toml("probe", "", "2.0.0");
@@ -1047,7 +1049,7 @@ int main(int argc, char** argv) {
         write(folder / "plugin.toml", changed);
         report = cli::check_game(options);
         cli::GameModPlugin shown = report.mod_plugins[0];
-        CHECK(shown.state == "update-pending" && shown.status == "loaded" && can_approve_shown(shown));
+        CHECK(shown.state == ModPluginState::UpdatePending && std::string(cli::status_name(cli::planned(report, shown))) == "loaded" && can_approve_shown(shown));
         CHECK(shown.report.manifest && !shown.report.manifest->affects_gameplay);
         CHECK(shown.update && shown.offered().manifest && shown.offered().manifest->affects_gameplay);
         CHECK(shown.offered().manifest->version.to_string() == "2.0.0" && shown.version == "2.0.0");
@@ -1056,7 +1058,7 @@ int main(int argc, char** argv) {
         write(folder / "plugin.toml", "id = ");
         report = cli::check_game(options);
         shown = report.mod_plugins[0];
-        CHECK(shown.state == "update-pending" && !shown.problem.empty() && !can_approve_shown(shown));
+        CHECK(shown.state == ModPluginState::UpdatePending && !shown.problem.empty() && !can_approve_shown(shown));
         CHECK(shown.report.manifest && !shown.offered().manifest);
         CHECK(!approve_shown_plugin(game, user, report, shown, error) && contains(error, "cannot be approved"));
     });
@@ -1170,6 +1172,49 @@ int main(int argc, char** argv) {
         CHECK(summaries.get(dir, "2026-11-15_08-00-00")->level == "no_plugin");
         summaries.clear();
         CHECK(summaries.get(dir, "2026-11-15_08-00-00")->level == "in_plugin_code");
+    });
+
+    run("plugins tab: a retired setting shows its module as the next start will have it (ADR 0014)", [] {
+        TempDir temp("retired-plan");
+        const fs::path game = make_game(temp.dir / "game");
+        const fs::path user = temp.dir / "user";
+        fs::create_directories(user);
+        const fs::path lode = game / "anvil" / "plugins" / "lode";
+        write(lode / "plugin.toml", plugin_toml("lode", "settings = \"settings.toml\"\n\n[[modules]]\nid = \"flows\"\n"
+                                                        "name = \"Flows\"\naffects_gameplay = false\n"));
+        write(lode / "lode.dll", "MZ");
+        write(lode / "settings.toml", "[retired.flows_mode]\nmodule = \"flows\"\noff = [\"off\"]\n");
+        const fs::path player = game / "anvil" / "data" / "lode" / "settings.toml";
+        write(player, "flows_mode = \"off\"\n");
+        cli::GameOptions options;
+        options.game_dir = game;
+        options.user_dir = user;
+        const auto text = [](const fs::path&, const std::string& english) { return english; };
+
+        // Before the first start after the update: anvil.toml does not list the module yet,
+        // but the start turns it off, so the tab shows it off.
+        cli::GameReport report = cli::check_game(options);
+        CHECK(report.choices.anvil_toml.disabled_modules.empty());
+        CHECK(report.plan.writes.retired.size() == 1 && report.plan.writes.retired[0].plugin == "lode");
+        PluginsSnapshot snapshot = build_plugins_snapshot(game, report, {}, text);
+        CHECK(snapshot.model.plugins.size() == 1 && snapshot.model.plugins[0].modules.size() == 1);
+        CHECK(!snapshot.model.plugins[0].modules[0].saved.on && snapshot.model.plugins[0].next.loads);
+        CHECK(contains(cli::format_game_report(report, cli::Format::Text), "the next start writes first (1):"));
+        CHECK(contains(cli::format_game_report(report, cli::Format::Json), "\"retired\": [{\"plugin\": \"lode\""));
+        CHECK(fs::exists(player) && !fs::exists(game / "anvil" / "anvil.toml"));  // nothing written by the check
+
+        // A switch the player makes first carries the move out as that start would,
+        // so the start has nothing left to undo it with.
+        bool written = false;
+        carry_out_retired_move(report.plan.writes.retired[0].move, report.plan.writes.retired[0].player_file,
+                               game / "anvil" / "anvil.toml", &written);
+        CHECK(written && !fs::exists(player));
+        std::string error;
+        CHECK(set_listed(game / "anvil" / "anvil.toml", module_switch_edits("lode.flows", true, true), error));
+        report = cli::check_game(options);
+        snapshot = build_plugins_snapshot(game, report, {}, text);
+        CHECK(report.plan.writes.empty() && snapshot.model.plugins[0].modules[0].saved.on);
+        CHECK(report.plan.lists.disabled_modules.empty());
     });
 
     manager_benchmark_tests();

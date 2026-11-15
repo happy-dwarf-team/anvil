@@ -44,10 +44,10 @@ struct SetupFacts {
     bool needs_steam = true;            // false in a GOG install, which starts without Steam
     bool steam_running = false;
     bool eu4_running = false;           // any eu4.exe
-    unsigned unfinished_starts = 0;     // anvil/data/anvil/unfinished-starts.txt
+    bool next_safe_mode = false;        // the safe mode record (read_next_start)
     bool on_battery = false;
     std::string installed_anvil;        // the version of the installed version.dll; "" when none
-    bool anvil_game_loads = false;
+    bool anvil_game_loads = false;      // in the plans of both arms
     std::string plugin;                 // the chosen plugin's id
     std::optional<ComparablePlugin> comparable;  // it, when it is one the series can compare
 };

@@ -40,7 +40,7 @@ void set_problem(ModPlugin& p, i18n::Message why) {
 }
 
 // The plugin as the approval in its `approval` (bound to its mod) decides it.
-void decide(ModPlugin& p, const fs::path& anvil_dir) {
+void decide(ModPlugin& p, const fs::path& anvil_dir, const CopyExists& copy_exists) {
     const std::optional<TrustEntry>& e = p.approval;
     if (!p.bound) {
         if (!p.problem.empty()) {
@@ -57,11 +57,11 @@ void decide(ModPlugin& p, const fs::path& anvil_dir) {
     if (!p.hash.empty() && p.hash == e->hash) {
         p.state = ModPluginState::Approved;
         p.load_folder = copy;
-        p.copy_missing = !is_folder(copy);
+        p.copy_missing = !copy_exists(p.id, e->hash);
         set_reason(p, i18n::Message("approved_on", {e->approved.substr(0, 10), short_hash(e->hash)}));
         return;
     }
-    if (is_folder(copy)) {
+    if (copy_exists(p.id, e->hash)) {
         p.state = ModPluginState::UpdatePending;
         p.load_folder = copy;
         set_reason(p, p.problem.empty()
@@ -162,18 +162,17 @@ fs::path approved_copy(const fs::path& anvil_dir, const std::string& id, const s
     return anvil_dir / "data" / "anvil" / "approved" / widen(id) / widen(hash);
 }
 
-ModDiscovery discover_mod_plugins(const fs::path& anvil_dir, const fs::path& user_dir,
-                                  const std::set<std::string>& local_ids) {
+std::string trust_warning(const TrustFile& trust) {
+    if (trust.error.empty()) return {};
+    return "anvil/trust.toml does not parse (" + trust.error +
+           (trust.line ? ", line " + std::to_string(trust.line) : std::string()) +
+           "): no plugin from a mod is approved until it is fixed or removed";
+}
+
+ModDiscovery find_mod_plugins(const fs::path& user_dir) {
     ModDiscovery d;
     d.playset = read_playset(user_dir);
     if (!d.playset.error.empty()) d.warnings.push_back(d.playset.error + "; no plugins from mods are loaded");
-    d.trust = read_trust(anvil_dir / "trust.toml");
-    if (!d.trust.error.empty()) {
-        d.warnings.push_back("anvil/trust.toml does not parse (" + d.trust.error +
-                             (d.trust.line ? ", line " + std::to_string(d.trust.line) : std::string()) +
-                             "): no plugin from a mod is approved until it is fixed or removed");
-    }
-
     for (const PlaysetMod& mod : d.playset.mods) {
         if (!mod.error.empty()) {
             // A zipped mod cannot carry plugins; it is no reason to warn.
@@ -206,9 +205,21 @@ ModDiscovery discover_mod_plugins(const fs::path& anvil_dir, const fs::path& use
             d.plugins.push_back(std::move(p));
         }
     }
+    return d;
+}
 
+void decide_mod_plugins(std::vector<ModPlugin>& plugins, const TrustFile& trust, const std::set<std::string>& local_ids,
+                        const fs::path& anvil_dir, const CopyExists& copy_exists) {
     std::map<std::string, std::vector<ModPlugin*>> by_id;
-    for (ModPlugin& p : d.plugins) {
+    for (ModPlugin& p : plugins) {
+        p.state = ModPluginState::Pending;
+        p.reason.clear();
+        p.why = {};
+        p.approval.reset();
+        p.bound = false;
+        p.load_folder.clear();
+        p.copy_missing = false;
+        p.others.clear();
         if (!is_valid_plugin_id(p.id)) {
             p.state = ModPluginState::Invalid;
             set_reason(p, p.problem_why);
@@ -217,7 +228,7 @@ ModDiscovery discover_mod_plugins(const fs::path& anvil_dir, const fs::path& use
         by_id[p.id].push_back(&p);
     }
     for (auto& [id, group] : by_id) {
-        const TrustEntry* entry = d.trust.find(id);
+        const TrustEntry* entry = trust.find(id);
         ModPlugin* bound = nullptr;
         for (ModPlugin* p : group) {
             if (entry != nullptr) p->approval = *entry;
@@ -240,13 +251,13 @@ ModDiscovery discover_mod_plugins(const fs::path& anvil_dir, const fs::path& use
             continue;
         }
         if (group.size() == 1) {
-            decide(*group.front(), anvil_dir);
+            decide(*group.front(), anvil_dir, copy_exists);
             continue;
         }
         for (ModPlugin* p : group) {
             for (const ModPlugin* o : others_of(p)) p->others.push_back(o->mod.name);
             if (p == bound) {
-                decide(*p, anvil_dir);
+                decide(*p, anvil_dir, copy_exists);
             } else if (bound != nullptr) {
                 p->state = ModPluginState::Conflict;
                 set_reason(*p, i18n::Message("conflict_bound", {bound->mod.name}));
@@ -256,6 +267,18 @@ ModDiscovery discover_mod_plugins(const fs::path& anvil_dir, const fs::path& use
             }
         }
     }
+}
+
+ModDiscovery discover_mod_plugins(const fs::path& anvil_dir, const fs::path& user_dir,
+                                  const std::set<std::string>& local_ids) {
+    ModDiscovery d = find_mod_plugins(user_dir);
+    d.trust = read_trust(anvil_dir / "trust.toml");
+    if (const std::string warning = trust_warning(d.trust); !warning.empty()) {
+        d.warnings.insert(d.warnings.begin() + (d.playset.error.empty() ? 0 : 1), warning);  // after the playset's
+    }
+    decide_mod_plugins(d.plugins, d.trust, local_ids, anvil_dir, [&](const std::string& id, const std::string& hash) {
+        return is_folder(approved_copy(anvil_dir, id, hash));
+    });
     return d;
 }
 
@@ -265,6 +288,11 @@ bool make_approved_copy(const fs::path& anvil_dir, const ModPlugin& plugin, std:
         return false;
     }
     return copy_verified(anvil_dir, plugin.id, plugin.folder, plugin.approval->hash, error);
+}
+
+bool copy_approved(const fs::path& anvil_dir, const std::string& id, const fs::path& folder, const std::string& hash,
+                   std::string& error) {
+    return copy_verified(anvil_dir, id, folder, hash, error);
 }
 
 bool approve_mod_plugin(const fs::path& anvil_dir, const ModPlugin& plugin, const std::string& hash,

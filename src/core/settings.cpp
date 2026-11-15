@@ -738,6 +738,9 @@ PlayerSettings parse_player_settings(const SettingsFile& schema, std::string_vie
         const std::string at = "line " + std::to_string(line) + ": ";
         const Setting* s = schema.find(name);
         if (s == nullptr) {
+            // A retired setting the next start moves into anvil.toml (ADR 0013, point 4):
+            // it is in the start plan's writes (ADR 0014), not a problem of the file.
+            if (schema.find_retired(name) != nullptr) continue;
             out.warnings.push_back(at + "'" + name + "' is not a setting of this plugin; ignored");
             continue;
         }

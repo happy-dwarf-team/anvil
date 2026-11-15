@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -114,7 +115,7 @@ std::string requires_plugin(const std::string& id) { return "\n[[dependencies]]\
 std::string conflicts_with(const std::string& id) { return "\n[[conflicts]]\nid = \"" + id + "\"\n"; }
 
 bool skipped_for(const GameReport& report, const std::string& id, const std::string& reason_part, bool disabled = false) {
-    for (const auto& s : report.skipped) {
+    for (const auto& s : report.plan.skipped) {
         if (s.id == id) return s.disabled == disabled && contains(s.reason, reason_part);
     }
     return false;
@@ -122,7 +123,7 @@ bool skipped_for(const GameReport& report, const std::string& id, const std::str
 
 std::string loaded(const GameReport& report) {
     std::string out;
-    for (const auto& p : report.load_order) out += (out.empty() ? "" : ",") + p.id;
+    for (const auto& p : report.plan.load) out += (out.empty() ? "" : ",") + p.id;
     return out;
 }
 
@@ -132,6 +133,12 @@ const GamePlugin* plugin_of(const GameReport& report, const std::string& folder)
     }
     return nullptr;
 }
+
+std::string status_of(const GameReport& report, const std::string& folder) {
+    return status_name(planned(report, *plugin_of(report, folder)));
+}
+
+std::string status_of(const GameReport& report, const GameModPlugin& plugin) { return status_name(planned(report, plugin)); }
 
 struct Run {
     int exit_code = -1;
@@ -165,8 +172,8 @@ int main(int argc, char** argv) {
     run("a game folder without plugins is fine, one that is not a game folder cannot be checked", [&] {
         const Game game;
         const GameReport empty = game.check();
-        CHECK(empty.exit_code == kExitOk && empty.plugins.empty() && empty.load_order.empty() && empty.skipped.empty());
-        CHECK(empty.exe_build == "test-build" && empty.enabled);
+        CHECK(empty.exit_code == kExitOk && empty.plugins.empty() && empty.plan.load.empty() && empty.plan.skipped.empty());
+        CHECK(empty.exe_build == "test-build" && empty.plan.enabled);
 
         CHECK(game.check(game.root / "missing").exit_code == kExitCannotCheck);
         fs::create_directories(game.root / "no-exe" / "anvil");
@@ -206,8 +213,9 @@ int main(int argc, char** argv) {
         const GameReport r = game.check();
         CHECK(r.exit_code == kExitProblems);
         CHECK(loaded(r) == "a-core,b-user,c-plain");  // early first, then main by id
-        CHECK(r.load_order[0].phase == "early" && r.load_order[1].phase == "main" && r.load_order[0].version == "1.0.0");
-        CHECK(r.load_order[0].folder == "a-core");
+        CHECK(r.plan.load[0].manifest->phase == Phase::Early && r.plan.load[1].manifest->phase == Phase::Main &&
+              r.plan.load[0].manifest->version.to_string() == "1.0.0");
+        CHECK(r.plugins[static_cast<size_t>(r.plan.load[0].local)].folder == "a-core");
         CHECK(skipped_for(r, "d-stale", "symbols.toml is for build other-build, the game is test-build"));
         CHECK(skipped_for(r, "e-conflict", "conflicts with a-core 1.0.0; disable one of them"));
         CHECK(skipped_for(r, "f-needs-d", "requires plugin 'd-stale'"));
@@ -218,8 +226,7 @@ int main(int argc, char** argv) {
         CHECK(skipped_for(r, "i-broken", "bogus"));
         CHECK(skipped_for(r, "not-a-plugin", "plugin.toml"));
         CHECK(r.plugins.size() == 13);  // folders only, in discovery order
-        CHECK(plugin_of(r, "a-core")->status == "loaded" && plugin_of(r, "g-off")->status == "disabled" &&
-              plugin_of(r, "d-stale")->status == "skipped");
+        CHECK(status_of(r, "a-core") == "loaded" && status_of(r, "g-off") == "disabled" && status_of(r, "d-stale") == "skipped");
         // The plugins' own problems are reported at their lines, and nothing is written into the game folder.
         const GamePlugin* stale = plugin_of(r, "d-stale");
         CHECK(stale->report.exit_code == kExitProblems && !stale->report.problems.empty() && stale->report.lock.empty());
@@ -227,10 +234,10 @@ int main(int argc, char** argv) {
         CHECK(plugin_of(r, "a-core")->report.exit_code == kExitOk);
         CHECK(plugin_of(r, "i-broken")->report.problems.size() == 1 && plugin_of(r, "i-broken")->report.problems[0].line == 8);
         CHECK(plugin_of(r, "not-a-plugin")->report.problems.size() == 1);
-        CHECK(r.skipped.size() == 10);
+        CHECK(r.plan.skipped.size() == 10);
         // The same folder on a second run gives the same answer.
         const GameReport again = game.check();
-        CHECK(loaded(again) == loaded(r) && again.skipped.size() == r.skipped.size());
+        CHECK(loaded(again) == loaded(r) && again.plan.skipped.size() == r.plan.skipped.size());
     });
 
     run("what the player disabled does not make the check fail", [&] {
@@ -241,16 +248,16 @@ int main(int argc, char** argv) {
         game.settings("disabled_plugins = [\"b-stale\"]\n");
         const GameReport disabled = game.check();
         CHECK(disabled.exit_code == kExitOk && loaded(disabled) == "a-ok");
-        CHECK(!plugin_of(disabled, "b-stale")->report.problems.empty() && plugin_of(disabled, "b-stale")->disabled);
+        CHECK(!plugin_of(disabled, "b-stale")->report.problems.empty() && turned_off(disabled, *plugin_of(disabled, "b-stale")));
         game.settings("enabled = false\n");
         const GameReport off = game.check();
-        CHECK(off.exit_code == kExitOk && !off.enabled && off.load_order.empty() && off.skipped.size() == 2);
+        CHECK(off.exit_code == kExitOk && !off.plan.enabled && off.plan.load.empty() && off.plan.skipped.size() == 2);
         CHECK(skipped_for(off, "a-ok", "enabled = false", true));
         // A broken anvil.toml is ignored by the loader, so it is a problem here.
         game.settings("enabled = [\n");
         const GameReport broken = game.check();
         CHECK(broken.exit_code == kExitProblems && broken.problems.size() == 1 && broken.problems[0].line != 0);
-        CHECK(contains(broken.problems[0].file, "anvil.toml") && broken.enabled);
+        CHECK(contains(broken.problems[0].file, "anvil.toml") && broken.plan.enabled);
     });
 
     run("overlapping code ranges of plugins that load together are warnings", [&] {
@@ -303,17 +310,17 @@ int main(int argc, char** argv) {
             }
             return nullptr;
         };
-        CHECK(r.playset_found && r.enabled_mods == 2 && r.mod_plugins.size() == 6 && r.mod_warnings.empty());
+        CHECK(r.inventory.playset.found && r.inventory.playset.mods.size() == 2 && r.mod_plugins.size() == 6 && r.mod_warnings.empty());
         CHECK(loaded(r) == "a-local,m-approved,z-needs-mod");
         const GameModPlugin* approved = mod_plugin("m-approved", "Mod One");
-        CHECK(approved->state == "approved" && approved->status == "loaded" && !approved->copy_missing);
+        CHECK(approved->state == ModPluginState::Approved && status_of(r, *approved) == "loaded" && !approved->copy_missing);
         CHECK(contains(approved->loads_from, "/anvil/data/anvil/approved/m-approved/" + approved->hash));
         CHECK(approved->approved_hash == approved->hash && approved->approved_version == "1.0.0" && approved->workshop_id.empty());
         CHECK(approved->report.manifest && approved->report.manifest->folder.wstring().find(L"approved") != std::wstring::npos);
-        CHECK(mod_plugin("m-pending", "Mod One")->state == "pending" && mod_plugin("m-pending", "Mod One")->status == "skipped");
-        CHECK(mod_plugin("a-local", "Mod One")->state == "shadowed");
-        CHECK(mod_plugin("m-twice", "Mod One")->state == "conflict" && mod_plugin("m-twice", "Mod Two")->others[0] == "Mod One");
-        CHECK(mod_plugin("Bad", "Mod Two")->state == "invalid");
+        CHECK(mod_plugin("m-pending", "Mod One")->state == ModPluginState::Pending && status_of(r, *mod_plugin("m-pending", "Mod One")) == "skipped");
+        CHECK(mod_plugin("a-local", "Mod One")->state == ModPluginState::Shadowed);
+        CHECK(mod_plugin("m-twice", "Mod One")->state == ModPluginState::Conflict && mod_plugin("m-twice", "Mod Two")->others[0] == "Mod One");
+        CHECK(mod_plugin("Bad", "Mod Two")->state == ModPluginState::Invalid);
         CHECK(r.exit_code == kExitProblems);  // the invalid one; the others wait for the player
 
         const std::string text = format_game_report(r, Format::Text);
@@ -337,7 +344,7 @@ int main(int argc, char** argv) {
         // Disabled in anvil.toml: listed as such, and what needs it is skipped.
         game.settings("disabled_plugins = [\"m-approved\"]\n");
         r = game.check();
-        CHECK(mod_plugin("m-approved", "Mod One")->status == "disabled" && skipped_for(r, "m-approved", "disabled in anvil.toml", true));
+        CHECK(status_of(r, *mod_plugin("m-approved", "Mod One")) == "disabled" && skipped_for(r, "m-approved", "disabled in anvil.toml", true));
         CHECK(skipped_for(r, "z-needs-mod", "m-approved") && r.exit_code == kExitProblems);
         CHECK(contains(format_game_report(r, Format::Text), "  m-approved from mod 'Mod One' (disabled): disabled in anvil.toml\n"));
     });
@@ -351,17 +358,52 @@ int main(int argc, char** argv) {
         const fs::path copy = approved_copy(game.dir / "anvil", "p", hash);
         write(folder / "p.dll", "MZ new");  // Steam updates the mod
         r = game.check();
-        CHECK(r.mod_plugins[0].state == "update-pending" && r.mod_plugins[0].status == "loaded" && loaded(r) == "p");
+        CHECK(r.mod_plugins[0].state == ModPluginState::UpdatePending && status_of(r, r.mod_plugins[0]) == "loaded" && loaded(r) == "p");
         CHECK(r.mod_plugins[0].hash != hash && r.mod_plugins[0].approved_hash == hash && r.exit_code == kExitOk);
         CHECK(r.mod_plugins[0].report.manifest && r.mod_plugins[0].report.manifest->folder == copy);
 
         write(folder / "p.dll", "MZ M");  // back to the approved files, without the copy
         fs::remove_all(copy);
         r = game.check();
-        CHECK(r.mod_plugins[0].state == "approved" && r.mod_plugins[0].copy_missing && loaded(r) == "p");
+        CHECK(r.mod_plugins[0].state == ModPluginState::Approved && r.mod_plugins[0].copy_missing && loaded(r) == "p");
         CHECK(r.mod_plugins[0].report.manifest && r.mod_plugins[0].report.manifest->folder == folder);
         CHECK(!fs::exists(copy));
         CHECK(contains(format_game_report(r, Format::Json), "\"copy_missing\": true"));
+    });
+
+    run("plugin inventory: every folder, checked once, and the approved copies that may load", [&] {
+        Game game;
+        game.plugin("a-local", "", symbols("test-build"));
+        write(game.dir / "anvil" / "plugins" / "broken" / "plugin.toml", "id = ");
+        const fs::path folder = game.mod_plugin("M", "p");
+        CHECK(game.approve("p", "M"));
+        GameReport r = game.check();
+        const PluginInventory& inv = r.inventory;
+        CHECK(inv.local.size() == 2 && inv.local[0].id == "a-local" && inv.local[1].id == "broken");
+        CHECK(inv.local[0].check.loadable() && inv.local[0].check.verified && inv.local[0].check.symbols.has_value());
+        CHECK(!inv.local[1].check.loadable() && !inv.local[1].check.manifest.manifest);
+        CHECK((inv.local_ids() == std::set<std::string>{"a-local", "broken"}) && inv.installed("p") && !inv.installed("q"));
+        CHECK(inv.mods.size() == 1 && inv.mods[0].found.id == "p" && inv.mods[0].check.loadable());
+        // The copy has the mod's own hash: the folder's check stands for it.
+        const std::string hash = inv.mods[0].found.hash;
+        CHECK(inv.copies.size() == 1 && inv.copies[0].name == hash && !inv.copies[0].check && inv.copy_exists("p", hash));
+
+        // An update waits: the copy that still loads is checked on its own.
+        write(folder / "p.dll", "MZ new");
+        write(folder / "plugin.toml", "id = ");
+        r = game.check();
+        CHECK(r.inventory.copies.size() == 1 && r.inventory.copies[0].check && r.inventory.copies[0].check->loadable());
+        CHECK(!r.inventory.mods[0].check.loadable() && loaded(r) == "a-local,p");
+        CHECK(r.mod_plugins[0].state == ModPluginState::UpdatePending);
+
+        // An unfinished copy (a name starting with '.') is never checked, and the next start removes it.
+        fs::create_directories(game.dir / "anvil" / "data" / "anvil" / "approved" / "p" / ".partial");
+        r = game.check();
+        const auto partial = std::find_if(r.inventory.copies.begin(), r.inventory.copies.end(),
+                                          [](const InventoryCopy& c) { return c.name == ".partial"; });
+        CHECK(partial != r.inventory.copies.end() && !partial->check);
+        CHECK(r.plan.writes.remove.size() == 1 && r.plan.writes.remove[0].filename() == ".partial");
+        CHECK(contains(format_game_report(r, Format::Json), "\"remove\": [\""));
     });
 
     run("plugins in mods: a dlc_load.json or trust.toml that does not parse is a problem", [&] {
@@ -375,7 +417,7 @@ int main(int argc, char** argv) {
         write(game.dir / "anvil" / "trust.toml", "[[plugin]]\nid = 1\n");
         r = game.check();
         CHECK(r.exit_code == kExitProblems && r.problems.size() == 1 && r.problems[0].line == 2);
-        CHECK(contains(r.problems[0].message, "approves no plugin from a mod") && r.mod_plugins[0].state == "pending");
+        CHECK(contains(r.problems[0].message, "approves no plugin from a mod") && r.mod_plugins[0].state == ModPluginState::Pending);
         fs::remove(game.dir / "anvil" / "trust.toml");
         write(game.user / "mod" / "M.mod", "name=\"M\"\n");
         r = game.check();
@@ -428,7 +470,9 @@ int main(int argc, char** argv) {
         clean.plugin("a-core", "", symbols("test-build"));
         const std::string clean_json = format_game_report(clean.check(), Format::Json);
         CHECK(contains(clean_json, "\"result\": \"ok\"") && contains(clean_json, "\"problems\": [],\n  \"plugins\": ["));
-        CHECK(contains(clean_json, "\"skipped\": [],\n  \"warnings\": []\n}\n"));
+        CHECK(contains(clean_json, "\"skipped\": [],\n  \"next_start\": {\"safe_mode\": false, \"unfinished_starts\": 0, "
+                                   "\"writes\": {\"remove\": [], \"copies\": [], \"retired\": []}},\n"));
+        CHECK(contains(clean_json, "\"warnings\": []\n}\n"));
         const std::string cannot_json = format_game_report(clean.check(clean.root / "none"), Format::Json);
         CHECK(contains(cannot_json, "\"result\": \"cannot-check\"") && contains(cannot_json, "\"cannot_check\": ") &&
               contains(cannot_json, "\"plugins\": [],"));

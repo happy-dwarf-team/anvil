@@ -5,6 +5,7 @@
 #include "core/instructions.hpp"
 #include "core/manifest.hpp"
 #include "core/pe_image.hpp"
+#include "core/plugin_check.hpp"
 #include "core/plugin_translation.hpp"
 #include "core/settings.hpp"
 #include "core/symbols.hpp"
@@ -70,127 +71,6 @@ const char* known_build(std::string_view sha256) {
 // A problem of a symbol in the selected build: at its table for that build, if it has one.
 uint32_t line_in_build(const Symbol& s) { return s.placement_line != 0 ? s.placement_line : s.line; }
 
-// Compares the plugin's symbols with an eu4.exe file and writes symbols.lock.
-// The file's symbols are those of the exe's build, if it declares it, else of its first.
-void check_against_exe(const CheckOptions& options, SymbolFile file, const std::string& symbols_text,
-                       const std::string& symbols_path, CheckReport& report) {
-    auto cannot = [&](const std::string& why) {
-        report.exit_code = kExitCannotCheck;
-        report.cannot_check = why;
-    };
-    std::string error;
-    const auto reader = FileImageReader::load(options.exe, error);
-    if (!reader) return cannot("cannot read " + report.exe_name + ": " + error);
-    const auto image = PeImage::parse(*reader, error);
-    if (!image) return cannot(report.exe_name + ": " + error);
-    report.exe_sha256 = sha256_file(options.exe);
-    if (report.exe_sha256.empty()) return cannot("cannot hash " + report.exe_name);
-
-    const auto& build_of = options.build_of ? options.build_of : known_build;
-    const size_t before = report.problems.size();
-    const bool several = file.builds_listed;
-    bool declared = false;  // the exe's build is one of the file's
-    if (const char* id = build_of(report.exe_sha256)) {
-        report.exe_build = id;
-        declared = select_build(file, id);
-        if (!declared) {
-            report.problems.push_back({symbols_path, file.build_line,
-                                       "symbols.toml is for " + file.build_list() + ", " + report.exe_name + " is " +
-                                           report.exe_build});
-            set_skip(report, build_mismatch(file, report.exe_build));
-        }
-    } else {
-        set_skip(report, unknown_build_reason(options.exe.parent_path()));
-        report.problems.push_back({symbols_path, file.build_line,
-                                   report.exe_name + " (SHA-256 " + report.exe_sha256 +
-                                       ") is not a game build this Anvil knows; symbols.toml declares " + file.build_list()});
-    }
-    report.build = file.build;
-
-    const SymbolVerification verification = verify_symbols(file, *image);
-    std::set<uint32_t> failed;
-    for (size_t i = 0; i < verification.problems.size(); ++i) {
-        const Symbol& s = file.symbols[verification.failed[i]];
-        failed.insert(s.id);
-        report.problems.push_back({symbols_path, line_in_build(s),
-                                   (several ? "in build " + file.build + ": " : std::string()) + verification.problems[i]});
-    }
-    // The loader checks the build first and gives the first failing symbol.
-    if (report.skip_reason.empty() && !verification.problems.empty()) set_skip(report, symbol_mismatch(verification.problems));
-    for (const auto& s : file.symbols) {
-        if (failed.contains(s.id) || s.memory != MemoryKind::Code || s.bytes.empty()) continue;
-        report.code_ranges.push_back(
-            {s.name, line_in_build(s), verification.symbols[s.id].rva, static_cast<uint32_t>(s.bytes.size())});
-    }
-    for (const auto& s : file.symbols) {
-        if (s.absent) report.absent.push_back(s.name);
-    }
-    // Instruction boundaries (design §16) of the symbols that verified.
-    for (const auto& s : file.symbols) {
-        if (failed.contains(s.id) || s.absent) continue;
-        const uint32_t rva = verification.symbols[s.id].rva;
-        const Section* section = image->section_of(rva, 1);
-        if (section == nullptr) continue;
-        const std::string where =
-            (several ? "in build " + file.build + ": " : std::string()) + "symbol " + s.name + " (rva " + hex(rva) + "): ";
-        if (has_instruction_boundaries(s, section->kind)) {
-            const std::string problem = check_instruction_boundaries(s, rva, *reader);
-            if (!problem.empty()) report.problems.push_back({symbols_path, line_in_build(s), where + problem});
-        }
-        // A block replacement continues at `resume`: it must be code.
-        if (!s.resume.empty()) {
-            const Symbol* target = file.find(s.resume);
-            if (failed.contains(target->id)) continue;
-            const Section* resume = image->section_of(verification.symbols[target->id].rva, 1);
-            if (resume != nullptr && resume->kind != MemoryKind::Code) {
-                report.problems.push_back({symbols_path, line_in_build(s),
-                                           where + "resume names " + s.resume + ", which is not in code (section " +
-                                               resume->name + ")"});
-            }
-        }
-    }
-
-    if (!options.write_lock) return;
-    const std::filesystem::path lock_path = options.plugin_dir / kLockFile;
-    std::string existing;
-    const bool has_existing = read_file(lock_path, existing);
-    SymbolsLock lock;
-    lock.format = file.builds_listed ? 2 : 1;
-    lock.tool = tool_name();
-    lock.symbols_sha256 = symbols_digest(symbols_text);
-    const LockCheck check{report.exe_sha256, report.exe_build.empty() ? "unknown" : report.exe_build,
-                          report.problems.size() == before};
-    if (lock.format == 1) {
-        lock.checks.push_back(check);
-    } else {
-        // A check of a build symbols.toml does not declare belongs to no build: the lock is left alone.
-        if (!declared) return;
-        // The other builds' checks stay while symbols.toml is the same.
-        std::optional<SymbolsLock> previous;
-        if (has_existing) previous = parse_lock(existing).lock;
-        for (const auto& build : file.builds) {
-            if (build == check.build) {
-                lock.checks.push_back(check);
-                continue;
-            }
-            if (!previous || previous->format != 2 || previous->symbols_sha256 != lock.symbols_sha256) continue;
-            for (const auto& c : previous->checks) {
-                if (c.build == build) lock.checks.push_back(c);
-            }
-        }
-    }
-    const std::string text = lock_text(lock);
-    if (has_existing && existing == text) {
-        report.lock = "unchanged";
-        return;
-    }
-    std::ofstream out(lock_path, std::ios::binary | std::ios::trunc);
-    out << text;
-    out.close();
-    if (!out) return cannot("cannot write " + shown_path(options.plugin_dir, kLockFile));
-    report.lock = "written";
-}
-
 // Without the game: symbols.lock must describe this symbols.toml and a clean
 // check, of every build when it lists `builds`.
 void check_lock(const CheckOptions& options, const SymbolFile& file, const std::string& symbols_text,
@@ -231,6 +111,107 @@ void check_lock(const CheckOptions& options, const SymbolFile& file, const std::
         complete = false;
     }
     if (complete) report.lock = "matches";
+}
+
+// What anvil check adds to the core's check of the symbols against an eu4.exe
+// (check_plugin_folder): the code ranges, the absent symbols and instruction
+// boundaries for authors, then symbols.lock. `file` is the core's, with the
+// exe's build selected when symbols.toml declares it, else its first.
+void exe_checks(const CheckOptions& options, const SymbolFile& file, const PluginCheck& check, const GameImage& game,
+                const std::string& symbols_path, CheckReport& report) {
+    const SymbolVerification& verification = check.verification;
+    const bool several = file.builds_listed;
+    // A symbols.toml problem of the core's check: the build or a symbol.
+    bool exe_ok = std::none_of(check.problems.begin(), check.problems.end(), [&](const PluginProblem& p) {
+        return shown_path(options.plugin_dir, utf8_path(p.file)) == symbols_path;
+    });
+    std::set<uint32_t> failed;
+    for (const size_t i : verification.failed) failed.insert(file.symbols[i].id);
+    for (const auto& s : file.symbols) {
+        if (failed.contains(s.id) || s.memory != MemoryKind::Code || s.bytes.empty()) continue;
+        report.code_ranges.push_back(
+            {s.name, line_in_build(s), verification.symbols[s.id].rva, static_cast<uint32_t>(s.bytes.size())});
+    }
+    for (const auto& s : file.symbols) {
+        if (s.absent) report.absent.push_back(s.name);
+    }
+    // Instruction boundaries (design §16) of the symbols that verified.
+    for (const auto& s : file.symbols) {
+        if (failed.contains(s.id) || s.absent) continue;
+        const uint32_t rva = verification.symbols[s.id].rva;
+        const Section* section = game.image->section_of(rva, 1);
+        if (section == nullptr) continue;
+        const std::string where =
+            (several ? "in build " + file.build + ": " : std::string()) + "symbol " + s.name + " (rva " + hex(rva) + "): ";
+        if (has_instruction_boundaries(s, section->kind)) {
+            const std::string problem = check_instruction_boundaries(s, rva, *game.reader);
+            if (!problem.empty()) {
+                report.problems.push_back({symbols_path, line_in_build(s), where + problem});
+                exe_ok = false;
+            }
+        }
+        // A block replacement continues at `resume`: it must be code.
+        if (!s.resume.empty()) {
+            const Symbol* target = file.find(s.resume);
+            if (failed.contains(target->id)) continue;
+            const Section* resume = game.image->section_of(verification.symbols[target->id].rva, 1);
+            if (resume != nullptr && resume->kind != MemoryKind::Code) {
+                report.problems.push_back({symbols_path, line_in_build(s),
+                                           where + "resume names " + s.resume + ", which is not in code (section " +
+                                               resume->name + ")"});
+                exe_ok = false;
+            }
+        }
+    }
+
+    if (!options.write_lock) return;
+    std::string symbols_text;
+    if (!read_file(options.plugin_dir / utf8_path(report.manifest->symbols), symbols_text)) {
+        report.exit_code = kExitCannotCheck;
+        report.cannot_check = "cannot read " + symbols_path;
+        return;
+    }
+    const std::filesystem::path lock_path = options.plugin_dir / kLockFile;
+    std::string existing;
+    const bool has_existing = read_file(lock_path, existing);
+    SymbolsLock lock;
+    lock.format = file.builds_listed ? 2 : 1;
+    lock.tool = tool_name();
+    lock.symbols_sha256 = symbols_digest(symbols_text);
+    const LockCheck lock_check{report.exe_sha256, report.exe_build.empty() ? "unknown" : report.exe_build, exe_ok};
+    if (lock.format == 1) {
+        lock.checks.push_back(lock_check);
+    } else {
+        // A check of a build symbols.toml does not declare belongs to no build: the lock is left alone.
+        if (!check.build_declared) return;
+        // The other builds' checks stay while symbols.toml is the same.
+        std::optional<SymbolsLock> previous;
+        if (has_existing) previous = parse_lock(existing).lock;
+        for (const auto& build : file.builds) {
+            if (build == lock_check.build) {
+                lock.checks.push_back(lock_check);
+                continue;
+            }
+            if (!previous || previous->format != 2 || previous->symbols_sha256 != lock.symbols_sha256) continue;
+            for (const auto& c : previous->checks) {
+                if (c.build == build) lock.checks.push_back(c);
+            }
+        }
+    }
+    const std::string text = lock_text(lock);
+    if (has_existing && existing == text) {
+        report.lock = "unchanged";
+        return;
+    }
+    std::ofstream out(lock_path, std::ios::binary | std::ios::trunc);
+    out << text;
+    out.close();
+    if (!out) {
+        report.exit_code = kExitCannotCheck;
+        report.cannot_check = "cannot write " + shown_path(options.plugin_dir, kLockFile);
+        return;
+    }
+    report.lock = "written";
 }
 
 // The first Anvil that reads [[modules]] (ADR 0011).
@@ -475,113 +456,86 @@ LockResult parse_lock(std::string_view text) {
     return result;
 }
 
-CheckReport check_plugin(const CheckOptions& options) {
+CheckReport check_report(const PluginCheck& check, const CheckOptions& options, const GameImage* game) {
     CheckReport report;
-    report.with_exe = !options.exe.empty();
-    if (report.with_exe) {
-        const auto name = options.exe.filename().u8string();
-        report.exe_name.assign(name.begin(), name.end());
-    }
-    std::error_code ec;
-    if (!std::filesystem::is_regular_file(options.plugin_dir / "plugin.toml", ec)) {
-        report.exit_code = kExitCannotCheck;
-        report.cannot_check = "no plugin.toml in " + shown(options.plugin_dir);
-        return report;
-    }
-    if (report.with_exe && !std::filesystem::is_regular_file(options.exe, ec)) {
-        report.exit_code = kExitCannotCheck;
-        report.cannot_check = "--exe: " + report.exe_name + " is not a file";
-        return report;
-    }
+    report.with_exe = game != nullptr;
+    if (game != nullptr) report.exe_name = game->exe_name;
     const std::string manifest_path = shown_path(options.plugin_dir, "plugin.toml");
-
-    const ManifestResult manifest = load_manifest(options.plugin_dir);
-    if (!manifest.manifest) {
-        report.problems.push_back({manifest_path, manifest.line, without_prefix(manifest.error, "plugin.toml: ")});
-        set_skip(report, manifest.error);
+    // The core's problems, at the paths as the author passed the folder.
+    const auto take_problems = [&] {
+        for (const PluginProblem& p : check.problems) {
+            report.problems.push_back({shown_path(options.plugin_dir, utf8_path(p.file)), p.line, p.message});
+        }
+    };
+    if (!check.skip.empty()) set_skip(report, check.skip);
+    if (!check.manifest.manifest) {
+        take_problems();
         report.exit_code = kExitProblems;
         return report;
     }
-    report.manifest = manifest.manifest;
-    const Manifest& m = *manifest.manifest;
+    report.manifest = check.manifest.manifest;
+    const Manifest& m = *check.manifest.manifest;
     if (const std::string why = modules_range_warning(m); !why.empty()) report.warnings.push_back({manifest_path, 0, why});
     report.plugin = m.id;
     report.has_symbols = !m.symbols.empty();
+    const auto cannot_read = [&](const std::string& path) {
+        report.exit_code = kExitCannotCheck;
+        report.cannot_check = "cannot read " + path;
+        if (check.skip.code == "cannot_read") set_skip(report, i18n::Message("cannot_read", {path}));
+        return report;
+    };
     if (report.has_symbols) {
         const std::filesystem::path relative = utf8_path(m.symbols);
         const std::string symbols_path = shown_path(options.plugin_dir, relative);
-        std::string text;
-        if (!read_file(options.plugin_dir / relative, text)) {
-            report.exit_code = kExitCannotCheck;
-            report.cannot_check = "cannot read " + symbols_path;
-            set_skip(report, i18n::Message("cannot_read", {symbols_path}));
-            return report;
-        }
-        if (text.starts_with("\xEF\xBB\xBF")) text.erase(0, 3);  // saved by Notepad, as load_symbols allows
-        const SymbolFileResult symbols = parse_symbols_text(text);
-        if (!symbols.file) {
-            report.problems.push_back({symbols_path, symbols.line, without_prefix(symbols.error, "symbols.toml: ")});
-            set_skip(report, symbols.error);
-            report.exit_code = kExitProblems;
-            return report;
-        }
-        report.build = symbols.file->build;
-        report.builds = symbols.file->builds;
-        report.symbols = symbols.file->symbols.size();
-        // Names `anvil gen` refuses, in any language it writes, fail the build later.
-        const GeneratedHeaders headers = generate_headers(*symbols.file, relative.generic_string(), true, true, true);
-        if (!headers.error.empty()) {
-            report.problems.push_back({symbols_path, headers.line, without_prefix(headers.error, "symbols.toml: ")});
-        }
-        if (report.with_exe) {
-            check_against_exe(options, *symbols.file, text, symbols_path, report);
-            if (report.exit_code == kExitCannotCheck) return report;
-        } else {
-            check_lock(options, *symbols.file, text, symbols_path, report);
+        if (check.unreadable == relative.generic_string()) return cannot_read(symbols_path);
+        if (check.symbols) {
+            const SymbolFile& file = *check.symbols;
+            report.build = file.build;
+            report.builds = file.builds;
+            report.symbols = file.symbols.size();
+            // Names `anvil gen` refuses, in any language it writes, fail the build later.
+            const GeneratedHeaders headers = generate_headers(file, relative.generic_string(), true, true, true);
+            if (!headers.error.empty()) {
+                report.problems.push_back({symbols_path, headers.line, without_prefix(headers.error, "symbols.toml: ")});
+            }
+            if (game != nullptr) {
+                report.exe_sha256 = game->exe_sha256;
+                if (game->build_id != nullptr) report.exe_build = game->build_id;
+                exe_checks(options, file, check, *game, symbols_path, report);
+                if (report.exit_code == kExitCannotCheck) return report;
+            } else {
+                std::string text;
+                if (!read_file(options.plugin_dir / relative, text)) return cannot_read(symbols_path);
+                if (text.starts_with("\xEF\xBB\xBF")) text.erase(0, 3);  // saved by Notepad, as load_symbols allows
+                check_lock(options, file, text, symbols_path, report);
+            }
         }
     }
     // settings.toml: the loader skips a plugin whose declarations do not parse.
-    std::optional<SettingsFile> settings_file;
     if (!m.settings.empty()) {
         const std::filesystem::path relative = utf8_path(m.settings);
         const std::string settings_path = shown_path(options.plugin_dir, relative);
-        std::string text;
-        if (!read_file(options.plugin_dir / relative, text)) {
-            report.exit_code = kExitCannotCheck;
-            report.cannot_check = "cannot read " + settings_path;
-            if (report.skip_reason.empty()) set_skip(report, i18n::Message("cannot_read", {settings_path}));
-            return report;
-        }
-        if (text.starts_with("\xEF\xBB\xBF")) text.erase(0, 3);  // saved by Notepad, as load_settings allows
-        const SettingsFileResult settings = parse_settings_text(text);
-        report.has_settings = true;
-        if (settings.file) settings_file = settings.file;
-        if (settings.file) {
-            report.settings = settings.file->settings.size();
+        if (check.unreadable == relative.generic_string()) return cannot_read(settings_path);
+        report.has_settings = check.unreadable.empty();
+        if (check.settings) {
+            report.settings = check.settings->settings.size();
             const GeneratedHeaders headers =
-                generate_settings_headers(*settings.file, relative.generic_string(), true, true, true);
+                generate_settings_headers(*check.settings, relative.generic_string(), true, true, true);
             if (!headers.error.empty()) {
                 report.problems.push_back({settings_path, headers.line, without_prefix(headers.error, "settings.toml: ")});
             }
-            uint32_t line = 0;
-            if (const std::string error = settings_module_error(*settings.file, m, line); !error.empty()) {
-                report.problems.push_back({settings_path, line, without_prefix(error, "settings.toml: ")});
-                if (report.skip_reason.empty()) set_skip(report, i18n::Message(error));
-            }
-            module_settings_warnings(m, *settings.file, settings_path, report.warnings);
-        } else {
-            report.problems.push_back({settings_path, settings.line, without_prefix(settings.error, "settings.toml: ")});
-            if (report.skip_reason.empty()) set_skip(report, settings.error);
+            module_settings_warnings(m, *check.settings, settings_path, report.warnings);
         }
     }
-    if (const std::string key = module_settings_key(m, settings_file ? &*settings_file : nullptr);
-        !key.empty() && admits_older(m, kFirstWithModuleSettings)) {
+    take_problems();
+    const SettingsFile* settings = check.settings ? &*check.settings : nullptr;
+    if (const std::string key = module_settings_key(m, settings); !key.empty() && admits_older(m, kFirstWithModuleSettings)) {
         report.warnings.push_back(
             {manifest_path, 0, range_warning(m, "'" + key + "' (ADR 0013)", kFirstWithModuleSettings, key)});
     }
     // translations/ (design §5.4): once the texts they translate are known.
-    if (options.translations && (m.settings.empty() || settings_file)) {
-        const std::vector<std::string> texts = plugin_texts(m, settings_file ? &*settings_file : nullptr);
+    if (options.translations && (m.settings.empty() || settings != nullptr)) {
+        const std::vector<std::string> texts = plugin_texts(m, settings);
         for (const TranslationProblem& p :
              check_plugin_translations(options.plugin_dir, texts, options.complete_translations)) {
             Problem problem{shown_path(options.plugin_dir, utf8_path(p.file)), p.line, p.message};
@@ -602,6 +556,51 @@ CheckReport check_plugin(const CheckOptions& options) {
     std::stable_sort(report.warnings.begin(), report.warnings.end(), by_place);
     report.exit_code = report.problems.empty() ? kExitOk : kExitProblems;
     return report;
+}
+
+CheckReport check_plugin(const CheckOptions& options) {
+    CheckReport report;
+    report.with_exe = !options.exe.empty();
+    if (report.with_exe) {
+        const auto name = options.exe.filename().u8string();
+        report.exe_name.assign(name.begin(), name.end());
+    }
+    const auto cannot = [&](const std::string& why) {
+        report.exit_code = kExitCannotCheck;
+        report.cannot_check = why;
+        return report;
+    };
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(options.plugin_dir / "plugin.toml", ec)) {
+        return cannot("no plugin.toml in " + shown(options.plugin_dir));
+    }
+    if (report.with_exe && !std::filesystem::is_regular_file(options.exe, ec)) {
+        return cannot("--exe: " + report.exe_name + " is not a file");
+    }
+    // The exe is read only for a plugin with symbols.toml, which is what it checks.
+    std::optional<FileImageReader> reader;
+    GameImage game;
+    const ManifestResult manifest = load_manifest(options.plugin_dir);
+    const bool reads_exe = report.with_exe && manifest.manifest && !manifest.manifest->symbols.empty();
+    if (reads_exe) {
+        std::string error;
+        reader = FileImageReader::load(options.exe, error);
+        if (!reader) return cannot("cannot read " + report.exe_name + ": " + error);
+        game.reader = &*reader;
+        game.image = PeImage::parse(*reader, error);
+        if (!game.image) return cannot(report.exe_name + ": " + error);
+        game.exe_sha256 = sha256_file(options.exe);
+        if (game.exe_sha256.empty()) return cannot("cannot hash " + report.exe_name);
+        const auto& build_of = options.build_of ? options.build_of : known_build;
+        game.build_id = build_of(game.exe_sha256);
+        game.unknown_build = unknown_build_reason(options.exe.parent_path());
+        game.exe_name = report.exe_name;
+    }
+    const PluginCheck check = check_plugin_folder(options.plugin_dir, game);
+    CheckReport out = check_report(check, options, reads_exe ? &game : nullptr);
+    out.with_exe = report.with_exe;
+    out.exe_name = report.exe_name;
+    return out;
 }
 
 std::string report_json(const CheckReport& report, const std::string& pad, const std::string& folder,

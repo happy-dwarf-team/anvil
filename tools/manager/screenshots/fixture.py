@@ -5,9 +5,10 @@
 <out>/game is an EU4 folder with the package the build's AnvilManager.exe
 carries (tools/manager/anvil-package.zip) and a few plugins that show the
 Plugins tab's states: modules, settings with two changed (one a yes/no with a
-long label), a plugin that is off,
-one that needs it, one whose plugin.toml does not parse, and a plugin from a mod
-that waits for approval. <out>/user is EU4's user folder (game/userdir.txt
+long label), a plugin that is off, one that needs it, one whose plugin.toml does
+not parse, a plugin from a mod that waits for approval, and a retired setting
+the next start moves into anvil.toml (ADR 0013, point 4), which turns its module
+off (ADR 0014). <out>/user is EU4's user folder (game/userdir.txt
 names it).
 
 eu4.exe is a stand-in (the build's anvil.exe), so run the Manager with
@@ -112,8 +113,12 @@ default = "brief"
 values = [{ name = "brief", label = "Brief" }, { name = "full", label = "Full" }]
 label = "Tooltip style"
 group = "Economy"
+
+[retired.tooltips_mode]
+module = "trade_tooltips"
+off = ["off"]
 ''')
-write(game / "anvil" / "data" / "tuning" / "settings.toml", "max_armies = 40\nskip_drilled = true\n")
+write(game / "anvil" / "data" / "tuning" / "settings.toml", "max_armies = 40\nskip_drilled = true\ntooltips_mode = \"off\"\n")
 plugin(plugins / "camera", "camera", "Camera", '''description = "Smoother zoom and a key to jump to the capital."
 affects_gameplay = false
 ''', '''[setting.zoom_speed]

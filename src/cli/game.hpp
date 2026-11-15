@@ -1,9 +1,14 @@
 #pragma once
 
 #include "cli/check.hpp"
+#include "core/mod_plugins.hpp"
+#include "core/plugin_inventory.hpp"
+#include "core/safe_mode.hpp"
+#include "core/start_plan.hpp"
 
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -20,41 +25,21 @@ struct GameOptions {
     std::function<const char*(std::string_view sha256)> build_of;
 };
 
-// One folder of anvil/plugins.
+// One folder of anvil/plugins, by PluginInventory::local.
 struct GamePlugin {
     std::string folder;  // the folder's name
     CheckReport report;  // the plugin as `anvil check <folder> --exe <eu4.exe>` sees it
-    // Disabled in anvil.toml (or all plugins are): its problems are listed but
-    // do not count towards the exit code.
-    bool disabled = false;
-    std::string status;  // "loaded", "skipped" or "disabled"
 };
 
-struct LoadedPlugin {
-    std::string id;
-    std::string version;
-    std::string phase;   // "early" or "main"
-    std::string folder;  // in anvil/plugins; "" for a plugin from a mod
-    std::string mod;     // the mod's name for a plugin from a mod
-};
-
-struct SkippedPlugin {
-    std::string id;      // the folder's name when plugin.toml is broken
-    std::string folder;
-    std::string reason;
-    bool disabled = false;  // by the player in anvil.toml: not a fault
-    std::string mod;        // the mod's name for a plugin from a mod (folder is then "")
-    i18n::Message why;      // `reason` by code, for the player's language (#158)
-};
-
-// A plugin in <mod>/anvil/<id>/ of a mod enabled in the playset (design §14).
+// A plugin in <mod>/anvil/<id>/ of a mod enabled in the playset (design §14),
+// by StartPlan::mods: its facts and its decision, as text for the reports.
 struct GameModPlugin {
     std::string id;
     std::string mod;          // its name
     std::string descriptor;   // as dlc_load.json lists it
     std::string workshop_id;  // "" for a local mod
     std::string folder;       // <mod>/anvil/<id>
-    std::string state;        // approved | update-pending | pending | conflict | shadowed | invalid
+    ModPluginState state = ModPluginState::Pending;
     std::string reason;
     i18n::Message why;        // `reason` by code, for the player's language (#158)
     std::string hash;         // of the folder in the mod; "" when it cannot be hashed
@@ -65,9 +50,6 @@ struct GameModPlugin {
     std::string loads_from;   // the approved copy for approved and update-pending; "" otherwise
     bool copy_missing = false;  // approved, and the copy is made at the next start
     std::vector<std::string> others;  // conflict, shadowed: the other mods with this id
-    std::string status;       // "loaded" or "skipped" (by the resolver, or because of `state`)
-    std::string skip_reason;  // the resolver's, for an approved plugin that does not load
-    i18n::Message skip_why;
     // The folder that loads (the approved copy, or the mod's folder while the
     // copy is not made), or for the others the mod's folder, as `anvil check
     // <folder> --exe <eu4.exe>` sees it.
@@ -89,6 +71,10 @@ struct OverlapWarning {
     std::string message;
 };
 
+// The report of `anvil check --game` (design §16), built on the start plan
+// of the next start (ADR 0014): the plan, each plugin's CheckReport and the
+// facts of eu4.exe. Strings for its states are made only when it is
+// formatted.
 struct GameReport {
     int exit_code = kExitOk;
     std::string cannot_check;  // why, with kExitCannotCheck for the whole folder
@@ -96,32 +82,43 @@ struct GameReport {
     std::string exe_name = "eu4.exe";
     std::string exe_sha256;
     std::string exe_build;     // empty: not a game build this Anvil knows
-    bool enabled = true;       // anvil.toml
-    std::vector<std::string> disabled_plugins;
-    std::vector<Problem> problems;       // anvil.toml
-    std::vector<GamePlugin> plugins;     // in discovery order
-    std::vector<LoadedPlugin> load_order;
-    std::vector<SkippedPlugin> skipped;  // discovery first, then the resolver, as in the log
+    std::vector<Problem> problems;  // anvil.toml, dlc_load.json, trust.toml
+    // What the folder and its playset hold, the player's choices as saved,
+    // and the plan of the next start as a normal start (no safe mode, no
+    // benchmark arm); `next_start` says whether that start is in safe mode.
+    PluginInventory inventory;
+    PlayerChoices choices;
+    StartPlan plan;
+    StartRecord next_start;
+    std::vector<GamePlugin> plugins;         // by inventory.local
+    std::vector<GameModPlugin> mod_plugins;  // by plan.mods
     std::vector<OverlapWarning> warnings;
-    // The playset (design §14): its user folder, whether it has dlc_load.json,
-    // its enabled mods, what could not be read, and the plugins of those mods.
     std::string user_dir;
-    bool playset_found = false;
-    size_t enabled_mods = 0;
-    std::vector<std::string> mod_warnings;
-    std::vector<GameModPlugin> mod_plugins;
+    std::vector<std::string> mod_warnings;   // the playset's mods that cannot be read
 };
 
-// `anvil check --game <folder>` (design §16): every plugin in anvil/plugins
-// checked against the folder's eu4.exe (without writing symbols.lock), then
-// resolved with the loader's own rules (anvil.toml, API, Anvil range, build
-// and symbols, duplicates, conflicts, dependencies, cycles), so the report
-// says what loads, in which order, and what is skipped and why. The plugins
-// of the playset's mods are decided as the loader does (approved, pending,
-// conflicting, shadowed; design §14), checked too, and the approved ones take
-// part in the resolution. Nothing is written: a missing approved copy is
-// reported, not made.
+// `anvil check --game <folder>` (design §16): the plugin inventory of the
+// folder against its eu4.exe (every plugin of anvil/plugins and of the
+// playset's mods, checked as `anvil check <folder> --exe <eu4.exe>` does,
+// without writing symbols.lock), and the plan of the next start with the
+// loader's own rules, so the report says what loads, in which order, what is
+// skipped and why, and what that start writes first. Nothing is written: a
+// missing approved copy is reported, not made.
 GameReport check_game(const GameOptions& options);
+
+// The plan's entry of a plugin of the report; nullptr when it has none (a
+// plugin in a mod that a local plugin shadows).
+const PlannedPlugin* planned(const GameReport& report, const GamePlugin& plugin);
+const PlannedPlugin* planned(const GameReport& report, const GameModPlugin& plugin);
+// "loaded", "disabled" or "skipped", as the reports say it.
+const char* status_name(const PlannedPlugin* plugin);
+// The player turned the plugin off (disabled_plugins, or enabled = false):
+// its problems do not count.
+bool turned_off(const GameReport& report, const GamePlugin& plugin);
+// The plan's skipped plugins the report lists: not the plugins from mods
+// that wait for the player (pending, a conflict) or cannot be approved,
+// which the mods' section lists with their state.
+std::vector<const PlannedPlugin*> listed_skipped(const GameReport& report);
 
 std::string format_game_report(const GameReport& report, Format format);
 

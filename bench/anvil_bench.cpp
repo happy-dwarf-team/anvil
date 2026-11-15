@@ -329,7 +329,6 @@ int main(int argc, char** argv) {
                  ResolveInput input;
                  input.host_api = kManifestApi;
                  input.host_version = Version::parse("1.0.0");
-                 input.game_build = "eu4-1.37.5-steam-win64";
                  for (const auto& text : manifests) input.manifests.push_back(*parse_manifest_text(text, L"C:\\p").manifest);
                  correct = correct && resolve(input).order.size() == manifests.size();
              }

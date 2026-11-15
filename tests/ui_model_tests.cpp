@@ -19,7 +19,18 @@ PluginSnap plugin(const std::string& id, std::vector<std::string> requires_ids =
     p.name = id + " name";
     p.version = "1.0.0";
     p.requires_ids = std::move(requires_ids);
+    p.next.loads = true;  // the plan's verdict: loads at the next start
+    p.runs = true;        // in the overlay's game: it loaded at this start
     return p;
+}
+
+// The plan's verdict that the plugin does not load at the next start.
+LoadState not_loading(LoadState::Why why, const std::string& missing = "", std::vector<std::string> through = {}) {
+    LoadState l;
+    l.why = why;
+    l.missing = missing;
+    l.through = std::move(through);
+    return l;
 }
 
 ModuleSnap module(const std::string& id, bool on = true, const std::string& group = "") {
@@ -46,86 +57,100 @@ SettingSnap setting(const std::string& name, const std::string& value, const std
     return s;
 }
 
-// Mei <- Anvil Map <- Tongs: Mei is off, so Anvil Map and Tongs do not load.
+// Mei <- Anvil Map <- Tongs: Mei is off, so Anvil Map and Tongs do not load,
+// as the start plan says it.
 Snapshot chain_snapshot() {
     Snapshot s;
     PluginSnap mei = plugin("mei");
     mei.name = "Mei";
     mei.saved.on = false;
     mei.in_effect.on = false;
+    mei.next = not_loading(LoadState::Why::Off);
     PluginSnap map = plugin("anvil-map", {"mei"});
     map.name = "Anvil Map";
+    map.next = not_loading(LoadState::Why::NeedsPlugin, "mei");
     PluginSnap tongs = plugin("tongs", {"anvil-map"});
     tongs.name = "Tongs";
+    tongs.next = not_loading(LoadState::Why::NeedsPlugin, "mei", {"anvil-map"});
     s.plugins = {mei, map, tongs};
     return s;
 }
 
 void load_tests() {
-    run("a plugin with its dependencies loads", [] {
+    // What loads and why not is the start plan's (ADR 0014; tested in
+    // start_plan_tests.cpp): the model shows the verdict it is given.
+    run("a plugin that loads", [] {
         Snapshot s;
         s.plugins = {plugin("a"), plugin("b", {"a"})};
-        CHECK(load_state(s, s.plugins[1]).loads);
+        CHECK(view(s, s.plugins[1]).load.loads);
         CHECK(view(s, s.plugins[1]).glyph == Glyph::On);
         CHECK(view(s, s.plugins[1]).line.kind == EntryLine::Kind::Summary);
     });
     run("a dependency that is off names the path to it", [] {
         const Snapshot s = chain_snapshot();
-        const LoadState l = load_state(s, s.plugins[2]);
-        CHECK(!l.loads);
-        CHECK(l.why == LoadState::Why::NeedsPlugin);
-        CHECK(l.missing == "mei");
-        CHECK(l.through == std::vector<std::string>{"anvil-map"});
         const PluginView v = view(s, s.plugins[2]);
+        CHECK(!v.load.loads);
         CHECK(v.glyph == Glyph::Attention);
         CHECK(v.line.kind == EntryLine::Kind::NeedsPlugin);
         CHECK(v.line.name == "Mei");
         CHECK(v.needs_attention);
     });
-    run("the nearest plugin that is off is the one named", [] {
-        Snapshot s = chain_snapshot();
-        s.plugins[1].saved.on = false;  // Anvil Map off too
-        const LoadState l = load_state(s, s.plugins[2]);
-        CHECK(l.missing == "anvil-map");
-        CHECK(l.through.empty());
-    });
     run("a plugin that is off says so, not its dependency", [] {
         Snapshot s = chain_snapshot();
         s.plugins[1].saved.on = false;
+        s.plugins[1].next = not_loading(LoadState::Why::Off);
         const PluginView v = view(s, s.plugins[1]);
         CHECK(v.load.why == LoadState::Why::Off);
         CHECK(v.glyph == Glyph::Off);
         CHECK(!v.needs_attention);
+        CHECK(passes(s, s.plugins[1], "", ChipOff) && !passes(s, s.plugins[2], "", ChipOff));
     });
     run("a required plugin that is not installed", [] {
         Snapshot s;
         s.plugins = {plugin("b", {"gone"})};
-        const LoadState l = load_state(s, s.plugins[0]);
-        CHECK(l.why == LoadState::Why::NotInstalled);
-        CHECK(l.missing == "gone");
+        s.plugins[0].next = not_loading(LoadState::Why::NotInstalled, "gone");
         CHECK(view(s, s.plugins[0]).line.kind == EntryLine::Kind::NotInstalled);
+        CHECK(view(s, s.plugins[0]).line.name == "gone");
     });
-    run("a cycle does not hang", [] {
-        Snapshot s;
-        s.plugins = {plugin("a", {"b"}), plugin("b", {"a"})};
-        CHECK(load_state(s, s.plugins[0]).loads);
-    });
-    run("own reasons come before the switch", [] {
+    run("a plugin that cannot load, one that waits for approval", [] {
         Snapshot s;
         PluginSnap bad = plugin("bad");
-        bad.blocked = Blocked::CannotLoad;
         bad.saved.on = false;
+        bad.next = not_loading(LoadState::Why::CannotLoad);
+        bad.next.reason = "symbols.toml is for another build";
         PluginSnap mod = plugin("mod");
         mod.origin = Origin::FromMod;
-        mod.blocked = Blocked::WaitsForApproval;
+        mod.next = not_loading(LoadState::Why::WaitsForApproval);
         s.plugins = {bad, mod};
         CHECK(view(s, s.plugins[0]).glyph == Glyph::CannotLoad);
         CHECK(view(s, s.plugins[0]).line.kind == EntryLine::Kind::CannotLoad);
         CHECK(view(s, s.plugins[1]).glyph == Glyph::Attention);
         CHECK(view(s, s.plugins[1]).line.kind == EntryLine::Kind::WaitsForApproval);
-        s.plugins[1].approved = true;  // approved for the next start
-        CHECK(load_state(s, s.plugins[1]).loads);
+        CHECK(waits_for_approval(s.plugins[1]) && to_approve(s) == 1);
+        // Approved for the next start: the plan of that start loads it.
+        s.plugins[1].approved = true;
+        s.plugins[1].next = LoadState{};
+        s.plugins[1].next.loads = true;
+        CHECK(!waits_for_approval(s.plugins[1]) && view(s, s.plugins[1]).load.loads);
         CHECK(pending_count(s.plugins[1]) == 1);
+    });
+    run("in the game: what runs now, what failed, and the next start apart", [] {
+        Snapshot s;
+        s.game = Game::Normal;
+        PluginSnap runs = plugin("runs");
+        runs.runs = true;
+        runs.next = not_loading(LoadState::Why::Off);  // turned off for the next start
+        PluginSnap failed = plugin("failed");
+        failed.runs = false;
+        failed.failed = true;
+        failed.failed_reason = "the approved copy cannot be made";
+        PluginSnap later = plugin("later");  // installed or approved now: loads from the next start
+        later.runs = false;
+        s.plugins = {runs, failed, later};
+        CHECK(view(s, s.plugins[0]).in_this_game && view(s, s.plugins[0]).load.why == LoadState::Why::Off);
+        CHECK(!view(s, s.plugins[1]).in_this_game && view(s, s.plugins[1]).line.kind == EntryLine::Kind::Failed);
+        CHECK(view(s, s.plugins[1]).glyph == Glyph::CannotLoad);
+        CHECK(!view(s, s.plugins[2]).in_this_game && view(s, s.plugins[2]).load.loads);
     });
     run("an update waiting for approval keeps the approved copy running", [] {
         Snapshot s;
@@ -194,6 +219,7 @@ void game_tests() {
         s.plugins[0].saved.on = false;
         CHECK(module_in_game(s, s.plugins[0], s.plugins[0].modules[1]) == InGame::Runs);
         s.plugins[0].in_effect.on = false;
+        s.plugins[0].runs = false;  // off at this start: it did not load
         CHECK(module_in_game(s, s.plugins[0], s.plugins[0].modules[1]) == InGame::OffWithPlugin);
     });
 }
@@ -409,10 +435,10 @@ void layout_tests() {
         Snapshot s;
         PluginSnap mod = plugin("m1");
         mod.origin = Origin::FromMod;
-        mod.blocked = Blocked::WaitsForApproval;
+        mod.next = not_loading(LoadState::Why::WaitsForApproval);
         PluginSnap bad = plugin("m2");
         bad.origin = Origin::FromMod;
-        bad.blocked = Blocked::CannotLoad;
+        bad.next = not_loading(LoadState::Why::CannotLoad);
         PluginSnap ok = plugin("m3");
         ok.origin = Origin::FromMod;
         s.plugins = {plugin("own"), mod, bad, ok};

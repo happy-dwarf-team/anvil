@@ -6,7 +6,6 @@
 #include "i18n/message.hpp"
 
 #include <filesystem>
-#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -17,14 +16,15 @@ struct ResolveInput {
     std::vector<Manifest> manifests;  // in discovery order
     unsigned host_api = 0;
     std::optional<Version> host_version;  // Anvil version, checked against each plugin's "anvil" range
-    const char* game_build = nullptr;  // nullptr = unknown build
     std::vector<std::string> disabled;  // ids disabled in anvil.toml
     // A benchmark start without the compared plugin (ANVIL_BENCHMARK=
     // without:<id>): that id is disabled at the same point, without anvil.toml.
     std::string benchmark_without;
-    // Optional check after the API and Anvil version checks (the plugin's
-    // symbols.toml); returns why the plugin must be skipped, empty = keep it.
-    std::function<i18n::Message(const Manifest&)> verify;
+    // By manifest: why the plugin's check against the game failed (its
+    // symbols.toml or settings.toml; PluginCheck::skip), empty when it passed
+    // or for a manifest beyond the end. Counted after the API and Anvil
+    // version checks.
+    std::vector<i18n::Message> check_failures;
 };
 
 // Why a plugin is skipped, in words the start-up benchmark's record may carry
@@ -62,7 +62,7 @@ struct ResolveResult {
     std::vector<Skipped> skipped;
 };
 
-// Validates plugins against the host (and, through `verify`, the game), skips
+// Validates plugins against the host (and, through `check_failures`, the game), skips
 // plugins that declare a `conflicts` entry matching another loaded plugin,
 // resolves required and optional dependencies (SemVer ranges) and load_after,
 // and orders them topologically (ties broken by id). A plugin with

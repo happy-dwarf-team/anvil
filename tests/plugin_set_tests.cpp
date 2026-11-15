@@ -151,9 +151,12 @@ void plugin_set_tests() {
         with_entry(start.add(gameplay_toml("refuses", "[[modules]]\nid = \"extra\"\nname = \"Extra\"\n"
                                                     "affects_gameplay = true\n")),
                    this_executable());                               // 5. the load fails
+        // 6. The start could not make its approved copy (ADR 0014): failed at load time, not skipped.
+        with_entry(start.add(gameplay_toml("uncopied")), probe).cannot_load = i18n::Message("copy_failed", {"disk full"});
+        start.add(gameplay_toml("needs-copy", "[[dependencies]]\nid = \"uncopied\"\n"));  // 7. what needs it
         PluginSet& set = start.make();
         set.load(Phase::Main);
-        CHECK(start.loaded("base") && set.count(Outcome::Kind::loaded) == 1 && set.count(Outcome::Kind::failed) == 5);
+        CHECK(start.loaded("base") && set.count(Outcome::Kind::loaded) == 1 && set.count(Outcome::Kind::failed) == 7);
         const auto reason = [&](const char* id) {
             const Outcome* o = start.plugin(id).outcome();
             CHECK(o != nullptr && o->kind == Outcome::Kind::failed && !o->why.empty() && o->reason == i18n::english(o->why));
@@ -164,6 +167,9 @@ void plugin_set_tests() {
         CHECK(reason("copy").starts_with("its approved copy changed (hash "));
         CHECK(reason("no-export") == "the entry DLL does not export anvil_plugin_load" && start.plugin("no-export").dll() == nullptr);
         CHECK(reason("refuses") == "anvil_plugin_load returned over the limit");
+        CHECK(reason("uncopied") == "cannot make its approved copy: disk full" && start.plugin("uncopied").outcome()->why.code == "copy_failed");
+        CHECK(start.plugin("uncopied").dll() == nullptr);
+        CHECK(reason("needs-copy") == "requires plugin 'uncopied', which failed to load");
         // Its log line, one per plugin.
         CHECK(start.logged_containing("anvil: missing 1.0.0: cannot load ") == 1);
         CHECK(start.logged("anvil: needs 1.0.0: not loaded; requires plugin 'missing', which failed to load"));
@@ -180,14 +186,14 @@ void plugin_set_tests() {
         AnvilGameSession s{sizeof(s), ANVIL_GAME_SESSION_STARTED, 1, 0, 1};
         start.bus.publish(ANVIL_GAME_EVENT_SESSION, &s);
         CHECK(start.policy.suspended(start.handle("base")->owner));
-        for (const char* id : {"missing", "needs", "copy", "no-export", "refuses"}) {
+        for (const char* id : {"missing", "needs", "copy", "no-export", "refuses", "uncopied", "needs-copy"}) {
             CHECK(!start.policy.suspended(start.handle(id)->owner));
             CHECK(start.logged_containing(std::string(id) + ": suspended") == 0);
         }
         CHECK(!start.policy.suspended(extra->owner) && start.logged_containing("refuses.extra: suspended") == 0);
         // A phase loads a plugin once: another call changes nothing.
         set.load(Phase::Main);
-        CHECK(set.count(Outcome::Kind::failed) == 5 && start.logged_containing("anvil: missing 1.0.0: cannot load ") == 1);
+        CHECK(set.count(Outcome::Kind::failed) == 7 && start.logged_containing("anvil: missing 1.0.0: cannot load ") == 1);
         g_failing_target = nullptr;
     });
 

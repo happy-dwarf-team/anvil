@@ -6,6 +6,7 @@
 #include "core/playset.hpp"
 #include "core/safe_mode.hpp"
 #include "core/semver.hpp"
+#include "core/start_plan.hpp"
 #include "files.hpp"
 #include "i18n/translate.hpp"
 
@@ -41,14 +42,6 @@ bool process_running(const wchar_t* name) {
     }
     CloseHandle(snapshot);
     return found;
-}
-
-unsigned read_unfinished(const fs::path& file) {
-    std::ifstream in(file, std::ios::binary);
-    unsigned value = 0;
-    char c = 0;
-    while (in.get(c) && c >= '0' && c <= '9' && value < 1000) value = value * 10 + static_cast<unsigned>(c - '0');
-    return value;
 }
 
 // A product name from Windows for the report: printable, at most 128 bytes.
@@ -143,26 +136,21 @@ uint64_t round_to(uint64_t value, uint64_t step) { return (value + step / 2) / s
 
 std::vector<ComparablePlugin> comparable_plugins(const cli::GameReport& report) {
     std::vector<ComparablePlugin> out;
-    for (const cli::LoadedPlugin& loaded : report.load_order) {
-        if (is_standard(loaded.id)) continue;
+    for (const PlannedPlugin& loaded : report.plan.load) {
+        if (is_standard(loaded.id) || !loaded.manifest) continue;
         ComparablePlugin p;
         p.id = loaded.id;
-        p.version = loaded.version;
-        if (loaded.mod.empty()) {
-            for (const cli::GamePlugin& g : report.plugins) {
-                if (g.folder == loaded.folder && g.report.manifest) p.dll = g.report.manifest->folder / widen(g.report.manifest->entry);
-            }
-        } else {
-            for (const cli::GameModPlugin& m : report.mod_plugins) {
-                if (m.id != loaded.id || m.mod != loaded.mod || !m.report.manifest) continue;
-                p.source = m.workshop_id.empty() ? "local" : "workshop";
-                p.workshop_item = m.workshop_id;
-                p.update_pending = m.state == "update-pending";
-                const fs::path folder = m.loads_from.empty() ? fs::path(widen(m.folder)) : fs::path(widen(m.loads_from));
-                p.dll = folder / widen(m.report.manifest->entry);
-            }
+        p.version = loaded.manifest->version.to_string();
+        // The folder the plan loads it from: for a mod's plugin its approved
+        // copy (the mod's folder while the next start has not made it).
+        p.dll = loaded.folder / widen(loaded.manifest->entry);
+        if (loaded.mod >= 0 && static_cast<size_t>(loaded.mod) < report.mod_plugins.size()) {
+            const cli::GameModPlugin& m = report.mod_plugins[static_cast<size_t>(loaded.mod)];
+            p.source = m.workshop_id.empty() ? "local" : "workshop";
+            p.workshop_item = m.workshop_id;
+            p.update_pending = m.state == ModPluginState::UpdatePending;
         }
-        if (!p.dll.empty()) out.push_back(std::move(p));
+        out.push_back(std::move(p));
     }
     return out;
 }
@@ -171,13 +159,13 @@ std::vector<ReportPluginSource> plugin_sources(const cli::GameReport& report) {
     std::vector<ReportPluginSource> out;
     std::vector<ComparablePlugin> all = comparable_plugins(report);
     // The standard plugins load from anvil/plugins too.
-    for (const cli::GamePlugin& g : report.plugins) {
-        if (g.report.manifest && is_standard(g.report.manifest->id) && g.status == "loaded") {
-            ComparablePlugin p;
-            p.id = g.report.manifest->id;
-            p.dll = g.report.manifest->folder / widen(g.report.manifest->entry);
-            all.insert(all.begin(), std::move(p));
-        }
+    size_t standard = 0;
+    for (const PlannedPlugin& g : report.plan.load) {
+        if (!g.manifest || !is_standard(g.id)) continue;
+        ComparablePlugin p;
+        p.id = g.id;
+        p.dll = g.folder / widen(g.manifest->entry);
+        all.insert(all.begin() + static_cast<std::ptrdiff_t>(standard++), std::move(p));
     }
     for (const ComparablePlugin& p : all) {
         const std::string sha = lower(sha256_file(p.dll));
@@ -196,12 +184,22 @@ SetupFacts read_setup_facts(const fs::path& game_dir, const cli::GameReport& rep
     f.needs_steam = !is_gog_folder(game_dir);
     f.steam_running = steam_running();
     f.eu4_running = any_eu4_running();
-    f.unfinished_starts = read_unfinished(game_dir / "anvil" / "data" / "anvil" / "unfinished-starts.txt");
+    // The safe mode record as the loader reads it (ADR 0014).
+    const NextStart next = read_next_start(game_dir / "anvil");
+    f.next_safe_mode = next.record.safe_mode;
     SYSTEM_POWER_STATUS power{};
     f.on_battery = GetSystemPowerStatus(&power) && power.ACLineStatus == 0;
     f.installed_anvil = installed_anvil;
-    f.anvil_game_loads = std::any_of(report.load_order.begin(), report.load_order.end(),
-                                     [](const cli::LoadedPlugin& p) { return p.id == "anvil-game"; });
+    // anvil-game loads in both arms of the series: the plans of a benchmark
+    // start (docs/spec/benchmark-v1.md §2), as the loader makes them.
+    f.anvil_game_loads = true;
+    for (const bool with : {true, false}) {
+        StartConditions arm;
+        arm.benchmark = BenchmarkArm{with, plugin};
+        const StartPlan plan = plan_start(report.inventory, report.choices, arm);
+        const PlannedPlugin* game = plan.find("anvil-game");
+        f.anvil_game_loads = f.anvil_game_loads && game != nullptr && game->loads();
+    }
     f.plugin = plugin;
     for (ComparablePlugin& p : comparable_plugins(report)) {
         if (p.id == plugin) f.comparable = std::move(p);
@@ -224,7 +222,7 @@ std::vector<SetupCheck> setup_checks(const SetupFacts& f) {
                        tr("Start Steam and sign in: the game starts with Steam, as you usually play.")});
     }
     out.push_back({f.eu4_running ? tr("EU4 is running") : tr("EU4 is not running"), !f.eu4_running, true, tr("Close the game.")});
-    const bool safe = f.unfinished_starts >= kSafeModeAfter;
+    const bool safe = f.next_safe_mode;
     out.push_back({safe ? tr("The next start would be in safe mode") : tr("The next start is not in safe mode"), !safe, true,
                    tr("Start EU4 once with Play EU4 and reach the menu: that start is the safe one, the next is normal.")});
     const std::string id = f.plugin.empty() ? std::string(tr("The compared plugin")) : f.plugin;

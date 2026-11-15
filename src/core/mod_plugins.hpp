@@ -6,6 +6,7 @@
 
 #include "i18n/message.hpp"
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <set>
 #include <string>
@@ -73,9 +74,26 @@ std::filesystem::path approved_copy(const std::filesystem::path& anvil_dir, cons
 ModDiscovery discover_mod_plugins(const std::filesystem::path& anvil_dir, const std::filesystem::path& user_dir,
                                   const std::set<std::string>& local_ids);
 
+// The two halves of discover_mod_plugins. find_mod_plugins reads the
+// playset and each plugin folder of its mods (id, mod, folder, hash,
+// plugin.toml and why it cannot be approved) and decides nothing: `trust`
+// stays empty and every state Pending. decide_mod_plugins decides them as
+// above against `trust`, without reading the disk: `copy_exists(id, hash)`
+// says whether anvil/data/anvil/approved/<id>/<hash> is there.
+using CopyExists = std::function<bool(const std::string& id, const std::string& hash)>;
+ModDiscovery find_mod_plugins(const std::filesystem::path& user_dir);
+void decide_mod_plugins(std::vector<ModPlugin>& plugins, const TrustFile& trust, const std::set<std::string>& local_ids,
+                        const std::filesystem::path& anvil_dir, const CopyExists& copy_exists);
+
+// What the log and the player read when trust.toml does not parse; "" when it does.
+std::string trust_warning(const TrustFile& trust);
+
 // The copy of an Approved plugin whose copy is missing, made from its mod
 // folder and checked against the approved hash. False with `error`.
 bool make_approved_copy(const std::filesystem::path& anvil_dir, const ModPlugin& plugin, std::string& error);
+// The same for a plugin `id` whose folder `folder` has the approved `hash`.
+bool copy_approved(const std::filesystem::path& anvil_dir, const std::string& id, const std::filesystem::path& folder,
+                   const std::string& hash, std::string& error);
 
 // Approves `plugin` as the player saw it (`hash`): checks that the mod folder
 // still has that hash and can load, copies it to its approved copy, checks

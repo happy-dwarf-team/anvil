@@ -14,6 +14,7 @@
 #include "log.hpp"
 #include "manifest.hpp"
 #include "platform.hpp"
+#include "plugin_inventory.hpp"
 #include "plugin_set.hpp"
 #include "changes.hpp"
 #include "control.hpp"
@@ -24,6 +25,7 @@
 #include "retired_move.hpp"
 #include "safe_mode.hpp"
 #include "seh_guard.hpp"
+#include "start_plan.hpp"
 #include "services.hpp"
 #include "plugin_translation.hpp"
 #include "settings.hpp"
@@ -66,7 +68,9 @@ struct Runtime {
     AnvilHost host{};
     std::unique_ptr<PluginSet> plugins;  // every plugin of this start, once resolved
     StartMarker start_marker;  // safe mode: starts that ended before game_ready
-    ModDiscovery mods;  // plugins in the playset's mods (design §14)
+    ModDiscovery mods;  // plugins in the playset's mods (design §14), as the plan decided them
+    // What this start found (ADR 0014): anvil.control plans the next start from it.
+    std::unique_ptr<PluginInventory> inventory;
     std::unique_ptr<Control> control;  // anvil.control, the overlay's view of the core (design §15)
     std::unique_ptr<Benchmark> benchmark;  // anvil.benchmark (docs/spec/benchmark-v1.md §5)
     LARGE_INTEGER start{};
@@ -352,8 +356,7 @@ void startup_impl(const std::filesystem::path& game_dir) {
         log_info("ANVIL_DISABLE=1: no plugins loaded");
         return;
     }
-    // Not const: the move of retired settings adds to disabled_modules (ADR 0013).
-    AnvilSettings settings = read_anvil_settings(g_runtime->anvil_dir / "anvil.toml");
+    const AnvilSettings settings = read_anvil_settings(g_runtime->anvil_dir / "anvil.toml");
     if (!settings.error.empty()) log_warning("anvil.toml ignored: " + settings.error);
     Log::instance().set_min_level(settings.log_level);
     if (!settings.enabled) {
@@ -482,80 +485,11 @@ void startup_impl(const std::filesystem::path& game_dir) {
     const i18n::Message unknown_build = game.build_id ? i18n::Message() : unknown_build_reason(game_dir);
     if (unknown_build.code == "build_unknown_gog") log_warning(i18n::english(unknown_build));
 
-    // Discovery: anvil/plugins/<folder>/plugin.toml
-    std::vector<Skipped> skipped;
-    ResolveInput input;
-    input.host_api = kManifestApi;
-    input.host_version = Version::parse(kAnvilVersion);
-    input.game_build = game.build_id;
-    input.disabled = settings.disabled_plugins;
-    if (arm && !arm->with) input.benchmark_without = arm->plugin;
-    // symbols.toml: its build and every symbol are checked here, before any
-    // plugin is loaded. The image is read through the registry, so bytes a
-    // plugin has already changed read in their original form (design §7).
-    // The verified symbols are kept per plugin folder for address_of and the
-    // symbol change calls.
-    std::map<std::wstring, PluginSymbols> verified_symbols;
-    // settings.toml: a plugin whose declarations do not parse is skipped, as
-    // it could not read its settings (design §11).
-    std::map<std::wstring, SettingsFile> declared_settings;
-    input.verify = [&](const Manifest& m) {
-        if (!m.symbols.empty()) {
-            SymbolVerification verified;
-            SymbolFile declared;
-            i18n::Message reason = check_plugin_symbols(m.folder / m.symbols, game.build_id, *g_runtime->changes,
-                                                        identity->image_base, &verified, &declared, unknown_build);
-            if (!reason.empty()) return reason;
-            verified_symbols[m.folder.wstring()] = PluginSymbols(declared, verified, identity->image_base);
-            log_info(m.id + ": " + std::to_string(verified.symbols.size()) + " symbol(s) verified");
-        }
-        if (!m.settings.empty()) {
-            SettingsFileResult parsed = load_settings(m.folder / m.settings);
-            if (!parsed.file) return i18n::Message(parsed.error);
-            uint32_t line = 0;  // `module` names a [[modules]] id (ADR 0013)
-            if (std::string error = settings_module_error(*parsed.file, m, line); !error.empty()) {
-                return i18n::Message(error);
-            }
-            declared_settings[m.folder.wstring()] = std::move(*parsed.file);
-        }
-        return i18n::Message();
-    };
-    const auto plugins_dir = g_runtime->anvil_dir / "plugins";
-    const std::vector<std::filesystem::path> folders = plugin_folders(plugins_dir);
-    // A local plugin wins over a plugin with its id in any mod (design §14),
-    // also when it is disabled or broken (then by its folder's name).
-    std::set<std::string> local_ids;
-    for (const auto& folder : folders) {
-        const auto parsed = load_manifest(folder);
-        local_ids.insert(parsed.manifest ? parsed.manifest->id : narrow(folder.filename().wstring()));
-        if (!parsed.manifest) {
-            skipped.push_back(skipped_for(narrow(folder.filename().wstring()), parsed.error, folder));
-            continue;
-        }
-        if (i18n::Message reason = missing_entry_reason(*parsed.manifest); !reason.empty()) {
-            skipped.push_back(skipped_for(parsed.manifest->id, std::move(reason), folder));
-            continue;
-        }
-        if (record.safe_mode && !loads_in_safe_mode(parsed.manifest->id)) {
-            skipped.push_back(
-                skipped_for(parsed.manifest->id, i18n::Message("safe_mode", {}), folder, SkipKind::safe_mode));
-            continue;
-        }
-        if (record.safe_mode) {
-            if (i18n::Message reason = safe_mode_exclusion(parsed.manifest->id, safe_mode_reports); !reason.empty()) {
-                skipped.push_back(skipped_for(parsed.manifest->id, std::move(reason), folder, SkipKind::safe_mode));
-                continue;
-            }
-        }
-        input.manifests.push_back(*parsed.manifest);
-    }
-    log_info("discovered " + std::to_string(folders.size()) + " plugin folder(s) in " + narrow(plugins_dir.wstring()));
-
-    // Plugins in the mods of the playset (design §14): only approved ones
-    // load, always from their approved copy, whose hash is checked again
-    // right before LoadLibrary (load_plugin).
-    std::map<std::wstring, std::string> approved_hashes;  // by the copy's folder
-    // The game's own choice: -userdir first (a private profile, as Etch's live game has).
+    // The plugin inventory (ADR 0014): every plugin of anvil/plugins and of
+    // the playset's mods with its check against the game. The image is read
+    // through the registry, so bytes a plugin has already changed read in
+    // their original form (design §7). The game's own choice of user folder:
+    // -userdir first (a private profile, as Etch's live game has).
     std::filesystem::path user_dir = eu4_user_dir(game_dir);
     if (const auto named = user_dir_argument(GetCommandLineW())) {
         std::error_code ec;
@@ -565,149 +499,133 @@ void startup_impl(const std::filesystem::path& game_dir) {
         }
     }
     {
-        g_runtime->mods = discover_mod_plugins(g_runtime->anvil_dir, user_dir, local_ids);
-        ModDiscovery& mods = g_runtime->mods;
-        for (const auto& w : mods.warnings) log_warning(w);
-        prune_approved_copies(g_runtime->anvil_dir, mods.trust);
-        std::map<std::string, std::vector<std::string>> shadowed;  // id -> the mods' names
-        for (ModPlugin& p : mods.plugins) {
-            const std::string label = p.id + " from mod '" + p.mod.name + "' (" +
-                                      (p.mod.workshop_id.empty() ? std::string("local mod") : "Workshop " + p.mod.workshop_id) + ")";
-            const i18n::Message source = p.mod.workshop_id.empty() ? i18n::Message("local_mod", {})
-                                                                   : i18n::Message("workshop_item", {p.mod.workshop_id});
-            const auto skip = [&](const i18n::Message& reason, SkipKind kind = SkipKind::other) {
-                Skipped s = skipped_for(p.id, i18n::Message("from_mod", {p.mod.name, source, reason}), p.folder);
-                s.mod = p.mod.name;
-                s.awaiting_approval = !p.loads() && (p.state == ModPluginState::Pending || p.state == ModPluginState::Conflict);
-                s.kind = kind;
-                skipped.push_back(std::move(s));
-            };
-            if (p.state == ModPluginState::Shadowed) {
-                shadowed[p.id].push_back(p.mod.name);
-                continue;
-            }
-            if (!p.loads()) {
-                skip(p.why, p.state == ModPluginState::Pending    ? SkipKind::approval
-                               : p.state == ModPluginState::Conflict ? SkipKind::conflict
-                                                                      : SkipKind::other);
-                continue;
-            }
-            if (record.safe_mode) {
-                skip(i18n::Message("safe_mode", {}), SkipKind::safe_mode);
-                continue;
-            }
-            if (p.copy_missing) {
-                if (std::string error; !make_approved_copy(g_runtime->anvil_dir, p, error)) {
-                    skip(i18n::Message("copy_failed", {error}));
-                    continue;
-                }
-                log_info(label + ": made the approved copy");
-            }
-            log_info(label + ": " + p.reason + "; loads from " + narrow(p.load_folder.wstring()));
-            const auto parsed = load_manifest(p.load_folder);
-            if (!parsed.manifest) {
-                skip(i18n::Message("copy_broken", {parsed.error}));
-                continue;
-            }
-            if (i18n::Message reason = missing_entry_reason(*parsed.manifest); !reason.empty()) {
-                skip(i18n::Message("copy_broken", {reason}));
-                continue;
-            }
-            approved_hashes[p.load_folder.wstring()] = p.approval->hash;
-            input.manifests.push_back(*parsed.manifest);
-        }
-        for (const auto& [id, names] : shadowed) {
-            std::string list;
-            for (const auto& n : names) list += (list.empty() ? "'" : ", '") + n + "'";
-            log_info(id + ": the local plugin in anvil/plugins wins over the same id in mod(s) " + list);
-        }
-        if (!mods.plugins.empty() || !mods.playset.mods.empty()) {
-            log_info("found " + std::to_string(mods.plugins.size()) + " plugin(s) in " +
-                     std::to_string(mods.playset.mods.size()) + " enabled mod(s) at " + fmt_ms(elapsed_ms()));
+        const OriginalImageReader image(*g_runtime->changes, identity->image_base);
+        g_runtime->inventory = std::make_unique<PluginInventory>(
+            take_inventory(g_runtime->anvil_dir, user_dir, game_image(image, game.build_id, unknown_build)));
+    }
+    const PluginInventory& inventory = *g_runtime->inventory;
+    log_info("discovered " + std::to_string(inventory.local.size()) + " plugin folder(s) in " +
+             narrow(inventory.plugins_dir.wstring()));
+    for (const auto& w : inventory.mod_warnings) log_warning(w);
+
+    // The start plan: what loads, in which order, with which modules, what
+    // does not and why, and what this start writes first.
+    const PlayerChoices choices = read_player_choices(inventory, settings);
+    StartConditions conditions;
+    conditions.safe_mode = record.safe_mode;
+    conditions.crashes = safe_mode_reports;
+    conditions.benchmark = arm;
+    conditions.host_version = Version::parse(kAnvilVersion);
+    const StartPlan plan = plan_start(inventory, choices, conditions);
+    for (const auto& w : plan.warnings) log_warning(w);
+    g_runtime->mods.playset = inventory.playset;
+    g_runtime->mods.trust = choices.trust;
+    g_runtime->mods.plugins = plan.mods;
+    g_runtime->mods.warnings = inventory.mod_warnings;
+    g_runtime->mods.warnings.insert(g_runtime->mods.warnings.end(), plan.warnings.begin(), plan.warnings.end());
+    const auto label_of = [](const ModPlugin& p) {
+        return p.id + " from mod '" + p.mod.name + "' (" +
+               (p.mod.workshop_id.empty() ? std::string("local mod") : "Workshop " + p.mod.workshop_id) + ")";
+    };
+
+    // The plan's writes, before any plugin loads: the approved copies
+    // trust.toml no longer names, the copies to make, the retired settings.
+    for (const std::filesystem::path& gone : plan.writes.remove) remove_tree(gone);
+    std::map<int, std::string> copy_errors;  // by mod plugin
+    for (const PlannedCopy& c : plan.writes.copies) {
+        const std::string label = label_of(plan.mods[static_cast<size_t>(c.mod)]);
+        if (std::string error; !copy_approved(g_runtime->anvil_dir, c.id, c.from, c.hash, error)) {
+            log_warning(label + ": cannot make its approved copy: " + error);
+            copy_errors[c.mod] = error;
+        } else {
+            log_info(label + ": made the approved copy");
         }
     }
-    ResolveResult resolved = resolve(input);
-    skipped.insert(skipped.end(), resolved.skipped.begin(), resolved.skipped.end());
-    for (const auto& s : skipped) log_warning(s.id + ": skipped — " + s.reason);
-    // A local plugin that is off at this start keeps what its plugin.toml and
-    // settings.toml declare, so anvil.control shows its modules, settings and
-    // dependencies (ADR 0013). Its retired settings move as for a plugin that
-    // loads, so a value the player saves for it later drops none of them;
-    // not for a second folder with the id of another (its data/<id> is the
-    // other's), and a benchmark start writes no file (benchmark-v1.md §2).
-    // One folder per id moves, and none when a folder of that id loads: the
-    // first folder can also fail another check (a newer Anvil) while a later
-    // one loads, and data/<id> is then the loaded one's.
-    std::set<std::string> moved_ids;
-    for (const Manifest& loaded : resolved.order) moved_ids.insert(loaded.id);
-    for (Skipped& s : skipped) {
-        if (!s.mod.empty()) continue;
-        ManifestResult parsed = load_manifest(s.folder);
-        if (!parsed.manifest || parsed.manifest->id != s.id) continue;
-        Manifest& m = *parsed.manifest;
-        add_implied_dependencies(m);
-        s.data_dir = g_runtime->anvil_dir / "data" / m.id;
-        if (!m.settings.empty()) {
-            SettingsFileResult declared = load_settings(m.folder / m.settings);
-            uint32_t line = 0;
-            if (declared.file && settings_module_error(*declared.file, m, line).empty()) {
-                if (!declared.file->retired.empty() && s.why.code != "duplicate_id" &&
-                    moved_ids.insert(m.id).second) {
-                    for (const RetiredMoveNote& note : move_retired_settings(m, *declared.file, s.data_dir / "settings.toml",
-                                                                             g_runtime->anvil_dir / "anvil.toml", settings,
-                                                                             !arm.has_value())) {
-                        Log::instance().write(note.level, m.id, note.message);
-                    }
-                }
-                s.settings = std::move(*declared.file);
-            }
+    for (const PlannedRetiredMove& m : plan.writes.retired) {
+        for (const RetiredMoveNote& note : carry_out_retired_move(m.move, m.player_file, g_runtime->anvil_dir / "anvil.toml")) {
+            Log::instance().write(note.level, m.plugin, note.message);
         }
-        s.manifest = std::move(m);
     }
-    log_info("resolved " + std::to_string(resolved.order.size()) + " plugin(s) to load at " + fmt_ms(elapsed_ms()));
+    for (const auto& [id, note] : plan.notes) Log::instance().write(note.level, id, note.message);
+
+    std::map<std::string, std::vector<std::string>> shadowed;  // id -> the mods' names
+    for (const ModPlugin& p : plan.mods) {
+        if (p.state == ModPluginState::Shadowed) {
+            shadowed[p.id].push_back(p.mod.name);
+        } else if (p.loads() && !plan.safe_mode) {
+            log_info(label_of(p) + ": " + p.reason + "; loads from " + narrow(p.load_folder.wstring()));
+        }
+    }
+    for (const auto& [id, names] : shadowed) {
+        std::string list;
+        for (const auto& n : names) list += (list.empty() ? "'" : ", '") + n + "'";
+        log_info(id + ": the local plugin in anvil/plugins wins over the same id in mod(s) " + list);
+    }
+    if (!plan.mods.empty() || !inventory.playset.mods.empty()) {
+        log_info("found " + std::to_string(plan.mods.size()) + " plugin(s) in " +
+                 std::to_string(inventory.playset.mods.size()) + " enabled mod(s) at " + fmt_ms(elapsed_ms()));
+    }
+    for (const PlannedPlugin& s : plan.skipped) log_warning(s.id + ": skipped — " + s.reason);
+    log_info("resolved " + std::to_string(plan.load.size()) + " plugin(s) to load at " + fmt_ms(elapsed_ms()));
     // The overlay speaks the language of EU4's settings, or with Mei, which
     // shows a translation mod's Chinese, Japanese or Korean, Steam's or
     // Windows' (#158).
-    const bool cjk_text = std::any_of(resolved.order.begin(), resolved.order.end(),
-                                      [](const Manifest& m) { return m.id == i18n::kCjkTextPlugin; });
+    const bool cjk_text = std::any_of(plan.load.begin(), plan.load.end(),
+                                      [](const PlannedPlugin& p) { return p.id == i18n::kCjkTextPlugin; });
     const i18n::LanguageChoice language = i18n::choose_language(user_dir, cjk_text);
     const std::string player_language = i18n::language_code(language.language);
     log_info("the player's language: " + player_language + " (" + language.source + ")");
-    // The plugin set: what the start found out about each plugin, in load
-    // order, then the skipped ones. It adds the owners (the core's own last)
-    // and the gameplay policy entries, before any plugin's code runs.
+    // The plugin set: what the plan says of each plugin, in load order, then
+    // the skipped ones. It adds the owners (the core's own last) and the
+    // gameplay policy entries, before any plugin's code runs.
     std::vector<ResolvedPlugin> to_load;
-    to_load.reserve(resolved.order.size());
-    for (auto& m : resolved.order) {
+    to_load.reserve(plan.load.size());
+    for (const PlannedPlugin& p : plan.load) {
         ResolvedPlugin r;
-        if (const auto it = verified_symbols.find(m.folder.wstring()); it != verified_symbols.end()) {
-            r.symbols = std::move(it->second);
+        const PluginCheck* check = check_of(inventory, plan, p);
+        if (check != nullptr && check->symbols && check->verified) {
+            SymbolFile declared = *check->symbols;
+            adopt_verified_bytes(declared, check->verification);
+            r.symbols = PluginSymbols(declared, check->verification, identity->image_base);
+            log_info(p.id + ": " + std::to_string(check->verification.symbols.size()) + " symbol(s) verified");
         }
-        if (const auto it = declared_settings.find(m.folder.wstring()); it != declared_settings.end()) {
-            r.settings = std::move(it->second);
+        if (check != nullptr && check->settings_fit) r.settings = check->settings;
+        r.approved_hash = p.approved_hash;
+        r.data_dir = g_runtime->anvil_dir / "data" / p.id;
+        r.modules_on = p.modules_on;
+        if (const auto failed = copy_errors.find(p.mod); failed != copy_errors.end()) {
+            r.cannot_load = i18n::Message("copy_failed", {failed->second});
         }
-        if (const auto it = approved_hashes.find(m.folder.wstring()); it != approved_hashes.end()) {
-            r.approved_hash = it->second;
-        }
-        r.data_dir = g_runtime->anvil_dir / "data" / m.id;
-        // Retired settings move into the module's switch and opt-ins once,
-        // before the modules are resolved, so the player's choice holds at
-        // this start (ADR 0013, point 4).
-        if (r.settings && !r.settings->retired.empty()) {
-            for (const RetiredMoveNote& note : move_retired_settings(m, *r.settings, r.data_dir / "settings.toml",
-                                                                     g_runtime->anvil_dir / "anvil.toml", settings,
-                                                                     !arm.has_value())) {
-                Log::instance().write(note.level, m.id, note.message);
-            }
-        }
-        // Its modules on or off at this start (anvil.toml, `default`; ADR 0011).
-        for (const Module& mod : m.modules) r.modules_on.push_back(module_enabled(settings, module_key(m, mod), mod.enabled_by_default));
-        r.manifest = std::move(m);
+        r.manifest = *p.manifest;
         to_load.push_back(std::move(r));
+    }
+    // A local plugin that is off at this start keeps what its plugin.toml and
+    // settings.toml declare, so anvil.control shows its modules, settings and
+    // dependencies (ADR 0013).
+    std::vector<Skipped> skipped;
+    skipped.reserve(plan.skipped.size());
+    for (const PlannedPlugin& p : plan.skipped) {
+        Skipped s;
+        s.id = p.id;
+        s.reason = p.reason;
+        s.why = p.why;
+        s.folder = p.folder;
+        s.disabled = p.disabled;
+        s.benchmark_arm = p.benchmark_arm;
+        s.mod = p.mod_name;
+        s.awaiting_approval = p.awaiting_approval;
+        s.kind = p.kind;
+        if (p.local >= 0 && p.manifest) {
+            s.manifest = p.manifest;
+            s.data_dir = g_runtime->anvil_dir / "data" / p.id;
+            const PluginCheck& check = inventory.local[static_cast<size_t>(p.local)].check;
+            if (check.settings_fit) s.settings = check.settings;
+        }
+        skipped.push_back(std::move(s));
     }
     // The opt-ins as the retired settings left them, before the plugin set
     // gives the policy its plugins.
-    g_runtime->policy->set_opt_ins(GameplayOptIns{settings.allow_ironman, settings.allow_multiplayer});
+    g_runtime->policy->set_opt_ins(GameplayOptIns{plan.lists.allow_ironman, plan.lists.allow_multiplayer});
     PluginSet::Dependencies deps;
     deps.context = &g_runtime->context;
     deps.policy = g_runtime->policy.get();
@@ -722,12 +640,12 @@ void startup_impl(const std::filesystem::path& game_dir) {
         last.anvil_version = kAnvilVersion;
         last.written = utc_now();
         last.safe_mode = record.safe_mode;
-        last.disabled_plugins = settings.disabled_plugins;
-        last.allow_ironman = settings.allow_ironman;
-        last.allow_multiplayer = settings.allow_multiplayer;
-        last.enabled_modules = settings.enabled_modules;
-        last.disabled_modules = settings.disabled_modules;
-        for (const TrustEntry& e : g_runtime->mods.trust.entries) last.approvals.push_back({e.id, e.mod, e.version, e.hash});
+        last.disabled_plugins = plan.lists.disabled_plugins;
+        last.allow_ironman = plan.lists.allow_ironman;
+        last.allow_multiplayer = plan.lists.allow_multiplayer;
+        last.enabled_modules = plan.lists.enabled_modules;
+        last.disabled_modules = plan.lists.disabled_modules;
+        for (const TrustEntry& e : choices.trust.entries) last.approvals.push_back({e.id, e.mod, e.version, e.hash});
         for (size_t i = 0; i < g_runtime->plugins->resolved_count(); ++i) {
             const PluginRecord& p = g_runtime->plugins->at(i);
             const PluginSettings& values = p.settings();
@@ -770,11 +688,12 @@ void startup_impl(const std::filesystem::path& game_dir) {
     sources.game_build = game.build_id;
     sources.plugins = g_runtime->plugins.get();
     sources.policy = g_runtime->policy.get();
-    sources.disabled = settings.disabled_plugins;
-    sources.allow_ironman = settings.allow_ironman;
-    sources.allow_multiplayer = settings.allow_multiplayer;
-    sources.enabled_modules = settings.enabled_modules;
-    sources.disabled_modules = settings.disabled_modules;
+    sources.disabled = plan.lists.disabled_plugins;
+    sources.allow_ironman = plan.lists.allow_ironman;
+    sources.allow_multiplayer = plan.lists.allow_multiplayer;
+    sources.enabled_modules = plan.lists.enabled_modules;
+    sources.disabled_modules = plan.lists.disabled_modules;
+    sources.inventory = g_runtime->inventory.get();
     sources.last_start = g_runtime->last_start;
     sources.safe_mode = record.safe_mode;
     sources.unfinished_starts = record.unfinished;
