@@ -1361,6 +1361,24 @@ AnvilResult world_province_view(std::int32_t* province) {
     return anvil_game::read_province_view(g_world, *province);
 }
 
+AnvilResult world_selected_province(std::int32_t* province) {
+    if (province == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (!world_open()) return ANVIL_ERROR_WRONG_PHASE;
+    return anvil_game::read_selected_province(g_world, *province);
+}
+
+AnvilResult world_province_at(std::int32_t x, std::int32_t y, std::int32_t* province) {
+    if (province == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (!world_open()) return ANVIL_ERROR_WRONG_PHASE;
+    return anvil_game::pick_province(g_world, x, y, *province);
+}
+
+AnvilResult world_unit_at(std::int32_t x, std::int32_t y, AnvilGameUnitRef* out) {
+    if (out == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (!world_open()) return ANVIL_ERROR_WRONG_PHASE;
+    return anvil_game::pick_unit(g_world, x, y, *out);
+}
+
 // ---- diplomacy (1.22.0) ----
 
 AnvilResult world_country_relations(const char* tag, std::uint32_t kind, AnvilGameRelation* out, std::uint32_t capacity,
@@ -1475,7 +1493,7 @@ constexpr AnvilGameWorldService kWorldService = {
     world_province_view,
     world_country_relations,       world_subject_type,     world_diplomacy_status,
     world_country_rivals,          world_country_overlord, world_country_subjects,
-    world_player_tags,
+    world_player_tags,             world_selected_province, world_province_at, world_unit_at,
 };
 
 // A port may declare these symbols absent on a new build (ADR 0004): the game
@@ -1695,6 +1713,19 @@ void load_world(anvil::Host& host) {
         l.view_window = sym::view_window.window;
         l.window_part = static_cast<std::uint32_t>(host.value(sym::dialog_window_part, "window_part"));
         l.widget_shown = sym::widget_shown.shown;
+        if (host.present(sym::selected_province)) {
+            static_assert(sym::selected_province.province_id == sym::province_base_tax.province_id,
+                          "the selection's province is not the province of the world's symbols");
+            l.selected = true;
+        }
+    }
+    if (host.present(sym::map_of_session) && host.present(sym::graphical_map_vtable) &&
+        host.present(sym::province_from_point)) {
+        l.graphical_map = static_cast<std::uint32_t>(host.value(sym::map_of_session, "graphical_map"));
+        l.map = static_cast<std::uint32_t>(host.value(sym::map_of_session, "map"));
+        l.map_vtable = reinterpret_cast<std::uintptr_t>(host.address(sym::graphical_map_vtable));
+        l.pick = host.function(sym::province_from_point);
+        if (host.present(sym::selectable_at_point)) l.pick_object = host.function(sym::selectable_at_point);
     }
     if (host.present(sym::pending_events) && host.present(sym::pending_entry) && host.present(sym::pending_event) &&
         host.present(sym::event_scope_country) && host.present(sym::event_options) &&

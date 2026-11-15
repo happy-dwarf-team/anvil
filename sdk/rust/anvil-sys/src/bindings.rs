@@ -1800,12 +1800,21 @@ pub struct AnvilGameWorldService {
     pub player_tags: ::core::option::Option<
         unsafe extern "C" fn(out: *mut AnvilGamePlayer) -> AnvilResult,
     >,
+    pub selected_province: ::core::option::Option<
+        unsafe extern "C" fn(province: *mut i32) -> AnvilResult,
+    >,
+    pub province_at: ::core::option::Option<
+        unsafe extern "C" fn(x: i32, y: i32, province: *mut i32) -> AnvilResult,
+    >,
+    pub unit_at: ::core::option::Option<
+        unsafe extern "C" fn(x: i32, y: i32, out: *mut AnvilGameUnitRef) -> AnvilResult,
+    >,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     [
         "Size of AnvilGameWorldService",
-    ][::core::mem::size_of::<AnvilGameWorldService>() - 400usize];
+    ][::core::mem::size_of::<AnvilGameWorldService>() - 424usize];
     [
         "Alignment of AnvilGameWorldService",
     ][::core::mem::align_of::<AnvilGameWorldService>() - 8usize];
@@ -1964,6 +1973,15 @@ const _: () = {
     [
         "Offset of field: AnvilGameWorldService::player_tags",
     ][::core::mem::offset_of!(AnvilGameWorldService, player_tags) - 392usize];
+    [
+        "Offset of field: AnvilGameWorldService::selected_province",
+    ][::core::mem::offset_of!(AnvilGameWorldService, selected_province) - 400usize];
+    [
+        "Offset of field: AnvilGameWorldService::province_at",
+    ][::core::mem::offset_of!(AnvilGameWorldService, province_at) - 408usize];
+    [
+        "Offset of field: AnvilGameWorldService::unit_at",
+    ][::core::mem::offset_of!(AnvilGameWorldService, unit_at) - 416usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

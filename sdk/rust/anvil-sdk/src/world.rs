@@ -1038,6 +1038,51 @@ impl World {
         Ok(province)
     }
 
+    /// The province last selected on the map; 0 while none has been selected
+    /// in this session (anvil-game 1.24.0).
+    pub fn selected_province(&self) -> Result<i32> {
+        let f = function!(self.table, AnvilGameWorldService, selected_province)?;
+        let mut province = 0i32;
+        // SAFETY: an out pointer.
+        check(unsafe { f(&mut province) }, || {
+            "world selected_province".to_owned()
+        })?;
+        Ok(province)
+    }
+
+    /// The province under the point (`x`, `y`) of the game window's client
+    /// area, in pixels, as the game's hover finds it; 0 off the map
+    /// (anvil-game 1.24.0).
+    pub fn province_at(&self, x: i32, y: i32) -> Result<i32> {
+        let f = function!(self.table, AnvilGameWorldService, province_at)?;
+        let mut province = 0i32;
+        // SAFETY: an out pointer.
+        check(unsafe { f(x, y, &mut province) }, || {
+            format!("world province_at {x},{y}")
+        })?;
+        Ok(province)
+    }
+
+    /// The army or navy the map picks at the same point, as the game's
+    /// cursor does; `NotFound` when it picks no unit there (anvil-game 1.24.0).
+    pub fn unit_at(&self, x: i32, y: i32) -> Result<UnitRef> {
+        let f = function!(self.table, AnvilGameWorldService, unit_at)?;
+        let mut raw = AnvilGameUnitRef {
+            id: 0,
+            country: EMPTY_TAG,
+            kind: 0,
+        };
+        // SAFETY: an out pointer.
+        check(unsafe { f(x, y, &mut raw) }, || {
+            format!("world unit_at {x},{y}")
+        })?;
+        Ok(UnitRef {
+            id: raw.id,
+            country: Tag::from_raw(&raw.country),
+            kind: UnitKind::from_raw(raw.kind),
+        })
+    }
+
     /// A country's relations of one kind, in the game's order (anvil-game 1.22.0).
     pub fn country_relations(&self, tag: Tag, kind: RelationKind) -> Result<Vec<Relation>> {
         let f = function!(self.table, AnvilGameWorldService, country_relations)?;

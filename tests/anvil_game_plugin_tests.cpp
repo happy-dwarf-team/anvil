@@ -52,6 +52,8 @@ void fake_frame_body() {
 
 // What the stand-in of PHYSFS_getWriteDir answers.
 const char* g_write_dir = nullptr;
+// What the stand-in of CEU3GraphicalMap::GetSelectable picks.
+void* g_picked = nullptr;
 
 // The types of the events the stand-in of SDL_PushEvent got, and its time stamp.
 std::vector<uint32_t> g_pushed;
@@ -81,6 +83,7 @@ struct FakeEu4 {
         }
         commit(0x1B66000, PAGE_READWRITE);
         commit(0x1CB8000, PAGE_READWRITE);
+        commit(0x1D57000, PAGE_READWRITE);
         commit(0x1D5A000, PAGE_READWRITE);
         commit(0x1FB0000, PAGE_READWRITE);
         commit(0x233D000, PAGE_READWRITE);
@@ -142,9 +145,10 @@ struct FakeEu4 {
         put(0x1746BAE, {0xFF, 0xD0, 0x48, 0x83, 0xC4, 0x20, 0x5F, 0xC3});
         put(0x1761F20, {0xB8, 0xD2, 0x04, 0x00, 0x00, 0xC3});  // SDL_GetTicks: mov eax,1234; ret
         // PHYSFS_getWriteDir, exported: mov rax, &g_write_dir; mov rax,[rax]; ret.
-        put(0x1761F40, {0x48, 0xB8});
-        put_pointer(0x1761F42, reinterpret_cast<uintptr_t>(&g_write_dir));
-        put(0x1761F4A, {0x48, 0x8B, 0x00, 0xC3});
+        // Below SDL_GetTicks: FakeWorld's getters start at 0x1761F40.
+        put(0x1761F00, {0x48, 0xB8});
+        put_pointer(0x1761F02, reinterpret_cast<uintptr_t>(&g_write_dir));
+        put(0x1761F0A, {0x48, 0x8B, 0x00, 0xC3});
         IMAGE_EXPORT_DIRECTORY exports{};
         exports.Name = 0x1B661A0;
         exports.Base = 1;
@@ -154,7 +158,7 @@ struct FakeEu4 {
         exports.AddressOfNames = 0x1B66150;
         exports.AddressOfNameOrdinals = 0x1B66160;
         std::memcpy(base + 0x1B66100, &exports, sizeof(exports));
-        const uint32_t function = 0x1761F40, name = 0x1B66170;
+        const uint32_t function = 0x1761F00, name = 0x1B66170;
         std::memcpy(base + 0x1B66140, &function, sizeof(function));
         std::memcpy(base + 0x1B66150, &name, sizeof(name));
         std::memset(base + 0x1B66160, 0, 2);
@@ -168,6 +172,8 @@ struct FakeEu4 {
         put_pointer(0x1CB8460 + 0x318, reinterpret_cast<uintptr_t>(&fake_is_multiplayer_slot));
         // The front end's vtable: slot 0 = its destructor.
         put_pointer(0x1D5A8C8, address(0x10D2C00));
+        // CEU3GraphicalMap's vtable, as graphical_map_vtable declares its first slot.
+        put_pointer(0x1D57E38, address(0x10A3840));
         DWORD old = 0;
         VirtualProtect(base + 0x1CB8000, 0x1000, PAGE_READONLY, &old);
         VirtualProtect(base + 0x1D5A000, 0x1000, PAGE_READONLY, &old);
@@ -1868,7 +1874,7 @@ int main(int argc, char** argv) {
         start.add(gp_toml);
         start.add(plugin_toml("other"));
         start.make();
-        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 168);
+        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 173);
         AnvilPlugin* p = start.load(ANVIL_GAME_ID);
         CHECK(p != nullptr);
         if (p == nullptr) return;
@@ -3101,6 +3107,95 @@ int main(int argc, char** argv) {
         CHECK(anvil_game::read_country_timed(l, "RUS", none) == ANVIL_ERROR_NOT_DECLARED &&
               anvil_game::read_province_timed(l, 1, none) == ANVIL_ERROR_NOT_DECLARED &&
               anvil_game::read_province_view(l, id) == ANVIL_ERROR_NOT_DECLARED);
+    });
+
+    run("anvil-game.world: the selected province, the province and the unit under a point", [&] {
+        const auto* world = static_cast<const AnvilGameWorldService*>(
+            bus.get_service(ANVIL_GAME_WORLD_SERVICE, ANVIL_GAME_WORLD_SERVICE_VERSION));
+        CHECK(world != nullptr && ANVIL_GAME_WORLD_HAS(world, province_at));
+        if (world == nullptr || !ANVIL_GAME_WORLD_HAS(world, province_at)) return;
+        FakeWorld& fake = *new FakeWorld;
+        fake.install(game.root, image);
+        fake.install_timed(game.session, image);  // the selection object at session+0x1220
+        // The map: session+0x330 holds the map input, whose +0x360 is the graphical map.
+        alignas(8) static uint8_t map_input[0x400] = {};
+        alignas(8) static uintptr_t graphical_map[4] = {};
+        graphical_map[0] = image.address(0x1D57E38);
+        FakeWorld::set(game.session, 0x330, reinterpret_cast<uintptr_t>(map_input));
+        FakeWorld::set(map_input, 0x360, reinterpret_cast<uintptr_t>(graphical_map));
+        // GetProvinceIDFromMouse after its declared prologue: the root global for
+        // the wildcard, then the province is the point's x (cvttss2si eax,[rdx]);
+        // the je without a session answers -1.
+        constexpr uint32_t kPick = 0x10A3DD0;
+        const int32_t rel = static_cast<int32_t>(0x233FE78 - (kPick + 13));
+        std::memcpy(image.base + kPick + 9, &rel, sizeof(rel));
+        image.put(kPick + 0x1A, {0xF3, 0x0F, 0x2C, 0x02, 0x48, 0x83, 0xC4, 0x30, 0x5B, 0xC3});
+        image.put(kPick + 0x6A, {0xB8, 0xFF, 0xFF, 0xFF, 0xFF, 0x48, 0x83, 0xC4, 0x30, 0x5B, 0xC3});
+        // GetSelectable after its declared prologue (six pushes): g_picked, then the pops.
+        constexpr uint32_t kSelectable = 0x10A46C0;
+        image.put(kSelectable + 23, {0x48, 0xB8});
+        image.put_pointer(kSelectable + 25, reinterpret_cast<uintptr_t>(&g_picked));
+        image.put(kSelectable + 33, {0x48, 0x8B, 0x00, 0x41, 0x5D, 0x41, 0x5C, 0x5F, 0x5E, 0x5B, 0x5D, 0xC3});
+        fake.install_units(game.session, image);
+        const uintptr_t root = reinterpret_cast<uintptr_t>(game.root);
+        std::memcpy(image.base + 0x233FE78, &root, sizeof(root));
+        game.set_session(game.session);
+        frame(game.app, 1);
+
+        std::int32_t province = -1;
+        CHECK(world->selected_province(&province) == ANVIL_ERROR_WRONG_PHASE &&
+              world->province_at(3, 700, &province) == ANVIL_ERROR_WRONG_PHASE && province == -1);  // between frames
+        AnvilGameUnitRef between{};
+        CHECK(world->unit_at(3, 700, &between) == ANVIL_ERROR_WRONG_PHASE);
+        bool ran = false;
+        g_in_frame_handler = [&] {
+            ran = true;
+            CHECK(world->selected_province(&province) == ANVIL_OK && province == 0);  // none selected yet
+            FakeWorld::set(fake.selection_object, 0, reinterpret_cast<uintptr_t>(fake.province(3)));
+            CHECK(world->selected_province(&province) == ANVIL_OK && province == 3);
+            FakeWorld::set(fake.selection_object, 0, reinterpret_cast<uintptr_t>(fake.province(3) + 8));
+            CHECK(world->selected_province(&province) == ANVIL_ERROR_INTERNAL);  // not a province of the array
+            FakeWorld::set(fake.selection_object, 0, uintptr_t{0});
+            CHECK(world->selected_province(nullptr) == ANVIL_ERROR_INVALID_ARGUMENT);
+
+            CHECK(world->province_at(3, 700, &province) == ANVIL_OK && province == 3);
+            CHECK(world->province_at(-4, 700, &province) == ANVIL_OK && province == 0);  // off the map
+            CHECK(world->province_at(900000, 0, &province) == ANVIL_ERROR_INTERNAL);    // no such province
+            graphical_map[0] = 0;
+            CHECK(world->province_at(3, 700, &province) == ANVIL_ERROR_INTERNAL);  // not the game's map
+            graphical_map[0] = image.address(0x1D57E38);
+            FakeWorld::set(game.session, 0x330, uintptr_t{0});
+            CHECK(world->province_at(3, 700, &province) == ANVIL_ERROR_INTERNAL);  // no map input
+            FakeWorld::set(game.session, 0x330, reinterpret_cast<uintptr_t>(map_input));
+            CHECK(world->province_at(3, 700, nullptr) == ANVIL_ERROR_INVALID_ARGUMENT);
+
+            AnvilGameUnitRef unit{};
+            g_picked = nullptr;
+            CHECK(world->unit_at(3, 700, &unit) == ANVIL_ERROR_NOT_FOUND);  // nothing there
+            g_picked = fake.navy;
+            CHECK(world->unit_at(3, 700, &unit) == ANVIL_OK && unit.id == FakeWorld::kNavyId &&
+                  std::string(unit.country.text) == "RUS" && unit.kind == ANVIL_GAME_UNIT_NAVY);
+            g_picked = fake.army;
+            CHECK(world->unit_at(3, 700, &unit) == ANVIL_OK && unit.id == FakeWorld::kArmyId &&
+                  unit.kind == ANVIL_GAME_UNIT_ARMY);
+            alignas(8) static uintptr_t place[2] = {};
+            place[0] = reinterpret_cast<uintptr_t>(fake.place_vtable);
+            g_picked = place;
+            CHECK(world->unit_at(3, 700, &unit) == ANVIL_ERROR_NOT_FOUND);  // a province, not a unit
+            g_picked = nullptr;
+            CHECK(world->unit_at(3, 700, nullptr) == ANVIL_ERROR_INVALID_ARGUMENT);
+        };
+        frame(game.app, 1);
+        CHECK(ran);
+        g_in_frame_handler = nullptr;
+        FakeWorld::set(game.session, 0x330, uintptr_t{0});
+
+        anvil_game::WorldLayout l;
+        std::int32_t id = 0;
+        CHECK(anvil_game::read_selected_province(l, id) == ANVIL_ERROR_NOT_DECLARED &&
+              anvil_game::pick_province(l, 1, 1, id) == ANVIL_ERROR_NOT_DECLARED);
+        AnvilGameUnitRef none{};
+        CHECK(anvil_game::pick_unit(l, 1, 1, none) == ANVIL_ERROR_NOT_DECLARED);
     });
 
     run("anvil-game.world: diplomacy", [&] {

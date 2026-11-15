@@ -834,6 +834,32 @@ unsafe extern "C" fn world_province_view(province: *mut i32) -> AnvilResult {
     ANVIL_OK
 }
 
+unsafe extern "C" fn world_selected_province(province: *mut i32) -> AnvilResult {
+    unsafe { *province = 1 };
+    ANVIL_OK
+}
+
+// The fake map: RUS's navy 7 at x = 100, no unit elsewhere.
+unsafe extern "C" fn world_unit_at(x: i32, _y: i32, out: *mut AnvilGameUnitRef) -> AnvilResult {
+    if x != 100 {
+        return ANVIL_ERROR_NOT_FOUND;
+    }
+    unsafe {
+        (*out).id = 7;
+        (*out).country = AnvilGameTag {
+            text: [b'R' as c_char, b'U' as c_char, b'S' as c_char, 0],
+        };
+        (*out).kind = ANVIL_GAME_UNIT_NAVY;
+    }
+    ANVIL_OK
+}
+
+// The fake map: the province is x, off the map left of it.
+unsafe extern "C" fn world_province_at(x: i32, _y: i32, province: *mut i32) -> AnvilResult {
+    unsafe { *province = x.max(0) };
+    ANVIL_OK
+}
+
 // RUS's alliance with TUR since 1700.1.1, without an end date.
 unsafe extern "C" fn world_country_relations(
     tag: *const c_char,
@@ -938,6 +964,9 @@ static FAKE_WORLD_FULL: Shared<AnvilGameWorldService> = Shared({
     table.country_overlord = Some(world_country_overlord);
     table.country_subjects = Some(world_country_subjects);
     table.player_tags = Some(world_player_tags);
+    table.selected_province = Some(world_selected_province);
+    table.province_at = Some(world_province_at);
+    table.unit_at = Some(world_unit_at);
     table
 });
 
@@ -1264,6 +1293,20 @@ fn world_reads_rulers_flags_and_variable_names() {
         timed[1].ruler && !timed[1].hidden && timed[1].start.is_none() && timed[1].end.is_none()
     );
     assert_eq!(w.province_view().unwrap(), 295);
+    assert_eq!(w.selected_province().unwrap(), 1);
+    assert_eq!(
+        (
+            w.province_at(226, 9).unwrap(),
+            w.province_at(-5, 9).unwrap()
+        ),
+        (226, 0)
+    );
+    let unit = w.unit_at(100, 9).unwrap();
+    assert_eq!(
+        (unit.id, unit.country.unwrap().as_str(), unit.kind),
+        (7, "RUS", world::UnitKind::Navy)
+    );
+    assert_eq!(w.unit_at(5, 9).unwrap_err().code(), ErrorCode::NotFound);
     assert_eq!(
         w.province_timed_modifiers(295).unwrap_err().code(),
         ErrorCode::Unsupported
