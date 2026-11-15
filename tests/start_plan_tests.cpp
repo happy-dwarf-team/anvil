@@ -266,8 +266,8 @@ void start_plan_tests() {
         bench.benchmark = BenchmarkArm{true, "lode"};
         plan = plan_start(inv, choices, bench);
         CHECK(entry(plan, "lode").modules_on == std::vector<bool>{false} && plan.writes.empty());
-        CHECK(plan.notes.size() == 2 && contains(plan.notes[0].second.message, "at this benchmark start") &&
-              contains(plan.notes[1].second.message, "stay for the next start"));
+        CHECK(plan.notes.size() == 2 && plan.notes[0].second.message.find("at this benchmark start") != std::string::npos &&
+              plan.notes[1].second.message.find("stay for the next start") != std::string::npos);
         // A second folder with the same id moves nothing: its data/<id> is the first one's.
         InventoryPlugin winner = local("lode", "\n[[modules]]\nid = \"flows\"\nname = \"Flows\"\naffects_gameplay = false\n");
         InventoryPlugin second = lode();
