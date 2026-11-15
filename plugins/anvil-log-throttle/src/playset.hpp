@@ -34,8 +34,9 @@ std::vector<Layer> playset_layers(const std::filesystem::path& dlc_load, const s
 bool resolve(const std::vector<Layer>& layers, std::string_view file, std::string& path, std::string& layer);
 
 // The uses of `token` as a whole word in the .txt files of the folders `in`
-// names, in every layer whose folder no later mod replaces (replace_path),
-// comments left out: the lines that define it first
+// names, recursively, without the files directly in a folder a later mod
+// replaces (replace_path; its subfolders stay, as in the game), comments
+// left out: the lines that define it first
 // (FindIn), then other uses. For FindIn::script the folders are events,
 // common, decisions, missions and history/countries; for events and
 // missions, that folder alone, and a dot is part of a name.
