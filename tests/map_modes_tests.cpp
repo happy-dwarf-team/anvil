@@ -187,6 +187,15 @@ void color_tests() {
         CHECK(kept_text(*mode, 7) == "Yours" && kept_text(*mode, 8).empty());
         r.clear_session();
         CHECK(mode->snapshot() == nullptr && mode->generation.load() == g + 2 && kept_text(*mode, 7).empty());
+
+        // A buffer of a session that ended between the caller's check and the
+        // store is dropped; one of this epoch is kept; a forged handle is refused.
+        const std::uint64_t before = r.epoch();
+        r.clear_session();
+        CHECK(!r.store_colors(mode, std::make_shared<Colors>(), before) && mode->snapshot() == nullptr);
+        CHECK(r.store_colors(mode, std::make_shared<Colors>(), r.epoch()) && mode->snapshot() != nullptr);
+        AnvilMapMode forged;
+        CHECK(!r.store_colors(&forged, std::make_shared<Colors>(), r.epoch()) && forged.snapshot() == nullptr);
     });
 }
 

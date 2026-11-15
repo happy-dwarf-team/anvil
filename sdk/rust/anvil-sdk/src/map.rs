@@ -314,7 +314,8 @@ impl MapModes {
     /// Hands over the colours of `mode`: `colors[i]` for the province with
     /// ID `i` (see [`rgb`] and [`NO_COLOR`]); provinces past the slice and
     /// province 0 keep the political colour. The slice is copied. Only while
-    /// a session runs (`WrongPhase` otherwise); more entries than the
+    /// a session runs (`WrongPhase` otherwise, also when it ends during the
+    /// call: the slice is dropped); more entries than the
     /// session's province limit, or a colour with a top byte other than 0 or
     /// 0xFF, is `InvalidArgument`.
     pub fn set_colors(&self, mode: Mode, colors: &[u32]) -> Result<()> {

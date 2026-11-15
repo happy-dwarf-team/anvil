@@ -139,9 +139,11 @@ typedef struct AnvilMapModesService {
      * so does province 0. The buffer is copied; the map shows it from the
      * next step on, while the mode is shown. Callable from any thread while a
      * session runs; at the end of a session every buffer is dropped.
-     * ANVIL_ERROR_INVALID_ARGUMENT: NULL, `count` above the session's province
-     * limit (anvil-game.world's province_limit), a colour with a top byte
-     * other than 0 or 0xFF. ANVIL_ERROR_WRONG_PHASE: no session runs. */
+     * ANVIL_ERROR_INVALID_ARGUMENT: NULL or not a mode of register_mode,
+     * `count` above the session's province limit (anvil-game.world's
+     * province_limit), a colour with a top byte other than 0 or 0xFF.
+     * ANVIL_ERROR_WRONG_PHASE: no session runs, or it ended during the call
+     * (the buffer is dropped). */
     AnvilResult (*set_colors)(const AnvilMapMode *mode, const uint32_t *colors, uint32_t count);
 
     /* The id of the plugin mode that borrowed `number`, a value of the game's

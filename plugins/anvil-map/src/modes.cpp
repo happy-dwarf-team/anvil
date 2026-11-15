@@ -136,6 +136,16 @@ void Registry::clear_session() {
     }
 }
 
+bool Registry::store_colors(const AnvilMapMode* mode, std::shared_ptr<const Colors> colors, std::uint64_t epoch) {
+    if (!owns(mode)) return false;
+    // Under show_mutex_, so clear_session() cannot move the epoch on between
+    // the check and the store (lock order: show_mutex_, then colors_mutex).
+    std::lock_guard lock(show_mutex_);
+    if (epoch != epoch_) return false;
+    set_colors(*const_cast<AnvilMapMode*>(mode), std::move(colors));
+    return true;
+}
+
 AnvilResult make_colors(const std::uint32_t* colors, std::uint32_t count, std::int32_t limit, Colors& out) {
     if (colors == nullptr && count != 0) return ANVIL_ERROR_INVALID_ARGUMENT;
     if (limit > 0 && count > static_cast<std::uint32_t>(limit)) return ANVIL_ERROR_INVALID_ARGUMENT;
