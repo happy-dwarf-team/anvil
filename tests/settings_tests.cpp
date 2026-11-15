@@ -349,6 +349,27 @@ void module_settings_tests() {
         CHECK(lists.disabled_modules.empty() && read(player) == "flows_mode = \"off\"\n" && notes.size() == 1 &&
               notes[0].level == ANVIL_LOG_WARNING && contains(notes[0].message, "the values stay for the next start"));
 
+        // A value that waits like this survives a rewrite of the player's file from the schema
+        // (the overlay or the Manager saving another setting), so the next start can still move it.
+        {
+            std::vector<SettingValue> values;
+            for (const auto& s : r.file->settings) values.push_back(s.default_value);
+            values[r.file->find("cooldown_months")->id].integer = 6;
+            std::string werror;
+            CHECK(write_player_settings(*r.file, values, player, werror));
+            const std::string kept = read(player);
+            CHECK(contains(kept, "cooldown_months = 6\n") && contains(kept, "flows_mode = \"off\"\n"));
+            std::filesystem::remove(toml);
+            lists = {};
+            notes = move_retired_settings(m, *r.file, player, toml, lists);
+            CHECK(lists.disabled_modules == std::vector<std::string>{"lode.flows"} && read(player).find("flows_mode") == std::string::npos);
+            CHECK(contains(read(player), "cooldown_months = 6"));
+            // Nothing retired left: the rewrite is the schema's alone again.
+            CHECK(write_player_settings(*r.file, values, player, werror) && read(player).find("Retired") == std::string::npos);
+            write(toml, "disabled_modules = [\n");
+            write(player, "flows_mode = \"off\"\n");
+        }
+
         // A player's file that does not parse: a warning, nothing changes.
         write(player, "flows_mode = \n");
         notes = move_retired_settings(m, *r.file, player, dir / "none.toml", lists);

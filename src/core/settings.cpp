@@ -779,7 +779,28 @@ std::string player_settings_text(const SettingsFile& schema, const std::vector<S
 
 bool write_player_settings(const SettingsFile& schema, const std::vector<SettingValue>& values,
                            const std::filesystem::path& file, std::string& error) {
-    return replace_text_file(file, player_settings_text(schema, values), error);
+    std::string text = player_settings_text(schema, values);
+    // A retired setting's value that did not move at the start (anvil.toml could not be
+    // written) waits in this file for the next start: a rewrite from the schema alone
+    // would drop it, and with it the player's choice of the module's switch.
+    std::string old;
+    if (!schema.retired.empty() && read_text(file, old)) {
+        if (old.starts_with("\xEF\xBB\xBF")) old.erase(0, 3);
+        std::string ignored;
+        if (const std::optional<RetiredMove> move = plan_retired_move(schema, old, ignored)) {
+            std::string kept;
+            for (const RetiredMove::Item& item : move->items) {
+                if (item.turns_off || item.turns_on || item.allows_ironman || item.allows_multiplayer) {
+                    kept += item.name + " = " + item.value + "\n";
+                }
+            }
+            if (!kept.empty()) {
+                text += (text.empty() ? std::string() : std::string("\n")) +
+                        "# Retired settings: the next start moves them into anvil.toml.\n" + kept;
+            }
+        }
+    }
+    return replace_text_file(file, text, error);
 }
 
 namespace {
