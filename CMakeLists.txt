@@ -429,6 +429,11 @@ if(ANVIL_BUILD_TESTS)
     add_executable(anvil_ui_model_tests tests/ui_model_tests.cpp)
     target_link_libraries(anvil_ui_model_tests PRIVATE anvil_ui_model anvil_core)
     add_test(NAME anvil_ui_model_tests COMMAND anvil_ui_model_tests)
+    # The shared widgets, drawn in a Dear ImGui context without a window
+    # (tests/ui_widgets_tests.cpp).
+    add_executable(anvil_ui_widgets_tests tests/ui_widgets_tests.cpp)
+    target_link_libraries(anvil_ui_widgets_tests PRIVATE anvil_ui_model anvil_manager_imgui)
+    add_test(NAME anvil_ui_widgets_tests COMMAND anvil_ui_widgets_tests)
 
     # The player's language (issue #158): messages by code, the language from
     # EU4's settings, and catalogs that translate every marked text of the

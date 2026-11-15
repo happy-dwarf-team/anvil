@@ -73,8 +73,10 @@ inline float toggle_track_width(bool compact) {
 // A switch that acts at once, with its state as `word` beside it (may be null).
 // It sits in a cell of the frame's height, so it lines up with buttons and text.
 // Tab reaches it and Enter or Space flips it; off, its outline keeps 3:1 and its
-// knob stays quiet. True when clicked.
-inline bool toggle(const char* id, bool on, const char* word, bool disabled, bool compact = false) {
+// knob stays quiet. `tip` (may be null) shows over its track and its word, also
+// while it is disabled: why it cannot be switched. True when clicked.
+inline bool toggle(const char* id, bool on, const char* word, bool disabled, bool compact = false,
+                   const char* tip = nullptr) {
     const float frame = ImGui::GetFrameHeight();
     const float h = compact ? std::round(ImGui::GetFontSize()) : frame;
     const float w = h * 1.9f;
@@ -98,6 +100,11 @@ inline bool toggle(const char* id, bool on, const char* word, bool disabled, boo
         ImGui::TextUnformatted(word);
     }
     ImGui::EndDisabled();
+    // The whole cell, not the last item: that is the word when there is one.
+    if (tip != nullptr && ImGui::IsWindowHovered() &&
+        ImGui::IsMouseHoveringRect(cell, ImVec2(ImGui::GetItemRectMax().x, cell.y + frame))) {
+        ImGui::SetTooltip("%s", tip);
+    }
     return clicked && !disabled;
 }
 

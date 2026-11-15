@@ -456,7 +456,8 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
     ImGui::SetCursorPosX(right - toggle_w);
     toggle_left_ = ImGui::GetCursorScreenPos().x;
     const std::string refusal = host.switch_refusal(i);
-    if (toggle("##on", p.saved.on, p.saved.on ? tr("On") : tr("Off"), locked || !known || !refusal.empty())) {
+    if (toggle("##on", p.saved.on, p.saved.on ? tr("On") : tr("Off"), locked || !known || !refusal.empty(), false,
+               refusal.empty() ? nullptr : refusal.c_str())) {
         if (p.saved.on) {
             host.apply(set_switch(p, "", Which::On, false));
         } else {
@@ -468,7 +469,6 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
             }
         }
     }
-    if (!refusal.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", refusal.c_str());
     if (!refusal.empty()) weak_wrapped(refusal);
 
     // The rest scrolls as one, so its modules and settings get the whole pane
