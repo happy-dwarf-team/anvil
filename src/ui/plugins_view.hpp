@@ -26,6 +26,9 @@ ImVec4 entry_color(const EntryLine& line);
 // "Where it runs" in a sentence, naming each kept-out mode once.
 std::string where_sentence(const Switches& switches, const Offers& offers);
 std::string switch_word(bool on);
+// A yes/no setting's label after its toggle, in a host's draw_setting_control:
+// it wraps under itself where the row needs its first line for the notes.
+void setting_label(const std::string& label);
 std::string allow_word(bool on);
 
 class PluginsHost {

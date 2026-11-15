@@ -137,6 +137,10 @@ LoadState load_state(const Snapshot& snapshot, const PluginSnap& plugin) {
 bool setting_pending(const SettingSnap& setting) { return setting.saved != setting.in_effect; }
 bool setting_changed(const SettingSnap& setting) { return setting.saved != setting.default_value; }
 
+float label_reserve(float avail, float trailing, float min_label) {
+    return trailing > 0.0f && avail - trailing >= min_label ? trailing : 0.0f;
+}
+
 std::size_t pending_count(const PluginSnap& plugin) {
     std::size_t n = switch_differences(plugin.saved, plugin.in_effect);
     for (const ModuleSnap& m : plugin.modules) n += switch_differences(m.saved, m.in_effect);

@@ -373,6 +373,12 @@ void find_tests() {
 }
 
 void layout_tests() {
+    run("a yes/no label leaves its first line to the notes while it keeps its room", [] {
+        CHECK(label_reserve(400.0f, 150.0f, 200.0f) == 150.0f);  // the notes stay beside the label
+        CHECK(label_reserve(400.0f, 200.0f, 200.0f) == 200.0f);  // exactly the room the label needs
+        CHECK(label_reserve(400.0f, 250.0f, 200.0f) == 0.0f);    // too narrow: the notes wrap under it
+        CHECK(label_reserve(400.0f, 0.0f, 200.0f) == 0.0f);      // nothing follows the label
+    });
     run("sections count what needs a look", [] {
         Snapshot s;
         PluginSnap mod = plugin("m1");
