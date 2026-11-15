@@ -104,6 +104,13 @@ struct FakeEu4 {
         put(0x815730, {0x49, 0x8B, 0x8D, 0xD8, 0x04, 0x00, 0x00, 0x48, 0x85, 0xC9, 0x74, 0x09});
         put(0x742D18, {0x41, 0x80, 0x7C, 0x24, 0x08, 0x00, 0x75, 0x17});
         put(0x7E04AC, {0x44, 0x88, 0x7F, 0x19, 0x45, 0x84, 0xFF});
+        // speed_of_root, and is_paused whole: it calls is_multiplayer at 0x6EAA10 on [rcx+50h].
+        put(0x1432315, {0x8B, 0x98, 0x08, 0x1E, 0x00, 0x00, 0xFF, 0xC3});
+        put(0x7E01B0, {0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x80, 0x79, 0x48, 0x00, 0x48, 0x8B, 0xD9, 0x74, 0x0E, 0x33,
+                       0xC0, 0x83, 0xF8, 0x02, 0x0F, 0x95, 0xC0, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xC3, 0x48, 0x8B, 0x49,
+                       0x50, 0xE8, 0x3A, 0xA8, 0xF0, 0xFF, 0x84, 0xC0, 0x75, 0x14, 0x48, 0x8B, 0x43, 0x08, 0x48, 0x2B,
+                       0x03, 0x48, 0xA9, 0xF8, 0xFF, 0xFF, 0xFF, 0xB8, 0x01, 0x00, 0x00, 0x00, 0x75, 0x05, 0xB8, 0x02,
+                       0x00, 0x00, 0x00, 0x83, 0xF8, 0x02, 0x0F, 0x95, 0xC0, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xC3});
         // set_session: the declared bytes (it stores the session at root+0x1E00), then
         // add rsp,20h; pop rdi; mov rbp,[rsp+10h]; mov rsi,[rsp+18h]; ret.
         put(0x756A30, {0x48, 0x89, 0x6C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57, 0x48, 0x83, 0xEC, 0x20,
@@ -199,6 +206,14 @@ struct GameObjects {
     alignas(16) uint8_t speed[0x60] = {};
     alignas(16) uint8_t oos_handler[0x50] = {};
     alignas(16) uint8_t frontend[0x910] = {};
+
+    // is_paused asks the session behind the speed object (+0x50) whether the
+    // game is multiplayer. The fake's code has no unwind data, so a fault
+    // inside it could not be caught: the pointer is there from the start.
+    GameObjects() {
+        const auto s = reinterpret_cast<uintptr_t>(session);
+        std::memcpy(speed + 0x50, &s, sizeof(s));
+    }
 
     uint64_t frame_counter() const {
         uint64_t v = 0;
@@ -1827,7 +1842,7 @@ int main(int argc, char** argv) {
         start.add(gp_toml);
         start.add(plugin_toml("other"));
         start.make();
-        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 165);
+        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 167);
         AnvilPlugin* p = start.load(ANVIL_GAME_ID);
         CHECK(p != nullptr);
         if (p == nullptr) return;
@@ -2214,6 +2229,63 @@ int main(int argc, char** argv) {
         game.set_session(game.session);
         frame(game.app, 1);
         CHECK(service->session(nullptr) == 1 && service->out_of_sync() == 0);
+    });
+
+    run("anvil-game: the speed from the root and the pause from the game-speed object", [&] {
+        CHECK(ANVIL_GAME_HAS(service, speed) && ANVIL_GAME_HAS(service, paused));
+        if (!ANVIL_GAME_HAS(service, paused)) return;
+        const uintptr_t root = reinterpret_cast<uintptr_t>(game.root);
+        std::memcpy(image.base + 0x233FE78, &root, sizeof(root));
+        game.set_session(game.session);
+        game.set_date(58'860'240);
+        const auto set_speed = [&](int32_t value) { std::memcpy(game.root + 0x1E08, &value, sizeof(value)); };
+        set_speed(1);
+        frame(game.app, 1);
+        int32_t speed = 0;
+        uint32_t flags = 0xFF;
+        CHECK(service->speed(&speed) == 1 && speed == 2 && service->speed(nullptr) == 1);
+        CHECK(service->paused(&flags) == 0 && flags == 0 && service->paused(nullptr) == 0);
+
+        // The player's pause keeps the speed.
+        game.speed[0x48] = 1;
+        frame(game.app, 1);
+        CHECK(service->paused(&flags) == 1 && flags == ANVIL_GAME_PAUSE_PLAYER && service->paused(nullptr) == 1);
+        CHECK(service->speed(&speed) == 1 && speed == 2);
+        game.speed[0x48] = 0;
+
+        // An entry in the game's pause list pauses a single-player game; multiplayer ignores the list.
+        alignas(8) static uint8_t entry[8] = {};
+        const uintptr_t begin = reinterpret_cast<uintptr_t>(entry), end = begin + sizeof(entry);
+        std::memcpy(game.speed, &begin, sizeof(begin));
+        std::memcpy(game.speed + 8, &end, sizeof(end));
+        set_speed(4);
+        frame(game.app, 1);
+        CHECK(service->paused(&flags) == 1 && flags == ANVIL_GAME_PAUSE_GAME);
+        CHECK(service->speed(&speed) == 1 && speed == 5);
+        g_multiplayer = true;
+        frame(game.app, 1);
+        CHECK(service->paused(&flags) == 0 && flags == 0 && service->speed(&speed) == 1 && speed == 5);
+        g_multiplayer = false;
+        std::memset(game.speed, 0, 16);
+
+        // A value off the speed bar is no speed.
+        set_speed(7);
+        frame(game.app, 1);
+        speed = -1;
+        CHECK(service->speed(&speed) == 0 && speed == -1);
+
+        // Without a session both answer 0, whatever the memory says.
+        alignas(16) static uint8_t menu[0x420] = {};
+        game.set_session(menu);
+        set_speed(2);
+        game.speed[0x48] = 1;
+        frame(game.app, 1);
+        flags = 0xFF;
+        CHECK(service->speed(&speed) == 0 && speed == -1 && service->paused(&flags) == 0 && flags == 0);
+        game.speed[0x48] = 0;
+        set_speed(0);
+        game.set_session(game.session);
+        frame(game.app, 1);
     });
 
     run("anvil-game: the GUI's keyboard from its text receiver and the shortcut editor", [&] {

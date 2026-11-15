@@ -237,6 +237,49 @@ build."eu4-1.37.5-steam-win64" = { rva = 0x7E04AC }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x7DF81C }        # CGameSpeed::Pause
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x7DF81C }
 
+# --- the speed and the pause ---
+# Read after a frame of the main loop, on the main thread.
+# A port may declare both absent. The same bytes as Tongs' declarations.
+
+[symbol.speed_of_root]
+bytes = "8B 98 08 1E 00 00 FF C3"                  # mov ebx,[rax+1E08h]; inc ebx
+memory = "code"
+values.speed = { at = 2, size = 4 }
+note = "top bar: the game speed at root+0x1E08, 0..4; the bar shows it plus one"
+build."eu4-1.37.5-steam-win64" = { rva = 0x1432315 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x142C2B5 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x142C2B5 }
+
+[symbol.is_paused]
+memory = "code"
+signature = "bool (void* game_speed)"
+values.pause_flag = { at = 8, size = 1 }
+note = "game speed: paused when the player's pause byte (+0x48) is set, or in single player when its pause list (+0, +8) is not empty"
+
+[symbol.is_paused.build."eu4-1.37.5-steam-win64"]
+rva = 0x7E01B0
+bytes = """
+40 53 48 83 EC 20 80 79 48 00 48 8B D9 74 0E 33 C0 83 F8 02 0F 95 C0 48 83 C4 20 5B C3
+48 8B 49 50 E8 3A A8 F0 FF 84 C0 75 14 48 8B 43 08 48 2B 03 48 A9 F8 FF FF FF
+B8 01 00 00 00 75 05 B8 02 00 00 00 83 F8 02 0F 95 C0 48 83 C4 20 5B C3
+"""
+
+[symbol.is_paused.build."eu4-1.37.5.2-gog-win64"]
+rva = 0x7DF520
+bytes = """
+40 53 48 83 EC 20 80 79 48 00 48 8B D9 74 0E 33 C0 83 F8 02 0F 95 C0 48 83 C4 20 5B C3
+48 8B 49 50 E8 8A AE F0 FF 84 C0 75 14 48 8B 43 08 48 2B 03 48 A9 F8 FF FF FF
+B8 01 00 00 00 75 05 B8 02 00 00 00 83 F8 02 0F 95 C0 48 83 C4 20 5B C3
+"""
+
+[symbol.is_paused.build."eu4-1.37.5.0-gog-win64"]
+rva = 0x7DF520
+bytes = """
+40 53 48 83 EC 20 80 79 48 00 48 8B D9 74 0E 33 C0 83 F8 02 0F 95 C0 48 83 C4 20 5B C3
+48 8B 49 50 E8 8A AE F0 FF 84 C0 75 14 48 8B 43 08 48 2B 03 48 A9 F8 FF FF FF
+B8 01 00 00 00 75 05 B8 02 00 00 00 83 F8 02 0F 95 C0 48 83 C4 20 5B C3
+"""
+
 # --- the keyboard of the game's GUI ---
 # Read on a key press, never written. A focused text field stores its text
 # receiver in the GUI, and the shortcut editor takes every key while it has

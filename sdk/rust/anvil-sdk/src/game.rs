@@ -122,6 +122,26 @@ impl OosFlags {
     }
 }
 
+/// Why the game is paused (`ANVIL_GAME_PAUSE_*`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct PauseFlags(pub u32);
+
+impl PauseFlags {
+    /// The player's pause, the one the space bar and the pause button toggle.
+    pub const PLAYER: u32 = crate::sys::ANVIL_GAME_PAUSE_PLAYER;
+    /// In single player, the game's own list of pauses is not empty.
+    pub const GAME: u32 = crate::sys::ANVIL_GAME_PAUSE_GAME;
+
+    /// Whether the player paused the game.
+    pub const fn player(self) -> bool {
+        self.0 & Self::PLAYER != 0
+    }
+    /// Whether the game holds a pause of its own.
+    pub const fn game(self) -> bool {
+        self.0 & Self::GAME != 0
+    }
+}
+
 /// What of the game's GUI takes the keyboard (`ANVIL_GAME_KEYBOARD_*`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct KeyboardFlags(pub u32);
@@ -497,5 +517,26 @@ impl Game {
         };
         // SAFETY: the service's function with this plugin's handle.
         check(unsafe { f(host.raw_plugin(), flags) }, || "restart")
+    }
+
+    /// The game speed as the speed bar shows it, 1 to 5, as of the last frame
+    /// (anvil-game 1.24.0); it keeps its value while paused. `None` without a
+    /// session, with an older anvil-game or on a build without its symbols.
+    pub fn speed(&self) -> Option<i32> {
+        let f = function!(self.table, AnvilGameService, speed).ok()?;
+        let mut speed = 0i32;
+        // SAFETY: the service's function with a valid out pointer.
+        (unsafe { f(&mut speed) } != 0).then_some(speed)
+    }
+
+    /// Why the game is paused, as of the last frame (anvil-game 1.24.0):
+    /// `Some` while a session runs and is paused, `None` while it runs on,
+    /// without a session, with an older anvil-game or on a build without its
+    /// symbols. A pause for going out of sync is [`Game::out_of_sync`]'s.
+    pub fn paused(&self) -> Option<PauseFlags> {
+        let f = function!(self.table, AnvilGameService, paused).ok()?;
+        let mut flags = 0u32;
+        // SAFETY: the service's function with a valid out pointer.
+        (unsafe { f(&mut flags) } != 0).then_some(PauseFlags(flags))
     }
 }

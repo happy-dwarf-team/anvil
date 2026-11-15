@@ -22,6 +22,8 @@ struct SessionView {
     // frame of the main loop, so only this count tells the two sessions apart.
     std::uint64_t installs = 0;
     std::uint32_t oos = 0;  // ANVIL_GAME_OOS_*
+    std::int32_t speed = 0;   // the speed bar's 1..5; 0 when unknown
+    std::uint32_t pause = 0;  // ANVIL_GAME_PAUSE_*
 };
 
 // 1 January of year 1: the date of a root without a running game, or of a
