@@ -30,12 +30,15 @@ int g_proto_variant = [] {
     char e[4] = {};
     size_t n = 0;
     getenv_s(&n, e, sizeof e, "ANVIL_PROTO_VARIANT");
-    return e[0] >= '0' && e[0] <= '4' ? e[0] - '0' : 0;
+    return e[0] >= '0' && e[0] <= '7' ? e[0] - '0' : 0;
 }();
 const char* const kProtoNames[] = {"C   the card as shown", "C1  compact cards, tags, folded settings",
                                    "C2  ember edge on the cards that are on", "C3  one grouped card, a row per module",
-                                   "C4  a row per module that opens"};
-constexpr int kProtoCount = 5;
+                                   "C4  a row per module that opens", "C5  two-line rows: name, then its state",
+                                   "C6  C5, and the open row is a card (one at a time)", "C7  rows like the plugin list: glyph, chevron at the right"};
+constexpr int kProtoCount = 8;
+std::string g_open_key;   // C6: the one open module (plugin.module)
+std::string g_open_init;  // C6: the plugin it was chosen for
 bool g_first_module = true;  // C3: no line above the first row
 float g_toggle_left = 0;  // the plugin toggle's track, in screen x
 
@@ -736,6 +739,123 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
         tags(right_edge);
         right_toggle(right_edge);
         body(true);
+        ImGui::PopID();
+        return;
+    }
+    if (v >= 5) {
+        // C5 to C7: a row that opens, two lines high: the name, then its state in a few words.
+        const ImGuiStyle& st = ImGui::GetStyle();
+        const float line = ImGui::GetTextLineHeight();
+        const float frame = ImGui::GetFrameHeight();
+        const std::string key = p.id + "." + mod.id;
+        if (v == 6 && g_open_init != p.id) {
+            g_open_init = p.id;
+            g_open_key.clear();
+            for (const ModuleSnap& other : p.modules) {
+                if (!reset_module_settings(p, other.id).empty()) {
+                    g_open_key = p.id + "." + other.id;
+                    break;
+                }
+            }
+        }
+        ImGuiStorage* storage = ImGui::GetStateStorage();
+        const ImGuiID open_id = ImGui::GetID("open");
+        bool open = v == 6 ? g_open_key == key : storage->GetBool(open_id, !changed.empty());
+        // The state line: where it runs (or On / Off), how many settings, how many changed.
+        // What the toggle does not say: where it runs (or that it changes the game), its settings;
+        // with nothing of that, the start of what it does.
+        std::string state;
+        const auto add = [&](const std::string& part) { state += (state.empty() ? "" : " \xC2\xB7 ") + part; };
+        if (mod.changes_game) {
+            const char* words[] = {tr("Off"), tr("Normal games"), tr("Normal games + Ironman"), tr("Normal games + Multiplayer"), tr("Everywhere")};
+            add(on ? std::string(words[static_cast<int>(where(mod.saved))]) : std::string(tr("Changes the game")));
+        }
+        if (n_settings > 0) add(trf("{0} settings", {std::to_string(n_settings)}));
+        if (state.empty()) state = mod.description;
+        const bool card = v == 6 && open;
+        if (card) {
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, kRaised);
+            ImGui::PushStyleColor(ImGuiCol_Border, kLine);
+            ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ImGui::GetFontSize() * 0.25f, ImGui::GetFontSize() * 0.25f));
+            ImGui::BeginChild("card", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding);
+        }
+        const ImVec2 at = ImGui::GetCursorScreenPos();
+        const float right_edge = at.x + ImGui::GetContentRegionAvail().x;
+        const float h = line * 2 + st.FramePadding.y * 2 + 2;
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, kFrameHovered);
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, kFrameActive);
+        if (ImGui::Selectable("##row", false, ImGuiSelectableFlags_AllowOverlap, ImVec2(0, h))) {
+            open = !open;
+            if (v == 6) {
+                g_open_key = open ? key : std::string();
+            } else {
+                storage->SetBool(open_id, open);
+            }
+        }
+        ImGui::PopStyleColor(2);
+        if (ImGui::IsItemHovered()) ImGui::SetItemTooltip("%s", key.c_str());
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        const float word_w = std::max(ImGui::CalcTextSize(tr("On")).x, ImGui::CalcTextSize(tr("Off")).x);
+        const float need = toggle_track_width(true) + st.ItemSpacing.x + word_w;
+        const bool room = std::min(g_toggle_left, right_edge - need) - at.x > ImGui::GetFontSize() * 8;
+        const float toggle_x = room ? std::min(g_toggle_left, right_edge - need) : right_edge - toggle_track_width(true);
+        const float chevron = v == 7 ? line : 0.0f;
+        const float text_right = toggle_x - st.ItemSpacing.x * 2 - chevron;
+        float x = at.x + st.FramePadding.x;
+        const float y1 = at.y + st.FramePadding.y;
+        const float y2 = y1 + line + 2;
+        const ImU32 dim = ImGui::GetColorU32(kTextWeak);
+        if (v == 7) {
+            // The plugin list's glyphs: on, off.
+            draw_glyph(draw, ImVec2(x, y1), line, on ? Glyph::On : Glyph::Off);
+        } else {
+            // The arrow that says the row opens.
+            const float s = line * 0.32f;
+            const ImVec2 c(x + line * 0.5f, y1 + line * 0.5f);
+            if (open) {
+                draw->AddTriangleFilled(ImVec2(c.x - s, c.y - s * 0.6f), ImVec2(c.x + s, c.y - s * 0.6f), ImVec2(c.x, c.y + s * 0.8f), dim);
+            } else {
+                draw->AddTriangleFilled(ImVec2(c.x - s * 0.6f, c.y - s), ImVec2(c.x - s * 0.6f, c.y + s), ImVec2(c.x + s * 0.8f, c.y), dim);
+            }
+        }
+        x += line + st.ItemInnerSpacing.x * 1.5f;
+        draw_strong(draw, ImVec2(x, y1), ImGui::GetColorU32(on ? kText : kTextWeak), mod.name.c_str(), text_right);
+        bool state_cut = false;
+        const float sw = draw_text_fit(draw, ImGui::GetFont(), ImVec2(x, y2), text_right, dim, state, &state_cut);
+        if (!changed.empty() && !state_cut) {
+            draw_text_fit(draw, ImGui::GetFont(), ImVec2(x + sw, y2), text_right, ImGui::GetColorU32(kInfo),
+                          " \xC2\xB7 " + trf("{0} changed", {std::to_string(changed.size())}));
+        }
+        if (v == 7) {
+            // A chevron at the right, before the toggle: > closed, v open.
+            const float s = line * 0.22f;
+            const ImVec2 c(text_right + st.ItemSpacing.x + line * 0.5f, at.y + h * 0.5f);
+            const float tw = std::max(1.5f, line * 0.09f);
+            if (open) {
+                draw->AddLine(ImVec2(c.x - s, c.y - s * 0.5f), ImVec2(c.x, c.y + s * 0.5f), dim, tw);
+                draw->AddLine(ImVec2(c.x, c.y + s * 0.5f), ImVec2(c.x + s, c.y - s * 0.5f), dim, tw);
+            } else {
+                draw->AddLine(ImVec2(c.x - s * 0.5f, c.y - s), ImVec2(c.x + s * 0.5f, c.y), dim, tw);
+                draw->AddLine(ImVec2(c.x + s * 0.5f, c.y), ImVec2(c.x - s * 0.5f, c.y + s), dim, tw);
+            }
+        }
+        ImGui::SetCursorScreenPos(ImVec2(toggle_x, at.y + (h - frame) * 0.5f));
+        if (toggle("##on", on, room ? (on ? tr("On") : tr("Off")) : nullptr, disabled, true)) host.apply(set_switch(p, mod.id, Which::On, !on));
+        ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + h));
+        ImGui::Dummy(ImVec2(1, 0));
+        if (open) {
+            const float indent = v == 7 ? line + st.ItemInnerSpacing.x * 1.5f + st.FramePadding.x : line + st.ItemInnerSpacing.x * 1.5f + st.FramePadding.x;
+            ImGui::Indent(indent);
+            body(false);
+            ImGui::Unindent(indent);
+        }
+        if (card) {
+            ImGui::EndChild();
+            ImGui::PopStyleVar(2);
+            ImGui::PopStyleColor(2);
+            ImGui::Dummy(ImVec2(1, 2));
+        }
         ImGui::PopID();
         return;
     }
