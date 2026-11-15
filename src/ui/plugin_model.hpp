@@ -218,6 +218,17 @@ PluginView view(const Snapshot& snapshot, const PluginSnap& plugin);
 enum class InGame { Runs, Off, OffWithPlugin, KeptOutOfIronman, KeptOutOfMultiplayer };
 InGame module_in_game(const Snapshot& snapshot, const PluginSnap& plugin, const ModuleSnap& module);
 
+// The opt-ins a module that is off keeps (ui-guidelines §5, "Off means kept"):
+// its toggle turns them back on with it, so its row names them while its choice
+// of games is hidden. None while it is on, nor for a module that does not change
+// the game, nor for one its author does not offer.
+struct KeptOptIns {
+    bool ironman = false;
+    bool multiplayer = false;
+    bool any() const { return ironman || multiplayer; }
+};
+KeptOptIns kept_opt_ins(const ModuleSnap& module);
+
 // Changes that wait for the next start: switches, opt-ins and approvals, and
 // settings whose saved value is not in effect. A change is counted where it
 // was made: a plugin turned off is one change, not one per module.

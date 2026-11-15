@@ -324,6 +324,22 @@ void where_tests() {
             CHECK(where(with_where(Switches{}, w)) == w);
         }
     });
+    run("a module that is off names the opt-ins its toggle brings back", [] {
+        ModuleSnap m = module("drill", false);
+        m.changes_game = true;
+        m.saved.allow_multiplayer = true;  // kept while it is off
+        CHECK(!kept_opt_ins(m).ironman && kept_opt_ins(m).multiplayer && kept_opt_ins(m).any());
+        m.saved.allow_ironman = true;
+        CHECK(kept_opt_ins(m).ironman && kept_opt_ins(m).multiplayer);
+        m.offers.ironman = false;  // its author keeps it out of ironman: that opt-in does nothing
+        CHECK(!kept_opt_ins(m).ironman && kept_opt_ins(m).multiplayer);
+        m.saved.on = true;  // on: its choice of games says them
+        CHECK(!kept_opt_ins(m).any());
+        m.saved.on = false;
+        m.changes_game = false;  // opt-ins mean nothing for it
+        CHECK(!kept_opt_ins(m).any());
+        CHECK(!kept_opt_ins(module("plain", false)).any());
+    });
     run("off keeps the opt-ins", [] {
         const Switches s = with_where(Switches{true, true, false}, Where::Off);
         CHECK(!s.on && s.allow_ironman && !s.allow_multiplayer);

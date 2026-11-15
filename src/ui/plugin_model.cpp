@@ -151,6 +151,11 @@ InGame module_in_game(const Snapshot& snapshot, const PluginSnap& plugin, const 
     return InGame::Runs;
 }
 
+KeptOptIns kept_opt_ins(const ModuleSnap& module) {
+    if (module.saved.on || !module.changes_game) return {};
+    return {module.saved.allow_ironman && module.offers.ironman, module.saved.allow_multiplayer && module.offers.multiplayer};
+}
+
 PluginView view(const Snapshot& snapshot, const PluginSnap& plugin) {
     PluginView v;
     v.load = plugin.next;
