@@ -1,5 +1,59 @@
 # Changelog
 
+## [1.24.0](https://github.com/happy-dwarf-team/anvil/compare/v1.23.0...v1.24.0) (2026-11-15)
+
+
+### Features
+
+* **api:** show a plugin map mode through anvil-map.modes ([#404](https://github.com/happy-dwarf-team/anvil/issues/404)) ([0601961](https://github.com/happy-dwarf-team/anvil/commit/06019619e7da3ce6c73943eb3cd0e1b46014f632)), closes [#380](https://github.com/happy-dwarf-team/anvil/issues/380)
+* **api:** the game speed and the pause in anvil-game.game ([#400](https://github.com/happy-dwarf-team/anvil/issues/400)) ([c82f43a](https://github.com/happy-dwarf-team/anvil/commit/c82f43aa36ef40016552e425fcd827024ef2498f)), closes [#378](https://github.com/happy-dwarf-team/anvil/issues/378)
+* **api:** the game's write folder in anvil-game.game ([#405](https://github.com/happy-dwarf-team/anvil/issues/405)) ([3090b01](https://github.com/happy-dwarf-team/anvil/commit/3090b01a5bc055eb38606fcd0b7b0b7f7fe6e6ce)), closes [#381](https://github.com/happy-dwarf-team/anvil/issues/381)
+* **api:** the selected province and the province under a point in anvil-game.world ([#408](https://github.com/happy-dwarf-team/anvil/issues/408)) ([4fedda1](https://github.com/happy-dwarf-team/anvil/commit/4fedda191aa087cbcb1b678f4afeeaf755eeefca)), closes [#379](https://github.com/happy-dwarf-team/anvil/issues/379)
+* **cli:** anvil check --game shows the next start's plan, its safe mode and the writes it makes first; the JSON report gains next_start ([048da8b](https://github.com/happy-dwarf-team/anvil/commit/048da8b74007464476036fc100c2fa7f5937bae1))
+* **manager:** the Plugins tab shows each plugin as the next start will load it, with a banner when the next start is in safe mode and one for what it writes first, such as retired settings that become module switches ([048da8b](https://github.com/happy-dwarf-team/anvil/commit/048da8b74007464476036fc100c2fa7f5937bae1))
+* the overlay's Plugins tab shows what changes from the next start apart from what runs in this game ([048da8b](https://github.com/happy-dwarf-team/anvil/commit/048da8b74007464476036fc100c2fa7f5937bae1))
+* **ui:** module rows that open, and a toggle for what acts at once ([#391](https://github.com/happy-dwarf-team/anvil/issues/391)) ([f33462f](https://github.com/happy-dwarf-team/anvil/commit/f33462fe18d693fe8c5bb148d0221e17fde4fbd0))
+
+
+### Bug Fixes
+
+* **core:** a plugin from a mod whose approved copy cannot be made now fails with the reason, with the plugins that need it, instead of being skipped ([048da8b](https://github.com/happy-dwarf-team/anvil/commit/048da8b74007464476036fc100c2fa7f5937bae1))
+* **core:** a retired value switches its module at this start when anvil.toml cannot be written ([#411](https://github.com/happy-dwarf-team/anvil/issues/411)) ([10eaeac](https://github.com/happy-dwarf-team/anvil/commit/10eaeaca33a2eeecf3160112b778ac99b98a77f3))
+* **core:** a retired value that waits for its move survives a settings save ([#402](https://github.com/happy-dwarf-team/anvil/issues/402)) ([3f620c5](https://github.com/happy-dwarf-team/anvil/commit/3f620c551d3608fb4424712748863649bb17bd65))
+* **core:** an environment variable of a retired setting is a warning, not silence ([#397](https://github.com/happy-dwarf-team/anvil/issues/397)) ([36645ed](https://github.com/happy-dwarf-team/anvil/commit/36645edeed5e76400f44caea0434ff7b066d3980))
+* **core:** keep a module switch made after a retired value could not leave the player's file ([#436](https://github.com/happy-dwarf-team/anvil/issues/436)) ([da66f5d](https://github.com/happy-dwarf-team/anvil/commit/da66f5dfcf94c5e0999d7c713f6fabb425d6d140))
+* **core:** let off win when two retired settings of one module disagree ([#437](https://github.com/happy-dwarf-team/anvil/issues/437)) ([f5c8c03](https://github.com/happy-dwarf-team/anvil/commit/f5c8c038276fade06da6c4379c56c6b30c2f37d6))
+* **core:** record retired values a start moved but could not remove from the player's file ([da66f5d](https://github.com/happy-dwarf-team/anvil/commit/da66f5dfcf94c5e0999d7c713f6fabb425d6d140))
+* **core:** refuse to disable the overlay or what it needs at the next start ([#430](https://github.com/happy-dwarf-team/anvil/issues/430)) ([e55a29d](https://github.com/happy-dwarf-team/anvil/commit/e55a29d09c5e6bba69cbe9bf2b419c37d511c6b1))
+* **core:** retired settings move from one folder of an id, and none when one loads ([#410](https://github.com/happy-dwarf-team/anvil/issues/410)) ([9d7b6c0](https://github.com/happy-dwarf-team/anvil/commit/9d7b6c01b729626c62bfb713c7ab2da2a67b605f))
+* **core:** retired settings write no file at a benchmark start, nor for a duplicate id ([#396](https://github.com/happy-dwarf-team/anvil/issues/396)) ([3bc9014](https://github.com/happy-dwarf-team/anvil/commit/3bc901456996d134a37b6be59008ab1d7ab39711))
+* **core:** the player's settings file is flushed before it replaces the old one ([#412](https://github.com/happy-dwarf-team/anvil/issues/412)) ([7d0c412](https://github.com/happy-dwarf-team/anvil/commit/7d0c41213a939626c414f57ba05e0c4ca1cac093))
+* **game:** unit_at answers not found for a pick that is not a unit ([#417](https://github.com/happy-dwarf-team/anvil/issues/417)) ([0470304](https://github.com/happy-dwarf-team/anvil/commit/04703047c85b2f9d6e19984f75360c9b38a5623a))
+* **game:** user_dir() gives a long write folder whole and stays valid at exit ([#409](https://github.com/happy-dwarf-team/anvil/issues/409)) ([3ddffac](https://github.com/happy-dwarf-team/anvil/commit/3ddffac1f18e91ed4e12eae8b760acf60a513621))
+* **game:** user_dir() keeps no NULs when the folder got shorter ([#421](https://github.com/happy-dwarf-team/anvil/issues/421)) ([9c97ab3](https://github.com/happy-dwarf-team/anvil/commit/9c97ab3c1c6336e1b5caa79383a1f92ea80d9367))
+* **log-throttle:** Find skips a subfolder that a later mod replaces ([196baca](https://github.com/happy-dwarf-team/anvil/commit/196bacac1b7063ebf6adadaf17f7826483fd52c0))
+* **log-throttle:** keep a replaced folder's subfolders in Find ([#431](https://github.com/happy-dwarf-team/anvil/issues/431)) ([30d9b4f](https://github.com/happy-dwarf-team/anvil/commit/30d9b4f5a638fe01a306ec1a65090271fb93372d))
+* **log-throttle:** the errors panel's Find skips a subfolder that a later mod replaces ([#399](https://github.com/happy-dwarf-team/anvil/issues/399)) ([196baca](https://github.com/happy-dwarf-team/anvil/commit/196bacac1b7063ebf6adadaf17f7826483fd52c0))
+* **manager:** before the first start after an update that retires a setting, the Plugins tab shows the module as the start will switch it and no longer calls the retired setting unknown ([048da8b](https://github.com/happy-dwarf-team/anvil/commit/048da8b74007464476036fc100c2fa7f5937bae1))
+* **manager:** keep --lang to the Manager, not the game it starts ([#432](https://github.com/happy-dwarf-team/anvil/issues/432)) ([fce73c9](https://github.com/happy-dwarf-team/anvil/commit/fce73c9b17711531aef79cbab15b3e673a35eccc))
+* **manager:** read a crash report again when it was not whole ([#419](https://github.com/happy-dwarf-team/anvil/issues/419)) ([894db06](https://github.com/happy-dwarf-team/anvil/commit/894db06ee16cdb7056e38429f30958ccaba7872f))
+* **manager:** the Undo of the Plugins page writes back the last start's value ([#393](https://github.com/happy-dwarf-team/anvil/issues/393)) ([34f8401](https://github.com/happy-dwarf-team/anvil/commit/34f84013d69f5de42fc6b35f0e5840933ea0d702))
+* **manager:** turn Play off when Steam would start another folder ([#438](https://github.com/happy-dwarf-team/anvil/issues/438)) ([d3a7ffb](https://github.com/happy-dwarf-team/anvil/commit/d3a7ffbeda62ed49fc14afe3f4b3cc69b3254a76))
+* **manager:** Undo writes back the last start's value of a setting ([34f8401](https://github.com/happy-dwarf-team/anvil/commit/34f84013d69f5de42fc6b35f0e5840933ea0d702))
+* **map:** a show request never outlives the session it was asked in ([#407](https://github.com/happy-dwarf-team/anvil/issues/407)) ([a95ed59](https://github.com/happy-dwarf-team/anvil/commit/a95ed59b5ea94f53e265d84e35ce9c3089f4a8f8))
+* **map:** set_colors drops a buffer of a session that ended during the call ([#416](https://github.com/happy-dwarf-team/anvil/issues/416)) ([840c413](https://github.com/happy-dwarf-team/anvil/commit/840c4134106225f74717b4b0b9d07284f62bf788))
+* **overlay:** open a plugin's repository only at an https address ([#418](https://github.com/happy-dwarf-team/anvil/issues/418)) ([c7b0b71](https://github.com/happy-dwarf-team/anvil/commit/c7b0b71b1323bf7a532a7ecf8d2cb5215cbe746d))
+* **overlay:** Open its repository opens the mod plugin's repository ([c7b0b71](https://github.com/happy-dwarf-team/anvil/commit/c7b0b71b1323bf7a532a7ecf8d2cb5215cbe746d))
+* **overlay:** stop a dependency chain at its first refusal ([#428](https://github.com/happy-dwarf-team/anvil/issues/428)) ([95eac82](https://github.com/happy-dwarf-team/anvil/commit/95eac825d477f1d7298e46accb5f92474ce3bbc8))
+* **ui:** a module row stays as it opened, and counts its locked changes ([#415](https://github.com/happy-dwarf-team/anvil/issues/415)) ([9e18a66](https://github.com/happy-dwarf-team/anvil/commit/9e18a66a8601e90844d23b7af3ee9fcc6391ee35))
+* **ui:** a module that is off names the opt-ins it keeps ([#435](https://github.com/happy-dwarf-team/anvil/issues/435)) ([c370330](https://github.com/happy-dwarf-team/anvil/commit/c370330dcec36cf2a41cfe5f5f583f873115bb32))
+* **ui:** keep a changed yes/no setting's note beside its long label ([#394](https://github.com/happy-dwarf-team/anvil/issues/394)) ([56433a4](https://github.com/happy-dwarf-team/anvil/commit/56433a48a00d647695a93536fd57d945fd5e7be3))
+* **ui:** keep a notice's title off its close button and the plugin switch off its buttons ([#433](https://github.com/happy-dwarf-team/anvil/issues/433)) ([61a9f6e](https://github.com/happy-dwarf-team/anvil/commit/61a9f6e9d84477de96fde4e252fe086072a873b4))
+* **ui:** resets and Undo leave locked settings alone, and Undo shows only when it can act ([#395](https://github.com/happy-dwarf-team/anvil/issues/395)) ([75fdedf](https://github.com/happy-dwarf-team/anvil/commit/75fdedf307780d81db601d8121f8ec6cb34af256))
+* **ui:** settings of a second entry of an id are read-only, its approval counts ([#429](https://github.com/happy-dwarf-team/anvil/issues/429)) ([44903ec](https://github.com/happy-dwarf-team/anvil/commit/44903ec3d43c382bb046a613a9c70f06d759f316))
+* **ui:** show a switch's refusal over its track, not only its word ([#424](https://github.com/happy-dwarf-team/anvil/issues/424)) ([ef47e86](https://github.com/happy-dwarf-team/anvil/commit/ef47e8644cc75e41b600fe857b2c36dff5d02070))
+* **ui:** two entries of one id in the Plugins list each open their own detail ([#401](https://github.com/happy-dwarf-team/anvil/issues/401)) ([dc63436](https://github.com/happy-dwarf-team/anvil/commit/dc63436ce910ace91a4b2a0984cdf9d742a44fa0))
+
 ## [1.23.0](https://github.com/happy-dwarf-team/anvil/compare/v1.22.0...v1.23.0) (2026-11-15)
 
 ### Features
