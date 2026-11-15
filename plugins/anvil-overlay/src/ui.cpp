@@ -1159,9 +1159,7 @@ void setting_control(size_t i, size_t s) {
             AnvilControlValue v{value ? 0 : 1, 0.0, nullptr};
             report(control.set(plugin, id, v));
         }
-        ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(label);
+        anvil::ui::setting_label(label);
         break;
     }
     case ANVIL_CONTROL_SETTING_INT:

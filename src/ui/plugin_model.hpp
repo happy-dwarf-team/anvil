@@ -204,6 +204,12 @@ std::size_t pending_count(const PluginSnap& plugin);
 std::size_t pending_count(const Snapshot& snapshot);
 bool setting_pending(const SettingSnap& setting);
 bool setting_changed(const SettingSnap& setting);
+// The width a setting row keeps free after a yes/no label on its first line, so
+// that "(?)" and the notes that follow ("changed · default: off" and Reset)
+// stay beside the label, which wraps under itself instead: all of `trailing`
+// when the row is `avail` wide and that leaves the control and its label at
+// least `min_label`; else 0, the label takes the line and the notes wrap under it.
+float label_reserve(float avail, float trailing, float min_label);
 // Plugins from mods waiting for a first approval or an update's (the tab's label).
 std::size_t to_approve(const Snapshot& snapshot);
 

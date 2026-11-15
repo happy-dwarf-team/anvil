@@ -4,7 +4,8 @@
 
 <out>/game is an EU4 folder with the package the build's AnvilManager.exe
 carries (tools/manager/anvil-package.zip) and a few plugins that show the
-Plugins tab's states: modules, settings with one changed, a plugin that is off,
+Plugins tab's states: modules, settings with two changed (one a yes/no with a
+long label), a plugin that is off,
 one that needs it, one whose plugin.toml does not parse, and a plugin from a mod
 that waits for approval. <out>/user is EU4's user folder (game/userdir.txt
 names it).
@@ -84,7 +85,13 @@ name = "Ledger export"
 description = "Writes the ledger's tables to anvil/data/tuning."
 affects_gameplay = false
 default = false
-''', '''[setting.hotkey]
+''', '''[setting.skip_drilled]
+type = "bool"
+default = false
+label = "Skip armies whose drill is already at its maximum"
+group = "Army"
+
+[setting.hotkey]
 type = "key"
 default = "Ctrl+Shift+D"
 label = "Drill hotkey"
@@ -106,7 +113,7 @@ values = [{ name = "brief", label = "Brief" }, { name = "full", label = "Full" }
 label = "Tooltip style"
 group = "Economy"
 ''')
-write(game / "anvil" / "data" / "tuning" / "settings.toml", "max_armies = 40\n")
+write(game / "anvil" / "data" / "tuning" / "settings.toml", "max_armies = 40\nskip_drilled = true\n")
 plugin(plugins / "camera", "camera", "Camera", '''description = "Smoother zoom and a key to jump to the capital."
 affects_gameplay = false
 ''', '''[setting.zoom_speed]

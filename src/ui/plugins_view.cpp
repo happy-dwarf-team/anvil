@@ -34,12 +34,23 @@ void weak(const std::string& text) { ImGui::TextDisabled("%s", text.c_str()); }
 
 // SameLine for an item `width` wide, or a new line when the rest of this one is
 // shorter (a setting row in the overlay's narrow panel).
-void same_line_if_fits(float width) {
+// The new line starts at `indent` (window-local x) when it is above 0.
+void same_line_if_fits(float width, float indent = 0.0f) {
     ImGui::SameLine();
-    if (ImGui::GetContentRegionAvail().x < width) ImGui::NewLine();
+    if (ImGui::GetContentRegionAvail().x < width) {
+        ImGui::NewLine();
+        if (indent > 0.0f) ImGui::SetCursorPosX(indent);
+    }
 }
 
 float text_width(const std::string& text) { return ImGui::CalcTextSize(text.c_str()).x; }
+
+// Where setting_label wraps (window-local x; 0 is the content region's end),
+// set by PluginsTab::draw_setting around the host's control, and where the
+// label began (0 while no yes/no label was drawn): the notes that wrap under
+// the row start there, so they read as the label's.
+float g_label_wrap_x = 0.0f;
+float g_label_x = 0.0f;
 
 
 void weak_wrapped(const std::string& text) {
@@ -720,14 +731,42 @@ void PluginsTab::draw_settings_of(const Snapshot& model, size_t i, std::string_v
     }
 }
 
+void setting_label(const std::string& label) {
+    ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+    ImGui::AlignTextToFramePadding();
+    g_label_x = ImGui::GetCursorPosX();
+    text_wrapped_at(label, g_label_wrap_x);
+}
+
 void PluginsTab::draw_setting(const Snapshot& model, size_t i, size_t s, bool disabled, PluginsHost& host) {
     const PluginSnap& p = model.plugins[i];
     const SettingSnap& snap = p.settings[s];
     const bool locked = host.in_game() && snap.locked;
+    const float gap = ImGui::GetStyle().ItemSpacing.x;
+    // The notes after the control, measured first: a yes/no label wraps under
+    // itself so that they stay on its first line (label_reserve).
+    std::string note, now, changed;
+    if (host.in_game()) {
+        // Settings apply at once in the game unless they say otherwise (ui-guidelines §3).
+        if (locked || snap.restart) note = locked ? tr("locked in a multiplayer game") : tr("next start");
+        const bool pending = setting_pending(snap);
+        if (pending || !snap.overridden.empty()) now = trf("now: {0}", {host.shown_value(i, s, pending ? snap.in_effect : snap.overridden)});
+    }
+    if (setting_changed(snap)) changed = trf("changed · default: {0}", {host.shown_value(i, s, snap.default_value)});
+    float trailing = gap + text_width("(?)");
+    if (!note.empty()) trailing += gap + text_width(note);
+    if (!now.empty()) trailing += gap + text_width(now);
+    if (!changed.empty()) trailing += gap + text_width(changed) + gap + button_width(tr("Reset"));
+    const float avail = ImGui::GetContentRegionAvail().x;
+    const float reserve = label_reserve(avail, trailing, ImGui::GetFontSize() * 12);
     ImGui::PushID(static_cast<int>(s));
     ImGui::BeginDisabled(disabled || locked);
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 12);
+    g_label_wrap_x = reserve > 0.0f ? ImGui::GetCursorPosX() + avail - reserve : 0.0f;
+    g_label_x = 0.0f;
     host.draw_setting_control(i, s, disabled || locked);
+    g_label_wrap_x = 0.0f;
+    const float indent = g_label_x;
     ImGui::EndDisabled();
     // "(?)": its description and its default; a changed value says so in words, with Reset.
     ImGui::SameLine();
@@ -741,25 +780,17 @@ void PluginsTab::draw_setting(const Snapshot& model, size_t i, size_t s, bool di
         ImGui::PopTextWrapPos();
         ImGui::EndTooltip();
     }
-    // What follows wraps to its own line when the panel is too narrow for it.
-    const float gap = ImGui::GetStyle().ItemSpacing.x;
-    if (host.in_game()) {
-        // Settings apply at once in the game unless they say otherwise (ui-guidelines §3).
-        if (locked || snap.restart) {
-            const std::string note = locked ? tr("locked in a multiplayer game") : tr("next start");
-            same_line_if_fits(text_width(note));
-            weak(note);
-        }
-        const bool pending = setting_pending(snap);
-        if (pending || !snap.overridden.empty()) {
-            const std::string now = trf("now: {0}", {host.shown_value(i, s, pending ? snap.in_effect : snap.overridden)});
-            same_line_if_fits(text_width(now));
-            ImGui::TextColored(kInfo, "%s", now.c_str());
-        }
+    // What follows wraps to its own line, under a yes/no label, when the panel is too narrow for it.
+    if (!note.empty()) {
+        same_line_if_fits(text_width(note), indent);
+        weak(note);
     }
-    if (setting_changed(snap)) {
-        const std::string changed = trf("changed · default: {0}", {host.shown_value(i, s, snap.default_value)});
-        same_line_if_fits(text_width(changed) + gap + button_width(tr("Reset")));
+    if (!now.empty()) {
+        same_line_if_fits(text_width(now), indent);
+        ImGui::TextColored(kInfo, "%s", now.c_str());
+    }
+    if (!changed.empty()) {
+        same_line_if_fits(text_width(changed) + gap + button_width(tr("Reset")), indent);
         ImGui::TextColored(kInfo, "%s", changed.c_str());
         ImGui::SameLine();
         ImGui::BeginDisabled(disabled || locked);

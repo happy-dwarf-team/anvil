@@ -295,9 +295,7 @@ void ManagerApp::draw_setting_control(size_t i, size_t s, bool disabled) {
                 value.integer = on ? 0 : 1;
                 commit = true;
             }
-            ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted(snap.label.c_str());
+            ::anvil::ui::setting_label(snap.label);
             break;
         }
         case SettingType::Int: {
