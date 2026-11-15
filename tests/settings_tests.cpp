@@ -661,6 +661,23 @@ void settings_tests() {
         CHECK(!store.current(99) && !store.saved(99));
     });
 
+    run("settings: a retired setting's environment variable is named and ignored", [] {
+        const SettingsFileResult r = parse_settings_text(kModuleSettings);
+        if (!r.file) {
+            CHECK(false);
+            return;
+        }
+        const auto dir = scratch("store-retired");
+        PluginSettings store;
+        const auto notes = store.init(*r.file, dir / "settings.toml", "lode", environment({{"LODE_FLOWS_MODE", "x"},
+                                                                                           {"ANVIL_LODE_FLOWS_MODE", "off"}}));
+        CHECK(notes.size() == 1 && notes[0].level == ANVIL_LOG_WARNING &&
+              notes[0].message == "ANVIL_LODE_FLOWS_MODE: flows_mode is a retired setting, replaced by the switch of module "
+                                  "lode.flows (enabled_modules or disabled_modules in anvil.toml); ignored");
+        CHECK(store.warnings().size() == 1);
+        CHECK(store.init(*r.file, dir / "settings.toml", "lode", environment({})).empty());
+    });
+
     run("settings: a change saves, applies restart = false at once and calls the subscribers", [] {
         const auto dir = scratch("change");
         const auto file = dir / "data" / "p" / "settings.toml";

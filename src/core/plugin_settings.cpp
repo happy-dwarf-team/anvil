@@ -65,6 +65,17 @@ std::vector<PluginSettings::Note> PluginSettings::init(SettingsFile schema, cons
         }
         store(s, *slots_[s.id], current_[s.id]);
     }
+    // A retired setting's variable (a script from before its module's switch) would
+    // otherwise do nothing without a word: the switch is in anvil.toml.
+    for (const RetiredSetting& r : schema_.retired) {
+        const std::string variable = setting_environment_name(plugin_id, r.name);
+        const auto text = environment ? environment(variable) : process_environment(variable);
+        if (!text) continue;
+        const std::string key = std::string(plugin_id) + "." + r.module;
+        warnings_.push_back(variable + ": " + r.name + " is a retired setting, replaced by the switch of module " + key +
+                            " (enabled_modules or disabled_modules in anvil.toml); ignored");
+        notes.push_back({ANVIL_LOG_WARNING, warnings_.back()});
+    }
     return notes;
 }
 
