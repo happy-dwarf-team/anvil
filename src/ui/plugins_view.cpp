@@ -435,8 +435,9 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
         ImGui::SameLine();
     }
     ImGui::SetCursorPosX(right - toggle_w);
+    toggle_left_ = ImGui::GetCursorScreenPos().x;
     const std::string refusal = host.switch_refusal(i);
-    if (plugin_toggle("##on", p.saved.on, p.saved.on ? tr("On") : tr("Off"), locked || !known || !refusal.empty())) {
+    if (toggle("##on", p.saved.on, p.saved.on ? tr("On") : tr("Off"), locked || !known || !refusal.empty())) {
         if (p.saved.on) {
             host.apply(set_switch(p, "", Which::On, false));
         } else {
@@ -517,7 +518,15 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
                                          ImGuiTreeNodeFlags_SpanAvailWidth);
             }
             if (!open) continue;
-            for (const size_t m : group.modules) draw_module(model, i, m, locked || plugin_off, host);
+            // One row per module, a hairline between them.
+            for (size_t k = 0; k < group.modules.size(); ++k) {
+                if (k > 0) {
+                    ImGui::PushStyleColor(ImGuiCol_Separator, kLine);
+                    ImGui::Separator();
+                    ImGui::PopStyleColor();
+                }
+                draw_module(model, i, group.modules[k], locked || plugin_off, host);
+            }
             if (!group.name.empty()) ImGui::TreePop();
         }
     }
@@ -557,63 +566,127 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
     const PluginSnap& p = model.plugins[i];
     const ModuleSnap& mod = p.modules[m];
     ImGui::PushID(mod.id.c_str());
-    // In the overlay: what this game does with it, and a change that waits.
-    const auto in_game = [&] {
-        if (!host.in_game()) return;
-        if (const std::string text = in_game_text(module_in_game(model, p, mod)); !text.empty()) {
-            ImGui::SameLine();
-            weak(text);
-        }
-        if (!(mod.saved == mod.in_effect)) {
-            ImGui::SameLine();
-            ImGui::TextColored(kInfo, "%s", tr("at the next start"));
-        }
-    };
-    // Its name, what it does, then its switch: a checkbox, or where it runs when it
-    // changes the game. Every name, description and control under it starts in one
-    // column: past the checkbox's box.
-    const float column = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x;
-    const auto describe = [&] {
-        if (!mod.description.empty()) weak_wrapped(mod.description);
-    };
-    if (mod.changes_game) {
-        ImGui::Indent(column);
-        ImGui::BeginDisabled(disabled);
-        ImGui::TextUnformatted(mod.name.c_str());
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetItemTooltip("%s", (p.id + "." + mod.id).c_str());
-        in_game();
-        describe();
-        draw_where(model, i, mod.id, mod.saved, mod.offers, false, disabled, host);
-    } else {
-        bool on = mod.saved.on;
-        ImGui::BeginDisabled(disabled);
-        if (checkbox(mod.name.c_str(), &on)) host.apply(set_switch(p, mod.id, Which::On, on));
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetItemTooltip("%s", (p.id + "." + mod.id).c_str());
-        in_game();
-        ImGui::Indent(column);
-        describe();
-    }
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const bool on = mod.saved.on;
+    const std::string key = p.id + "." + mod.id;
     const SettingsLayout layout = settings_layout(p, mod.id);
     const size_t n = layout.shown.size() + layout.advanced.size();
+    const std::vector<Edit> changed = reset_module_settings(p, mod.id);
+
+    // One line: its name, its facts, a chevron and its switch; a click anywhere on the
+    // line opens what it does, where it runs and its settings. The facts say what the
+    // switch does not: that it changes the game (while it is off and its choice of
+    // games is hidden), its settings, what was changed, and in the overlay what this
+    // game does with it. Where it runs is in the open part only.
+    struct Part {
+        std::string text;
+        ImVec4 color;
+    };
+    std::vector<Part> facts;
+    if (mod.changes_game && !on) facts.push_back({tr("changes the game"), kTextWeak});
+    if (n > 0) facts.push_back({trn("{0} setting|{0} settings", static_cast<long long>(n)), kTextWeak});
+    if (!changed.empty()) facts.push_back({trf("{0} changed", {std::to_string(changed.size())}), kInfo});
+    if (host.in_game()) {
+        if (std::string text = in_game_text(module_in_game(model, p, mod)); !text.empty()) facts.push_back({std::move(text), kTextWeak});
+        if (!(mod.saved == mod.in_effect)) facts.push_back({tr("at the next start"), kInfo});
+    }
+    std::string all_facts;
+    for (const Part& part : facts) all_facts += (all_facts.empty() ? "" : " \xC2\xB7 ") + part.text;
+
+    // Opened at first: a module whose settings were changed.
+    ImGuiStorage* storage = ImGui::GetStateStorage();
+    const ImGuiID open_id = ImGui::GetID("open");
+    bool open = storage->GetBool(open_id, !changed.empty());
+    const float line = ImGui::GetTextLineHeight();
+    const float frame = ImGui::GetFrameHeight();
+    const float h = frame + 2;
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    const float right_edge = at.x + ImGui::GetContentRegionAvail().x;
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, kFrameHovered);
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, kFrameActive);
+    if (ImGui::Selectable("##row", false, ImGuiSelectableFlags_AllowOverlap, ImVec2(0, h))) {
+        open = !open;
+        storage->SetBool(open_id, open);
+    }
+    ImGui::PopStyleColor(2);
+    if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 26);
+        ImGui::TextUnformatted(mod.name.c_str());
+        if (!all_facts.empty()) weak(all_facts);
+        if (!mod.description.empty()) ImGui::TextUnformatted(mod.description.c_str());
+        weak(key);
+        ImGui::PopTextWrapPos();
+        ImGui::EndTooltip();
+    }
+
+    // The switch lines up under the plugin's; on a narrow pane it keeps the right edge
+    // and drops its word before it leaves the line.
+    const float word_w = std::max(ImGui::CalcTextSize(tr("On")).x, ImGui::CalcTextSize(tr("Off")).x);
+    const float need = toggle_track_width(true) + style.ItemSpacing.x + word_w;
+    const float wanted = std::min(toggle_left_ > at.x ? toggle_left_ : right_edge - need, right_edge - need);
+    const bool room = wanted - at.x > ImGui::GetFontSize() * 8;
+    const float toggle_x = room ? wanted : right_edge - toggle_track_width(true);
+    const float chevron_x = toggle_x - style.ItemSpacing.x - line;
+    const float text_right = chevron_x - style.ItemSpacing.x;
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    const float x = at.x + style.FramePadding.x;
+    const float y = at.y + (h - line) * 0.5f;
+    bool cut = false;
+    const float name_w = draw_strong(draw, ImVec2(x, y), ImGui::GetColorU32(on && !disabled ? kText : kTextWeak), mod.name.c_str(), text_right, &cut);
+    // The facts after the name, cut with "..."; with room for less than a few letters,
+    // none (the tooltip has them).
+    float fx = x + name_w + style.ItemSpacing.x * 1.5f;
+    if (!cut && text_right - fx > ImGui::GetFontSize() * 4) {
+        for (size_t k = 0; k < facts.size() && !cut; ++k) {
+            const std::string text = (k > 0 ? " \xC2\xB7 " : "") + facts[k].text;
+            fx += draw_text_fit(draw, ImGui::GetFont(), ImVec2(fx, y), text_right, ImGui::GetColorU32(facts[k].color), text, &cut);
+        }
+    }
+    // The chevron: > closed, v open.
+    {
+        const ImU32 color = ImGui::GetColorU32(kTextWeak);
+        const float s = line * 0.22f;
+        const float thickness = std::max(1.5f, line * 0.09f);
+        const ImVec2 c(chevron_x + line * 0.5f, at.y + h * 0.5f);
+        if (open) {
+            draw->AddLine(ImVec2(c.x - s, c.y - s * 0.5f), ImVec2(c.x, c.y + s * 0.5f), color, thickness);
+            draw->AddLine(ImVec2(c.x, c.y + s * 0.5f), ImVec2(c.x + s, c.y - s * 0.5f), color, thickness);
+        } else {
+            draw->AddLine(ImVec2(c.x - s * 0.5f, c.y - s), ImVec2(c.x + s * 0.5f, c.y), color, thickness);
+            draw->AddLine(ImVec2(c.x + s * 0.5f, c.y), ImVec2(c.x - s * 0.5f, c.y + s), color, thickness);
+        }
+    }
+    ImGui::SetCursorScreenPos(ImVec2(toggle_x, at.y + (h - frame) * 0.5f));
+    if (toggle("##on", on, room ? (on ? tr("On") : tr("Off")) : nullptr, disabled, true)) host.apply(set_switch(p, mod.id, Which::On, !on));
+    ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + h));
+    ImGui::Dummy(ImVec2(0, 0));
+    if (!open) {
+        ImGui::PopID();
+        return;
+    }
+
+    // The open part, under the name: what it does, where it runs (while it is on; its
+    // switch turns it off), its settings.
+    ImGui::Indent(style.FramePadding.x);
+    if (!mod.description.empty()) weak_wrapped(mod.description);
+    if (mod.changes_game && on) draw_where(model, i, mod.id, mod.saved, mod.offers, true, disabled, host);
     if (n > 0) {
-        if (mod.saved.on) {
+        if (on) {
             draw_settings_of(model, i, mod.id, disabled, host);
         } else if (ImGui::TreeNode(trf("Settings ({0}), kept while it is off", {std::to_string(n)}).c_str())) {
             draw_settings_of(model, i, mod.id, true, host);
             ImGui::TreePop();
         }
-        const std::vector<Edit> reset = reset_module_settings(p, mod.id);
-        if (reset.size() > 1) {
+        if (changed.size() > 1) {
             ImGui::BeginDisabled(disabled);
-            if (text_button(trf("Reset settings ({0})...", {std::to_string(reset.size())}).c_str())) {
-                ask_edits(model, host, trf("Reset the settings of {0}", {mod.name}), tr("Reset"), reset);
+            if (text_button(trf("Reset settings ({0})...", {std::to_string(changed.size())}).c_str())) {
+                ask_edits(model, host, trf("Reset the settings of {0}", {mod.name}), tr("Reset"), changed);
             }
             ImGui::EndDisabled();
         }
     }
-    ImGui::Unindent(column);
+    ImGui::Unindent(style.FramePadding.x);
     ImGui::Spacing();
     ImGui::PopID();
 }

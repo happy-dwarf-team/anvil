@@ -30,8 +30,8 @@ still says what is shown and when.
 3. **Every state has a shape, every exception a word.** Colour never stands alone: a list
    entry starts with its state's glyph, and anything but "on" is also said in words (§ Status).
 4. **Only what ImGui draws.** Every token is an `ImGuiCol_*` colour or an `ImGuiStyleVar`. Two
-   small exceptions are drawn with `ImDrawList`: the status glyphs and the plugin's toggle
-   (an `InvisibleButton` with a rounded track and a knob, about 20 lines in `src/ui/`). No new
+   small exceptions are drawn with `ImDrawList`: the status glyphs and the toggle
+   (an `InvisibleButton` with a rounded track and a knob, about 30 lines in `src/ui/`). No new
    dependencies.
 5. **Say the usual once, mark the exception.** A list or a module row does not repeat "on" or
    "applies at once"; it says what is unusual about it.
@@ -122,8 +122,9 @@ with its own colours and spacings.
 | **Primary button** | Ember with `on_ember` semibold text. One per view: "Start EU4", the confirm button of a dialog, "Approve...". |
 | **Secondary button** | `frame` with a `border` outline. Everything else, Cancel included. |
 | **Text button** | No frame, `info` text: "More", "Clear", "Reset settings (2)...", "Revoke approval...". |
-| **Plugin toggle** | A 36 × 20 track (in font units: about 2.1 × 1.2 lines) with a round knob and the word "On" or "Off" in semibold after it; ember track and `on_ember` knob when on, a `frame` track with a `border` outline when off. Only the plugin's own switch uses it, in the detail's header. |
-| **Checkbox** | A box outlined in `control_outline` (3:1, so an unticked one still reads as a control), with what it covers in weak text under its label, aligned with it; on, an ember tick (`CheckMark`) on an ember-tinted box (`CheckboxSelectedBg`, `#5b3e28`: ember at 28 % over `frame`). ImGui draws a radio button's dot in `CheckMark` on `FrameBg` too, so the tick stays light rather than dark on a filled box (as the prototype drew it). When its plugin is off, the checkbox is disabled and keeps its tick, so the choice stays visible but reads as held (ui-guidelines §5). |
+| **Toggle** | For what acts at once (ui-guidelines §5). A track 1.9 times as wide as high with a round knob, in a cell of the frame's height so it lines up with buttons and text, and its state as a word after it where nothing else names it. Two sizes: the frame's height for the plugin's own switch in the detail's header, the text's height for a module's row and a yes/no setting (there with its label after it instead of the word). On: an ember track (darker while pressed) and an `on_ember` knob. Off: a `frame` track with a `control_outline` outline (3:1) and a `text_weak` knob, both brighter on hover. The knob's margin grows with the scale. Tab reaches it and Enter or Space flips it, with the ember keyboard cursor around it. Disabled, it fades once, by `DisabledAlpha`. |
+| **Module row** | One line: the name in semibold (`text_weak` while off), its facts in `text_weak` ("2 settings", "changes the game" while off; "1 changed" and "at the next start" in `info`), a chevron (› closed, ⌄ open), then the compact toggle with its word, its track under the plugin toggle's. The whole row opens and closes; hover is `frame_hovered`, neutral, since opening a row selects nothing. A `line` hairline parts the rows. The facts end in "…" before the chevron and are left out when fewer than a few letters fit; the tooltip has the name, the facts, what it does and the id. Open, it shows what it does, where it runs (a segmented control without Off, while it is on) and its settings under the name. |
+| **Checkbox** | For a choice confirmed later with a button, or a view option in a dense line. A box outlined in `control_outline` (3:1, so an unticked one still reads as a control), with what it covers in weak text under its label, aligned with it; on, an ember tick (`CheckMark`) on an ember-tinted box (`CheckboxSelectedBg`, `#5b3e28`: ember at 28 % over `frame`). ImGui draws a radio button's dot in `CheckMark` on `FrameBg` too, so the tick stays light rather than dark on a filled box (as the prototype drew it). |
 | **Segmented control** | A `frame` track with a 2 px inset; the chosen segment is ember at 28 % with an ember outline. |
 | **Input and combo** | `frame` with a `border` outline that brightens on hover; the caret is ember (`InputTextCursor`). |
 | **List row** | Two lines, always (ui-guidelines §5), in the Plugins list and the Crashes list alike: a status glyph in a column of its own, the name in semibold and an `info` dot when something waits; under it one phrase in 12 px, in `text_weak` for a summary and in the state colour for an exception. A line that does not fit ends in "…" and the tooltip has it whole. Hover `raised`, the section headers' too; the selection is ember at 16 % with a 3 px ember bar at its left edge. |
@@ -201,8 +202,8 @@ Decided on 2026-11-14 as variant B1 of the throwaway page
 6. **The keyboard cursor is ember and 2 px**, easy to see on the warm surfaces.
 7. **The overlay is more opaque** (97 %) and keeps its body text off pure white, so it reads
    over a bright map without glare.
-8. **The plugin's switch is a toggle in the header**, apart from the modules' checkboxes, and a
-   plugin without modules loses the Off of its "where it runs" control, which said the same.
+8. **What acts at once is a toggle**: the plugin's in the header, a module's and a yes/no
+   setting's smaller. "Where it runs" loses its Off wherever a toggle says the same.
 9. **The list says the usual once** (review of 2026-11-14 below).
 
 ## Review of the list and the overlay, 2026-11-14
@@ -240,6 +241,22 @@ what changed in Anvil 1.23.0:
 | An unticked checkbox's outline was `border`, 1.9:1. | `control_outline`, 3.6:1. |
 | In the overlay, five layers above the list (the build, Restart, a panel's checkbox, "Warnings (1)" folded, the approval banner) left the list two rows; the detail's scrolling part shrank to a sliver under a long approval; names were in regular weight; the build showed as "eu4-1.37.5-steam-win64"; a row's line ran under the list's edge. | One status line (Anvil, Steam 1.37.5, "Panels:" with their switches, Restart game... at the right); start-up warnings as a banner line with Show; the approval as one banner shared with the Manager, without the reason that repeats it and with "Open its repository"; the detail scrolls as one under its header; Segoe UI Semibold in the overlay; "…" and a tooltip in list rows; the plugin toggle at a fixed place at the header's right (it moved with the name's width); "Crashes" as in the Manager; a larger first window. |
 | Notices above a page were coloured text with small buttons; text buttons at the start of a line sat 8 px in; the Benchmark listed eight green checks and said "per arm". | Banners with text buttons; text buttons line up with the text; one "Ready: all 8 checks pass" that unfolds, and "without and with the plugin". |
+
+## Review of the switches, 2026-11-15
+
+The plugin's toggle, the modules' checkboxes and the yes/no settings, read against the
+`/ui-ux-pro-max` rules on keyboard reach, a control's 3:1 outline, distinct states and
+progressive disclosure. Twelve layouts of the modules were tried on the throwaway branch
+`prototype/module-toggles` (`ANVIL_PROTO_VARIANT`); the player chose C11 (rows that open,
+hairlines, the chevron at the right) without "where it runs" on the row.
+
+| Found | Change |
+|---|---|
+| Tab never reached the plugin's toggle: an `InvisibleButton` without `EnableNav`. | The toggle takes the keyboard; Enter or Space flips it. |
+| Off, the toggle's outline was `border` (1.9:1) and its white knob was the brightest thing in the header. | `control_outline` (3.6:1) and a `text_weak` knob; it brightens on hover and darkens while pressed. |
+| Disabled, the toggle faded twice (`BeginDisabled` and its own alpha); its knob's margin stayed 3 px at 200 %. | It fades once; the margin grows with the scale. |
+| A module's checkbox hung in the left margin, rows that change the game had none, and their Off sat in a segmented control: three controls for one decision, at three places. | Every module is one row with a small toggle under the plugin's; "where it runs" lost its Off and sits in the open part. |
+| Yes/no settings were a plain checkbox in the Manager and an outlined one in the overlay. | The compact toggle in both. |
 
 ## What came from `/ui-ux-pro-max`, and what did not
 

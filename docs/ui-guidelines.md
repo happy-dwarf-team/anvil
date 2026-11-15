@@ -191,16 +191,25 @@ settled it is variant B5 of `tools/manager/prototype/module-switches.html` on th
 
 ### Switches and opt-ins
 
+- **A toggle or a checkbox.** What acts at once is a toggle: a plugin, a module, a yes/no
+  setting. A choice the player confirms later with a button (in a dialog, "Remove my data
+  too") stays a checkbox, and so does a view option in a dense line ("Panels:", "Follow").
 - **The plugin's own switch is a toggle in the detail's header**, at its right edge, with
   its state as a word ("On", "Off"). It decides about every module, so it is bigger than
-  and drawn apart from their checkboxes. Reset and Remove sit before it, behind a separator.
-  It keeps its place from plugin to plugin and when clicked, and stays in sight while the
-  modules scroll.
-- **A module that does not change the game** has a checkbox: on or off.
-- **A module that changes the game** has one choice of where it runs, as a segmented
-  control: Off, Normal games, + Ironman, + Multiplayer, Everywhere. **A plugin without
-  modules that changes the game** has the same control without Off, since its toggle turns
-  it off; while it is off the control keeps showing the choice, greyed. A choice its
+  theirs. Reset and Remove sit before it, behind a separator. It keeps its place from
+  plugin to plugin and when clicked, and stays in sight while the modules scroll.
+- **A module is one row**: its name, then in weak words what its switch does not say (its
+  settings, "1 changed" in the info colour, "changes the game" while it is off, and in the
+  overlay what this game does with it), a chevron, and its small toggle with its word,
+  lined up under the plugin's toggle. A hairline parts the rows. A click anywhere on the row
+  opens what it does, where it runs and its settings; a module whose settings were changed
+  starts open. On a narrow pane the facts end in "…" (the tooltip has them all), and the
+  toggle keeps its place and drops its word before it leaves the row.
+- **A module that changes the game** has one choice of where it runs, in its open part, as
+  a segmented control without Off (its toggle turns it off): Normal games, + Ironman,
+  + Multiplayer, Everywhere. It shows while the module is on. **A plugin without
+  modules that changes the game** has the same control under its header; while it is off
+  the control keeps showing the choice, greyed. A choice its
   author does not offer is disabled with "its author keeps it out of ironman" in its
   tooltip. The line under it says the choice in a sentence and names each kept-out mode
   once, as the player's choice or as its author's ("Runs in normal games. Kept out of
@@ -216,7 +225,7 @@ settled it is variant B5 of `tools/manager/prototype/module-switches.html` on th
 - **A plugin that is off** greys its modules and keeps showing each module's own switch,
   opt-ins and settings, so the player sees what comes back when the plugin is turned on. A
   line says so once: "The plugin is off, so none of its modules load. Each module keeps its
-  switch and its settings." The modules' controls are disabled, not unticked.
+  switch and its settings." The modules' toggles are disabled, not turned off.
 ### Dependencies
 
 - **A plugin others need** says so next to its switch: "Needed by Anvil Map. Turning it off
