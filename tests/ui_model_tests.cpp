@@ -351,6 +351,43 @@ void chain_tests() {
         CHECK(c.steps.size() == 1 && c.steps[0].id == "a");
         CHECK(c.missing == std::vector<std::string>{"gone"});
     });
+    run("a refused edit stops a chain; a reset or an Undo goes on", [] {
+        Snapshot off = chain_snapshot();
+        off.plugins[1].saved.on = false;
+        off.plugins[2].saved.on = false;
+        const std::vector<Edit> chain = edits_of(off, turn_on_chain(off, "tongs"));
+        CHECK(chain.size() == 3);
+        std::vector<std::string> written;
+        // Mei is refused: Anvil Map and Tongs, which need it, are not turned on.
+        const auto refuse_mei = [&](const Edit& e) -> std::string {
+            if (e.plugin == "mei") return "refused";
+            written.push_back(e.key());
+            return {};
+        };
+        CHECK(apply_in_order(chain, OnRefusal::Stop, refuse_mei) == "refused");
+        CHECK(written.empty());
+        // A reset of three values with the first and the last refused: the middle one is written,
+        // and the first refusal is the one reported.
+        PluginSnap p = plugin("p");
+        p.settings = {setting("x", "2", "1"), setting("y", "a", "b"), setting("z", "3", "1")};
+        const std::vector<Edit> reset = reset_plugin(p);
+        CHECK(reset.size() == 3);
+        written.clear();
+        const std::string first = apply_in_order(reset, OnRefusal::GoOn, [&](const Edit& e) -> std::string {
+            if (e.setting != "y") return "no " + e.setting;
+            written.push_back(e.setting);
+            return {};
+        });
+        CHECK(first == "no x");
+        CHECK(written == std::vector<std::string>{"y"});
+        // Nothing refused: everything is written, in order, and nothing reported.
+        written.clear();
+        CHECK(apply_in_order(chain, OnRefusal::Stop, [&](const Edit& e) -> std::string {
+                  written.push_back(e.key());
+                  return {};
+              }).empty());
+        CHECK((written == std::vector<std::string>{"mei", "anvil-map", "tongs"}));
+    });
 }
 
 void reset_tests() {

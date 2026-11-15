@@ -293,6 +293,18 @@ std::vector<Edit> edits_of(const Snapshot& snapshot, const Chain& chain) {
     return out;
 }
 
+std::string apply_in_order(const std::vector<Edit>& edits, OnRefusal on_refusal,
+                           const std::function<std::string(const Edit&)>& write) {
+    std::string first;
+    for (const Edit& e : edits) {
+        std::string error = write(e);
+        if (error.empty()) continue;
+        if (first.empty()) first = std::move(error);
+        if (on_refusal == OnRefusal::Stop) break;
+    }
+    return first;
+}
+
 std::vector<Edit> reset_setting(const PluginSnap& plugin, std::string_view setting) {
     std::vector<Edit> out;
     for (const SettingSnap& s : plugin.settings) {

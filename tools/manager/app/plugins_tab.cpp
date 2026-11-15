@@ -81,7 +81,7 @@ struct ManagerApp::PluginsHost final : mui::PluginsHost {
     PluginSource& source(size_t i) const { return app.plugins_->sources[i]; }
 
     bool read_only() const override { return app.read_only(); }
-    void apply(const std::vector<mui::Edit>& edits) override { app.apply_edits(edits); }
+    void apply(const std::vector<mui::Edit>& edits, mui::OnRefusal on_refusal) override { app.apply_edits(edits, on_refusal); }
     bool known(size_t i) const override { return source(i).manifest.has_value(); }
     void draw_setting_control(size_t i, size_t s, bool disabled) override { app.draw_setting_control(i, s, disabled); }
 
@@ -434,10 +434,11 @@ void ManagerApp::save_plugin_settings(size_t i) {
 
 // Writes the model's edits: switches and opt-ins to anvil.toml, settings to
 // the players' files. Switches change what loads, so the folder is read again.
-void ManagerApp::apply_edits(const std::vector<mui::Edit>& edits) {
+void ManagerApp::apply_edits(const std::vector<mui::Edit>& edits, mui::OnRefusal on_refusal) {
     if (edits.empty() || !plugins_ || read_only()) return;
     const fs::path toml = game_ / "anvil" / "anvil.toml";
     bool switches = false;
+    bool refused = false;
     std::vector<size_t> settings;
     std::string error;
     std::set<std::string> moved;
@@ -491,9 +492,13 @@ void ManagerApp::apply_edits(const std::vector<mui::Edit>& edits) {
             }
         }
         if (!ok) {
-            failed(e.kind == mui::Edit::Kind::Setting ? tr("The settings were not saved") : tr("anvil.toml was not changed"), error,
-                   error.find("error 5)") != std::string::npos);
-            break;
+            // The first refusal is reported; a chain stops there, a reset or an Undo goes on.
+            if (!refused) {
+                failed(e.kind == mui::Edit::Kind::Setting ? tr("The settings were not saved") : tr("anvil.toml was not changed"), error,
+                       error.find("error 5)") != std::string::npos);
+            }
+            refused = true;
+            if (on_refusal == mui::OnRefusal::Stop) break;
         }
     }
     for (const size_t i : settings) save_plugin_settings(i);
