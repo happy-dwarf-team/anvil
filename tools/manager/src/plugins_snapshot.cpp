@@ -206,6 +206,12 @@ bool apply_setting_edit(PluginSource& source, const mui::Edit& edit, std::string
             return true;
         }
         if (value_text(setting, value) == edit.value) return true;
+        // Any other value (Undo sends the last start's) is read as the player's file would hold it.
+        PlayerSettings parsed = parse_player_settings(*source.schema, toml_string(setting.name) + " = " + edit.value + "\n");
+        if (parsed.values[setting.id]) {
+            value = *parsed.values[setting.id];
+            return true;
+        }
         error = "unknown value " + edit.value + " for " + setting.name;
         return false;
     }
