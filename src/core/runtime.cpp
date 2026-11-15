@@ -635,6 +635,11 @@ void startup_impl(const std::filesystem::path& game_dir) {
     // loads, so a value the player saves for it later drops none of them;
     // not for a second folder with the id of another (its data/<id> is the
     // other's), and a benchmark start writes no file (benchmark-v1.md §2).
+    // One folder per id moves, and none when a folder of that id loads: the
+    // first folder can also fail another check (a newer Anvil) while a later
+    // one loads, and data/<id> is then the loaded one's.
+    std::set<std::string> moved_ids;
+    for (const Manifest& loaded : resolved.order) moved_ids.insert(loaded.id);
     for (Skipped& s : skipped) {
         if (!s.mod.empty()) continue;
         ManifestResult parsed = load_manifest(s.folder);
@@ -646,7 +651,8 @@ void startup_impl(const std::filesystem::path& game_dir) {
             SettingsFileResult declared = load_settings(m.folder / m.settings);
             uint32_t line = 0;
             if (declared.file && settings_module_error(*declared.file, m, line).empty()) {
-                if (!declared.file->retired.empty() && s.why.code != "duplicate_id") {
+                if (!declared.file->retired.empty() && s.why.code != "duplicate_id" &&
+                    moved_ids.insert(m.id).second) {
                     for (const RetiredMoveNote& note : move_retired_settings(m, *declared.file, s.data_dir / "settings.toml",
                                                                              g_runtime->anvil_dir / "anvil.toml", settings,
                                                                              !arm.has_value())) {
