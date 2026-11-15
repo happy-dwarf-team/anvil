@@ -378,6 +378,8 @@ extern const Translation kKorean[] = {
      "작성자가 철인 모드에서 제외했습니다."},
     {"Its author keeps it out of multiplayer.",
      "작성자가 멀티플레이에서 제외했습니다."},
+    {"Its settings are changed in the first entry of {0}, under \"{1}\".",
+     "설정은 \"{1}\" 아래 {0}의 처음 항목에서 변경합니다."},
     {"Kept as {0}",
      "{0}(으)로 보관됨"},
     {"Kept out of ironman unless you allow it.",

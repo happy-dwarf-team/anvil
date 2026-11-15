@@ -378,6 +378,8 @@ extern const Translation kSimplifiedChinese[] = {
      "作者不让它用于铁人模式。"},
     {"Its author keeps it out of multiplayer.",
      "作者不让它用于多人游戏。"},
+    {"Its settings are changed in the first entry of {0}, under \"{1}\".",
+     "它的设置在“{1}”下 {0} 的第一个条目中更改。"},
     {"Kept as {0}",
      "已保存为 {0}"},
     {"Kept out of ironman unless you allow it.",

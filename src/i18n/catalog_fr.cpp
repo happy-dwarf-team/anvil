@@ -377,6 +377,8 @@ extern const Translation kFrench[] = {
      "Son auteur l'exclut de l'Ironman."},
     {"Its author keeps it out of multiplayer.",
      "Son auteur l'exclut du multijoueur."},
+    {"Its settings are changed in the first entry of {0}, under \"{1}\".",
+     "Ses paramètres se modifient dans la première entrée de {0}, sous « {1} »."},
     {"Kept as {0}",
      "Conservé sous {0}"},
     {"Kept out of ironman unless you allow it.",

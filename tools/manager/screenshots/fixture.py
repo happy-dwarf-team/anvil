@@ -6,7 +6,8 @@
 carries (tools/manager/anvil-package.zip) and a few plugins that show the
 Plugins tab's states: modules, settings with two changed (one a yes/no with a
 long label), a plugin that is off, one that needs it, one whose plugin.toml does
-not parse, a plugin from a mod that waits for approval, and a retired setting
+not parse, a plugin from a mod that waits for approval, a copy of Camera in that
+mod that the local Camera shadows (its settings shown read-only), and a retired setting
 the next start moves into anvil.toml (ADR 0013, point 4), which turns its module
 off (ADR 0014). <out>/user is EU4's user folder (game/userdir.txt
 names it).
@@ -168,6 +169,23 @@ write(game / "anvil" / "anvil.log", "".join(f"[{ms:9.1f} ms] {level:<5} [{source
 plugin(user / "mod" / "fixture-mod" / "anvil" / "sieges", "sieges", "Siege overview", '''description = "A list of every siege the player's armies hold."
 affects_gameplay = false
 ''')
+# The same id as the local Camera, with a setting of its own: the local one loads instead,
+# and this entry's settings (the same player's file, read with its schema) are shown read-only.
+plugin(user / "mod" / "fixture-mod" / "anvil" / "camera", "camera", "Camera", '''description = "Smoother zoom and a key to jump to the capital."
+affects_gameplay = false
+''', '''[setting.zoom_speed]
+type = "float"
+default = 1.0
+min = 0.25
+max = 4.0
+label = "Zoom speed"
+
+[setting.edge_pan]
+type = "bool"
+default = true
+label = "Move the map at the screen's edge"
+''')
+write(game / "anvil" / "data" / "camera" / "settings.toml", "zoom_speed = 1.5\n")
 write(user / "mod" / "fixture-mod.mod", 'name="Fixture mod"\npath="mod/fixture-mod"\n')
 write(user / "dlc_load.json", '{"enabled_mods":["mod/fixture-mod.mod"],"disabled_dlcs":[]}')
 print(game)

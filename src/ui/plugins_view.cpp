@@ -102,6 +102,16 @@ std::string in_game_text(InGame state) {
     return {};
 }
 
+// A section of the list, untranslated (marked for the catalogs).
+const char* section_name(Origin origin) {
+    switch (origin) {
+        case Origin::FromMod: return i18n::N_("From mods");
+        case Origin::WithAnvil: return i18n::N_("Comes with Anvil");
+        case Origin::Own: break;
+    }
+    return i18n::N_("Your plugins");
+}
+
 }  // namespace
 
 std::string entry_line(const EntryLine& line) {
@@ -317,9 +327,9 @@ void PluginsTab::draw_list(const Snapshot& model, PluginsHost& host) {
         const char* name;
         const char* id;
     };
-    const Section sections[] = {{Origin::Own, i18n::N_("Your plugins"), "own"},
-                                {Origin::FromMod, i18n::N_("From mods"), "mods"},
-                                {Origin::WithAnvil, i18n::N_("Comes with Anvil"), "anvil"}};
+    const Section sections[] = {{Origin::Own, section_name(Origin::Own), "own"},
+                                {Origin::FromMod, section_name(Origin::FromMod), "mods"},
+                                {Origin::WithAnvil, section_name(Origin::WithAnvil), "anvil"}};
     const float line = ImGui::GetTextLineHeight();
     for (const Section& section : sections) {
         std::vector<size_t> members;
@@ -403,7 +413,10 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
     // as its longer word, so it stays put from plugin to plugin and when it is clicked.
     const ImGuiStyle& style = ImGui::GetStyle();
     const float gap = style.ItemSpacing.x * 3;
-    const std::vector<Edit> reset = reset_plugin(p);
+    // Another entry of this id: its settings are the first entry's to change, shown here greyed.
+    const bool settings_shown_only = settings_read_only(model, i);
+    std::vector<Edit> reset = reset_plugin(p);
+    if (settings_shown_only) std::erase_if(reset, [](const Edit& e) { return e.kind == Edit::Kind::Setting; });
     const bool buttons = host.has_header_buttons(i);
     const float toggle_w = ImGui::GetFrameHeight() * 1.9f + style.ItemSpacing.x +
                            std::max(ImGui::CalcTextSize(tr("On")).x, ImGui::CalcTextSize(tr("Off")).x);
@@ -525,6 +538,11 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
     if (plugin_off && !p.modules.empty()) {
         weak_wrapped(tr("The plugin is off, so none of its modules load. Each module keeps its switch and its settings."));
     }
+    if (settings_shown_only && !p.settings.empty()) {
+        const size_t first = index_of(model, p.id);
+        weak_wrapped(trf("Its settings are changed in the first entry of {0}, under \"{1}\".",
+                         {p.name, tr(section_name(model.plugins[first].origin))}));
+    }
     if (!p.modules.empty()) {
         ImGui::SeparatorText(trf("Modules ({0})", {std::to_string(p.modules.size())}).c_str());
         for (const ModuleGroup& group : module_groups(p)) {
@@ -544,7 +562,7 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
                     ImGui::Separator();
                     ImGui::PopStyleColor();
                 }
-                draw_module(model, i, group.modules[k], locked || plugin_off, host);
+                draw_module(model, i, group.modules[k], locked || plugin_off, settings_shown_only, host);
             }
             if (!group.name.empty()) ImGui::TreePop();
         }
@@ -552,7 +570,7 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
     const SettingsLayout own = settings_layout(p, "");
     if (!own.shown.empty() || !own.advanced.empty()) {
         ImGui::SeparatorText(tr("Settings"));
-        draw_settings_of(model, i, "", locked, host);
+        draw_settings_of(model, i, "", locked || settings_shown_only, host);
     }
     ImGui::EndChild();
     ImGui::PopID();
@@ -581,7 +599,7 @@ void PluginsTab::draw_where(const Snapshot& model, size_t i, std::string_view mo
     weak_wrapped(where_sentence(saved.on || without_off ? shown : saved, offers));
 }
 
-void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool disabled, PluginsHost& host) {
+void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool disabled, bool settings_shown_only, PluginsHost& host) {
     const PluginSnap& p = model.plugins[i];
     const ModuleSnap& mod = p.modules[m];
     ImGui::PushID(mod.id.c_str());
@@ -695,14 +713,14 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
     if (mod.changes_game && on) draw_where(model, i, mod.id, mod.saved, mod.offers, true, disabled, host);
     if (n > 0) {
         if (on) {
-            draw_settings_of(model, i, mod.id, disabled, host);
+            draw_settings_of(model, i, mod.id, disabled || settings_shown_only, host);
         } else if (ImGui::TreeNode(trf("Settings ({0}), kept while it is off", {std::to_string(n)}).c_str())) {
             draw_settings_of(model, i, mod.id, true, host);
             ImGui::TreePop();
         }
         // Locked settings stay out of the reset (reset_module_settings).
         if (const std::vector<Edit> resets = reset_module_settings(p, mod.id); resets.size() > 1) {
-            ImGui::BeginDisabled(disabled);
+            ImGui::BeginDisabled(disabled || settings_shown_only);
             if (text_button(trf("Reset settings ({0})...", {std::to_string(resets.size())}).c_str())) {
                 ask_edits(model, host, trf("Reset the settings of {0}", {mod.name}), tr("Reset"), resets);
             }

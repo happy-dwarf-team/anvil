@@ -378,6 +378,8 @@ extern const Translation kJapanese[] = {
      "作者がアイアンマンでは使えないようにしています。"},
     {"Its author keeps it out of multiplayer.",
      "作者がマルチプレイでは使えないようにしています。"},
+    {"Its settings are changed in the first entry of {0}, under \"{1}\".",
+     "設定は「{1}」にある {0} の 1 つ目の項目で変更します。"},
     {"Kept as {0}",
      "{0} として保存"},
     {"Kept out of ironman unless you allow it.",
