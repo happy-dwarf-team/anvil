@@ -3182,6 +3182,12 @@ int main(int argc, char** argv) {
             place[0] = reinterpret_cast<uintptr_t>(fake.place_vtable);
             g_picked = place;
             CHECK(world->unit_at(3, 700, &unit) == ANVIL_ERROR_NOT_FOUND);  // a province, not a unit
+            // A kind of selectable whose kind getter is no constant getter: not a unit either.
+            alignas(8) static uintptr_t odd_vtable[2] = {};
+            alignas(8) static uintptr_t odd[2] = {};
+            odd[0] = reinterpret_cast<uintptr_t>(odd_vtable);
+            g_picked = odd;
+            CHECK(world->unit_at(3, 700, &unit) == ANVIL_ERROR_NOT_FOUND);
             g_picked = nullptr;
             CHECK(world->unit_at(3, 700, nullptr) == ANVIL_ERROR_INVALID_ARGUMENT);
         };
