@@ -185,6 +185,14 @@ struct PluginView {
 enum class Where { Off, Normal, PlusIronman, PlusMultiplayer, Everywhere };
 
 const PluginSnap* find_plugin(const Snapshot& snapshot, std::string_view id);
+
+// Two entries can share an id: a local plugin and the copy in a mod it shadows,
+// or two mods in conflict. An entry's key tells them apart in the list (the
+// selection, the widgets' ids): the id for the first of them, then the id and
+// its place. Both read the same player's file, so what waits counts once.
+std::string entry_key(const Snapshot& snapshot, std::size_t index);
+std::size_t index_of_entry(const Snapshot& snapshot, std::string_view key);  // SIZE_MAX for none
+bool first_of_id(const Snapshot& snapshot, std::size_t index);
 const ModuleSnap* find_module(const PluginSnap& plugin, std::string_view id);
 
 // What loads at the next start, with the saved files.
