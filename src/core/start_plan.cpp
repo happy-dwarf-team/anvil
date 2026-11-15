@@ -75,6 +75,7 @@ PlayerChoices read_player_choices(const PluginInventory& inventory, AnvilSetting
     PlayerChoices choices;
     choices.anvil_toml = std::move(anvil_toml);
     choices.trust = read_trust(inventory.anvil_dir / "trust.toml");
+    choices.moved_retired = read_moved_retired(moved_retired_file(inventory.anvil_dir));
     const auto settings_file = [&](const std::string& id) {
         if (choices.settings_files.contains(id)) return;
         std::optional<std::string> text = read_text_file(data_dir(inventory.anvil_dir, id) / "settings.toml", kMaxPluginTomlBytes);
@@ -120,9 +121,10 @@ const PlannedPlugin* StartPlan::find(std::string_view id) const {
 }
 
 std::vector<RetiredMoveNote> carry_out_retired_move_now(const PlannedRetiredMove& move, const fs::path& anvil_toml,
-                                                        bool* anvil_toml_written) {
+                                                        bool* anvil_toml_written, bool* settled) {
     AnvilSettings lists = read_anvil_settings(anvil_toml);
-    return move_retired_settings(move.manifest, move.schema, move.player_file, anvil_toml, lists, true, anvil_toml_written);
+    return move_retired_settings(move.manifest, move.schema, move.player_file, anvil_toml, lists, true, anvil_toml_written,
+                                 moved_retired_file(anvil_toml.parent_path()), settled);
 }
 
 const PluginCheck* check_of(const PluginInventory& inventory, const StartPlan& plan, const PlannedPlugin& plugin) {
@@ -353,9 +355,14 @@ StartPlan plan_start(const PluginInventory& inventory, const PlayerChoices& choi
             const auto text = choices.settings_files.find(id);
             const std::optional<std::string> player_text = text != choices.settings_files.end() ? text->second : std::nullopt;
             // A benchmark start writes no file (docs/spec/benchmark-v1.md §2): the
-            // values hold for its lists only and stay for the next start.
-            RetiredMovePlan m = plan_retired_settings(manifest, schema, player_text, plan.lists, !conditions.benchmark);
+            // values hold for its lists only and stay for the next start. A value the
+            // record of moved retired settings holds is only removed from the player's file.
+            const auto recorded = choices.moved_retired.find(id);
+            RetiredMovePlan m = plan_retired_settings(manifest, schema, player_text, plan.lists, !conditions.benchmark,
+                                                      recorded != choices.moved_retired.end() ? recorded->second
+                                                                                              : std::vector<MovedRetired>{});
             if (!m.writes()) {
+                if (m.forget_recorded) plan.writes.forget_moved.push_back(id);
                 for (RetiredMoveNote& note : m.notes) plan.notes.emplace_back(id, std::move(note));
                 return;
             }

@@ -285,6 +285,19 @@ void start_plan_tests() {
         choices.settings_files["lode"] = "flows_mode = \"on\"\n";
         plan = plan_start(inv, choices, {});
         CHECK(entry(plan, "lode").modules_on == std::vector<bool>{true} && plan.writes.retired.size() == 1);
+        // A value the record of moved retired settings holds (its file could not be written
+        // after anvil.toml was): anvil.toml decides the module, the value only leaves the file.
+        choices.settings_files["lode"] = "flows_mode = \"off\"\n";
+        choices.moved_retired["lode"] = {{"flows_mode", "\"off\""}};
+        plan = plan_start(inv, choices, {});
+        CHECK(entry(plan, "lode").modules_on == std::vector<bool>{true} && plan.lists.disabled_modules.empty());
+        CHECK(plan.writes.retired.size() == 1 && plan.writes.retired[0].move.edits.empty() &&
+              plan.writes.retired[0].move.writes_player_file && plan.writes.forget_moved.empty());
+        // A recorded plugin whose file holds no retired value any more leaves the record.
+        choices.settings_files["lode"] = std::nullopt;
+        plan = plan_start(inv, choices, {});
+        CHECK(plan.writes.retired.empty() && plan.writes.forget_moved == std::vector<std::string>{"lode"});
+        choices.moved_retired.clear();
         // A benchmark start: the module is off for that start only, and nothing is written (benchmark-v1.md §2).
         choices.settings_files["lode"] = "flows_mode = \"off\"\n";
         StartConditions bench;

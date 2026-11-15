@@ -1251,26 +1251,38 @@ int main(int argc, char** argv) {
         CHECK(report.plan.writes.retired[0].move.player_text == "level = 3\n");  // the plan's, now stale
 
         // The player's file cannot be replaced (another program holds it open): anvil.toml has the
-        // move, the file keeps the value, and the Manager is told (a warning), so it does not make the switch.
+        // move, the file keeps the value (a warning), and the record of moved retired settings holds
+        // it, so the move is settled: the next start will not make it again, and the switch may go on.
         const fs::path toml = game / "anvil" / "anvil.toml";
+        const fs::path record = moved_retired_file(game / "anvil");
         const HANDLE held = CreateFileW(player.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
         CHECK(held != INVALID_HANDLE_VALUE);
         bool written = false;
-        std::vector<RetiredMoveNote> notes = carry_out_retired_move_now(report.plan.writes.retired[0], toml, &written);
-        CloseHandle(held);
-        CHECK(written && contains(read(player), "flows_mode"));
+        bool settled = false;
+        std::vector<RetiredMoveNote> notes = carry_out_retired_move_now(report.plan.writes.retired[0], toml, &written, &settled);
+        CHECK(written && settled && contains(read(player), "flows_mode"));
         CHECK(std::any_of(notes.begin(), notes.end(), [](const RetiredMoveNote& n) {
             return n.level == ANVIL_LOG_WARNING && contains(n.message, "cannot remove the retired settings");
         }));
+        CHECK(read_moved_retired(record) == (MovedRetiredRecord{{"lode", {{"flows_mode", "\"off\""}}}}));
 
-        // A switch the player makes first carries the move out as that start would,
-        // so the start has nothing left to undo it with, and the setting saved since stays.
-        written = false;
-        notes = carry_out_retired_move_now(report.plan.writes.retired[0], toml, &written);
-        CHECK(written && read(player) == "level = 5\n");
-        CHECK(std::none_of(notes.begin(), notes.end(), [](const RetiredMoveNote& n) { return n.level == ANVIL_LOG_WARNING; }));
+        // The player turns the module on while the file is still held: the next start keeps it on
+        // and only tries again to remove the value.
         std::string error;
-        CHECK(set_listed(game / "anvil" / "anvil.toml", module_switch_edits("lode.flows", true, true), error));
+        CHECK(set_listed(toml, module_switch_edits("lode.flows", true, true), error));
+        report = cli::check_game(options);
+        snapshot = build_plugins_snapshot(game, report, {}, text);
+        CHECK(snapshot.model.plugins[0].modules[0].saved.on && report.plan.lists.disabled_modules.empty());
+        CHECK(report.plan.writes.retired.size() == 1 && report.plan.writes.retired[0].move.edits.empty());
+        // Another switch before the start retries the removal (still held: settled all the same).
+        notes = carry_out_retired_move_now(report.plan.writes.retired[0], toml, &written, &settled);
+        CloseHandle(held);
+        CHECK(written && settled && read_anvil_settings(toml).disabled_modules.empty() && fs::exists(record));
+
+        // Released: the removal goes through, the setting saved since stays, and the record goes.
+        notes = carry_out_retired_move_now(report.plan.writes.retired[0], toml, &written, &settled);
+        CHECK(written && settled && read(player) == "level = 5\n" && !fs::exists(record));
+        CHECK(std::none_of(notes.begin(), notes.end(), [](const RetiredMoveNote& n) { return n.level == ANVIL_LOG_WARNING; }));
         report = cli::check_game(options);
         snapshot = build_plugins_snapshot(game, report, {}, text);
         CHECK(report.plan.writes.empty() && snapshot.model.plugins[0].modules[0].saved.on);

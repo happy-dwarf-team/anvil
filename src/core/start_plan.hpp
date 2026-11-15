@@ -31,6 +31,9 @@ struct PlayerChoices {
     TrustFile trust;
     // anvil/data/<id>/settings.toml by plugin id; nullopt: there is none.
     std::map<std::string, std::optional<std::string>> settings_files;
+    // anvil/data/anvil/retired-moved.toml: retired values anvil.toml has
+    // already, still in a player's file that could not be written.
+    MovedRetiredRecord moved_retired;
 };
 
 // Reads the player's choices for the plugins of `inventory`. The loader,
@@ -128,6 +131,9 @@ struct StartWrites {
     std::vector<std::filesystem::path> remove;
     std::vector<PlannedCopy> copies;
     std::vector<PlannedRetiredMove> retired;  // only the moves that write
+    // Plugins whose entries leave the record of moved retired settings, as
+    // their files no longer hold them (not a write the player sees).
+    std::vector<std::string> forget_moved;
     bool empty() const { return remove.empty() && copies.empty() && retired.empty(); }
 };
 
@@ -169,10 +175,14 @@ StartPlan plan_start(const PluginInventory& inventory, const PlayerChoices& choi
 // before a switch the player makes): planned again from the player's file
 // and anvil.toml as they are now, so a value saved since the plan stays.
 // Returns what to show; a warning means a file was not written, and
-// `anvil_toml_written` false that it was anvil.toml (nothing changed).
+// `anvil_toml_written` false that it was anvil.toml (nothing changed). It
+// keeps the record of moved retired settings next to anvil.toml as a start
+// does; `settled` true: the next start does not move these values again
+// (the player's file lost them, or the record holds them), so a switch the
+// player makes now holds.
 std::vector<RetiredMoveNote> carry_out_retired_move_now(const PlannedRetiredMove& move,
                                                         const std::filesystem::path& anvil_toml,
-                                                        bool* anvil_toml_written = nullptr);
+                                                        bool* anvil_toml_written = nullptr, bool* settled = nullptr);
 
 // The check of the folder a planned plugin loads from (for a mod's plugin
 // whose update waits, its approved copy's); nullptr when there is none.

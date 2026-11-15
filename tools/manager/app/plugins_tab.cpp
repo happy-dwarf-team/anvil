@@ -456,15 +456,18 @@ void ManagerApp::apply_edits(const std::vector<mui::Edit>& edits, mui::OnRefusal
         // anvil.toml (ADR 0013, point 4) and undo a switch saved before it:
         // the move is made now, as that start would make it (ADR 0014),
         // from the files as they are now (a setting saved since the folder
-        // was read stays). A file it cannot write stops the switch.
+        // was read stays). A move the next start would make again stops the
+        // switch: anvil.toml not written, or the player's file not written and
+        // the record of moved retired settings not either.
         const char* move_failed = nullptr;
         if (e.kind == mui::Edit::Kind::Switch && snapshot_->report && moved.insert(e.plugin).second) {
             for (const PlannedRetiredMove& m : snapshot_->report->plan.writes.retired) {
                 if (m.plugin != e.plugin) continue;
                 switches = true;  // anvil.toml or the player's file changed: read the folder again
                 bool written = true;
-                for (const RetiredMoveNote& note : carry_out_retired_move_now(m, toml, &written)) {
-                    if (note.level != ANVIL_LOG_WARNING || move_failed != nullptr) continue;
+                bool settled = true;
+                for (const RetiredMoveNote& note : carry_out_retired_move_now(m, toml, &written, &settled)) {
+                    if (settled || note.level != ANVIL_LOG_WARNING || move_failed != nullptr) continue;
                     move_failed = written ? tr("The settings were not saved") : tr("anvil.toml was not changed");
                     error = note.message;
                 }
