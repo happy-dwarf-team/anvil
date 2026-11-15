@@ -292,6 +292,7 @@ void ManagerApp::poll() {
     using namespace std::chrono;
     if (pending_.valid() && pending_.wait_for(0s) == std::future_status::ready) {
         snapshot_ = pending_.get();
+        crash_summaries_.folder_refreshed();  // a report the game was still writing is read again
         translations_.clear();   // a plugin installed or updated may bring other translations
         follow_language(game_);  // the overlay's setting may be new: the folder was installed or changed
         rebuild_plugins();       // its sources point into the new report
@@ -1011,9 +1012,7 @@ void ManagerApp::draw_crashes_tab() {
         return;
     }
     const auto summary = [&](const std::string& name) -> const std::optional<CrashSummary>& {
-        auto it = crash_summaries_.find(name);
-        if (it == crash_summaries_.end()) it = crash_summaries_.emplace(name, load_crash_summary(folder, name)).first;
-        return it->second;
+        return crash_summaries_.get(folder, name);
     };
     const auto what = [](const CrashSummary& crash) {
         const bool named = !crash.summary.empty() || !crash.plugins.empty();

@@ -3,6 +3,7 @@
 #include "benchmark_tab.hpp"
 #include "cli/game.hpp"
 #include "core/crash_history.hpp"
+#include "crash_summaries.hpp"
 #include "core/discovery.hpp"
 #include "core/last_start.hpp"
 #include "core/plugin_translation.hpp"
@@ -192,7 +193,7 @@ private:
     mutable std::map<std::pair<std::filesystem::path, std::string>, std::optional<PluginTranslation>> translations_;
     std::string crash_selected_;
     std::string shot_dialog_;  // the screenshot mode's dialog, until it opens
-    std::map<std::string, std::optional<CrashSummary>> crash_summaries_;  // the crash list's, read once each
+    CrashSummaries crash_summaries_;  // the crash list's
     std::string crash_text_;
     std::string log_text_;
     std::vector<anvil::ui::LogLine> log_lines_;  // log_text_ in lines, rebuilt by set_log_text

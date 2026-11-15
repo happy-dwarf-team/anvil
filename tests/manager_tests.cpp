@@ -5,6 +5,7 @@
 // Nothing here needs, or touches, a real game.
 // Usage: anvil_manager_tests <path of version.dll>
 #include "catalog.hpp"
+#include "crash_summaries.hpp"
 #include "core/game_build.hpp"
 #include "files.hpp"
 #include "game.hpp"
@@ -1144,6 +1145,31 @@ int main(int argc, char** argv) {
         bad.value = "\"many\"";
         CHECK(!apply_setting_edit(source, bad, error) && contains(error, "unknown value"));
         CHECK(source.values[0].integer == 20);
+    });
+
+    run("crashes tab: a report not yet readable whole is read again after the next refresh", [] {
+        TempDir temp("crash-summaries");
+        const fs::path dir = temp.dir;
+        const std::string whole = "{\n  \"format\": 1,\n  \"level\": \"no_plugin\",\n  \"summary\": \"\"\n}\n";
+        write(dir / "2026-11-15_08-00-00.json", whole);
+        CrashSummaries summaries;
+        CHECK(summaries.get(dir, "2026-11-15_08-00-00") && summaries.get(dir, "2026-11-15_08-00-00")->level == "no_plugin");
+        // Not there yet, and half written: the game was still writing them at the first look.
+        CHECK(!summaries.get(dir, "2026-11-15_09-00-00").has_value());
+        write(dir / "2026-11-15_09-30-00.json", "{\n  \"format\": 1,\n  \"lev");
+        CHECK(summaries.get(dir, "2026-11-15_09-30-00") && summaries.get(dir, "2026-11-15_09-30-00")->level.empty());
+        write(dir / "2026-11-15_09-00-00.json", whole);
+        write(dir / "2026-11-15_09-30-00.json", whole);
+        CHECK(!summaries.get(dir, "2026-11-15_09-00-00").has_value());  // read once until the folder is refreshed
+        summaries.folder_refreshed();
+        CHECK(summaries.get(dir, "2026-11-15_09-00-00") && summaries.get(dir, "2026-11-15_09-00-00")->level == "no_plugin");
+        CHECK(summaries.get(dir, "2026-11-15_09-30-00") && summaries.get(dir, "2026-11-15_09-30-00")->level == "no_plugin");
+        // A whole one stays as it was read.
+        write(dir / "2026-11-15_08-00-00.json", "{\n  \"format\": 1,\n  \"level\": \"in_plugin_code\"\n}\n");
+        summaries.folder_refreshed();
+        CHECK(summaries.get(dir, "2026-11-15_08-00-00")->level == "no_plugin");
+        summaries.clear();
+        CHECK(summaries.get(dir, "2026-11-15_08-00-00")->level == "in_plugin_code");
     });
 
     manager_benchmark_tests();

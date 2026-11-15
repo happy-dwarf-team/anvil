@@ -35,6 +35,7 @@ add_library(anvil_manager_core STATIC
     src/benchmark_series.cpp
     src/benchmark_setup.cpp
     src/catalog.cpp
+    src/crash_summaries.cpp
     src/game.cpp
     src/install.cpp
     src/json.cpp
