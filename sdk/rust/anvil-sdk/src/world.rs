@@ -1136,7 +1136,8 @@ impl World {
 
     /// What [`World::player`] answers and the two tags it is chosen from, read
     /// at once (anvil-game 1.23.0). In a normal game `tag` and `own` are the
-    /// player's country and `observed` is `None`; in observe mode `own` is the
+    /// player's country and `observed` is as the game stores it: usually `None`,
+    /// but it can hold a tag left over; in observe mode `own` is the
     /// observer's pseudo-country and `tag` the observed country while there is
     /// one.
     pub fn player_tags(&self) -> Result<PlayerTags> {
