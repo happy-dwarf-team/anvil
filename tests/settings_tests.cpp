@@ -331,6 +331,16 @@ void module_settings_tests() {
         CHECK(lists.disabled_modules.size() == 1 && !std::filesystem::exists(player) && !std::filesystem::exists(toml));
         CHECK(!notes.empty() && contains(notes[0].message, "meant module lode.flows off; anvil.toml has it so already"));
 
+        // A benchmark start: this start's lists only; neither file is written, so the next start moves it.
+        write(toml, "# the player's\n");
+        write(player, "flows_mode = \"off\"\n");
+        lists = {};
+        notes = move_retired_settings(m, *r.file, player, toml, lists, false);
+        CHECK(lists.disabled_modules == std::vector<std::string>{"lode.flows"});
+        CHECK(read(toml) == "# the player's\n" && read(player) == "flows_mode = \"off\"\n");
+        CHECK(notes.size() == 2 && contains(notes[0].message, "at this benchmark start; anvil.toml is not written") &&
+              contains(notes[1].message, "stay for the next start"));
+
         // anvil.toml cannot be written (it does not parse): the player's file stays for the next start.
         write(toml, "disabled_modules = [\n");
         write(player, "flows_mode = \"off\"\n");

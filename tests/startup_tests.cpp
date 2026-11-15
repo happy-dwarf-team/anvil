@@ -257,6 +257,45 @@ int main(int argc, char** argv) {
         CHECK(read(game.anvil / "anvil.toml") == toml);
     });
 
+    run("start-up: retired settings move at a normal start only, and never from a second folder of the same id", [&] {
+        Game game(probe);
+        const fs::path local = game.anvil / "plugins" / "mod-probe";
+        fs::copy(probe, local, fs::copy_options::recursive);
+        write(local / "plugin.toml", read(local / "plugin.toml") +
+                                         "settings = \"settings.toml\"\n\n[[modules]]\nid = \"flows\"\nname = \"Flows\"\n"
+                                         "affects_gameplay = false\n");
+        const std::string retired = "[setting.level]\ntype = \"int\"\ndefault = 1\nlabel = \"Level\"\n\n"
+                                    "[retired.flows_mode]\nmodule = \"flows\"\noff = [\"off\"]\n";
+        write(local / "settings.toml", retired);
+        const fs::path player = game.anvil / "data" / "mod-probe" / "settings.toml";
+        write(player, "flows_mode = \"off\"\n");
+        const std::string toml = read(game.anvil / "anvil.toml");
+
+        // A benchmark start: the module is off at this start, and neither file changes.
+        SetEnvironmentVariableW(L"ANVIL_BENCHMARK", L"with:mod-probe");
+        std::string log = game.start();
+        SetEnvironmentVariableW(L"ANVIL_BENCHMARK", nullptr);
+        CHECK(contains(log, "means module mod-probe.flows off at this benchmark start; anvil.toml is not written"));
+        CHECK(read(game.anvil / "anvil.toml") == toml && read(player) == "flows_mode = \"off\"\n");
+
+        // A second folder with the same id loses, and its retired rules leave the winner's data alone.
+        const fs::path twin = game.anvil / "plugins" / "mod-probe-2";
+        fs::copy(local, twin, fs::copy_options::recursive);
+        write(local / "settings.toml", "[setting.level]\ntype = \"int\"\ndefault = 1\nlabel = \"Level\"\n\n"
+                                       "[setting.flows_mode]\ntype = \"string\"\ndefault = \"on\"\nlabel = \"Mode\"\n");
+        log = game.start();
+        CHECK(contains(log, "skipped") && contains(log, kRunning));
+        CHECK(!contains(log, "meant module mod-probe.flows"));
+        CHECK(read(game.anvil / "anvil.toml") == toml && read(player) == "flows_mode = \"off\"\n");
+
+        // Alone again with its retired setting, a normal start moves it: into anvil.toml, out of the player's file.
+        fs::remove_all(twin);
+        write(local / "settings.toml", retired);
+        log = game.start();
+        CHECK(contains(log, "meant module mod-probe.flows off: added it to disabled_modules in anvil.toml"));
+        CHECK(contains(read(game.anvil / "anvil.toml"), "disabled_modules = [\"mod-probe.flows\"]") && !fs::exists(player));
+    });
+
     run("start-up: a benchmark start writes its record at ready and when it quits", [&] {
         Game game(probe);
         fs::copy(probe, game.anvil / "plugins" / "mod-probe", fs::copy_options::recursive);
