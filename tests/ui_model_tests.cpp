@@ -239,6 +239,25 @@ void pending_tests() {
     });
 }
 
+void entry_tests() {
+    run("entries of one id: told apart in the list, counted once", [] {
+        Snapshot s;
+        PluginSnap local = plugin("lode");
+        local.settings = {setting("x", "1", "1")};
+        local.settings[0].saved = "5";  // waits for the next start, in data/lode/settings.toml
+        PluginSnap shadowed = local;    // the copy in a mod: the same player's file
+        shadowed.origin = Origin::FromMod;
+        PluginSnap other = plugin("tongs");
+        s.plugins = {local, other, shadowed};
+        CHECK(entry_key(s, 0) == "lode" && entry_key(s, 1) == "tongs" && entry_key(s, 2) == "lode|2");
+        CHECK(entry_key(s, 3).empty());
+        CHECK(index_of_entry(s, "lode") == 0 && index_of_entry(s, "lode|2") == 2 && index_of_entry(s, "tongs") == 1);
+        CHECK(index_of_entry(s, "lode|3") == SIZE_MAX && index_of_entry(s, "tongs|2") == SIZE_MAX);
+        CHECK(first_of_id(s, 0) && first_of_id(s, 1) && !first_of_id(s, 2));
+        CHECK(pending_count(s) == 1 && undo_pending(s).size() == 1);
+    });
+}
+
 void where_tests() {
     run("where it runs, both ways", [] {
         CHECK(where(Switches{false, true, true}) == Where::Off);
@@ -462,6 +481,7 @@ int main() {
     load_tests();
     game_tests();
     pending_tests();
+    entry_tests();
     where_tests();
     chain_tests();
     reset_tests();

@@ -151,8 +151,32 @@ std::size_t pending_count(const PluginSnap& plugin) {
 
 std::size_t pending_count(const Snapshot& snapshot) {
     std::size_t n = 0;
-    for (const PluginSnap& p : snapshot.plugins) n += pending_count(p);
+    for (std::size_t i = 0; i < snapshot.plugins.size(); ++i) {
+        if (first_of_id(snapshot, i)) n += pending_count(snapshot.plugins[i]);
+    }
     return n;
+}
+
+bool first_of_id(const Snapshot& snapshot, std::size_t index) {
+    for (std::size_t i = 0; i < index; ++i) {
+        if (snapshot.plugins[i].id == snapshot.plugins[index].id) return false;
+    }
+    return true;
+}
+
+std::string entry_key(const Snapshot& snapshot, std::size_t index) {
+    if (index >= snapshot.plugins.size()) return {};
+    std::size_t before = 0;
+    for (std::size_t i = 0; i < index; ++i) before += snapshot.plugins[i].id == snapshot.plugins[index].id ? 1 : 0;
+    // '|' is in no plugin id (manifest ids are lower-case letters, digits, '-' and '_').
+    return before == 0 ? snapshot.plugins[index].id : snapshot.plugins[index].id + "|" + std::to_string(before + 1);
+}
+
+std::size_t index_of_entry(const Snapshot& snapshot, std::string_view key) {
+    for (std::size_t i = 0; i < snapshot.plugins.size(); ++i) {
+        if (snapshot.plugins[i].id == key.substr(0, key.find('|')) && entry_key(snapshot, i) == key) return i;
+    }
+    return SIZE_MAX;
 }
 
 namespace {
@@ -366,8 +390,9 @@ std::vector<Edit> undo_pending(const PluginSnap& plugin) {
 
 std::vector<Edit> undo_pending(const Snapshot& snapshot) {
     std::vector<Edit> out;
-    for (const PluginSnap& p : snapshot.plugins) {
-        std::vector<Edit> mine = undo_pending(p);
+    for (std::size_t i = 0; i < snapshot.plugins.size(); ++i) {
+        if (!first_of_id(snapshot, i)) continue;  // the same files as the first entry of its id
+        std::vector<Edit> mine = undo_pending(snapshot.plugins[i]);
         out.insert(out.end(), mine.begin(), mine.end());
     }
     return out;

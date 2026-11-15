@@ -173,13 +173,15 @@ void PluginsTab::draw_waiting(const Snapshot& model) {
     if (to_approve(model) == 0) return;
     begin_banner("waiting", Tone::Warn);
     ImGui::TextUnformatted(tr("Waiting for your approval:"));
-    for (const PluginSnap& p : model.plugins) {
+    for (size_t i = 0; i < model.plugins.size(); ++i) {
+        const PluginSnap& p = model.plugins[i];
         if (!(p.blocked == Blocked::WaitsForApproval && !p.approved) && p.update_waits.empty()) continue;
         // The version that waits: its row and its detail say whether it is an update.
         const std::string label = p.name + " " + (p.update_waits.empty() ? p.version : p.update_waits);
+        const std::string key = entry_key(model, i);
         ImGui::SameLine();
         if (ImGui::GetContentRegionAvail().x < button_width(label.c_str())) ImGui::NewLine();
-        if (text_button((label + "##wait-" + p.id).c_str())) selected = p.id;
+        if (text_button((label + "##wait-" + key).c_str())) selected = key;
     }
     end_banner(Tone::Warn);
 }
@@ -227,11 +229,12 @@ ModAction draw_mod_approval(const ModApproval& a) {
 }
 
 void PluginsTab::draw_panes(const Snapshot& model, PluginsHost& host) {
-    if (selected.empty() || index_of(model, selected) == SIZE_MAX) {
+    if (selected.empty() || index_of_entry(model, selected) == SIZE_MAX) {
         // The list's first entry: sections go Own, FromMod, WithAnvil, each in the model's order.
         const auto first = std::min_element(model.plugins.begin(), model.plugins.end(),
                                             [](const PluginSnap& a, const PluginSnap& b) { return a.origin < b.origin; });
-        selected = first == model.plugins.end() ? std::string() : first->id;
+        selected = first == model.plugins.end() ? std::string()
+                                                 : entry_key(model, static_cast<size_t>(first - model.plugins.begin()));
     }
     const float list_width = std::clamp(ImGui::GetContentRegionAvail().x * 0.34f, ImGui::GetFontSize() * 16, ImGui::GetFontSize() * 24);
     ImGui::BeginChild("list", ImVec2(list_width, 0), ImGuiChildFlags_Borders);
@@ -239,7 +242,7 @@ void PluginsTab::draw_panes(const Snapshot& model, PluginsHost& host) {
     ImGui::EndChild();
     ImGui::SameLine();
     ImGui::BeginChild("detail", ImVec2(0, 0), ImGuiChildFlags_Borders);
-    if (const size_t i = index_of(model, selected); i != SIZE_MAX) draw_detail(model, i, host);
+    if (const size_t i = index_of_entry(model, selected); i != SIZE_MAX) draw_detail(model, i, host);
     ImGui::EndChild();
 }
 
@@ -327,7 +330,7 @@ void PluginsTab::draw_list(const Snapshot& model, PluginsHost& host) {
         if (section.origin != Origin::Own && counts.plugins == 0 && !host.show_empty_section(section.origin)) continue;
         if (filtering && members.empty()) continue;
         const std::string count = filtering ? trf("{0} found", {std::to_string(members.size())}) : std::to_string(counts.plugins);
-        const bool holds_selection = std::any_of(members.begin(), members.end(), [&](size_t i) { return model.plugins[i].id == selected; });
+        const bool holds_selection = std::any_of(members.begin(), members.end(), [&](size_t i) { return entry_key(model, i) == selected; });
         ImGui::SetNextItemOpen(section.origin != Origin::WithAnvil || holds_selection || filtering,
                                filtering || holds_selection ? ImGuiCond_Always : ImGuiCond_Once);
         // Hovered `raised`, as a row: ember is the selection's colour.
@@ -354,7 +357,8 @@ void PluginsTab::draw_list(const Snapshot& model, PluginsHost& host) {
             const bool third = match.where == Match::Where::Module || match.where == Match::Where::Setting;
             const float pad = ImGui::GetStyle().FramePadding.y;
             const ImVec2 at = ImGui::GetCursorScreenPos();
-            if (list_row(("##entry-" + p.id).c_str(), p.id == selected, third ? 3 : 2)) selected = p.id;
+            const std::string key = entry_key(model, i);
+            if (list_row(("##entry-" + key).c_str(), key == selected, third ? 3 : 2)) selected = key;
             const bool hovered = ImGui::IsItemHovered();
             ImDrawList* draw = ImGui::GetWindowDrawList();
             const float x = row_text_x(at);
