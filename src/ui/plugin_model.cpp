@@ -361,6 +361,10 @@ std::size_t changed_module_settings(const PluginSnap& plugin, std::string_view m
     }));
 }
 
+std::string repository_link(std::string_view repository) {
+    return repository.starts_with("https://") ? std::string(repository) : std::string();
+}
+
 std::vector<Edit> reset_module_settings(const PluginSnap& plugin, std::string_view module) {
     std::vector<Edit> out;
     for (const SettingSnap& s : plugin.settings) {

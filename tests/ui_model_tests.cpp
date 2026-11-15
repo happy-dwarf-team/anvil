@@ -361,6 +361,11 @@ void reset_tests() {
         const std::vector<Edit> all = reset_plugin(p);
         CHECK(all.size() == 1 && all[0].setting == "z");
     });
+    run("a repository is offered to open only at an https:// address", [] {
+        CHECK(repository_link("https://github.com/x/y") == "https://github.com/x/y");
+        CHECK(repository_link("http://example.com/x").empty() && repository_link("github.com/x/y").empty() &&
+              repository_link("file:///C:/x").empty() && repository_link("").empty());
+    });
 }
 
 void find_tests() {

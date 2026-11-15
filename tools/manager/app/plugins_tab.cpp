@@ -369,7 +369,7 @@ void ManagerApp::draw_mod_approval(size_t i) {
     if (!m.approved_hash.empty()) {
         a.approved = trf("Approved: {0} on {1} (hash {2})", {m.approved_version, m.approved_date.substr(0, 10), m.approved_hash.substr(0, 8)});
     }
-    if (src.manifest) a.repository = src.manifest->repository;
+    if (src.manifest) a.repository = mui::repository_link(src.manifest->repository);
     a.can_approve = can_approve_shown(m);
     a.update = m.state == "update-pending";
     a.can_revoke = !m.approved_hash.empty();

@@ -251,6 +251,11 @@ std::vector<Edit> reset_module_settings(const PluginSnap& plugin, std::string_vi
 // The module's settings that differ from their default, locked ones included:
 // the count its row shows, as its setting rows mark them "changed".
 std::size_t changed_module_settings(const PluginSnap& plugin, std::string_view module);
+
+// The repository a plugin names, for "Open its repository": an https://
+// address only, the one kind the Manager and the overlay open; empty
+// otherwise, so no button is shown that would do nothing.
+std::string repository_link(std::string_view repository);
 // Settings, modules' switches and opt-ins, and the plugin's opt-ins; never the
 // plugin's own switch and never an approval. Module switches go back to their
 // `default_on`, opt-ins to not allowed.
