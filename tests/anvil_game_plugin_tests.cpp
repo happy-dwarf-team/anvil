@@ -50,8 +50,17 @@ void fake_frame_body() {
     if (g_inside_frame != nullptr) g_inside_frame();
 }
 
-// What the stand-in of PHYSFS_getWriteDir answers.
+// What the stand-in of PHYSFS_getWriteDir answers. With g_write_dir_switch
+// at n >= 0, its call n from now on (0 is the next) answers g_write_dir_later
+// instead: PhysFS' folder changed between two of the plugin's calls.
 const char* g_write_dir = nullptr;
+int g_write_dir_switch = -1;
+const char* g_write_dir_later = nullptr;
+const char* fake_get_write_dir() {
+    if (g_write_dir_switch == 0) g_write_dir = g_write_dir_later;
+    if (g_write_dir_switch >= 0) --g_write_dir_switch;
+    return g_write_dir;
+}
 // What the stand-in of CEU3GraphicalMap::GetSelectable picks.
 void* g_picked = nullptr;
 
@@ -144,11 +153,11 @@ struct FakeEu4 {
         put_pointer(0x1746BA6, reinterpret_cast<uintptr_t>(&fake_push_event_rest));
         put(0x1746BAE, {0xFF, 0xD0, 0x48, 0x83, 0xC4, 0x20, 0x5F, 0xC3});
         put(0x1761F20, {0xB8, 0xD2, 0x04, 0x00, 0x00, 0xC3});  // SDL_GetTicks: mov eax,1234; ret
-        // PHYSFS_getWriteDir, exported: mov rax, &g_write_dir; mov rax,[rax]; ret.
+        // PHYSFS_getWriteDir, exported: mov rax, fake_get_write_dir; jmp rax.
         // Below SDL_GetTicks: FakeWorld's getters start at 0x1761F40.
         put(0x1761F00, {0x48, 0xB8});
-        put_pointer(0x1761F02, reinterpret_cast<uintptr_t>(&g_write_dir));
-        put(0x1761F0A, {0x48, 0x8B, 0x00, 0xC3});
+        put_pointer(0x1761F02, reinterpret_cast<uintptr_t>(&fake_get_write_dir));
+        put(0x1761F0A, {0xFF, 0xE0});
         IMAGE_EXPORT_DIRECTORY exports{};
         exports.Name = 0x1B661A0;
         exports.Base = 1;
@@ -2273,9 +2282,21 @@ int main(int argc, char** argv) {
         // A folder longer than MAX_PATH (-userdir with long paths on): given whole.
         static const std::string written =
             "C:/Users/Zo\xC3\xAB/Documents/Paradox Interactive/" + std::string(1200, 'd') + "/";
-        g_write_dir = written.c_str();
+        static const std::string shorter =
+            "C:/Users/Zo\xC3\xAB/Documents/Paradox Interactive/" + std::string(1100, 'd') + "/";
+        // It grew between the measure and the copy: not given, asked again next time.
+        g_write_dir = "D:/x/";
+        g_write_dir_later = written.c_str();
+        g_write_dir_switch = 1;
+        CHECK(service->user_dir() == nullptr);
+        CHECK(g_write_dir == written.c_str() && g_write_dir_switch == -1);
+        // It got shorter: given at its copied length, not padded to the measured one (no NULs
+        // after it, the trailing slash removed).
+        g_write_dir_later = shorter.c_str();
+        g_write_dir_switch = 1;
         const wchar_t* dir = service->user_dir();
-        CHECK(dir != nullptr && std::wstring(dir) == L"C:\\Users\\Zo\u00EB\\Documents\\Paradox Interactive\\" + std::wstring(1200, L'd'));
+        CHECK(g_write_dir == shorter.c_str() && g_write_dir_switch == -1);
+        CHECK(dir != nullptr && std::wstring(dir) == L"C:\\Users\\Zo\u00EB\\Documents\\Paradox Interactive\\" + std::wstring(1100, L'd'));
         // Given once, it stays: the same string, whatever PhysFS says later.
         g_write_dir = "D:/other/";
         CHECK(service->user_dir() == dir);
