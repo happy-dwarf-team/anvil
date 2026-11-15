@@ -9,6 +9,7 @@
 #include "core/mod_plugins.hpp"
 #include "core/playset.hpp"
 #include "core/plugin_hash.hpp"
+#include "core/start_plan.hpp"
 #include "core/trust.hpp"
 #include "test_support.hpp"
 
@@ -110,6 +111,14 @@ struct Playground {
         return discover_mod_plugins(anvil, user, local_ids);
     }
 };
+
+// What a start removes before any plugin loads: the start plan's approved
+// copies that trust.toml no longer names (ADR 0014), removed as the loader does.
+void prune_as_a_start(const Playground& g) {
+    const PluginInventory inventory = take_inventory(g.anvil, g.user, GameImage{});
+    const StartPlan plan = plan_start(inventory, read_player_choices(inventory), {});
+    for (const fs::path& gone : plan.writes.remove) remove_tree(gone);
+}
 
 const ModPlugin* find(const ModDiscovery& d, const std::string& id, const std::string& mod) {
     for (const ModPlugin& p : d.plugins) {
@@ -356,7 +365,7 @@ int main() {
         p = find(d, "hello", "Hello Mod");
         CHECK(p->state == ModPluginState::Approved && p->hash != approved_hash && fs::exists(copy));
         // The next start prunes the copies trust.toml no longer names.
-        prune_approved_copies(g.anvil, d.trust);
+        prune_as_a_start(g);
         CHECK(!fs::exists(copy) && fs::exists(approved_copy(g.anvil, "hello", p->hash)));
 
         // An update whose approved copy is gone just waits.
@@ -380,7 +389,8 @@ int main() {
         p = find(d, "tool", "local-mod");
         CHECK(p->state == ModPluginState::Approved && p->copy_missing);
         std::string error;
-        CHECK(make_approved_copy(g.anvil, *p, error) && hash_plugin_folder(p->load_folder).sha256 == p->hash);
+        CHECK(copy_approved(g.anvil, p->id, p->folder, p->approval->hash, error) &&
+              hash_plugin_folder(p->load_folder).sha256 == p->hash);
 
         write(p->load_folder / "tool.dll", "tampered");
         CHECK(hash_plugin_folder(p->load_folder).sha256 != p->hash);
@@ -466,7 +476,7 @@ int main() {
         CHECK(d.warnings.size() == 1 && contains(d.warnings[0], "trust.toml does not parse"));
         CHECK(d.plugins[0].state == ModPluginState::Invalid);
         const fs::path copies = g.anvil / "data" / "anvil" / "approved" / "p";
-        prune_approved_copies(g.anvil, d.trust);  // nothing goes while the file is broken
+        prune_as_a_start(g);  // nothing goes while the file is broken
         CHECK(!fs::is_empty(copies));
         std::string error;
         CHECK(!revoke_mod_plugin(g.anvil, "p", "", error) && contains(error, "does not parse"));
@@ -487,7 +497,7 @@ int main() {
         CHECK(fs::exists(approved_copy(g.anvil, "p", hash_p)));
         d = g.discover();
         CHECK(find(d, "p", "M")->state == ModPluginState::Pending && find(d, "q", "M")->state == ModPluginState::Approved);
-        prune_approved_copies(g.anvil, d.trust);
+        prune_as_a_start(g);
         CHECK(!fs::exists(g.anvil / "data" / "anvil" / "approved" / "p"));
         CHECK(fs::exists(approved_copy(g.anvil, "q", find(d, "q", "M")->hash)));
         CHECK(revoke_mod_plugin(g.anvil, "never-approved", "", error));

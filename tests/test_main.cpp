@@ -134,6 +134,7 @@ int main(int argc, char** argv) {
     translation_tests();
     plugin_set_tests();
     start_plan_tests();
+    plugin_inventory_tests();
 
     run("resolver: a failed check skips the plugin and its dependents", [] {
         ResolveInput in;

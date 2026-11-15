@@ -230,12 +230,13 @@ OverlayPlugins build_overlay_plugins(const ControlClient& control, const AnvilCo
         p.approved_in_effect = !m.approved_hash.empty();
         p.approved = m.approved_next || (p.approved_in_effect && !m.revoked_next);
         if (m.state == "update-pending" && !m.approved_next) p.update_waits = m.version;
+        // Without the next start's plan (an older core, or none now: Anvil is off,
+        // or a plugin the next start does not see), this start's state and the
+        // approvals made in this game decide.
         if (const auto next = control.mod_plugin_next_start(m.index)) {
             p.next = next_state(*next);
-        } else if (control.has_next_start()) {
-            // Shadowed: the next start loads a local plugin with this id instead.
-            p.next.why = mui::LoadState::Why::CannotLoad;
-            p.next.reason = m.reason_text();
+        } else if (m.state == "pending" && m.approved_next) {
+            p.next.loads = true;  // approved in this game: it loads from the next start
         } else if (m.state == "pending") {
             p.next.why = mui::LoadState::Why::WaitsForApproval;
         } else if (m.state != "approved" && m.state != "update-pending") {

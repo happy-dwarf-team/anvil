@@ -67,6 +67,7 @@ void benchmark_tests(); // benchmark_tests.cpp
 void translation_tests();  // translation_tests.cpp
 void plugin_set_tests();   // plugin_set_tests.cpp
 void start_plan_tests();   // start_plan_tests.cpp
+void plugin_inventory_tests();  // plugin_inventory_tests.cpp
 void manager_benchmark_tests();  // manager_benchmark_tests.cpp, in anvil_manager_tests
 void manager_runner_tests();     // the same file: the series runner, with
 int fake_benchmark_game();       // anvil_manager_tests --bench-game as the game

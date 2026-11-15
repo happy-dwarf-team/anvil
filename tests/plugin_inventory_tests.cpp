@@ -1,0 +1,147 @@
+// The plugin inventory (ADR 0014) on folders laid out on disk: what
+// take_inventory reads and checks, and what a start plan made from it loads.
+// Part of anvil_tests.
+#include "core/log.hpp"
+#include "core/mod_plugins.hpp"
+#include "core/plugin_hash.hpp"
+#include "core/plugin_inventory.hpp"
+#include "core/start_plan.hpp"
+#include "core/trust.hpp"
+#include "test_support.hpp"
+
+#include <windows.h>
+
+#include <fstream>
+#include <string>
+#include <vector>
+
+using namespace anvil;
+namespace fs = std::filesystem;
+
+namespace {
+
+void write(const fs::path& file, std::string_view text) {
+    fs::create_directories(file.parent_path());
+    std::ofstream(file, std::ios::binary) << text;
+}
+
+fs::path fresh(const char* name) {
+    const fs::path dir = fs::temp_directory_path() / name;
+    std::error_code ignored;
+    fs::remove_all(dir, ignored);
+    fs::create_directories(dir);
+    return dir;
+}
+
+// A mod `name` in user/mod with the plugin `id` of `version`; returns the plugin's folder.
+fs::path mod_plugin(const fs::path& user, const std::string& name, const std::string& id, const std::string& version) {
+    const fs::path folder = user / "mod" / widen(name) / "anvil" / widen(id);
+    write(folder / "plugin.toml", plugin_toml(id, "", version));
+    write(folder / (id + ".dll"), "MZ");
+    write(user / "mod" / widen(name + ".mod"), "name=\"" + name + "\"\npath=\"mod/" + name + "\"\n");
+    return folder;
+}
+
+void enable_mods(const fs::path& user, const std::vector<std::string>& names) {
+    std::string list;
+    for (const std::string& n : names) list += (list.empty() ? "\"mod/" : ",\"mod/") + n + ".mod\"";
+    write(user / "dlc_load.json", "{\"enabled_mods\":[" + list + "]}");
+}
+
+TrustEntry approval(const std::string& mod, const std::string& id, const std::string& version, const std::string& hash) {
+    TrustEntry e;
+    e.id = id;
+    e.version = version;
+    e.mod = "mod/" + mod + ".mod";
+    e.mod_name = mod;
+    e.hash = hash;
+    e.approved = "2026-11-15T10:00:00Z";
+    return e;
+}
+
+void copy_folder(const fs::path& from, const fs::path& to) {
+    fs::create_directories(to);
+    fs::copy(from, to, fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+}
+
+}  // namespace
+
+void plugin_inventory_tests() {
+    run("plugin inventory: an update waits while another mod has the approved hash: the copy loads with that check", [] {
+        const fs::path dir = fresh("anvil-inventory-update-other-mod");
+        const fs::path anvil = dir / "anvil";
+        const fs::path user = dir / "user";
+        // One updated x to 2.0.0; Two still ships the 1.0.0 the player approved from One.
+        mod_plugin(user, "One", "x", "2.0.0");
+        const fs::path old = mod_plugin(user, "Two", "x", "1.0.0");
+        enable_mods(user, {"One", "Two"});
+        const std::string h1 = hash_plugin_folder(old).sha256;
+        copy_folder(old, approved_copy(anvil, "x", h1));
+        std::string error;
+        CHECK(write_trust(anvil / "trust.toml", {approval("One", "x", "1.0.0", h1)}, error));
+
+        const PluginInventory inventory = take_inventory(anvil, user, GameImage{});
+        const StartPlan plan = plan_start(inventory, read_player_choices(inventory), {});
+        CHECK(plan.mods.size() == 2 && plan.mods[0].state == ModPluginState::UpdatePending &&
+              plan.mods[1].state == ModPluginState::Conflict);
+        const PlannedPlugin* x = plan.find("x");
+        CHECK(x != nullptr && x->not_loading == NotLoading::None && x->folder == approved_copy(anvil, "x", h1));
+        // The copy's plugin.toml, not the update's: the DLL that loads is 1.0.0's.
+        CHECK(x != nullptr && x->manifest && x->manifest->version.to_string() == "1.0.0");
+        const PluginCheck* check = x != nullptr ? check_of(inventory, plan, *x) : nullptr;
+        CHECK(check != nullptr && check->manifest.manifest && check->manifest.manifest->version.to_string() == "1.0.0");
+        fs::remove_all(dir);
+    });
+
+    run("plugin inventory: an approved copy of a hash trust.toml no longer names is not checked", [] {
+        const fs::path dir = fresh("anvil-inventory-stale-copy");
+        const fs::path anvil = dir / "anvil";
+        const fs::path user = dir / "user";
+        const fs::path now = mod_plugin(user, "One", "x", "2.0.0");
+        enable_mods(user, {"One"});
+        const std::string h2 = hash_plugin_folder(now).sha256;
+        // The copy of 1.0.0, from before the player approved the update.
+        const fs::path stale = approved_copy(anvil, "x", std::string(64, 'a'));
+        write(stale / "plugin.toml", plugin_toml("x", "", "1.0.0"));
+        write(stale / "x.dll", "MZ");
+        std::string error;
+        CHECK(write_trust(anvil / "trust.toml", {approval("One", "x", "2.0.0", h2)}, error));
+
+        const PluginInventory inventory = take_inventory(anvil, user, GameImage{});
+        CHECK(inventory.copies.size() == 1 && inventory.copies[0].folder == stale && !inventory.copies[0].check);
+        const StartPlan plan = plan_start(inventory, read_player_choices(inventory), {});
+        CHECK(plan.writes.remove.size() == 1 && plan.writes.remove[0] == stale);
+        // The copy trust.toml names while the mod has another hash is checked.
+        CHECK(write_trust(anvil / "trust.toml", {approval("One", "x", "1.0.0", std::string(64, 'a'))}, error));
+        const PluginInventory waits = take_inventory(anvil, user, GameImage{});
+        CHECK(waits.copies.size() == 1 && waits.copies[0].check.has_value());
+        fs::remove_all(dir);
+    });
+
+    run("plugin inventory: a symbols.toml that cannot be read leaves settings.toml checked and its retired values moved", [] {
+        // symbols.toml is there (plugin.toml parses) but another program holds it open without
+        // sharing it (an antivirus scan, an editor): it cannot be read.
+        const fs::path dir = fresh("anvil-inventory-unreadable-symbols");
+        const fs::path anvil = dir / "anvil";
+        const fs::path lode = anvil / "plugins" / "lode";
+        write(lode / "plugin.toml", plugin_toml("lode", "symbols = \"symbols.toml\"\nsettings = \"settings.toml\"\n\n"
+                                                        "[[modules]]\nid = \"flows\"\nname = \"Flows\"\naffects_gameplay = false\n"));
+        write(lode / "lode.dll", "MZ");
+        write(lode / "settings.toml", "[retired.flows_mode]\nmodule = \"flows\"\noff = [\"off\"]\n");
+        write(anvil / "data" / "lode" / "settings.toml", "flows_mode = \"off\"\n");
+        write(lode / "symbols.toml", "");
+        const HANDLE held = CreateFileW((lode / "symbols.toml").c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+        CHECK(held != INVALID_HANDLE_VALUE);
+
+        const PluginInventory inventory = take_inventory(anvil, dir / "user", GameImage{});
+        CHECK(inventory.local.size() == 1);
+        const PluginCheck& check = inventory.local[0].check;
+        CHECK(check.unreadable == "symbols.toml" && check.skip.code == "cannot_read" && !check.loadable());
+        CHECK(check.settings.has_value() && check.settings_fit);
+        const StartPlan plan = plan_start(inventory, read_player_choices(inventory), {});
+        CHECK(plan.load.empty() && plan.writes.retired.size() == 1 && plan.writes.retired[0].plugin == "lode");
+        CHECK(plan.lists.disabled_modules == std::vector<std::string>{"lode.flows"});
+        CloseHandle(held);
+        fs::remove_all(dir);
+    });
+}

@@ -30,9 +30,11 @@ struct InventoryCopy {
     std::string id;
     std::string name;  // the folder's name: the hash of a finished copy
     std::filesystem::path folder;
-    // The check of a copy that may load in place of its mod's folder (one
-    // whose hash no mod's folder of its id has: an update waits); a copy with
-    // the folder's own hash has the folder's check.
+    // The check of a copy that may load in place of its mod's folder: the one
+    // trust.toml approves for its id while no mod's folder of that id has its
+    // hash (an update waits). A copy with a mod folder's hash has that
+    // folder's check (PluginInventory::copy_check), and the copies of other
+    // hashes, which the start removes, have none.
     std::optional<PluginCheck> check;
 };
 
@@ -58,12 +60,17 @@ struct PluginInventory {
     std::set<std::string> local_ids() const;
     bool copy_exists(const std::string& id, const std::string& hash) const;
     const InventoryCopy* copy(const std::string& id, const std::string& hash) const;
+    // The check of the approved copy `id`/`hash`: its own, else that of a mod's
+    // folder with the same id and hash (the same files), else none.
+    const PluginCheck* copy_check(const std::string& id, const std::string& hash) const;
     // Whether a plugin with this id is here at all: in anvil/plugins or in a mod.
     bool installed(const std::string& id) const;
 };
 
 // Reads anvil/plugins and the mods of `user_dir`'s playset, and checks each
-// plugin against `game` (check_plugin_folder).
+// plugin against `game` (check_plugin_folder). Of the approved copies, it
+// checks only one that may load in place of its mod's folder (above); it
+// reads anvil/trust.toml for that alone, and approves nothing.
 PluginInventory take_inventory(const std::filesystem::path& anvil_dir, const std::filesystem::path& user_dir,
                                const GameImage& game);
 

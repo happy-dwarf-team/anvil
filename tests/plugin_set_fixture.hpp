@@ -10,6 +10,7 @@
 #include "core/host.hpp"
 #include "core/log.hpp"
 #include "core/manifest.hpp"
+#include "core/plugin_check.hpp"
 #include "core/plugin_set.hpp"
 #include "core/plugin_symbols.hpp"
 #include "core/services.hpp"
@@ -88,14 +89,17 @@ public:
         anvil::ResolvedPlugin r;
         r.manifest = *parsed.manifest;
         if (!r.manifest.symbols.empty()) {
-            anvil::SymbolVerification verified;
-            anvil::SymbolFile declared;
-            const std::string reason = anvil::i18n::english(anvil::check_plugin_symbols(
-                folder / r.manifest.symbols, build_, changes, image_base_, &verified, &declared));
+            // The loader's check (ADR 0014): against the game as it shipped.
+            const anvil::OriginalImageReader reader(changes, image_base_);
+            const anvil::PluginCheck check =
+                anvil::check_plugin_folder(folder, anvil::game_image(reader, build_, anvil::i18n::Message("build_unknown", {})));
+            const std::string reason = anvil::i18n::english(check.skip);
             if (!reason.empty()) std::printf("  %s: %s\n", r.manifest.id.c_str(), reason.c_str());
-            CHECK(reason.empty());
-            if (!reason.empty()) return nullptr;
-            r.symbols = anvil::PluginSymbols(declared, verified, image_base_);
+            CHECK(reason.empty() && check.symbols.has_value());
+            if (!reason.empty() || !check.symbols) return nullptr;
+            anvil::SymbolFile declared = *check.symbols;
+            anvil::adopt_verified_bytes(declared, check.verification);
+            r.symbols = anvil::PluginSymbols(declared, check.verification, image_base_);
         }
         if (!r.manifest.settings.empty()) {
             anvil::SettingsFileResult settings = anvil::load_settings(folder / r.manifest.settings);

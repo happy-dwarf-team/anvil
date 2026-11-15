@@ -106,12 +106,12 @@ PluginCheck check_plugin_folder(const std::filesystem::path& folder, const GameI
         const std::string name = relative.generic_string();
         std::string text;
         if (!read_file(folder / relative, text)) {
+            // The plugin cannot load, but its settings.toml is still read: the
+            // player's values and retired settings of a plugin that does not
+            // load are kept and moved (ADR 0013).
             check.unreadable = name;
             set_skip(check, i18n::Message("cannot_read", {name}));
-            return check;
-        }
-        SymbolFileResult parsed = parse_symbols_text(text);
-        if (!parsed.file) {
+        } else if (SymbolFileResult parsed = parse_symbols_text(text); !parsed.file) {
             check.problems.push_back({name, parsed.line, without_prefix(parsed.error, "symbols.toml: ")});
             set_skip(check, i18n::Message(parsed.error));
         } else {
@@ -126,7 +126,7 @@ PluginCheck check_plugin_folder(const std::filesystem::path& folder, const GameI
         const std::string name = relative.generic_string();
         std::string text;
         if (!read_file(folder / relative, text)) {
-            check.unreadable = name;
+            if (check.unreadable.empty()) check.unreadable = name;
             set_skip(check, i18n::Message("cannot_read", {name}));
             return check;
         }

@@ -183,11 +183,11 @@ GameReport check_game(const GameOptions& options) {
         if (p.loads()) gm.loads_from = shown(p.load_folder);
         gm.copy_missing = p.copy_missing;
         gm.others = p.others;
-        // The approved copy that loads has its own check when an update waits;
-        // one with the folder's hash has the folder's.
+        // The approved copy that loads while an update waits has the plan's
+        // check: its own, or that of another mod's folder with its hash.
         const PluginCheck* loads = &report.inventory.mods[i].check;
         if (p.state == ModPluginState::UpdatePending && p.approval) {
-            if (const InventoryCopy* c = report.inventory.copy(p.id, p.approval->hash); c != nullptr && c->check) loads = &*c->check;
+            if (const PluginCheck* c = report.inventory.copy_check(p.id, p.approval->hash)) loads = c;
         }
         check.plugin_dir = p.loads() && !p.copy_missing ? p.load_folder : p.folder;
         gm.report = check_report(*loads, check, &game);

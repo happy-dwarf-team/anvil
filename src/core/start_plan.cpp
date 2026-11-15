@@ -27,14 +27,14 @@ const SettingsFile* retiring(const PluginCheck& check) {
 }
 
 // The check a mod's plugin loads with: its approved copy's when that is not
-// the mod's folder (an update waits), else the folder's.
-const PluginCheck& load_check(const PluginInventory& inventory, const ModPlugin& decided, size_t index) {
+// the mod's folder (an update waits), else the folder's. The copy's check is
+// that of another mod's folder with its hash when one has it, never the
+// waiting update's: those are not the files that load.
+const PluginCheck* load_check(const PluginInventory& inventory, const ModPlugin& decided, size_t index) {
     if (decided.state == ModPluginState::UpdatePending && decided.approval) {
-        if (const InventoryCopy* c = inventory.copy(decided.id, decided.approval->hash); c != nullptr && c->check) {
-            return *c->check;
-        }
+        return inventory.copy_check(decided.id, decided.approval->hash);
     }
-    return inventory.mods[index].check;
+    return &inventory.mods[index].check;
 }
 
 // A plugin that does not load, from what decides it.
@@ -119,11 +119,17 @@ const PlannedPlugin* StartPlan::find(std::string_view id) const {
     return nullptr;
 }
 
+std::vector<RetiredMoveNote> carry_out_retired_move_now(const PlannedRetiredMove& move, const fs::path& anvil_toml,
+                                                        bool* anvil_toml_written) {
+    AnvilSettings lists = read_anvil_settings(anvil_toml);
+    return move_retired_settings(move.manifest, move.schema, move.player_file, anvil_toml, lists, true, anvil_toml_written);
+}
+
 const PluginCheck* check_of(const PluginInventory& inventory, const StartPlan& plan, const PlannedPlugin& plugin) {
     if (plugin.local >= 0) return &inventory.local[static_cast<size_t>(plugin.local)].check;
     if (plugin.mod >= 0) {
         const size_t i = static_cast<size_t>(plugin.mod);
-        return &load_check(inventory, plan.mods[i], i);
+        return load_check(inventory, plan.mods[i], i);
     }
     return nullptr;
 }
@@ -201,7 +207,16 @@ StartPlan plan_start(const PluginInventory& inventory, const PlayerChoices& choi
             p.awaiting_approval = !m.loads() && (m.state == ModPluginState::Pending || m.state == ModPluginState::Conflict);
             plan.skipped.push_back(p);
         };
-        const PluginCheck& check = load_check(inventory, m, i);
+        // No check of the copy that would load: trust.toml changed after the
+        // inventory was taken (the next start's plan during a game). Nothing
+        // loads on a check of other files.
+        static const PluginCheck unchecked = [] {
+            PluginCheck c;
+            c.skip = i18n::Message("the approved copy was not checked; restart the game");
+            return c;
+        }();
+        const PluginCheck* checked = load_check(inventory, m, i);
+        const PluginCheck& check = checked != nullptr ? *checked : unchecked;
         if (check.manifest.manifest) {
             p.manifest = *check.manifest.manifest;
             add_implied_dependencies(*p.manifest);
@@ -344,7 +359,7 @@ StartPlan plan_start(const PluginInventory& inventory, const PlayerChoices& choi
                 for (RetiredMoveNote& note : m.notes) plan.notes.emplace_back(id, std::move(note));
                 return;
             }
-            plan.writes.retired.push_back({id, data_dir(inventory.anvil_dir, id) / "settings.toml", std::move(m)});
+            plan.writes.retired.push_back({id, data_dir(inventory.anvil_dir, id) / "settings.toml", std::move(m), manifest, schema});
         };
         for (const InventoryPlugin& local : inventory.local) {
             // Not a second folder with the id of another: its data/<id> is the other's.
