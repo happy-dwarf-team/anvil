@@ -146,6 +146,34 @@ private:
     std::uint64_t epoch_ = 0;
 };
 
+// The service's show(mode): UNSUPPORTED while another loader of map modes
+// runs (`off`), INVALID_ARGUMENT for a handle this registry did not give,
+// WRONG_PHASE outside a session; else the request waits for the step. The
+// epoch is read before the session is checked, so a session that ends after
+// the check drops the request.
+inline AnvilResult ask_show(Registry& registry, const AnvilMapMode* mode, bool off,
+                            const std::atomic<bool>& in_session) noexcept {
+    if (off) return ANVIL_ERROR_UNSUPPORTED;
+    if (!registry.owns(mode)) return ANVIL_ERROR_INVALID_ARGUMENT;
+    const std::uint64_t epoch = registry.epoch();
+    if (!in_session.load(std::memory_order_acquire)) return ANVIL_ERROR_WRONG_PHASE;
+    registry.request_show(mode, epoch);
+    return ANVIL_OK;
+}
+
+// The step's half of show(): takes the waiting request and, when the map's
+// current mode could be read (`readable`) and is another one, switches to it
+// with set(session, number), the game's SetCurrentMapMode as the minimap's
+// button calls it. The mode it switched to, or null.
+template <class Set>
+AnvilMapMode* switch_to_asked(Registry& registry, bool readable, std::uintptr_t session, std::int32_t current,
+                              Set&& set) {
+    AnvilMapMode* asked = registry.take_show();
+    if (asked == nullptr || !readable || current == asked->number) return nullptr;
+    set(session, asked->number);
+    return asked;
+}
+
 // Checks a buffer for set_colors and copies it. `limit` is the session's
 // province limit (0 when it is not known). ANVIL_OK fills `out`.
 AnvilResult make_colors(const std::uint32_t* colors, std::uint32_t count, std::int32_t limit, Colors& out);

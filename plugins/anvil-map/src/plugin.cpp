@@ -256,13 +256,16 @@ bool call_set_mode(std::uintptr_t session, std::int32_t number, unsigned long* c
 
 // A mode show() asked for: the game's own switch, as the minimap's button.
 void show_asked() {
-    AnvilMapMode* asked = g_registry.take_show();
-    if (asked == nullptr) return;
     std::uintptr_t session = 0;
     std::int32_t number = -1;
-    if (!current_mode(session, number) || number == asked->number) return;
+    const bool readable = current_mode(session, number);
     unsigned long code = 0;
-    if (!call_set_mode(session, asked->number, &code)) {
+    bool faulted = false;
+    AnvilMapMode* asked = anvil_map::switch_to_asked(g_registry, readable, session, number,
+                                                     [&](std::uintptr_t s, std::int32_t n) {
+                                                         faulted = !call_set_mode(s, n, &code);
+                                                     });
+    if (asked != nullptr && faulted) {
         const anvil::Host host;
         host.warn("show {}: SetCurrentMapMode faulted ({:#x})", asked->id, code);
     }
@@ -380,13 +383,7 @@ const AnvilMapMode* svc_shown() { return g_shown.load(std::memory_order_acquire)
 const char* svc_id(const AnvilMapMode* mode) { return mode != nullptr ? mode->id.c_str() : nullptr; }
 
 AnvilResult svc_show(const AnvilMapMode* mode) {
-    if (g_off.load(std::memory_order_relaxed)) return ANVIL_ERROR_UNSUPPORTED;
-    if (!g_registry.owns(mode)) return ANVIL_ERROR_INVALID_ARGUMENT;
-    // The epoch before the check: a session that ends after it drops the request.
-    const std::uint64_t epoch = g_registry.epoch();
-    if (!g_in_session.load(std::memory_order_acquire)) return ANVIL_ERROR_WRONG_PHASE;
-    g_registry.request_show(mode, epoch);
-    return ANVIL_OK;
+    return anvil_map::ask_show(g_registry, mode, g_off.load(std::memory_order_relaxed), g_in_session);
 }
 
 const AnvilMapModesService kService = {

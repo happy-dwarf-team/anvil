@@ -8,8 +8,10 @@
 
 #include <anvil/anvil_map.h>
 
+#include <atomic>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -59,6 +61,61 @@ void show_tests() {
         // A handle that is not a mode is not read: an address of no AnvilMapMode.
         alignas(AnvilMapMode) static const unsigned char junk[sizeof(AnvilMapMode)] = {0xFF, 0xFF, 0xFF, 0xFF};
         CHECK(!r.owns(reinterpret_cast<const AnvilMapMode*>(junk)));
+    });
+
+    run("map modes: show() answers UNSUPPORTED, INVALID_ARGUMENT and WRONG_PHASE before it asks", [] {
+        Registry r;
+        const AnvilMapMode* a = nullptr;
+        std::string why;
+        AnvilMapModeInfo ia = info("p.a");
+        CHECK(r.add(&ia, false, &a, why) == ANVIL_OK);
+        std::atomic<bool> in_session{false};
+        // Another loader of map modes: refused before the handle is looked at.
+        CHECK(ask_show(r, a, true, in_session) == ANVIL_ERROR_UNSUPPORTED);
+        CHECK(ask_show(r, nullptr, true, in_session) == ANVIL_ERROR_UNSUPPORTED);
+        CHECK(ask_show(r, nullptr, false, in_session) == ANVIL_ERROR_INVALID_ARGUMENT);
+        AnvilMapMode forged;
+        forged.number = a->number;
+        CHECK(ask_show(r, &forged, false, in_session) == ANVIL_ERROR_INVALID_ARGUMENT);
+        // Outside a session (the menus, between two sessions).
+        CHECK(ask_show(r, a, false, in_session) == ANVIL_ERROR_WRONG_PHASE);
+        CHECK(r.take_show() == nullptr);
+        in_session = true;
+        CHECK(ask_show(r, &forged, false, in_session) == ANVIL_ERROR_INVALID_ARGUMENT);
+        CHECK(ask_show(r, a, true, in_session) == ANVIL_ERROR_UNSUPPORTED && r.take_show() == nullptr);
+        CHECK(ask_show(r, a, false, in_session) == ANVIL_OK && r.take_show() == a);
+    });
+
+    run("map modes: the step switches to the asked mode through SetCurrentMapMode, once", [] {
+        Registry r;
+        const AnvilMapMode* a = nullptr;
+        std::string why;
+        AnvilMapModeInfo ia = info("p.a");
+        CHECK(r.add(&ia, false, &a, why) == ANVIL_OK);
+        std::atomic<bool> in_session{true};
+        std::vector<std::pair<std::uintptr_t, std::int32_t>> calls;
+        const auto set = [&](std::uintptr_t session, std::int32_t number) { calls.emplace_back(session, number); };
+        constexpr std::uintptr_t kSession = 0x5E55;
+        // Nothing asked: nothing called.
+        CHECK(switch_to_asked(r, true, kSession, 1, set) == nullptr && calls.empty());
+        // Asked while the political mode shows: one call with the session and the borrowed number.
+        CHECK(ask_show(r, a, false, in_session) == ANVIL_OK);
+        CHECK(switch_to_asked(r, true, kSession, 1, set) == a);
+        CHECK(calls.size() == 1 && calls[0].first == kSession && calls[0].second == a->number);
+        // The request was taken: the next step calls nothing.
+        CHECK(switch_to_asked(r, true, kSession, a->number, set) == nullptr && calls.size() == 1);
+        // Already shown: taken, not called again.
+        CHECK(ask_show(r, a, false, in_session) == ANVIL_OK);
+        CHECK(switch_to_asked(r, true, kSession, a->number, set) == nullptr && calls.size() == 1);
+        CHECK(r.take_show() == nullptr);
+        // The current mode could not be read: taken and dropped, not called.
+        CHECK(ask_show(r, a, false, in_session) == ANVIL_OK);
+        CHECK(switch_to_asked(r, false, 0, -1, set) == nullptr && calls.size() == 1);
+        CHECK(r.take_show() == nullptr);
+        // Asked, then the session ended before the step: the next session's step calls nothing.
+        CHECK(ask_show(r, a, false, in_session) == ANVIL_OK);
+        r.clear_session();
+        CHECK(switch_to_asked(r, true, kSession, 1, set) == nullptr && calls.size() == 1);
     });
 }
 
