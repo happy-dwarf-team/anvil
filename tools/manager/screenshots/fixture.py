@@ -4,7 +4,7 @@
 
 <out>/game is an EU4 folder with the package the build's AnvilManager.exe
 carries (tools/manager/anvil-package.zip) and a few plugins that show the
-Plugins tab's states: modules, settings with two changed (one a yes/no with a
+Plugins tab's states: modules (one off with a kept multiplayer opt-in), settings with two changed (one a yes/no with a
 long label), a plugin that is off, one that needs it, one whose plugin.toml does
 not parse, a plugin from a mod that waits for approval, a copy of Camera in that
 mod that the local Camera shadows (its settings shown read-only), and a retired setting
@@ -79,6 +79,7 @@ id = "merge_fleets"
 name = "Merge fleets in port"
 affects_gameplay = true
 allow_ironman = "opt-in"
+allow_multiplayer = "opt-in"
 default = false
 
 [[modules]]
@@ -140,7 +141,9 @@ id = "ledger-lib"
 version = "*"
 ''')
 write(plugins / "broken" / "plugin.toml", 'id = "broken"\nname = "Broken"\nversion = "1.0"\n')
-write(game / "anvil" / "anvil.toml", 'disabled_plugins = ["ledger-lib"]\nallow_ironman = ["tuning.drill_all"]\n')
+# Merge fleets in port is off and keeps its multiplayer opt-in: its row names it.
+write(game / "anvil" / "anvil.toml", 'disabled_plugins = ["ledger-lib"]\nallow_ironman = ["tuning.drill_all"]\n'
+      'allow_multiplayer = ["tuning.merge_fleets"]\n')
 
 # Two crash reports for the Crashes page, in the layout Anvil writes (two-space indent):
 # one in a plugin's code, one with no plugin named.

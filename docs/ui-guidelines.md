@@ -199,8 +199,9 @@ settled it is variant B5 of `tools/manager/prototype/module-switches.html` on th
   theirs. Reset and Remove sit before it, behind a separator. It keeps its place from
   plugin to plugin and when clicked, and stays in sight while the modules scroll.
 - **A module is one row**: its name, then in weak words what its switch does not say (its
-  settings, "1 changed" in the info colour, "changes the game" while it is off, and in the
-  overlay what this game does with it), a chevron, and its small toggle with its word,
+  settings, "1 changed" in the info colour, "changes the game" and its kept opt-ins
+  ("allowed in multiplayer") while it is off, and in the overlay what this game does with
+  it), a chevron, and its small toggle with its word,
   lined up under the plugin's toggle. A hairline parts the rows. A click anywhere on the row
   opens what it does, where it runs and its settings; a module whose settings were changed
   starts open. On a narrow pane the facts end in "…" (the tooltip has them all), and the
@@ -221,7 +222,8 @@ settled it is variant B5 of `tools/manager/prototype/module-switches.html` on th
 ### Off means kept
 
 - **A module that is off** keeps its settings: they fold into "Settings (n), kept while it
-  is off" and open greyed. Its opt-ins stay as they were.
+  is off" and open greyed. Its opt-ins stay as they were, and its row names them
+  ("allowed in ironman"), so its toggle never turns on what the player cannot see.
 - **A plugin that is off** greys its modules and keeps showing each module's own switch,
   opt-ins and settings, so the player sees what comes back when the plugin is turned on. A
   line says so once: "The plugin is off, so none of its modules load. Each module keeps its

@@ -612,15 +612,22 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
 
     // One line: its name, its facts, a chevron and its switch; a click anywhere on the
     // line opens what it does, where it runs and its settings. The facts say what the
-    // switch does not: that it changes the game (while it is off and its choice of
-    // games is hidden), its settings, what was changed, and in the overlay what this
-    // game does with it. Where it runs is in the open part only.
+    // switch does not: that it changes the game and where it is allowed (while it is
+    // off and its choice of games is hidden: its toggle brings the kept opt-ins back), its
+    // settings, what was changed, and in the overlay what this game does with it. Where it
+    // runs is in the open part only.
     struct Part {
         std::string text;
         ImVec4 color;
     };
     std::vector<Part> facts;
     if (mod.changes_game && !on) facts.push_back({tr("changes the game"), kTextWeak});
+    if (const KeptOptIns kept = kept_opt_ins(mod); kept.any()) {
+        facts.push_back({tr(kept.ironman && kept.multiplayer ? i18n::N_("allowed in ironman and multiplayer")
+                            : kept.ironman                   ? i18n::N_("allowed in ironman")
+                                                             : i18n::N_("allowed in multiplayer")),
+                         kTextWeak});
+    }
     if (n > 0) facts.push_back({trn("{0} setting|{0} settings", static_cast<long long>(n)), kTextWeak});
     if (changed > 0) facts.push_back({trf("{0} changed", {std::to_string(changed)}), kInfo});
     if (host.in_game()) {
