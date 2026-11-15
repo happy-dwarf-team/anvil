@@ -90,6 +90,7 @@ struct Ui {
     std::vector<ModRow> mods;
     bool confirm_restart = false;  // "Restart game..." was clicked; the confirmation is shown
     std::vector<std::string> warnings;
+    bool warnings_open = false;  // their banner shows the lines
     bool crash_loaded = false;
     std::optional<CrashInfo> crash;
     std::string log;
@@ -456,39 +457,46 @@ const char* get_clipboard(ImGuiContext*) { return ui().paste.c_str(); }
 void build_fonts(double font_scale, anvil::i18n::Language language) {
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->Clear();
+    anvil::ui::g_title_font = nullptr;
     const auto started = std::chrono::steady_clock::now();
     wchar_t windows[MAX_PATH] = {};
-    ImFont* font = nullptr;
-    float size = static_cast<float>(17.0 * font_scale);
-    if (GetWindowsDirectoryW(windows, MAX_PATH) != 0) {
-        char path[MAX_PATH * 3] = {};
-        const std::wstring file = std::wstring(windows) + L"\\Fonts\\segoeui.ttf";
-        if (WideCharToMultiByte(CP_UTF8, 0, file.c_str(), -1, path, sizeof(path), nullptr, nullptr) > 0 &&
-            GetFileAttributesW(file.c_str()) != INVALID_FILE_ATTRIBUTES) {
-            ImFontConfig config;
-            config.OversampleH = 2;
-            font = io.Fonts->AddFontFromFileTTF(path, size, &config);
-        }
-    }
-    if (font == nullptr) {
-        ImFontConfig config;
-        size = static_cast<float>(13.0 * font_scale);
-        config.SizePixels = size;
-        io.Fonts->AddFontDefault(&config);
-    }
-    // Chinese, Japanese and Korean: the language's font, merged into the Latin
+    const bool have_windows = GetWindowsDirectoryW(windows, MAX_PATH) != 0;
+    // Chinese, Japanese and Korean: the language's font, merged into each Latin
     // one (i18n/cjk_font.hpp). ImGui rasterizes a glyph when a text first needs it.
     const anvil::i18n::FontData cjk = anvil::i18n::cjk_font(language);
-    if (cjk.size > 0) {
+    // A Latin font of Windows at `size`, the CJK one merged into it; null when the file is missing.
+    const auto add = [&](const wchar_t* name, float size) -> ImFont* {
+        if (!have_windows) return nullptr;
+        char path[MAX_PATH * 3] = {};
+        const std::wstring file = std::wstring(windows) + L"\\Fonts\\" + name;
+        if (WideCharToMultiByte(CP_UTF8, 0, file.c_str(), -1, path, sizeof(path), nullptr, nullptr) <= 0 ||
+            GetFileAttributesW(file.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            return nullptr;
+        }
         ImFontConfig config;
-        config.MergeMode = true;
-        config.FontDataOwnedByAtlas = false;  // the binary's resource
-        config.OversampleH = 1;               // ImGui's advice for CJK: a quarter of the atlas
-        config.PixelSnapH = true;
+        config.OversampleH = 2;
+        ImFont* font = io.Fonts->AddFontFromFileTTF(path, size, &config);
+        if (font == nullptr || cjk.size == 0) return font;
+        ImFontConfig merge;
+        merge.MergeMode = true;
+        merge.DstFont = font;
+        merge.FontDataOwnedByAtlas = false;  // the binary's resource
+        merge.OversampleH = 1;               // ImGui's advice for CJK: a quarter of the atlas
+        merge.PixelSnapH = true;
         // Source Han Sans fills more of its height with its ascent and
         // descent than Segoe UI, so the same size draws smaller ideographs.
-        config.GlyphOffset.y = static_cast<float>(1.0 * font_scale);
-        io.Fonts->AddFontFromMemoryTTF(const_cast<void*>(cjk.data), static_cast<int>(cjk.size), size * 1.12f, &config);
+        merge.GlyphOffset.y = static_cast<float>(1.0 * font_scale);
+        io.Fonts->AddFontFromMemoryTTF(const_cast<void*>(cjk.data), static_cast<int>(cjk.size), size * 1.12f, &merge);
+        return font;
+    };
+    const float size = static_cast<float>(17.0 * font_scale);
+    if (add(L"segoeui.ttf", size) == nullptr) {
+        ImFontConfig config;
+        config.SizePixels = static_cast<float>(13.0 * font_scale);
+        io.Fonts->AddFontDefault(&config);
+    } else {
+        // Names in lists and headers (docs/ui-design-system.md): Segoe UI Semibold, as in the Manager.
+        anvil::ui::g_title_font = add(L"seguisb.ttf", size * 1.18f);
     }
     const auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
     char line[160];
@@ -544,16 +552,22 @@ void merge_system_fonts() {
     default: break;
     }
     int merged = 0;
+    // Into the text's font and the names' (Semibold), each that build_fonts added.
+    ImFontAtlas* atlas = ImGui::GetIO().Fonts;
+    const std::vector<ImFont*> targets(atlas->Fonts.begin(), atlas->Fonts.end());
     for (const SystemFont which : order) {
         MappedFont& font = g_system_fonts[which];
         map_font(font);
         if (font.view == nullptr) continue;
-        ImFontConfig config;
-        config.MergeMode = true;
-        config.FontDataOwnedByAtlas = false;  // the mapped view
-        config.OversampleH = 1;
-        config.PixelSnapH = true;
-        ImGui::GetIO().Fonts->AddFontFromMemoryTTF(font.view, font.size, 0.0f, &config);
+        for (ImFont* target : targets) {
+            ImFontConfig config;
+            config.MergeMode = true;
+            config.DstFont = target;
+            config.FontDataOwnedByAtlas = false;  // the mapped view
+            config.OversampleH = 1;
+            config.PixelSnapH = true;
+            atlas->AddFontFromMemoryTTF(font.view, font.size, 0.0f, &config);
+        }
         ++merged;
     }
     char line[96];
@@ -698,16 +712,20 @@ void draw_plugin_panels() {
     });
 }
 
-// In the status tab: a plugin's window can be shown again after it was closed.
+// On the status line, after "Panels:": a plugin's window can be shown again
+// after it was closed. Each switch takes the next line when this one is full.
 void draw_panel_switches() {
+    ImGui::SameLine(0, ImGui::GetStyle().ItemSpacing.x * 3);
+    ImGui::TextDisabled("%s", tr("Panels:"));
     shared().panels.each([](AnvilPanel& panel) {
+        ImGui::SameLine();
+        const float width = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize(panel.title.c_str()).x;
+        if (ImGui::GetContentRegionAvail().x < width) ImGui::NewLine();
         bool shown = panel.shown;
         ImGui::PushID(static_cast<int>(panel.index));
         if (anvil::ui::checkbox(panel.title.c_str(), &shown)) shared().panels.set_shown_locked(panel, shown);
         ImGui::PopID();
-        ImGui::SameLine();
     });
-    ImGui::NewLine();
 }
 
 // ---- notices -------------------------------------------------------------------------
@@ -906,27 +924,38 @@ std::string session_text(const AnvilControlStatus& s) {
                                          : N_("In a single-player game; no gameplay plugin acts."));
 }
 
-// The game's own restart through anvil-game (ADR 0012), after a confirmation
-// that says what happens to a running campaign. Hidden with an anvil-game that
-// has no restart().
+// The game's own restart through anvil-game (ADR 0012): a button at the
+// status line's right end, then a confirmation under the line that says what
+// happens to a running campaign. Hidden with an anvil-game that has no restart().
+const AnvilGameService* restart_service() {
+    const AnvilGameService* game = shared().game_work;
+    return game != nullptr && ANVIL_GAME_HAS(game, restart) ? game : nullptr;
+}
+
+void draw_restart_button() {
+    Ui& u = ui();
+    if (restart_service() == nullptr) return;
+    const AnvilControlStatus& s = u.status;
+    const bool multiplayer = s.session && s.multiplayer;
+    if (multiplayer) u.confirm_restart = false;
+    const char* label = tr("Restart game...");
+    const float width = anvil::ui::button_width(label);
+    ImGui::SameLine();
+    if (ImGui::GetContentRegionAvail().x < width + ImGui::GetStyle().ItemSpacing.x * 3) ImGui::NewLine();
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - width));
+    ImGui::BeginDisabled(multiplayer || u.confirm_restart);
+    if (ImGui::Button(label)) u.confirm_restart = true;
+    ImGui::EndDisabled();
+    if (multiplayer && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("%s", tr("Leave the multiplayer game first."));
+    }
+}
+
 void draw_restart() {
     Ui& u = ui();
-    const AnvilGameService* game = shared().game_work;
-    if (game == nullptr || !ANVIL_GAME_HAS(game, restart)) return;
+    const AnvilGameService* game = restart_service();
+    if (game == nullptr || !u.confirm_restart) return;
     const AnvilControlStatus& s = u.status;
-    if (s.session && s.multiplayer) {
-        u.confirm_restart = false;
-        ImGui::BeginDisabled();
-        ImGui::Button(tr("Restart game..."));
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        weak(tr("Leave the multiplayer game first."));
-        return;
-    }
-    if (!u.confirm_restart) {
-        if (ImGui::Button(tr("Restart game..."))) u.confirm_restart = true;
-        return;
-    }
     if (!s.session) {
         wrapped(tr("The game closes and starts again, with the same mods and launch options."));
     } else if (s.ironman) {
@@ -951,11 +980,19 @@ void draw_restart() {
     if (ImGui::Button((std::string(tr("Cancel")) + "##restart").c_str())) u.confirm_restart = false;
 }
 
-// The lines above the list: Anvil, the game, the restart and what the start left.
+// The lines above the list: one status line (Anvil, the game, the panels'
+// switches, the restart), then banners only for what the player should act on.
 void draw_status_lines() {
     Ui& u = ui();
     const AnvilControlStatus& s = u.status;
-    line(trf("Anvil {0}, game build {1}", {s.anvil_version ? s.anvil_version : "?", s.game_build ? s.game_build : tr("unknown")}));
+    ImGui::AlignTextToFramePadding();
+    weak(trf("Anvil {0}, game build {1}",
+             {s.anvil_version ? s.anvil_version : "?", s.game_build ? anvil::ui::build_label(s.game_build) : std::string(tr("unknown"))}));
+    bool any_panel = false;
+    shared().panels.each([&](AnvilPanel&) { any_panel = true; });
+    if (any_panel) draw_panel_switches();
+    draw_restart_button();
+    draw_restart();
     if (s.safe_mode) {
         anvil::ui::banner("safe-mode", Tone::Bad,
                           trf("Safe mode: the last {0} starts ended before the game was ready.", {std::to_string(s.unfinished_starts)}));
@@ -979,17 +1016,19 @@ void draw_status_lines() {
         // ADR 0013, point 14: what the players of a multiplayer game started now compare.
         weak_wrapped(trf("Multiplayer code for a game started now: {0}", {std::string(s.next_game_hash)}));
     }
-    draw_restart();
     if (!s.loading_done) weak(tr("Plugins are still loading."));
-    bool any_panel = false;
-    shared().panels.each([&](AnvilPanel&) { any_panel = true; });
-    if (any_panel) draw_panel_switches();
-    if (!u.warnings.empty() && ImGui::TreeNode((trf("Warnings ({0})", {std::to_string(u.warnings.size())}) + "###warnings").c_str())) {
-        if (ImGui::BeginChild("warnings", ImVec2(0.0f, ImGui::GetTextLineHeightWithSpacing() * 5.0f), ImGuiChildFlags_Borders)) {
+    // What this start warned about: one banner line, its lines on request.
+    if (!u.warnings.empty()) {
+        anvil::ui::begin_banner("warnings", Tone::Warn);
+        line(trn("This start left {0} warning.|This start left {0} warnings.", static_cast<long long>(u.warnings.size())));
+        ImGui::SameLine();
+        if (anvil::ui::text_button((std::string(u.warnings_open ? tr("Hide") : tr("Show")) + "###warnings").c_str())) {
+            u.warnings_open = !u.warnings_open;
+        }
+        if (u.warnings_open) {
             for (const std::string& w : u.warnings) anvil::ui::text_wrapped(w);
         }
-        ImGui::EndChild();
-        ImGui::TreePop();
+        anvil::ui::end_banner(Tone::Warn);
     }
 }
 
@@ -1019,11 +1058,14 @@ void revoke(const ModRow& m) {
     ui().model_stale = true;
 }
 
-const char* state_text(const ModRow& m) {
+std::string state_text(const ModRow& m) {
     if (m.approved_next) return tr("approved for the next start");
     if (m.revoked_next) return tr("revoked from the next start");
     if (m.state == "approved") return m.loaded ? tr("approved, loaded") : tr("approved");
-    if (m.state == "update-pending") return m.loaded ? tr("update waits; the approved version is loaded") : tr("update waits");
+    if (m.state == "update-pending") {
+        return m.loaded ? trf("An update to {0} waits for your approval; the approved {1} loads.", {m.version, m.approved_version})
+                        : std::string(tr("update waits"));
+    }
     if (m.state == "pending") return tr("waits for approval");
     if (m.state == "conflict") return tr("conflict");
     if (m.state == "shadowed") return tr("a local plugin wins");
@@ -1229,20 +1271,26 @@ struct OverlayHost final : anvil::ui::PluginsHost {
             return;
         }
         const ModRow& m = u.mods[*src.mod];
-        weak_wrapped(m.authors.empty() ? trf("id {0}", {m.id}) : trf("id {0}, by {1}", {m.id, m.authors}));
-        weak_wrapped(trf("from {0}", {mod_source(m)}));
-        const bool good = (m.state == "approved" && m.loaded) || m.approved_next;
-        const bool waits = m.state == "pending" || m.state == "update-pending" || m.state == "conflict";
-        anvil::ui::state_row(good ? Glyph::On : waits ? Glyph::Attention : Glyph::CannotLoad, state_text(m));
-        if (!good && !m.reason_text().empty()) weak_wrapped(m.reason_text());
-        if (!m.repository.empty()) weak_wrapped(trf("Source: {0}", {m.repository}));
+        // Who and where from on one line, then the approval as the Manager draws it.
+        weak_wrapped((m.authors.empty() ? trf("id {0}", {m.id}) : trf("id {0}, by {1}", {m.id, m.authors})) + " · " +
+                     trf("from {0}", {mod_source(m)}));
+        anvil::ui::ModApproval a;
+        a.good = (m.state == "approved" && m.loaded) || m.approved_next;
+        a.tone = m.state == "pending" || m.state == "update-pending" || m.state == "conflict" ? Tone::Warn : Tone::Bad;
+        a.state = state_text(m);
+        // Waiting: the state says what the reason would (the version that waits, the one that loads).
+        if (!a.good && m.state != "update-pending" && m.state != "pending" && !m.reason_text().empty()) a.details.push_back(m.reason_text());
         if (!m.approved_hash.empty()) {
-            weak_wrapped(trf("Approved: {0} on {1} (hash {2})",
-                             {m.approved_version, m.approved_date.substr(0, 10), m.approved_hash.substr(0, 8)}));
+            a.approved = trf("Approved: {0} on {1} (hash {2})", {m.approved_version, m.approved_date.substr(0, 10), m.approved_hash.substr(0, 8)});
         }
-        const bool approvable = m.can_approve && !m.approved_next;
-        if (approvable &&
-            anvil::ui::primary_button(m.state == "update-pending" ? tr("Approve the update...") : tr("Approve..."))) {
+        a.repository = m.repository;
+        a.can_approve = m.can_approve && !m.approved_next;
+        a.update = m.state == "update-pending";
+        a.can_revoke = m.can_revoke;
+        const anvil::ui::ModAction action = anvil::ui::draw_mod_approval(a);
+        if (action == anvil::ui::ModAction::OpenRepository) open_link(m.repository);
+        if (action == anvil::ui::ModAction::Revoke) revoke(m);
+        if (action == anvil::ui::ModAction::Approve) {
             anvil::ui::Confirm c;
             c.title = plugin(i).name + " " + m.version;
             c.button = tr("Approve");
@@ -1255,10 +1303,6 @@ struct OverlayHost final : anvil::ui::PluginsHost {
                        trf("Hash: {0}", {m.hash.empty() ? "-" : m.hash})};
             c.action = [m] { approve(m); };
             u.plugins_tab.ask(std::move(c));
-        }
-        if (m.can_revoke) {
-            if (approvable) ImGui::SameLine();
-            if (ImGui::Button(tr("Revoke the approval"))) revoke(m);
         }
     }
 
@@ -1356,7 +1400,7 @@ void draw_panel() {
     const float k = scale();
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(820.0f * k, 540.0f * k), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(880.0f * k, 640.0f * k), ImGuiCond_FirstUseEver);
     bool open = true;
     if (ImGui::Begin("Anvil###anvil-panel", &open, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings)) {
         // The last action's result: a banner in its state, closed with OK.
@@ -1378,7 +1422,7 @@ void draw_panel() {
                 }
             };
             tab(N_("Plugins"), Tab::Plugins, draw_plugins);
-            tab(N_("Crash report"), Tab::Crash, draw_crash);
+            tab(N_("Crashes"), Tab::Crash, draw_crash);
             tab(N_("Log"), Tab::Log, draw_log);
             u.requested_tab = Tab::None;
             ImGui::EndTabBar();

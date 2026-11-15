@@ -18,11 +18,12 @@
 #include <cmath>
 #include <initializer_list>
 #include <string>
+#include <string_view>
 
 namespace anvil::ui {
 
 // The titles' font, Segoe UI Semibold with the CJK fonts merged into it; null
-// where the app has none (the overlay), and the text's font at a larger size stands in.
+// where Windows has none, and the text's font at a larger size stands in.
 inline ImFont* g_title_font = nullptr;
 // Logs and reports: Consolas with the CJK fonts merged into it; null where the
 // app has none, and the text's font stands in.
@@ -78,12 +79,54 @@ inline void strong_wrapped(const char* text) {
     if (g_title_font != nullptr) ImGui::PopFont();
 }
 
-// A name in semibold drawn at `at` without an item, in a list row; its width.
-inline float draw_strong(ImDrawList* draw, ImVec2 at, ImU32 color, const char* text) {
-    ImFont* font = g_title_font != nullptr ? g_title_font : ImGui::GetFont();
+// Text drawn at `at` without an item, in `font` at the text's size, cut with
+// "…" where it would pass `max_x` (a list row's second line); its width, and
+// in `cut` whether it was cut.
+inline float draw_text_fit(ImDrawList* draw, ImFont* font, ImVec2 at, float max_x, ImU32 color, std::string_view text,
+                           bool* cut = nullptr) {
     const float size = ImGui::GetFontSize();
-    draw->AddText(font, size, at, color, text);
-    return font->CalcTextSizeA(size, FLT_MAX, 0.0f, text).x;
+    const auto measure = [&](std::string_view t) { return font->CalcTextSizeA(size, FLT_MAX, 0.0f, t.data(), t.data() + t.size()).x; };
+    const float room = max_x - at.x;
+    const float full = measure(text);
+    if (cut != nullptr) *cut = full > room;
+    if (full <= room) {
+        draw->AddText(font, size, at, color, text.data(), text.data() + text.size());
+        return full;
+    }
+    constexpr std::string_view kEllipsis = "\xE2\x80\xA6";
+    const float ellipsis = measure(kEllipsis);
+    size_t end = 0;
+    float width = 0;
+    for (size_t k = 0; k < text.size();) {
+        size_t next = k + 1;
+        while (next < text.size() && (static_cast<unsigned char>(text[next]) & 0xC0) == 0x80) ++next;
+        width += measure(text.substr(k, next - k));
+        if (width + ellipsis > room) break;
+        end = next;
+        k = next;
+    }
+    while (end > 0 && text[end - 1] == ' ') --end;
+    const std::string shown = std::string(text.substr(0, end)) + std::string(kEllipsis);
+    draw->AddText(font, size, at, color, shown.c_str());
+    return measure(shown);
+}
+
+// A name in semibold drawn at `at` without an item, in a list row, cut at `max_x`; its width.
+inline float draw_strong(ImDrawList* draw, ImVec2 at, ImU32 color, const char* text, float max_x = FLT_MAX, bool* cut = nullptr) {
+    return draw_text_fit(draw, g_title_font != nullptr ? g_title_font : ImGui::GetFont(), at, max_x, color, text, cut);
+}
+
+// The game build a player recognises: "eu4-1.37.5-steam-win64" gives "Steam 1.37.5",
+// "eu4-1.37.5-gog-win64" "GOG 1.37.5"; another id stays as it is.
+inline std::string build_label(std::string_view build) {
+    constexpr std::string_view prefix = "eu4-";
+    if (!build.starts_with(prefix)) return std::string(build);
+    const size_t dash = build.find('-', prefix.size());
+    if (dash == std::string_view::npos) return std::string(build);
+    const std::string_view version = build.substr(prefix.size(), dash - prefix.size());
+    const std::string_view rest = build.substr(dash + 1);
+    const std::string_view store = rest.starts_with("steam") ? "Steam" : rest.starts_with("gog") ? "GOG" : std::string_view();
+    return store.empty() ? std::string(build) : std::string(store) + " " + std::string(version);
 }
 
 // Text in the monospace font between these two: a log or a report.

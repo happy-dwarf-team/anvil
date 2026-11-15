@@ -238,8 +238,8 @@ settled it is variant B5 of `tools/manager/prototype/module-switches.html` on th
 - **What waits for the player shows from anywhere.** In the Manager the sidebar's Plugins
   entry carries "▲ 2" in the warning colour, whose tooltip says "Plugins (2 to approve)"; in
   the overlay the Plugins tab's label says "2 to approve". The page opens with a line naming
-  each plugin that waits, an update as
-  "Trade Tweaks (update to 1.1.0)", each a button that selects it. The list entry of an
+  each plugin that waits with the version that waits ("Trade Tweaks 1.1.0"), each a button
+  that selects it. The list entry of an
   update says "update waits for approval" and which version runs until then.
 - A plugin that cannot load (invalid, a conflict between mods, a local plugin with its id
   loads instead) is an entry with "cannot load" and the reason and the way out in its detail.

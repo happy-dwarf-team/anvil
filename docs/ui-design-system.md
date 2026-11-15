@@ -98,10 +98,10 @@ All of them pass through `ScaleAllSizes`, as today.
 
 - **Segoe UI at 17 px, as today**, and the CJK fonts as today. Windows ships it, so the
   installer does not grow and the CJK fallbacks keep matching it.
-- **Segoe UI Semibold** (`seguisb.ttf`, also in Windows) as a second font. The Manager loads
-  it for its page titles, at 1.18 times the text, with the CJK fonts merged into it as into
-  the text's font (their regular weight stands in); plugin names, the heading of the detail,
-  group headings and the title of a dialog may follow.
+- **Segoe UI Semibold** (`seguisb.ttf`, also in Windows) as a second font. The Manager and
+  the overlay load it at 1.18 times the text, with the CJK fonts merged into it as into the
+  text's font (their regular weight stands in): the Manager's page titles, and in both apps
+  the names in list rows and the detail's header and the title of a dialog.
 - **Consolas** (`consola.ttf`, also in Windows) at 15 px for logs, crash reports and the
   benchmark's JSON, with the CJK fonts merged into it; the Log page draws a warning's and an
   error's glyph in a gutter before the line, and its chips filter to those levels.
@@ -126,10 +126,10 @@ with its own colours and spacings.
 | **Checkbox** | A box outlined in `control_outline` (3:1, so an unticked one still reads as a control), with what it covers in weak text under its label, aligned with it; on, an ember tick (`CheckMark`) on an ember-tinted box (`CheckboxSelectedBg`, `#5b3e28`: ember at 28 % over `frame`). ImGui draws a radio button's dot in `CheckMark` on `FrameBg` too, so the tick stays light rather than dark on a filled box (as the prototype drew it). When its plugin is off, the checkbox is disabled and keeps its tick, so the choice stays visible but reads as held (ui-guidelines §5). |
 | **Segmented control** | A `frame` track with a 2 px inset; the chosen segment is ember at 28 % with an ember outline. |
 | **Input and combo** | `frame` with a `border` outline that brightens on hover; the caret is ember (`InputTextCursor`). |
-| **List row** | Two lines, always (ui-guidelines §5), in the Plugins list and the Crashes list alike: a status glyph in a column of its own, the name in semibold and an `info` dot when something waits; under it one phrase in 12 px, in `text_weak` for a summary and in the state colour for an exception. Hover `raised`; the selection is ember at 16 % with a 3 px ember bar at its left edge. |
+| **List row** | Two lines, always (ui-guidelines §5), in the Plugins list and the Crashes list alike: a status glyph in a column of its own, the name in semibold and an `info` dot when something waits; under it one phrase in 12 px, in `text_weak` for a summary and in the state colour for an exception. A line that does not fit ends in "…" and the tooltip has it whole. Hover `raised`, the section headers' too; the selection is ember at 16 % with a 3 px ember bar at its left edge. |
 | **Section header** in the list | Small text in `text_weak` on no fill, a count in a `frame` pill, and "▲ 2" / "✕ 1" in the state colours when entries need attention ("From mods (3) ▲ 2 ✕ 1"), brighter on hover. |
 | **Group header** in the detail | Semibold `text`, a fold arrow, "n of m on", a `line` rule to the right. |
-| **Detail header** | The name in semibold at 17 px with version and id under it in `text_weak`; at the right the plugin toggle, a `line` separator, then Reset and Remove as secondary buttons. Under it, in the overlay, the plugin's state when it is an exception, with its glyph ("▲ kept out of this game: its author keeps it out of ironman"). It stays at the top of the scrolling detail (a fixed part above `BeginChild`), so the plugin being changed is always named. |
+| **Detail header** | The name in semibold at 17 px with version and id under it in `text_weak`; at the right the plugin toggle, a `line` separator, then Reset and Remove as secondary buttons. Under it, in the overlay, the plugin's state when it is an exception, with its glyph ("▲ kept out of this game: its author keeps it out of ironman"). It stays at the top of the detail (a fixed part above `BeginChild`), so the plugin being changed is always named; everything under it (facts, banners, description, modules, settings) scrolls as one, so a long approval banner never squeezes the settings into a scroll area of their own. |
 | **Tag and chip** | Pills with a hairline. The "changes the game" tag carries the warning colour only in its word and outline. An active filter chip is ember at 16 % with an ember outline. |
 | **Banner** | `raised`, as high as its contents, with a 3 px left bar in the state colour and the state's glyph (§ Status; a dot for information) before its first line; the text stays `text` and wraps under itself, not under the glyph. Its actions sit inside it, after the text. Every notice of a page is one: a warning, a refusal, an update, a crash. |
 | **State row** | A glyph and one line beside it, outside a banner: a state that is no exception ("You have the latest release", "No crash reports"). |
@@ -238,6 +238,7 @@ what changed in Anvil 1.23.0:
 | The crash report looked like a field to type in; the log was on `panel`. | Both are the code view on `bg0`. |
 | "Also remove my plugins, their settings and data, crash reports and logs" deleted them with no warning. | "Remove my data too", what it covers under it, and a warning banner while it is ticked. |
 | An unticked checkbox's outline was `border`, 1.9:1. | `control_outline`, 3.6:1. |
+| In the overlay, five layers above the list (the build, Restart, a panel's checkbox, "Warnings (1)" folded, the approval banner) left the list two rows; the detail's scrolling part shrank to a sliver under a long approval; names were in regular weight; the build showed as "eu4-1.37.5-steam-win64"; a row's line ran under the list's edge. | One status line (Anvil, Steam 1.37.5, "Panels:" with their switches, Restart game... at the right); start-up warnings as a banner line with Show; the approval as one banner shared with the Manager, without the reason that repeats it and with "Open its repository"; the detail scrolls as one under its header; Segoe UI Semibold in the overlay; "…" and a tooltip in list rows; "Crashes" as in the Manager; a larger first window. |
 | Notices above a page were coloured text with small buttons; text buttons at the start of a line sat 8 px in; the Benchmark listed eight green checks and said "per arm". | Banners with text buttons; text buttons line up with the text; one "Ready: all 8 checks pass" that unfolds, and "without and with the plugin". |
 
 ## What came from `/ui-ux-pro-max`, and what did not

@@ -164,7 +164,8 @@ void PluginsTab::draw_waiting(const Snapshot& model) {
     ImGui::TextUnformatted(tr("Waiting for your approval:"));
     for (const PluginSnap& p : model.plugins) {
         if (!(p.blocked == Blocked::WaitsForApproval && !p.approved) && p.update_waits.empty()) continue;
-        const std::string label = p.update_waits.empty() ? p.name : trf("{0} (update to {1})", {p.name, p.update_waits});
+        // The version that waits: its row and its detail say whether it is an update.
+        const std::string label = p.name + " " + (p.update_waits.empty() ? p.version : p.update_waits);
         ImGui::SameLine();
         if (ImGui::GetContentRegionAvail().x < button_width(label.c_str())) ImGui::NewLine();
         if (text_button((label + "##wait-" + p.id).c_str())) selected = p.id;
@@ -182,6 +183,32 @@ void PluginsTab::draw_pending(const Snapshot& model, PluginsHost& host) {
     if (text_button(tr("Undo them"))) host.apply(undo_pending(model));
     ImGui::EndDisabled();
     end_banner(Tone::Info);
+}
+
+ModAction draw_mod_approval(const ModApproval& a) {
+    ModAction action = ModAction::None;
+    if (a.good) {
+        state_row(Glyph::On, a.state);
+    } else {
+        begin_banner("mod-state", a.tone);
+        wrapped(a.state);
+    }
+    for (const std::string& detail : a.details) weak_wrapped(detail);
+    // When it was approved and where it comes from, on one line where it fits.
+    if (!a.approved.empty()) weak(a.approved);
+    if (!a.repository.empty()) {
+        if (!a.approved.empty()) same_line_if_fits(button_width(tr("Open its repository")));
+        if (text_button(tr("Open its repository"))) action = ModAction::OpenRepository;
+    }
+    ImGui::BeginDisabled(a.disabled);
+    if (a.can_approve && primary_button(a.update ? tr("Approve the update...") : tr("Approve..."))) action = ModAction::Approve;
+    if (a.can_revoke) {
+        if (a.can_approve) ImGui::SameLine();
+        if (ImGui::Button(tr("Revoke the approval"))) action = ModAction::Revoke;
+    }
+    ImGui::EndDisabled();
+    if (!a.good) end_banner(a.tone);
+    return action;
 }
 
 void PluginsTab::draw_panes(const Snapshot& model, PluginsHost& host) {
@@ -288,9 +315,13 @@ void PluginsTab::draw_list(const Snapshot& model, PluginsHost& host) {
         const bool holds_selection = std::any_of(members.begin(), members.end(), [&](size_t i) { return model.plugins[i].id == selected; });
         ImGui::SetNextItemOpen(section.origin != Origin::WithAnvil || holds_selection || filtering,
                                filtering || holds_selection ? ImGuiCond_Always : ImGuiCond_Once);
+        // Hovered `raised`, as a row: ember is the selection's colour.
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, kRaised);
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, kRaised);
         const bool open = ImGui::TreeNodeEx((std::string(tr(section.name)) + " (" + count + ")###" + section.id).c_str(),
                                             ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_NoTreePushOnOpen |
                                                 ImGuiTreeNodeFlags_AllowOverlap);
+        ImGui::PopStyleColor(2);
         for (const auto& [n, glyph] : {std::pair{counts.attention, Glyph::Attention}, std::pair{counts.cannot_load, Glyph::CannotLoad}}) {
             if (n == 0) continue;
             ImGui::SameLine();
@@ -309,17 +340,30 @@ void PluginsTab::draw_list(const Snapshot& model, PluginsHost& host) {
             const float pad = ImGui::GetStyle().FramePadding.y;
             const ImVec2 at = ImGui::GetCursorScreenPos();
             if (list_row(("##entry-" + p.id).c_str(), p.id == selected, third ? 3 : 2)) selected = p.id;
-            if (ImGui::IsItemHovered()) ImGui::SetItemTooltip("%s", (p.id + " " + p.version).c_str());
+            const bool hovered = ImGui::IsItemHovered();
             ImDrawList* draw = ImGui::GetWindowDrawList();
             const float x = row_text_x(at);
+            // A line that does not fit ends in "…"; the tooltip has it whole.
+            const float dot = v.pending > 0 ? line : 0.0f;
+            const float right = ImGui::GetItemRectMax().x - ImGui::GetStyle().ItemInnerSpacing.x;
+            bool cut_name = false, cut_line = false, cut_where = false;
             draw_glyph(draw, ImVec2(row_glyph_x(at), at.y + pad), line, v.glyph);
-            const float w = draw_strong(draw, ImVec2(x, at.y + pad), ImGui::GetColorU32(v.load.loads ? kText : kTextWeak), p.name.c_str());
+            const float w = draw_strong(draw, ImVec2(x, at.y + pad), ImGui::GetColorU32(v.load.loads ? kText : kTextWeak), p.name.c_str(),
+                                        right - dot, &cut_name);
             if (v.pending > 0) draw_pending_dot(draw, ImVec2(x + w + line * 0.5f, at.y + pad + line * 0.5f), line * 0.18f);
-            draw->AddText(ImVec2(x, at.y + pad + line), ImGui::GetColorU32(entry_color(v.line)), entry_line(v.line).c_str());
+            const std::string second = entry_line(v.line);
+            draw_text_fit(draw, ImGui::GetFont(), ImVec2(x, at.y + pad + line), right, ImGui::GetColorU32(entry_color(v.line)), second,
+                          &cut_line);
+            std::string where;
             if (third) {
-                const std::string where = match.where == Match::Where::Module ? trf("found in module: {0}", {match.what})
-                                                                              : trf("found in setting: {0}", {match.what});
-                draw->AddText(ImVec2(x, at.y + pad + line * 2), ImGui::GetColorU32(kInfo), where.c_str());
+                where = match.where == Match::Where::Module ? trf("found in module: {0}", {match.what})
+                                                            : trf("found in setting: {0}", {match.what});
+                draw_text_fit(draw, ImGui::GetFont(), ImVec2(x, at.y + pad + line * 2), right, ImGui::GetColorU32(kInfo), where, &cut_where);
+            }
+            if (hovered) {
+                std::string tip = p.name + " " + p.version + "\n" + p.id;
+                if (cut_name || cut_line || cut_where) tip += "\n\n" + second + (third ? "\n" + where : "");
+                ImGui::SetTooltip("%s", tip.c_str());
             }
         }
         ImGui::Spacing();
@@ -372,6 +416,10 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
     ImGui::EndDisabled();
     if (!refusal.empty()) weak_wrapped(refusal);
 
+    // The rest scrolls as one, so its modules and settings get the whole pane
+    // however much the facts above them say; the header stays in sight.
+    ImGui::Separator();
+    ImGui::BeginChild("body", ImVec2(0, 0), ImGuiChildFlags_None);
     // What the player needs to know about it, in the order it matters.
     host.draw_facts(i);
     if (p.blocked == Blocked::CannotLoad) {
@@ -410,10 +458,6 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
     }
     if (!p.description.empty()) wrapped(p.description);
     host.draw_notes(i);
-    ImGui::Separator();
-
-    // The body scrolls; the header above stays in sight.
-    ImGui::BeginChild("body", ImVec2(0, 0), ImGuiChildFlags_None);
     const bool plugin_off = !p.saved.on || !known;
     if (p.modules.empty() && p.changes_game && known) {
         ImGui::SeparatorText(tr("Where it runs"));
