@@ -355,6 +355,12 @@ std::vector<Edit> reset_setting(const PluginSnap& plugin, std::string_view setti
     return out;
 }
 
+std::size_t changed_module_settings(const PluginSnap& plugin, std::string_view module) {
+    return static_cast<std::size_t>(std::count_if(plugin.settings.begin(), plugin.settings.end(), [&](const SettingSnap& s) {
+        return s.module == module && setting_changed(s);
+    }));
+}
+
 std::vector<Edit> reset_module_settings(const PluginSnap& plugin, std::string_view module) {
     std::vector<Edit> out;
     for (const SettingSnap& s : plugin.settings) {

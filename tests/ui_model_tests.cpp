@@ -356,6 +356,8 @@ void reset_tests() {
         p.settings[1].locked = true;
         const std::vector<Edit> module_reset = reset_module_settings(p, "m");
         CHECK(module_reset.size() == 1 && module_reset[0].setting == "z");
+        // The module's row still counts the locked one, as its setting rows mark it changed.
+        CHECK(changed_module_settings(p, "m") == 2 && changed_module_settings(p, "n") == 0);
         const std::vector<Edit> all = reset_plugin(p);
         CHECK(all.size() == 1 && all[0].setting == "z");
     });

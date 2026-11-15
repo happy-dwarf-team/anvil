@@ -590,7 +590,7 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
     const std::string key = p.id + "." + mod.id;
     const SettingsLayout layout = settings_layout(p, mod.id);
     const size_t n = layout.shown.size() + layout.advanced.size();
-    const std::vector<Edit> changed = reset_module_settings(p, mod.id);
+    const std::size_t changed = changed_module_settings(p, mod.id);
 
     // One line: its name, its facts, a chevron and its switch; a click anywhere on the
     // line opens what it does, where it runs and its settings. The facts say what the
@@ -604,7 +604,7 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
     std::vector<Part> facts;
     if (mod.changes_game && !on) facts.push_back({tr("changes the game"), kTextWeak});
     if (n > 0) facts.push_back({trn("{0} setting|{0} settings", static_cast<long long>(n)), kTextWeak});
-    if (!changed.empty()) facts.push_back({trf("{0} changed", {std::to_string(changed.size())}), kInfo});
+    if (changed > 0) facts.push_back({trf("{0} changed", {std::to_string(changed)}), kInfo});
     if (host.in_game()) {
         if (std::string text = in_game_text(module_in_game(model, p, mod)); !text.empty()) facts.push_back({std::move(text), kTextWeak});
         if (!(mod.saved == mod.in_effect)) facts.push_back({tr("at the next start"), kInfo});
@@ -612,10 +612,13 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
     std::string all_facts;
     for (const Part& part : facts) all_facts += (all_facts.empty() ? "" : " \xC2\xB7 ") + part.text;
 
-    // Opened at first: a module whose settings were changed.
+    // Opened at first: a module whose settings were changed. Decided once, so a
+    // row does not close under the cursor when its last change is reset, nor
+    // open when a setting changes from outside.
     ImGuiStorage* storage = ImGui::GetStateStorage();
-    const ImGuiID open_id = ImGui::GetID("open");
-    bool open = storage->GetBool(open_id, !changed.empty());
+    int* const open_state = storage->GetIntRef(ImGui::GetID("open"), -1);
+    if (*open_state < 0) *open_state = changed > 0 ? 1 : 0;
+    bool open = *open_state != 0;
     const float line = ImGui::GetTextLineHeight();
     const float frame = ImGui::GetFrameHeight();
     const float h = frame + 2;
@@ -625,7 +628,7 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
     ImGui::PushStyleColor(ImGuiCol_HeaderActive, kFrameActive);
     if (ImGui::Selectable("##row", false, ImGuiSelectableFlags_AllowOverlap, ImVec2(0, h))) {
         open = !open;
-        storage->SetBool(open_id, open);
+        *open_state = open ? 1 : 0;
     }
     ImGui::PopStyleColor(2);
     if (ImGui::IsItemHovered()) {
@@ -697,10 +700,11 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
             draw_settings_of(model, i, mod.id, true, host);
             ImGui::TreePop();
         }
-        if (changed.size() > 1) {
+        // Locked settings stay out of the reset (reset_module_settings).
+        if (const std::vector<Edit> resets = reset_module_settings(p, mod.id); resets.size() > 1) {
             ImGui::BeginDisabled(disabled);
-            if (text_button(trf("Reset settings ({0})...", {std::to_string(changed.size())}).c_str())) {
-                ask_edits(model, host, trf("Reset the settings of {0}", {mod.name}), tr("Reset"), changed);
+            if (text_button(trf("Reset settings ({0})...", {std::to_string(resets.size())}).c_str())) {
+                ask_edits(model, host, trf("Reset the settings of {0}", {mod.name}), tr("Reset"), resets);
             }
             ImGui::EndDisabled();
         }
