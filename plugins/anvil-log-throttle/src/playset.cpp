@@ -228,6 +228,13 @@ Search search(const std::vector<Layer>& layers, std::string_view token, FindIn i
             if (!std::filesystem::is_directory(dir, ec)) continue;
             for (auto it = std::filesystem::recursive_directory_iterator(dir, ec);
                  !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+                // A subfolder a later layer replaces (replace_path = "common/ideas"): the game reads none of it here.
+                if (it->is_directory(ec)) {
+                    if (replaced_after(layers, index, folder_key(utf8_of(it->path().lexically_relative(layer.path))))) {
+                        it.disable_recursion_pending();
+                    }
+                    continue;
+                }
                 if (!it->is_regular_file(ec) || it->path().extension() != L".txt") continue;
                 const std::string text = read_file(it->path());
                 if (text.find(token) == std::string::npos) continue;
