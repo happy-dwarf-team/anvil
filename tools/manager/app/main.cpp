@@ -13,6 +13,7 @@
 #include "core/log.hpp"
 #include "core/playset.hpp"
 #include "i18n/cjk_font.hpp"
+#include "i18n/message.hpp"
 #include "i18n/translate.hpp"
 #include "manager_app.hpp"
 #include "platform.hpp"
@@ -440,8 +441,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         if (args[i] == L"--dialog" && i + 1 < args.size()) shot_options().dialog = anvil::narrow(args[++i]);
         if (args[i] == L"--scale" && i + 1 < args.size()) shot_options().scale = std::max(50, _wtoi(args[++i].c_str()));
         if (args[i] == L"--width" && i + 1 < args.size()) shot_options().width = std::max(720, _wtoi(args[++i].c_str()));
-        // The language goes through ANVIL_LANGUAGE, which every later choice of it honours.
-        if (args[i] == L"--lang" && i + 1 < args.size()) SetEnvironmentVariableW(L"ANVIL_LANGUAGE", args[++i].c_str());
+        // The Manager's own language, which every later choice of it honours. Not
+        // through ANVIL_LANGUAGE: the game the Manager starts would inherit it.
+        if (args[i] == L"--lang" && i + 1 < args.size()) {
+            anvil::i18n::force_process_language(anvil::i18n::language_named(anvil::narrow(args[++i])));
+        }
     }
     if (shot && shot->out.empty()) return 2;
     if (!shot) remove_stale_copies();

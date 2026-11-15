@@ -332,6 +332,32 @@ int main(int argc, char** argv) {
         fs::remove_all(dir, ignored);
     });
 
+    run("force_process_language: the Manager's --lang, not in the environment a started game inherits", [] {
+        const fs::path dir = fs::temp_directory_path() / ("anvil-i18n-lang-" + std::to_string(GetCurrentProcessId()));
+        fs::create_directories(dir);
+        std::ofstream(dir / "settings.txt") << "language=\"l_french\"\n";
+        const auto environment = [] {
+            char value[16] = {};
+            const DWORD n = GetEnvironmentVariableA("ANVIL_LANGUAGE", value, sizeof(value));
+            return n == 0 ? std::string("(unset)") : std::string(value, n);
+        };
+        SetEnvironmentVariableA("ANVIL_LANGUAGE", nullptr);
+        force_process_language(Language::German);
+        CHECK(forced_language() == Language::German);
+        CHECK(choose_manager_language(dir, {}).language == Language::German && choose_manager_language(dir, {}).source == "--lang");
+        CHECK(environment() == "(unset)");
+        // The player's own ANVIL_LANGUAGE stays for the game; --lang wins in this process.
+        SetEnvironmentVariableA("ANVIL_LANGUAGE", "ja");
+        CHECK(choose_manager_language(dir, {}).language == Language::German);
+        CHECK(environment() == "ja");
+        force_process_language(std::nullopt);
+        CHECK(choose_manager_language(dir, {}).language == Language::Japanese && choose_manager_language(dir, {}).source == "ANVIL_LANGUAGE");
+        SetEnvironmentVariableA("ANVIL_LANGUAGE", nullptr);
+        CHECK(!forced_language() && choose_manager_language(dir, {}).language == Language::French);
+        std::error_code ignored;
+        fs::remove_all(dir, ignored);
+    });
+
     run("tr and text: the player's language, English as the fallback", [] {
         set_language(Language::English);
         CHECK(std::string(tr("Cancel")) == "Cancel");
