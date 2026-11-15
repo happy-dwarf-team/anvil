@@ -124,6 +124,13 @@ public:
         return true;
     }
 
+    // set_colors(): hands `colors` to `mode` unless the epoch has ended (the
+    // session ended between the caller's check and this; clear_session()
+    // moves the epoch on before it drops the buffers, so a late buffer is
+    // never kept for the next session). False for a mode this registry does
+    // not own or an ended epoch.
+    bool store_colors(const AnvilMapMode* mode, std::shared_ptr<const Colors> colors, std::uint64_t epoch);
+
     // The step: the waiting request, or null; it is taken.
     AnvilMapMode* take_show() noexcept {
         std::lock_guard lock(show_mutex_);

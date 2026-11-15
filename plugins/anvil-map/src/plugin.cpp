@@ -354,15 +354,17 @@ AnvilResult svc_register(const AnvilMapModeInfo* info, const AnvilMapMode** out)
 }
 
 AnvilResult svc_set_colors(const AnvilMapMode* mode, const std::uint32_t* colors, std::uint32_t count) {
-    if (mode == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (!g_registry.owns(mode)) return ANVIL_ERROR_INVALID_ARGUMENT;
+    // The epoch before the check, as in show(): a buffer of a session that
+    // ends meanwhile is dropped, not painted in the next one.
+    const std::uint64_t epoch = g_registry.epoch();
     if (!g_in_session.load(std::memory_order_acquire)) return ANVIL_ERROR_WRONG_PHASE;
     try {
         auto buffer = std::make_shared<anvil_map::Colors>();
         const AnvilResult r =
             anvil_map::make_colors(colors, count, g_province_limit.load(std::memory_order_relaxed), *buffer);
         if (r != ANVIL_OK) return r;
-        anvil_map::set_colors(*const_cast<AnvilMapMode*>(mode), std::move(buffer));
-        return ANVIL_OK;
+        return g_registry.store_colors(mode, std::move(buffer), epoch) ? ANVIL_OK : ANVIL_ERROR_WRONG_PHASE;
     } catch (...) {
         return ANVIL_ERROR_OUT_OF_MEMORY;
     }
