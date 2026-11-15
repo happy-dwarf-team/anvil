@@ -1,5 +1,6 @@
 #include "settings.hpp"
 
+#include "files.hpp"
 #include "manifest.hpp"
 
 #include <toml++/toml.hpp>
@@ -893,25 +894,9 @@ bool replace_text_file(const std::filesystem::path& file, const std::string& tex
         if (ec) error = "cannot remove " + shown(file) + ": " + ec.message();
         return !ec;
     }
-    std::filesystem::create_directories(file.parent_path(), ec);
-    std::filesystem::path temporary = file;
-    temporary += L".tmp";
-    {
-        std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-        out << text;
-        out.close();
-        if (!out) {
-            error = "cannot write " + shown(temporary);
-            return false;
-        }
-    }
-    std::filesystem::rename(temporary, file, ec);  // replaces the file in one step
-    if (ec) {
-        error = "cannot replace " + shown(file) + ": " + ec.message();
-        std::filesystem::remove(temporary, ec);
-        return false;
-    }
-    return true;
+    // Flushed before the one-step replace, so a crash or power cut right after
+    // leaves the old file or the new one, never an empty one.
+    return write_file_atomic(file, text, error);
 }
 
 std::string setting_environment_name(std::string_view plugin_id, std::string_view setting_name) {
