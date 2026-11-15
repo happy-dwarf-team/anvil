@@ -35,21 +35,30 @@ void show_tests() {
         CHECK(r.add(&ia, false, &a, why) == ANVIL_OK && r.add(&ib, false, &b, why) == ANVIL_OK);
         CHECK(r.take_show() == nullptr);
         CHECK(r.owns(a) && r.owns(b) && !r.owns(nullptr));
-        CHECK(r.request_show(a) && r.request_show(b));
+        CHECK(r.request_show(a, r.epoch()) && r.request_show(b, r.epoch()));
         CHECK(r.take_show() == b && r.take_show() == nullptr);
         // A mode of another registry, a forged handle and NULL are refused.
         Registry other;
         const AnvilMapMode* c = nullptr;
         AnvilMapModeInfo ic = info("p.c");
         CHECK(other.add(&ic, false, &c, why) == ANVIL_OK);
-        CHECK(!r.owns(c) && !r.request_show(c) && !r.request_show(nullptr));
+        CHECK(!r.owns(c) && !r.request_show(c, r.epoch()) && !r.request_show(nullptr, r.epoch()));
         AnvilMapMode forged;
         forged.number = a->number;
-        CHECK(!r.request_show(&forged) && r.take_show() == nullptr);
+        CHECK(!r.request_show(&forged, r.epoch()) && r.take_show() == nullptr);
         // The end of a session drops a waiting request.
-        CHECK(r.request_show(a));
+        CHECK(r.request_show(a, r.epoch()));
         r.clear_session();
         CHECK(r.take_show() == nullptr);
+        // A request checked in a session that ended before it was kept is
+        // dropped too: it never reaches the next session's step.
+        const std::uint64_t before = r.epoch();
+        r.clear_session();
+        CHECK(r.request_show(a, before) && r.take_show() == nullptr);
+        CHECK(r.request_show(b, r.epoch()) && r.take_show() == b);
+        // A handle that is not a mode is not read: an address of no AnvilMapMode.
+        alignas(AnvilMapMode) static const unsigned char junk[sizeof(AnvilMapMode)] = {0xFF, 0xFF, 0xFF, 0xFF};
+        CHECK(!r.owns(reinterpret_cast<const AnvilMapMode*>(junk)));
     });
 }
 

@@ -380,8 +380,10 @@ const char* svc_id(const AnvilMapMode* mode) { return mode != nullptr ? mode->id
 AnvilResult svc_show(const AnvilMapMode* mode) {
     if (g_off.load(std::memory_order_relaxed)) return ANVIL_ERROR_UNSUPPORTED;
     if (!g_registry.owns(mode)) return ANVIL_ERROR_INVALID_ARGUMENT;
+    // The epoch before the check: a session that ends after it drops the request.
+    const std::uint64_t epoch = g_registry.epoch();
     if (!g_in_session.load(std::memory_order_acquire)) return ANVIL_ERROR_WRONG_PHASE;
-    g_registry.request_show(mode);
+    g_registry.request_show(mode, epoch);
     return ANVIL_OK;
 }
 
