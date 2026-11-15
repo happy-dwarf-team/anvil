@@ -1243,7 +1243,8 @@ AnvilResult pick_unit(const WorldLayout& l, std::int32_t x, std::int32_t y, Anvi
     const auto object = reinterpret_cast<std::uintptr_t>(picked);
     // The kind from its vtable's constant getter, read rather than called, as selected_units() does.
     std::int64_t kind = 0;
-    if (!constant_of(l, object, l.kind_slot, kind)) return ANVIL_ERROR_INTERNAL;
+    // Not a constant getter: not a unit, as selected_units() skips it.
+    if (!constant_of(l, object, l.kind_slot, kind)) return ANVIL_ERROR_NOT_FOUND;
     if (kind != ANVIL_GAME_UNIT_ARMY && kind != ANVIL_GAME_UNIT_NAVY) return ANVIL_ERROR_NOT_FOUND;
     AnvilGameUnitRef ref{};
     std::uint64_t country = 0;
