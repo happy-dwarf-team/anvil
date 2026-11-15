@@ -30,13 +30,16 @@ int g_proto_variant = [] {
     char e[4] = {};
     size_t n = 0;
     getenv_s(&n, e, sizeof e, "ANVIL_PROTO_VARIANT");
-    return e[0] >= '0' && e[0] <= '7' ? e[0] - '0' : 0;
+    const int k = std::atoi(e);
+    return k >= 0 && k < 12 ? k : 0;
 }();
 const char* const kProtoNames[] = {"C   the card as shown", "C1  compact cards, tags, folded settings",
                                    "C2  ember edge on the cards that are on", "C3  one grouped card, a row per module",
                                    "C4  a row per module that opens", "C5  two-line rows: name, then its state",
-                                   "C6  C5, and the open row is a card (one at a time)", "C7  rows like the plugin list: glyph, chevron at the right"};
-constexpr int kProtoCount = 8;
+                                   "C6  C5, and the open row is a card (one at a time)", "C7  rows like the plugin list: glyph, chevron at the right",
+                                   "C8  C4: the whole row opens, its facts cut with ...", "C9  C8, and the open row is a card (one at a time)",
+                                   "C10 C8 with its facts at the right, by the toggle", "C11 C8 with lines between rows and the chevron at the right"};
+constexpr int kProtoCount = 12;
 std::string g_open_key;   // C6: the one open module (plugin.module)
 std::string g_open_init;  // C6: the plugin it was chosen for
 bool g_first_module = true;  // C3: no line above the first row
@@ -743,12 +746,19 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
         return;
     }
     if (v >= 5) {
-        // C5 to C7: a row that opens, two lines high: the name, then its state in a few words.
+        // C5 to C11: a row that opens anywhere it is clicked, its facts cut with "..." before the
+        // toggle (the full text in the tooltip), the toggle in its place.
+        const bool two_line = v == 5 || v == 6 || v == 7;
+        const bool glyph = v == 7;
+        const bool chevron_right = v == 7 || v == 11;
+        const bool accordion = v == 6 || v == 9;
+        const bool facts_right = v == 10;
+        const bool lines = v == 11;
         const ImGuiStyle& st = ImGui::GetStyle();
         const float line = ImGui::GetTextLineHeight();
         const float frame = ImGui::GetFrameHeight();
         const std::string key = p.id + "." + mod.id;
-        if (v == 6 && g_open_init != p.id) {
+        if (accordion && g_open_init != p.id) {
             g_open_init = p.id;
             g_open_key.clear();
             for (const ModuleSnap& other : p.modules) {
@@ -758,21 +768,31 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
                 }
             }
         }
+        if (lines) {
+            if (!g_first_module) {
+                ImGui::PushStyleColor(ImGuiCol_Separator, kLine);
+                ImGui::Separator();
+                ImGui::PopStyleColor();
+            }
+            g_first_module = false;
+        }
         ImGuiStorage* storage = ImGui::GetStateStorage();
         const ImGuiID open_id = ImGui::GetID("open");
-        bool open = v == 6 ? g_open_key == key : storage->GetBool(open_id, !changed.empty());
-        // The state line: where it runs (or On / Off), how many settings, how many changed.
-        // What the toggle does not say: where it runs (or that it changes the game), its settings;
-        // with nothing of that, the start of what it does.
-        std::string state;
-        const auto add = [&](const std::string& part) { state += (state.empty() ? "" : " \xC2\xB7 ") + part; };
+        bool open = accordion ? g_open_key == key : storage->GetBool(open_id, !changed.empty());
+        // Its facts, what the toggle does not say: where it runs (or that it changes the game) and
+        // its settings; on two lines, with nothing of that, the start of what it does.
+        std::string facts;
+        const auto add = [&](const std::string& part) { facts += (facts.empty() ? "" : " \xC2\xB7 ") + part; };
         if (mod.changes_game) {
-            const char* words[] = {tr("Off"), tr("Normal games"), tr("Normal games + Ironman"), tr("Normal games + Multiplayer"), tr("Everywhere")};
-            add(on ? std::string(words[static_cast<int>(where(mod.saved))]) : std::string(tr("Changes the game")));
+            const char* long_words[] = {tr("Off"), tr("Normal games"), tr("Normal games + Ironman"), tr("Normal games + Multiplayer"), tr("Everywhere")};
+            const char* short_words[] = {tr("Off"), tr("Normal games"), tr("+ Ironman"), tr("+ Multiplayer"), tr("Everywhere")};
+            const int w = static_cast<int>(where(mod.saved));
+            add(on ? std::string(two_line ? long_words[w] : short_words[w]) : std::string(tr("Changes the game")));
         }
         if (n_settings > 0) add(trf("{0} settings", {std::to_string(n_settings)}));
-        if (state.empty()) state = mod.description;
-        const bool card = v == 6 && open;
+        if (facts.empty() && two_line) facts = mod.description;
+        const std::string changed_text = changed.empty() ? std::string() : trf("{0} changed", {std::to_string(changed.size())});
+        const bool card = accordion && open;
         if (card) {
             ImGui::PushStyleColor(ImGuiCol_ChildBg, kRaised);
             ImGui::PushStyleColor(ImGuiCol_Border, kLine);
@@ -782,35 +802,34 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
         }
         const ImVec2 at = ImGui::GetCursorScreenPos();
         const float right_edge = at.x + ImGui::GetContentRegionAvail().x;
-        const float h = line * 2 + st.FramePadding.y * 2 + 2;
+        const float h = two_line ? line * 2 + st.FramePadding.y * 2 + 2 : line + st.FramePadding.y * 2 + 2;
         ImGui::PushStyleColor(ImGuiCol_HeaderHovered, kFrameHovered);
         ImGui::PushStyleColor(ImGuiCol_HeaderActive, kFrameActive);
         if (ImGui::Selectable("##row", false, ImGuiSelectableFlags_AllowOverlap, ImVec2(0, h))) {
             open = !open;
-            if (v == 6) {
+            if (accordion) {
                 g_open_key = open ? key : std::string();
             } else {
                 storage->SetBool(open_id, open);
             }
         }
         ImGui::PopStyleColor(2);
-        if (ImGui::IsItemHovered()) ImGui::SetItemTooltip("%s", key.c_str());
+        const bool row_hovered = ImGui::IsItemHovered();
         ImDrawList* draw = ImGui::GetWindowDrawList();
         const float word_w = std::max(ImGui::CalcTextSize(tr("On")).x, ImGui::CalcTextSize(tr("Off")).x);
         const float need = toggle_track_width(true) + st.ItemSpacing.x + word_w;
         const bool room = std::min(g_toggle_left, right_edge - need) - at.x > ImGui::GetFontSize() * 8;
         const float toggle_x = room ? std::min(g_toggle_left, right_edge - need) : right_edge - toggle_track_width(true);
-        const float chevron = v == 7 ? line : 0.0f;
+        const float chevron = chevron_right ? line : 0.0f;
         const float text_right = toggle_x - st.ItemSpacing.x * 2 - chevron;
         float x = at.x + st.FramePadding.x;
-        const float y1 = at.y + st.FramePadding.y;
+        const float y1 = at.y + (two_line ? st.FramePadding.y : (h - line) * 0.5f);
         const float y2 = y1 + line + 2;
         const ImU32 dim = ImGui::GetColorU32(kTextWeak);
-        if (v == 7) {
-            // The plugin list's glyphs: on, off.
+        if (glyph) {
             draw_glyph(draw, ImVec2(x, y1), line, on ? Glyph::On : Glyph::Off);
-        } else {
-            // The arrow that says the row opens.
+            x += line + st.ItemInnerSpacing.x * 1.5f;
+        } else if (!chevron_right) {
             const float s = line * 0.32f;
             const ImVec2 c(x + line * 0.5f, y1 + line * 0.5f);
             if (open) {
@@ -818,17 +837,27 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
             } else {
                 draw->AddTriangleFilled(ImVec2(c.x - s * 0.6f, c.y - s), ImVec2(c.x - s * 0.6f, c.y + s), ImVec2(c.x + s * 0.8f, c.y), dim);
             }
+            x += line + st.ItemInnerSpacing.x * 1.5f;
         }
-        x += line + st.ItemInnerSpacing.x * 1.5f;
-        draw_strong(draw, ImVec2(x, y1), ImGui::GetColorU32(on ? kText : kTextWeak), mod.name.c_str(), text_right);
-        bool state_cut = false;
-        const float sw = draw_text_fit(draw, ImGui::GetFont(), ImVec2(x, y2), text_right, dim, state, &state_cut);
-        if (!changed.empty() && !state_cut) {
-            draw_text_fit(draw, ImGui::GetFont(), ImVec2(x + sw, y2), text_right, ImGui::GetColorU32(kInfo),
-                          " \xC2\xB7 " + trf("{0} changed", {std::to_string(changed.size())}));
+        bool cut = false;
+        const float name_w = draw_strong(draw, ImVec2(x, y1), ImGui::GetColorU32(on ? kText : kTextWeak), mod.name.c_str(), text_right, &cut);
+        // The facts: under the name (two lines), after it, or at the right by the toggle; "N changed" in blue last.
+        float fx = two_line ? x : x + name_w + st.ItemSpacing.x * 1.5f;
+        const float fy = two_line ? y2 : y1;
+        if (facts_right && !cut) {
+            const std::string all = facts + (changed_text.empty() ? "" : (facts.empty() ? "" : " \xC2\xB7 ") + changed_text);
+            fx = std::max(fx, text_right - ImGui::CalcTextSize(all.c_str()).x);
         }
-        if (v == 7) {
-            // A chevron at the right, before the toggle: > closed, v open.
+        bool facts_cut = cut && !two_line;
+        // Less room than a few letters: no facts on the row (the tooltip has them), never a lone "...".
+        if (!facts_cut && text_right - fx > ImGui::GetFontSize() * 4) {
+            const float fw = facts.empty() ? 0.0f : draw_text_fit(draw, ImGui::GetFont(), ImVec2(fx, fy), text_right, dim, facts, &facts_cut);
+            if (!changed_text.empty() && !facts_cut) {
+                draw_text_fit(draw, ImGui::GetFont(), ImVec2(fx + fw, fy), text_right, ImGui::GetColorU32(kInfo),
+                              (facts.empty() ? "" : " \xC2\xB7 ") + changed_text, &facts_cut);
+            }
+        }
+        if (chevron_right) {
             const float s = line * 0.22f;
             const ImVec2 c(text_right + st.ItemSpacing.x + line * 0.5f, at.y + h * 0.5f);
             const float tw = std::max(1.5f, line * 0.09f);
@@ -840,12 +869,25 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
                 draw->AddLine(ImVec2(c.x + s * 0.5f, c.y), ImVec2(c.x - s * 0.5f, c.y + s), dim, tw);
             }
         }
+        // The tooltip: the whole name and facts, what it does, its id.
+        if (row_hovered) {
+            ImGui::BeginTooltip();
+            ImGui::PushTextWrapPos(ImGui::GetFontSize() * 26);
+            ImGui::TextUnformatted(mod.name.c_str());
+            if (!facts.empty() || !changed_text.empty()) {
+                weak(facts + (changed_text.empty() ? "" : (facts.empty() ? "" : " \xC2\xB7 ") + changed_text));
+            }
+            if (!mod.description.empty() && facts != mod.description) ImGui::TextUnformatted(mod.description.c_str());
+            weak(key);
+            ImGui::PopTextWrapPos();
+            ImGui::EndTooltip();
+        }
         ImGui::SetCursorScreenPos(ImVec2(toggle_x, at.y + (h - frame) * 0.5f));
         if (toggle("##on", on, room ? (on ? tr("On") : tr("Off")) : nullptr, disabled, true)) host.apply(set_switch(p, mod.id, Which::On, !on));
         ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + h));
         ImGui::Dummy(ImVec2(1, 0));
         if (open) {
-            const float indent = v == 7 ? line + st.ItemInnerSpacing.x * 1.5f + st.FramePadding.x : line + st.ItemInnerSpacing.x * 1.5f + st.FramePadding.x;
+            const float indent = (glyph || !chevron_right ? line + st.ItemInnerSpacing.x * 1.5f : 0.0f) + st.FramePadding.x;
             ImGui::Indent(indent);
             body(false);
             ImGui::Unindent(indent);
