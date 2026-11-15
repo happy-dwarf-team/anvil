@@ -722,6 +722,8 @@ extern const Translation kJapanese[] = {
      "Steam は実行中です"},
     {"Steam started",
      "Steam が起動しました"},
+    {"Steam starts EU4 from {0}, not from this folder: the Manager cannot start the game here.",
+     "Steam は {0} から EU4 を起動します。このフォルダーからではないため、Manager はここでゲームを起動できません。"},
     {"Steam, the mods or the compared plugin changed during the series.",
      "シリーズ中に Steam、MOD、または比較するプラグインが変わりました。"},
     {"Stop",

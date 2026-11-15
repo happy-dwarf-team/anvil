@@ -722,6 +722,8 @@ extern const Translation kKorean[] = {
      "Steam이 실행 중입니다"},
     {"Steam started",
      "Steam이 시작되었습니다"},
+    {"Steam starts EU4 from {0}, not from this folder: the Manager cannot start the game here.",
+     "Steam은 이 폴더가 아니라 {0}에서 EU4를 시작하므로 Manager가 여기서 게임을 시작할 수 없습니다."},
     {"Steam, the mods or the compared plugin changed during the series.",
      "시리즈 중에 Steam, 모드 또는 비교하는 플러그인이 바뀌었습니다."},
     {"Stop",
