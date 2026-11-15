@@ -704,6 +704,12 @@ AnvilResult Control::disable_next_start(std::string_view plugin_id, std::string&
         return ANVIL_ERROR_NOT_FOUND;
     }
     std::lock_guard lock(mutex_);
+    // As switch_set refuses it: the overlay is where the player turns things
+    // back on, so it keeps itself and what it needs (ADR 0013, point 7).
+    if (needed_.contains(plugin_id) && !disabled_next_.contains(plugin_id)) {
+        error = "the overlay needs " + std::string(plugin_id) + "; turn it off in Anvil Manager";
+        return ANVIL_ERROR_UNSUPPORTED;
+    }
     if (!add_disabled_plugin(sources_.anvil_dir / "anvil.toml", plugin_id, error)) {
         Log::instance().write(ANVIL_LOG_WARNING, "anvil", "cannot disable " + std::string(plugin_id) +
                                                               " at the next start: " + error);
