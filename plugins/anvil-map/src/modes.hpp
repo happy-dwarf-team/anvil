@@ -11,6 +11,7 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace anvil_map {
@@ -95,27 +96,47 @@ public:
     // (the end of a session).
     void clear_session();
 
-    // Whether `mode` is one of this registry's modes.
+    // Whether `mode` is one of this registry's modes. Compares the pointer
+    // only: a handle that is not a mode is never read.
     bool owns(const AnvilMapMode* mode) const noexcept {
-        return mode != nullptr && by_number(mode->number) == mode;
+        if (mode == nullptr) return false;
+        for (const auto& n : numbers_) {
+            if (n.load(std::memory_order_acquire) == mode) return true;
+        }
+        return false;
+    }
+
+    // The session's epoch: clear_session() moves it on. show() reads it
+    // before it checks that a session runs.
+    std::uint64_t epoch() const noexcept {
+        std::lock_guard lock(show_mutex_);
+        return epoch_;
     }
 
     // show(): keeps `mode` for the next step, replacing a request before it.
-    // False for a mode this registry does not own.
-    bool request_show(const AnvilMapMode* mode) noexcept {
+    // False for a mode this registry does not own. A request of an epoch that
+    // has ended (the session ended between show()'s check and this) is
+    // dropped, as clear_session() drops one that waits.
+    bool request_show(const AnvilMapMode* mode, std::uint64_t epoch) noexcept {
         if (!owns(mode)) return false;
-        show_.store(const_cast<AnvilMapMode*>(mode), std::memory_order_release);
+        std::lock_guard lock(show_mutex_);
+        if (epoch == epoch_) show_ = const_cast<AnvilMapMode*>(mode);
         return true;
     }
 
     // The step: the waiting request, or null; it is taken.
-    AnvilMapMode* take_show() noexcept { return show_.exchange(nullptr, std::memory_order_acq_rel); }
+    AnvilMapMode* take_show() noexcept {
+        std::lock_guard lock(show_mutex_);
+        return std::exchange(show_, nullptr);
+    }
 
 private:
     mutable std::mutex mutex_;
     std::vector<AnvilMapMode*> modes_;
     std::array<std::atomic<AnvilMapMode*>, kModeLimit> numbers_{};
-    std::atomic<AnvilMapMode*> show_{nullptr};
+    mutable std::mutex show_mutex_;  // show_ and epoch_
+    AnvilMapMode* show_ = nullptr;
+    std::uint64_t epoch_ = 0;
 };
 
 // Checks a buffer for set_colors and copies it. `limit` is the session's
