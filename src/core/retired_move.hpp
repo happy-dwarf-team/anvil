@@ -24,7 +24,9 @@ namespace anvil {
 // is removed from the player's file. anvil.toml is written first; when that
 // fails the player's file stays as it was, so the next start tries again.
 // Returns what to log, in the plugin's name: each half of the move, or why
-// it waits.
+// it waits. With `write_files` false (a benchmark start, which never writes
+// anvil.toml: docs/spec/benchmark-v1.md §2) the values apply to `lists` for
+// this start only and both files stay, so a later start moves them.
 struct RetiredMoveNote {
     AnvilLogLevel level = ANVIL_LOG_INFO;
     std::string message;
@@ -33,6 +35,6 @@ struct RetiredMoveNote {
 std::vector<RetiredMoveNote> move_retired_settings(const Manifest& manifest, const SettingsFile& schema,
                                                    const std::filesystem::path& player_file,
                                                    const std::filesystem::path& anvil_toml,
-                                                   AnvilSettings& lists);
+                                                   AnvilSettings& lists, bool write_files = true);
 
 }  // namespace anvil

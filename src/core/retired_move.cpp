@@ -26,7 +26,7 @@ bool listed(const std::vector<std::string>& list, const std::string& id) {
 std::vector<RetiredMoveNote> move_retired_settings(const Manifest& manifest, const SettingsFile& schema,
                                                    const std::filesystem::path& player_file,
                                                    const std::filesystem::path& anvil_toml,
-                                                   AnvilSettings& lists) {
+                                                   AnvilSettings& lists, bool write_files) {
     std::vector<RetiredMoveNote> notes;
     if (schema.retired.empty()) return notes;
     std::optional<std::string> text = read_text_file(player_file, kMaxPluginTomlBytes);
@@ -69,11 +69,25 @@ std::vector<RetiredMoveNote> move_retired_settings(const Manifest& manifest, con
                 edits.push_back(e);
                 changes += (changes.empty() ? "" : " and ") + std::string(e.listed ? "added it to " : "took it out of ") + e.key;
             }
+            if (!write_files) {
+                pending.push_back({ANVIL_LOG_INFO, changes.empty()
+                                                       ? what + " means module " + key + " " + state + "; anvil.toml has it so already"
+                                                       : what + " means module " + key + " " + state +
+                                                             " at this benchmark start; anvil.toml is not written"});
+                continue;
+            }
             pending.push_back({ANVIL_LOG_INFO,
                                changes.empty() ? what + " meant module " + key + " " + state + "; anvil.toml has it so already"
                                                : what + " meant module " + key + " " + state + ": " + changes +
                                                      " in anvil.toml, " + state + " from this start"});
         }
+    }
+    if (!write_files) {
+        lists = std::move(after);
+        notes.insert(notes.end(), pending.begin(), pending.end());
+        notes.push_back({ANVIL_LOG_INFO, "a benchmark start writes neither anvil.toml nor settings.toml: the retired "
+                                         "setting(s) stay for the next start"});
+        return notes;
     }
     if (!edits.empty() && !set_listed(anvil_toml, edits, error)) {
         notes.push_back({ANVIL_LOG_WARNING, "retired settings not moved: cannot write anvil.toml (" + error +
