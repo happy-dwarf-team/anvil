@@ -101,7 +101,9 @@ std::size_t pending_count(const PluginSnap& plugin) {
 std::size_t pending_count(const Snapshot& snapshot) {
     std::size_t n = 0;
     for (std::size_t i = 0; i < snapshot.plugins.size(); ++i) {
-        if (first_of_id(snapshot, i)) n += pending_count(snapshot.plugins[i]);
+        const PluginSnap& p = snapshot.plugins[i];
+        // Another entry of an id reads the first one's files; only its approval is its own.
+        n += first_of_id(snapshot, i) ? pending_count(p) : p.approved != p.approved_in_effect ? 1 : 0;
     }
     return n;
 }
@@ -111,6 +113,10 @@ bool first_of_id(const Snapshot& snapshot, std::size_t index) {
         if (snapshot.plugins[i].id == snapshot.plugins[index].id) return false;
     }
     return true;
+}
+
+bool settings_read_only(const Snapshot& snapshot, std::size_t index) {
+    return index < snapshot.plugins.size() && !first_of_id(snapshot, index);
 }
 
 std::string entry_key(const Snapshot& snapshot, std::size_t index) {

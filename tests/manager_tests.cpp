@@ -1110,6 +1110,47 @@ int main(int argc, char** argv) {
         CHECK(s.model.plugins[1].approved_in_effect);
     });
 
+    run("plugins tab: two entries of one id keep their approvals and read one settings file", [] {
+        // Two mods in conflict over one id: each entry has its own approval.
+        cli::GameModPlugin one;
+        one.id = "sieges";
+        one.descriptor = "mod/ugc_1.mod";
+        cli::GameModPlugin two = one;
+        two.descriptor = "mod/ugc_2.mod";
+        PluginsSnapshot s;
+        anvil::ui::PluginSnap entry;
+        entry.id = "sieges";
+        entry.origin = anvil::ui::Origin::FromMod;
+        entry.approved = true;
+        s.model.plugins = {entry, entry};
+        s.sources.resize(2);
+        s.sources[0].mod = &one;
+        s.sources[1].mod = &two;
+        LastStart last;
+        last.approvals.push_back({"sieges", "mod/ugc_2.mod", "1.0.0", "ab"});
+        apply_last_start(s, last);
+        CHECK(!s.model.plugins[0].approved_in_effect && s.model.plugins[1].approved_in_effect);
+        CHECK(anvil::ui::pending_count(s.model) == 1);  // the first entry's approval, not the second's
+
+        // The second entry's schema reads what the first one wrote to the same player's file.
+        TempDir temp("entry-settings");
+        const SettingsFileResult schema = parse_settings_text("[setting.speed]\ntype = \"int\"\ndefault = 3\nlabel = \"Speed\"\n");
+        CHECK(schema.file.has_value());
+        if (!schema.file) return;
+        PluginSource& second = s.sources[1];
+        second.schema = *schema.file;
+        second.values = {schema.file->settings[0].default_value};
+        second.player_file = temp.dir / "settings.toml";
+        anvil::ui::SettingSnap speed;
+        speed.name = "speed";
+        speed.saved = "3";
+        s.model.plugins[1].settings = {speed};
+        write(second.player_file, "speed = 5\nwidth = 2\n");  // width: the first entry's schema only
+        reread_player_settings(second, s.model.plugins[1]);
+        CHECK(second.values[0].integer == 5 && s.model.plugins[1].settings[0].saved == "5");
+        CHECK(second.settings_warnings.size() == 1);
+    });
+
     run("plugins tab: Undo writes back the last start's value, neither the default nor the saved one", [] {
         const SettingsFileResult schema = parse_settings_text(
             "[setting.max_armies]\ntype = \"int\"\ndefault = 10\nlabel = \"Armies\"\n"

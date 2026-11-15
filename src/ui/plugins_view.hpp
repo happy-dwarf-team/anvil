@@ -118,7 +118,8 @@ private:
     void draw_detail(const Snapshot& model, std::size_t i, PluginsHost& host);
     void draw_where(const Snapshot& model, std::size_t i, std::string_view module, const Switches& saved, const Offers& offers,
                     bool without_off, bool disabled, PluginsHost& host);
-    void draw_module(const Snapshot& model, std::size_t i, std::size_t m, bool disabled, PluginsHost& host);
+    // `settings_shown_only`: the module's settings are another entry's to change (settings_read_only).
+    void draw_module(const Snapshot& model, std::size_t i, std::size_t m, bool disabled, bool settings_shown_only, PluginsHost& host);
     void draw_settings_of(const Snapshot& model, std::size_t i, std::string_view module, bool disabled, PluginsHost& host);
     void draw_setting(const Snapshot& model, std::size_t i, std::size_t s, bool disabled, PluginsHost& host);
 

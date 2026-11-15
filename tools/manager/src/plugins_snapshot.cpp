@@ -187,11 +187,15 @@ void apply_last_start(PluginsSnapshot& snapshot, const LastStart& last) {
     lists.allow_multiplayer = last.allow_multiplayer;
     lists.enabled_modules = last.enabled_modules;
     lists.disabled_modules = last.disabled_modules;
-    for (mui::PluginSnap& p : snapshot.model.plugins) {
+    for (size_t i = 0; i < snapshot.model.plugins.size(); ++i) {
+        mui::PluginSnap& p = snapshot.model.plugins[i];
         p.in_effect = {!listed(lists.disabled_plugins, p.id), listed(lists.allow_ironman, p.id), listed(lists.allow_multiplayer, p.id)};
         if (p.origin == mui::Origin::FromMod) {
-            p.approved_in_effect = std::any_of(last.approvals.begin(), last.approvals.end(),
-                                               [&](const LastStart::Approval& a) { return a.id == p.id; });
+            // An approval is the entry's own: two mods with one id are told apart by their descriptor.
+            const cli::GameModPlugin* mod = i < snapshot.sources.size() ? snapshot.sources[i].mod : nullptr;
+            p.approved_in_effect = std::any_of(last.approvals.begin(), last.approvals.end(), [&](const LastStart::Approval& a) {
+                return a.id == p.id && (mod == nullptr || a.mod == mod->descriptor);
+            });
         }
         for (mui::ModuleSnap& m : p.modules) {
             const std::string key = p.id + "." + m.id;
@@ -234,6 +238,16 @@ bool apply_setting_edit(PluginSource& source, const mui::Edit& edit, std::string
     }
     error = "no setting " + edit.setting;
     return false;
+}
+
+void reread_player_settings(PluginSource& source, mui::PluginSnap& plugin) {
+    if (!source.schema) return;
+    PlayerSettings player = load_player_settings(*source.schema, source.player_file);
+    source.settings_warnings = std::move(player.warnings);
+    for (const Setting& setting : source.schema->settings) {
+        source.values[setting.id] = player.values[setting.id].value_or(setting.default_value);
+        plugin.settings[setting.id].saved = value_text(setting, source.values[setting.id]);
+    }
 }
 
 }  // namespace anvil::manager

@@ -378,6 +378,8 @@ extern const Translation kPolish[] = {
      "Autor nie dopuszcza tego do trybu ironman."},
     {"Its author keeps it out of multiplayer.",
      "Autor nie dopuszcza tego do gry wieloosobowej."},
+    {"Its settings are changed in the first entry of {0}, under \"{1}\".",
+     "Jej ustawienia zmienia się w pierwszym wpisie {0}, w sekcji „{1}”."},
     {"Kept as {0}",
      "Zachowano jako {0}"},
     {"Kept out of ironman unless you allow it.",

@@ -55,6 +55,10 @@ std::string value_text(const Setting& setting, const SettingValue& value);
 // last start's for Undo), read as the player's settings.toml would hold it.
 bool apply_setting_edit(PluginSource& source, const anvil::ui::Edit& edit, std::string& error);
 
+// Reads `source`'s player file again into its values and `plugin`'s saved
+// values: another entry of the plugin's id wrote it (settings_read_only).
+void reread_player_settings(PluginSource& source, anvil::ui::PluginSnap& plugin);
+
 // What is in effect, from the record of the last start (ADR 0013, point 8):
 // its anvil.toml lists, its approvals and its settings' values.
 void apply_last_start(PluginsSnapshot& snapshot, const LastStart& last);

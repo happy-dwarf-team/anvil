@@ -282,6 +282,35 @@ void entry_tests() {
         CHECK(first_of_id(s, 0) && first_of_id(s, 1) && !first_of_id(s, 2));
         CHECK(pending_count(s) == 1 && undo_pending(s).size() == 1);
     });
+    run("entries of one id: the first one's settings are changed, the others' shown", [] {
+        Snapshot s;
+        PluginSnap local = plugin("lode");
+        local.settings = {setting("x", "1", "1")};
+        PluginSnap shadowed = local;
+        shadowed.origin = Origin::FromMod;
+        shadowed.settings = {setting("y", "2", "2")};  // another schema, the same player's file
+        s.plugins = {local, plugin("tongs"), shadowed};
+        CHECK(!settings_read_only(s, 0) && !settings_read_only(s, 1) && settings_read_only(s, 2));
+        CHECK(!settings_read_only(s, 3));  // no entry
+    });
+    run("entries of one id: each one's approval waits apart", [] {
+        Snapshot s;
+        PluginSnap first = plugin("trade");
+        first.origin = Origin::FromMod;
+        first.approved = first.approved_in_effect = true;
+        first.settings = {setting("x", "1", "1")};
+        first.settings[0].saved = "5";  // waits, counted once
+        PluginSnap second = first;      // the same id in another mod, in conflict
+        second.approved = true;         // approved now: waits for the next start
+        second.approved_in_effect = false;
+        s.plugins = {first, second};
+        CHECK(pending_count(s) == 2);
+        s.plugins[1].approved = false;  // and nothing waits of its own
+        CHECK(pending_count(s) == 1);
+        // Undo does not take an approval back.
+        s.plugins[1].approved = true;
+        CHECK(undo_pending(s).size() == 1);
+    });
 }
 
 void where_tests() {

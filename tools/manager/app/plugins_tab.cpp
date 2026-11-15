@@ -191,10 +191,12 @@ void ManagerApp::rebuild_plugins() {
         return;
     }
     if (!old) return;
-    for (mui::PluginSnap& p : plugins_->model.plugins) {
-        const auto was = std::find_if(old->model.plugins.begin(), old->model.plugins.end(),
-                                      [&](const mui::PluginSnap& o) { return o.id == p.id; });
-        if (was == old->model.plugins.end()) continue;
+    // Entry by entry: two entries of one id have approvals of their own.
+    for (size_t i = 0; i < plugins_->model.plugins.size(); ++i) {
+        mui::PluginSnap& p = plugins_->model.plugins[i];
+        const size_t j = mui::index_of_entry(old->model, mui::entry_key(plugins_->model, i));
+        if (j == SIZE_MAX) continue;
+        const mui::PluginSnap* was = &old->model.plugins[j];
         p.in_effect = was->in_effect;
         p.approved_in_effect = was->approved_in_effect;
         for (mui::ModuleSnap& m : p.modules) {
@@ -430,6 +432,10 @@ void ManagerApp::save_plugin_settings(size_t i) {
     }
     source.settings_warnings.clear();
     for (const Setting& setting : source.schema->settings) p.settings[setting.id].saved = value_text(setting, source.values[setting.id]);
+    // The other entries of its id read the same file with their own schema: they show what it holds now.
+    for (size_t k = 0; k < plugins_->sources.size(); ++k) {
+        if (k != i && plugins_->model.plugins[k].id == p.id) reread_player_settings(plugins_->sources[k], plugins_->model.plugins[k]);
+    }
 }
 
 // Writes the model's edits: switches and opt-ins to anvil.toml, settings to
