@@ -55,6 +55,13 @@ const char* g_write_dir = nullptr;
 // What the stand-in of CEU3GraphicalMap::GetSelectable picks.
 void* g_picked = nullptr;
 
+// Picks that fault, as the game's would on a map torn down under them: the stand-ins jump here.
+volatile std::int32_t* g_fault_at = nullptr;
+std::int32_t faulting_pick(void*, const float*) { return *g_fault_at; }
+void* faulting_pick_object(void*, const float*, void*, std::uint8_t, std::uint8_t) {
+    return reinterpret_cast<void*>(static_cast<std::intptr_t>(*g_fault_at));
+}
+
 // The types of the events the stand-in of SDL_PushEvent got, and its time stamp.
 std::vector<uint32_t> g_pushed;
 int fake_push_event_rest(const void* event) {
@@ -3193,6 +3200,37 @@ int main(int argc, char** argv) {
         };
         frame(game.app, 1);
         CHECK(ran);
+
+        // A pick that faults costs that answer, not the game: each stand-in starts with
+        // mov rax, imm64; jmp rax to a function that reads address 0.
+        std::uint8_t pick_bytes[12], selectable_bytes[12];
+        std::memcpy(pick_bytes, image.base + kPick, sizeof(pick_bytes));
+        std::memcpy(selectable_bytes, image.base + kSelectable, sizeof(selectable_bytes));
+        const auto jump_to = [&](std::uint32_t rva, std::uintptr_t target) {
+            image.put(rva, {0x48, 0xB8});
+            image.put_pointer(rva + 2, target);
+            image.put(rva + 10, {0xFF, 0xE0});
+        };
+        jump_to(kPick, reinterpret_cast<std::uintptr_t>(&faulting_pick));
+        jump_to(kSelectable, reinterpret_cast<std::uintptr_t>(&faulting_pick_object));
+        ran = false;
+        g_in_frame_handler = [&] {
+            ran = true;
+            province = -1;
+            CHECK(world->province_at(3, 700, &province) == ANVIL_ERROR_INTERNAL && province == -1);
+            AnvilGameUnitRef unit{};
+            g_picked = fake.army;
+            CHECK(world->unit_at(3, 700, &unit) == ANVIL_ERROR_INTERNAL && unit.id == 0);
+            g_picked = nullptr;
+        };
+        frame(game.app, 1);
+        CHECK(ran);
+        std::memcpy(image.base + kPick, pick_bytes, sizeof(pick_bytes));
+        std::memcpy(image.base + kSelectable, selectable_bytes, sizeof(selectable_bytes));
+        g_in_frame_handler = [&] {  // the restored picks answer again
+            CHECK(world->province_at(3, 700, &province) == ANVIL_OK && province == 3);
+        };
+        frame(game.app, 1);
         g_in_frame_handler = nullptr;
         FakeWorld::set(game.session, 0x330, uintptr_t{0});
 
