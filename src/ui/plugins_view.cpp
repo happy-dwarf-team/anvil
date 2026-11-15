@@ -30,15 +30,36 @@ int g_proto_variant = [] {
     char e[4] = {};
     size_t n = 0;
     getenv_s(&n, e, sizeof e, "ANVIL_PROTO_VARIANT");
-    return e[0] >= 'A' && e[0] <= 'C' ? e[0] - 'A' : 0;
+    return e[0] >= '0' && e[0] <= '4' ? e[0] - '0' : 0;
 }();
-const char* const kProtoNames[] = {"A  toggle at the right, like Windows Settings", "B  toggle before the name, Off leaves the segments",
-                                   "C  a card per module"};
+const char* const kProtoNames[] = {"C   the card as shown", "C1  compact cards, tags, folded settings",
+                                   "C2  ember edge on the cards that are on", "C3  one grouped card, a row per module",
+                                   "C4  a row per module that opens"};
+constexpr int kProtoCount = 5;
+bool g_first_module = true;  // C3: no line above the first row
 float g_toggle_left = 0;  // the plugin toggle's track, in screen x
 
+float g_tags_limit = FLT_MAX;  // screen x a tag must end before (the toggle's place)
+bool proto_tag(const std::string& text, ImVec4 color) {
+    const ImVec2 size = ImGui::CalcTextSize(text.c_str());
+    const float px = ImGui::GetFontSize() * 0.4f;
+    const float end = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + size.x + px * 2;
+    if (end > g_tags_limit) return false;
+    ImGui::SameLine();
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    const float frame = ImGui::GetFrameHeight();
+    const float h = size.y + 2;
+    const ImVec2 top(at.x, at.y + (frame - h) * 0.5f);
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(top, ImVec2(top.x + size.x + px * 2, top.y + h), ImGui::GetColorU32(kFrame), h * 0.5f);
+    draw->AddText(ImVec2(top.x + px, top.y + 1), ImGui::GetColorU32(color), text.c_str());
+    ImGui::Dummy(ImVec2(size.x + px * 2, frame));
+    return true;
+}
+
 void proto_switcher() {
-    if (ImGui::IsKeyDown(ImGuiMod_Ctrl) && ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false)) g_proto_variant = (g_proto_variant + 2) % 3;
-    if (ImGui::IsKeyDown(ImGuiMod_Ctrl) && ImGui::IsKeyPressed(ImGuiKey_RightArrow, false)) g_proto_variant = (g_proto_variant + 1) % 3;
+    if (ImGui::IsKeyDown(ImGuiMod_Ctrl) && ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false)) g_proto_variant = (g_proto_variant + kProtoCount - 1) % kProtoCount;
+    if (ImGui::IsKeyDown(ImGuiMod_Ctrl) && ImGui::IsKeyPressed(ImGuiKey_RightArrow, false)) g_proto_variant = (g_proto_variant + 1) % kProtoCount;
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - 8, vp->WorkPos.y + 8), ImGuiCond_Always, ImVec2(1, 0));
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.05f, 0.25f, 0.45f, 0.95f));
@@ -46,12 +67,12 @@ void proto_switcher() {
     ImGui::Begin("##proto", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
                      ImGuiWindowFlags_NoNav);
-    if (ImGui::ArrowButton("##prev", ImGuiDir_Left)) g_proto_variant = (g_proto_variant + 2) % 3;
+    if (ImGui::ArrowButton("##prev", ImGuiDir_Left)) g_proto_variant = (g_proto_variant + kProtoCount - 1) % kProtoCount;
     ImGui::SameLine();
     ImGui::AlignTextToFramePadding();
     ImGui::Text("PROTOTYPE  %s", kProtoNames[g_proto_variant]);
     ImGui::SameLine();
-    if (ImGui::ArrowButton("##next", ImGuiDir_Right)) g_proto_variant = (g_proto_variant + 1) % 3;
+    if (ImGui::ArrowButton("##next", ImGuiDir_Right)) g_proto_variant = (g_proto_variant + 1) % kProtoCount;
     ImGui::End();
     ImGui::PopStyleColor(2);
 }
@@ -542,6 +563,15 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
     }
     if (!p.modules.empty()) {
         ImGui::SeparatorText(trf("Modules ({0})", {std::to_string(p.modules.size())}).c_str());
+        g_first_module = true;
+        const bool grouped = g_proto_variant == 3;
+        if (grouped) {
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, kRaised);
+            ImGui::PushStyleColor(ImGuiCol_Border, kLine);
+            ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ImGui::GetFontSize() * 0.75f, ImGui::GetFontSize() * 0.5f));
+            ImGui::BeginChild("modules-card", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding);
+        }
         for (const ModuleGroup& group : module_groups(p)) {
             bool open = true;
             if (!group.name.empty()) {
@@ -554,6 +584,11 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
             if (!open) continue;
             for (const size_t m : group.modules) draw_module(model, i, m, locked || plugin_off, host);
             if (!group.name.empty()) ImGui::TreePop();
+        }
+        if (grouped) {
+            ImGui::EndChild();
+            ImGui::PopStyleVar(2);
+            ImGui::PopStyleColor(2);
         }
     }
     const SettingsLayout own = settings_layout(p, "");
@@ -609,7 +644,6 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
     // Its name, what it does, then its switch: a checkbox, or where it runs when it
     // changes the game. Every name, description and control under it starts in one
     // column: past the checkbox's box.
-    const float column = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x;
     const auto describe = [&] {
         if (!mod.description.empty()) weak_wrapped(mod.description);
     };
@@ -628,9 +662,12 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
         const float need = toggle_track_width(true) + st.ItemSpacing.x + word_w;
         const float x = std::min(g_toggle_left, right_edge - need);
         ImGui::SameLine();
-        ImGui::SetCursorScreenPos(ImVec2(std::max(x, ImGui::GetCursorScreenPos().x), ImGui::GetCursorScreenPos().y));
+        const float at = ImGui::GetCursorScreenPos().x;
         bool on = mod.saved.on;
-        if (toggle("##on", on, on ? tr("On") : tr("Off"), disabled, true)) host.apply(set_switch(p, mod.id, Which::On, !on));
+        // A narrow pane: the word goes before the toggle leaves the row.
+        const bool room = at <= x;
+        ImGui::SetCursorScreenPos(ImVec2(room ? x : std::max(at, right_edge - toggle_track_width(true)), ImGui::GetCursorScreenPos().y));
+        if (toggle("##on", on, room ? (on ? tr("On") : tr("Off")) : nullptr, disabled, true)) host.apply(set_switch(p, mod.id, Which::On, !on));
     };
     const auto settings = [&] {
         const SettingsLayout layout = settings_layout(p, mod.id);
@@ -643,103 +680,125 @@ void PluginsTab::draw_module(const Snapshot& model, size_t i, size_t m, bool dis
             ImGui::TreePop();
         }
     };
-    if (g_proto_variant == 0) {
-        // A: the name at the left edge, its toggle at the right under the plugin's; a module that
-        // changes the game keeps the segments (with Off) under its description.
-        const float right_edge = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
-        name_line();
-        if (!mod.changes_game) right_toggle(right_edge);
+    const int v = g_proto_variant;
+    const std::vector<Edit> changed = reset_module_settings(p, mod.id);
+    const SettingsLayout layout = settings_layout(p, mod.id);
+    const size_t n_settings = layout.shown.size() + layout.advanced.size();
+    const bool on = mod.saved.on;
+    // The header's facts as tags (C1 on): what kind of module it is and what was changed.
+    // Tags that do not fit before the toggle are left out of the line (C4 shows them when opened).
+    const auto tags = [&](float right_edge) {
+        if (v == 0) return;
+        const float word_w = std::max(ImGui::CalcTextSize(tr("On")).x, ImGui::CalcTextSize(tr("Off")).x);
+        g_tags_limit = std::min(g_toggle_left, right_edge - toggle_track_width(true) - ImGui::GetStyle().ItemSpacing.x - word_w) -
+                       ImGui::GetStyle().ItemSpacing.x;
+        if (!changed.empty()) proto_tag(trf("{0} changed", {std::to_string(changed.size())}), kInfo);
+        if (mod.changes_game) proto_tag(tr("changes the game"), kTextWeak);
+        g_tags_limit = FLT_MAX;
+    };
+    const auto title = [&](ImVec4 color) {
+        ImGui::AlignTextToFramePadding();
+        const ImVec2 at = ImGui::GetCursorScreenPos();
+        const float w = draw_strong(ImGui::GetWindowDrawList(), ImVec2(at.x, at.y + ImGui::GetStyle().FramePadding.y), ImGui::GetColorU32(color), mod.name.c_str());
+        ImGui::Dummy(ImVec2(w, ImGui::GetFrameHeight()));
+        if (ImGui::IsItemHovered()) ImGui::SetItemTooltip("%s", (p.id + "." + mod.id).c_str());
+        in_game();
+    };
+    // The settings: open (C, C2, C3) or folded behind one line that says how many (C1, C4).
+    const auto settings_folded = [&] {
+        if (n_settings == 0) return;
+        const std::string label = changed.empty() ? trf("Settings ({0})", {std::to_string(n_settings)})
+                                                  : trf("Settings ({0}, {1} changed)", {std::to_string(n_settings), std::to_string(changed.size())});
+        if (ImGui::TreeNode((label + "###settings").c_str())) {
+            draw_settings_of(model, i, mod.id, disabled || !on, host);
+            ImGui::TreePop();
+        }
+    };
+    const auto body = [&](bool folded) {
         describe();
-        if (mod.changes_game) draw_where(model, i, mod.id, mod.saved, mod.offers, false, disabled, host);
-        ImGui::Indent(ImGui::GetFontSize());
-        settings();
-        ImGui::Unindent(ImGui::GetFontSize());
-        ImGui::Spacing();
+        if (mod.changes_game && on) draw_where(model, i, mod.id, mod.saved, mod.offers, true, disabled, host);
+        if (folded) {
+            settings_folded();
+        } else {
+            settings();
+        }
+    };
+    if (v == 3) {
+        // C3: one card for all modules; a thin line between rows.
+        if (!g_first_module) {
+            ImGui::PushStyleColor(ImGuiCol_Separator, kLine);
+            ImGui::Separator();
+            ImGui::PopStyleColor();
+        }
+        g_first_module = false;
+        const float right_edge = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+        title(on ? kText : kTextWeak);
+        tags(right_edge);
+        right_toggle(right_edge);
+        body(true);
         ImGui::PopID();
         return;
     }
-    if (g_proto_variant == 1) {
-        // B: every module has the same small toggle before its name; one that changes the
-        // game says where it runs in segments without Off, greyed while it is off.
-        const float col = toggle_track_width(true) + ImGui::GetStyle().ItemInnerSpacing.x;
-        bool on = mod.saved.on;
-        if (toggle("##on", on, nullptr, disabled, true)) host.apply(set_switch(p, mod.id, Which::On, !on));
-        ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
-        name_line();
-        ImGui::Indent(col);
-        describe();
-        if (mod.changes_game && on) draw_where(model, i, mod.id, mod.saved, mod.offers, true, disabled, host);
-        settings();
-        ImGui::Unindent(col);
-        ImGui::Spacing();
+    if (v == 4) {
+        // C4: one line per module (name, where it runs in two words, tags, toggle); a click opens
+        // what it does, where it runs and its settings. Opened at first: the ones with changes.
+        const float right_edge = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+        ImGui::SetNextItemOpen(!changed.empty(), ImGuiCond_Once);
+        ImGui::PushStyleColor(ImGuiCol_Text, on ? kText : kTextWeak);
+        const bool open = ImGui::TreeNodeEx("##row", ImGuiTreeNodeFlags_AllowOverlap | ImGuiTreeNodeFlags_FramePadding,
+                                            "%s", mod.name.c_str());
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetItemTooltip("%s", (p.id + "." + mod.id).c_str());
+        if (mod.changes_game && on) {
+            const char* words[] = {tr("Off"), tr("Normal games"), tr("+ Ironman"), tr("+ Multiplayer"), tr("Everywhere")};
+            const char* word = words[static_cast<int>(where(mod.saved))];
+            const float word_w = std::max(ImGui::CalcTextSize(tr("On")).x, ImGui::CalcTextSize(tr("Off")).x);
+            const float limit = std::min(g_toggle_left, right_edge - toggle_track_width(true) - ImGui::GetStyle().ItemSpacing.x * 2 - word_w);
+            if (ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + ImGui::CalcTextSize(word).x < limit) {
+                ImGui::SameLine();
+                weak(word);
+            }
+        }
+        tags(right_edge);
+        right_toggle(right_edge);
+        if (open) {
+            body(false);
+            ImGui::TreePop();
+        }
         ImGui::PopID();
         return;
     }
     {
-        // C: a card per module: the name and its toggle on top, then what it does, where it
-        // runs (segments without Off, greyed while it is off) and its settings.
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, kRaised);
+        // C, C1, C2: a card per module.
+        const float fs = ImGui::GetFontSize();
+        const bool compact = v >= 1;
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, compact && !on ? ImVec4(0, 0, 0, 0) : kRaised);
         ImGui::PushStyleColor(ImGuiCol_Border, kLine);
         ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ImGui::GetFontSize() * 0.75f, ImGui::GetFontSize() * 0.5f));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, compact ? ImVec2(fs * 0.6f, fs * 0.3f) : ImVec2(fs * 0.75f, fs * 0.5f));
+        if (compact) ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, ImGui::GetStyle().ItemSpacing.y * 0.75f));
         ImGui::BeginChild("card", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding);
+        if (v == 2 && on) {
+            // C2: the ember edge of a card that is on, like a banner's edge.
+            const ImVec2 wp = ImGui::GetWindowPos(), ws = ImGui::GetWindowSize();
+            ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(wp.x + 1, wp.y + 5), ImVec2(wp.x + 4, wp.y + ws.y - 5), ImGui::GetColorU32(kEmber), 1.5f);
+        }
         const float right_edge = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
-        draw_strong(ImGui::GetWindowDrawList(), ImVec2(ImGui::GetCursorScreenPos().x, ImGui::GetCursorScreenPos().y + ImGui::GetStyle().FramePadding.y),
-                    ImGui::GetColorU32(disabled ? kTextDim : kText), mod.name.c_str());
-        ImGui::Dummy(ImVec2(ImGui::CalcTextSize(mod.name.c_str()).x * 1.05f, ImGui::GetFrameHeight()));
-        if (ImGui::IsItemHovered()) ImGui::SetItemTooltip("%s", (p.id + "." + mod.id).c_str());
-        in_game();
+        title(!compact || on ? kText : kTextWeak);
+        tags(right_edge);
         right_toggle(right_edge);
-        describe();
-        if (mod.changes_game && mod.saved.on) draw_where(model, i, mod.id, mod.saved, mod.offers, true, disabled, host);
-        settings();
+        body(v == 1);
         ImGui::EndChild();
-        ImGui::PopStyleVar(2);
+        ImGui::PopStyleVar(compact ? 3 : 2);
         ImGui::PopStyleColor(2);
-        ImGui::Spacing();
+        if (compact) {
+            ImGui::Dummy(ImVec2(0, fs * 0.1f));
+        } else {
+            ImGui::Spacing();
+        }
         ImGui::PopID();
         return;
     }
-    if (mod.changes_game) {
-        ImGui::Indent(column);
-        ImGui::BeginDisabled(disabled);
-        ImGui::TextUnformatted(mod.name.c_str());
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetItemTooltip("%s", (p.id + "." + mod.id).c_str());
-        in_game();
-        describe();
-        draw_where(model, i, mod.id, mod.saved, mod.offers, false, disabled, host);
-    } else {
-        bool on = mod.saved.on;
-        ImGui::BeginDisabled(disabled);
-        if (checkbox(mod.name.c_str(), &on)) host.apply(set_switch(p, mod.id, Which::On, on));
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetItemTooltip("%s", (p.id + "." + mod.id).c_str());
-        in_game();
-        ImGui::Indent(column);
-        describe();
-    }
-    const SettingsLayout layout = settings_layout(p, mod.id);
-    const size_t n = layout.shown.size() + layout.advanced.size();
-    if (n > 0) {
-        if (mod.saved.on) {
-            draw_settings_of(model, i, mod.id, disabled, host);
-        } else if (ImGui::TreeNode(trf("Settings ({0}), kept while it is off", {std::to_string(n)}).c_str())) {
-            draw_settings_of(model, i, mod.id, true, host);
-            ImGui::TreePop();
-        }
-        const std::vector<Edit> reset = reset_module_settings(p, mod.id);
-        if (reset.size() > 1) {
-            ImGui::BeginDisabled(disabled);
-            if (text_button(trf("Reset settings ({0})...", {std::to_string(reset.size())}).c_str())) {
-                ask_edits(model, host, trf("Reset the settings of {0}", {mod.name}), tr("Reset"), reset);
-            }
-            ImGui::EndDisabled();
-        }
-    }
-    ImGui::Unindent(column);
-    ImGui::Spacing();
-    ImGui::PopID();
 }
 
 void PluginsTab::draw_settings_of(const Snapshot& model, size_t i, std::string_view module, bool disabled, PluginsHost& host) {
