@@ -10,6 +10,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 
 namespace anvil::ui {
@@ -63,29 +64,41 @@ inline void draw_pending_dot(ImDrawList* draw, ImVec2 center, float radius) {
     draw->AddCircleFilled(center, radius, ImGui::GetColorU32(kInfo));
 }
 
-// The plugin's own switch: a toggle, bigger than a checkbox and drawn apart
-// from the modules' ones, with its state as a word beside it. True when clicked.
-inline bool plugin_toggle(const char* id, bool on, const char* word, bool disabled) {
-    const float h = ImGui::GetFrameHeight();
+// PROTOTYPE (branch prototype/module-toggles): one toggle in two sizes. Big for the
+// plugin's own switch, small (the text's height) for modules and yes/no settings.
+// Reachable with the keyboard, an outline of 3:1 while off, a quiet knob while off,
+// a pressed colour, a knob margin that grows with the scale. `word` may be null.
+inline float toggle_track_width(bool compact) {
+    return (compact ? std::round(ImGui::GetFontSize()) : ImGui::GetFrameHeight()) * 1.9f;
+}
+inline bool toggle(const char* id, bool on, const char* word, bool disabled, bool compact = false) {
+    const float frame = ImGui::GetFrameHeight();
+    const float h = compact ? std::round(ImGui::GetFontSize()) : frame;
     const float w = h * 1.9f;
     ImGui::BeginDisabled(disabled);
-    const ImVec2 at = ImGui::GetCursorScreenPos();
-    const bool clicked = ImGui::InvisibleButton(id, ImVec2(w, h));
+    const ImVec2 cell = ImGui::GetCursorScreenPos();
+    const bool clicked = ImGui::InvisibleButton(id, ImVec2(w, frame), ImGuiButtonFlags_EnableNav);
     const bool hovered = ImGui::IsItemHovered();
+    const bool held = ImGui::IsItemActive();
+    const ImVec2 at(cell.x, std::round(cell.y + (frame - h) * 0.5f));
     ImDrawList* draw = ImGui::GetWindowDrawList();
-    const float alpha = disabled ? ImGui::GetStyle().DisabledAlpha : 1.0f;
-    const ImVec4 track = on ? (hovered ? kEmberHovered : kEmber) : (hovered ? kFrameActive : kFrameHovered);
-    draw->AddRectFilled(at, ImVec2(at.x + w, at.y + h), ImGui::GetColorU32(with_alpha(track, alpha)), h * 0.5f);
-    draw->AddRect(at, ImVec2(at.x + w, at.y + h), ImGui::GetColorU32(with_alpha(on ? kEmber : kBorder, alpha)), h * 0.5f);
-    const float r = h * 0.5f - 3.0f;
+    // BeginDisabled already fades every colour by DisabledAlpha.
+    const ImVec4 track = on ? (held ? kEmberActive : hovered ? kEmberHovered : kEmber) : (held ? kFrameActive : hovered ? kFrameHovered : kFrame);
+    draw->AddRectFilled(at, ImVec2(at.x + w, at.y + h), ImGui::GetColorU32(track), h * 0.5f);
+    draw->AddRect(at, ImVec2(at.x + w, at.y + h), ImGui::GetColorU32(on ? kEmber : (hovered ? kTextWeak : kControlOutline)), h * 0.5f);
+    const float pad = std::max(2.0f, std::round(h * 0.16f));
+    const float r = h * 0.5f - pad;
     const ImVec2 knob(on ? at.x + w - h * 0.5f : at.x + h * 0.5f, at.y + h * 0.5f);
-    draw->AddCircleFilled(knob, r, ImGui::GetColorU32(with_alpha(on ? kOnEmber : kText, alpha)));
-    ImGui::SameLine();
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(word);
+    draw->AddCircleFilled(knob, r, ImGui::GetColorU32(on ? kOnEmber : (hovered ? kText : kTextWeak)));
+    if (word != nullptr) {
+        ImGui::SameLine();
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(word);
+    }
     ImGui::EndDisabled();
     return clicked && !disabled;
 }
+inline bool plugin_toggle(const char* id, bool on, const char* word, bool disabled) { return toggle(id, on, word, disabled); }
 
 // A segmented control: one button per choice, the current one in the accent.
 // `enabled[i]` false greys a choice; `tips[i]` (may be null) is its tooltip,

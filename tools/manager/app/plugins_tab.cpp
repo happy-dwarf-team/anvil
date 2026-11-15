@@ -289,11 +289,15 @@ void ManagerApp::draw_setting_control(size_t i, size_t s, bool disabled) {
     bool commit = false;
     switch (setting.type) {
         case SettingType::Bool: {
-            bool on = value.integer != 0;
-            if (ImGui::Checkbox(snap.label.c_str(), &on)) {
-                value.integer = on ? 1 : 0;
+            // PROTOTYPE (prototype/module-toggles): a yes/no setting is the small toggle, its label after it.
+            const bool on = value.integer != 0;
+            if (::anvil::ui::toggle("##bool", on, nullptr, false, true)) {
+                value.integer = on ? 0 : 1;
                 commit = true;
             }
+            ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(snap.label.c_str());
             break;
         }
         case SettingType::Int: {
