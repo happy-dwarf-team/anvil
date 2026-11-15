@@ -175,7 +175,7 @@ void PluginsTab::draw_waiting(const Snapshot& model) {
     ImGui::TextUnformatted(tr("Waiting for your approval:"));
     for (size_t i = 0; i < model.plugins.size(); ++i) {
         const PluginSnap& p = model.plugins[i];
-        if (!(p.blocked == Blocked::WaitsForApproval && !p.approved) && p.update_waits.empty()) continue;
+        if (!waits_for_approval(p)) continue;
         // The version that waits: its row and its detail say whether it is an update.
         const std::string label = p.name + " " + (p.update_waits.empty() ? p.version : p.update_waits);
         const std::string key = entry_key(model, i);
@@ -477,9 +477,9 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
     ImGui::BeginChild("body", ImVec2(0, 0), ImGuiChildFlags_None);
     // What the player needs to know about it, in the order it matters.
     host.draw_facts(i);
-    if (p.blocked == Blocked::CannotLoad) {
+    if (v.load.why == LoadState::Why::CannotLoad) {
         banner("cannot-load", Tone::Bad,
-               p.blocked_reason.empty() ? std::string(tr("It cannot load.")) : trf("It cannot load: {0}", {p.blocked_reason}));
+               v.load.reason.empty() ? std::string(tr("It cannot load.")) : trf("It cannot load: {0}", {v.load.reason}));
     }
     if (v.load.why == LoadState::Why::NeedsPlugin || v.load.why == LoadState::Why::NotInstalled) {
         const PluginSnap* missing = find_plugin(model, v.load.missing);

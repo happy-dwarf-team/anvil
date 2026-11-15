@@ -7,6 +7,7 @@
 #include "core/discovery.hpp"
 #include "core/log.hpp"
 #include "core/mod_plugins.hpp"
+#include "core/plugin_inventory.hpp"
 #include "core/resolver.hpp"
 #include "core/safe_mode.hpp"
 #include "core/settings.hpp"
@@ -1141,6 +1142,63 @@ restart = false
             CHECK(svc.mod_plugin(0, &m) == 1 && m.revoked_next_start == 1 && m.can_approve == 1);
             CHECK(fs::exists(approved_copy(anvil, "probe", hash)));  // in use by this start
         }
+        fs::remove_all(dir);
+    });
+    run("control: the next start's plan, from this start's inventory and the choices saved now", [] {
+        const fs::path dir = fresh_dir("anvil-control-next-start");
+        const fs::path anvil = dir / "anvil";
+        const fs::path user = dir / "user";
+        for (const char* id : {"a", "b"}) {
+            write_file(anvil / "plugins" / id / "plugin.toml",
+                       plugin_toml(id, std::string(id) == "b" ? "\n[[dependencies]]\nid = \"a\"\nversion = \"*\"\n" : ""));
+            write_file(anvil / "plugins" / id / (std::string(id) + ".dll"), "MZ");
+        }
+        const fs::path mod = user / "mod" / "probe-mod";
+        write_file(mod / "anvil" / "probe" / "plugin.toml", plugin_toml("probe"));
+        write_file(mod / "anvil" / "probe" / "probe.dll", "MZ");
+        write_file(user / "mod" / "probe-mod.mod", "name=\"Probe Mod\"\npath=\"mod/probe-mod\"\n");
+        write_file(user / "dlc_load.json", "{\"enabled_mods\":[\"mod/probe-mod.mod\"]}");
+
+        const PluginInventory inventory = take_inventory(anvil, user, GameImage{});
+        ModDiscovery mods = discover_mod_plugins(anvil, user, inventory.local_ids());
+        TestStart start;
+        add_plugin(start, "a", true, "", anvil / "data");
+        add_plugin(start, "b", true, "[[dependencies]]\nid = \"a\"\nversion = \"*\"\n", anvil / "data");
+        ControlSources sources;
+        sources.anvil_dir = anvil;
+        sources.plugins = &start.make();
+        sources.mods = &mods;
+        sources.inventory = &inventory;
+        Control control(sources);
+        control.loading_done();
+        const AnvilControlService& svc = *control.service();
+        CHECK(svc.size >= offsetof(AnvilControlService, mod_plugin_next_start) + sizeof(void*));
+        AnvilControlNextStart n{};
+        n.size = sizeof(n);
+        CHECK(svc.next_start("b", &n) == 1 && n.loads == 1 && std::string(n.why).empty() && std::string(n.reason).empty());
+        CHECK(svc.mod_plugin_next_start(0, &n) == 1 && n.loads == 0 && std::string(n.why) == "approval");
+        // Turned off in the game: the plan of the next start says so, and what needs it.
+        AnvilControlResult result{};
+        CHECK(svc.switch_set("a", ANVIL_CONTROL_SWITCH_ON, 0, nullptr, &result) == ANVIL_OK);
+        CHECK(svc.next_start("a", &n) == 1 && n.loads == 0 && std::string(n.why) == "off");
+        CHECK(svc.next_start("b", &n) == 1 && n.loads == 0 && std::string(n.why) == "needs" && std::string(n.needs) == "a" &&
+              std::string(n.through).empty() && i18n::parse(n.reason_message).code == "requires_missing");
+        // Approved in the game: it loads from the next start.
+        AnvilControlModPlugin m{};
+        m.size = sizeof(m);
+        CHECK(svc.mod_plugin(0, &m) == 1);
+        const std::string hash = m.hash;
+        CHECK(svc.approve_mod_plugin(0, hash.c_str(), &result) == ANVIL_OK);
+        CHECK(svc.mod_plugin_next_start(0, &n) == 1 && n.loads == 1);
+        // A plugin installed while the game runs is in the plan after a restart, not now.
+        write_file(anvil / "plugins" / "c" / "plugin.toml", plugin_toml("c"));
+        write_file(anvil / "plugins" / "c" / "c.dll", "MZ");
+        CHECK(svc.next_start("c", &n) == 0 && svc.mod_plugin_next_start(1, &n) == 0);
+        // Everything turned off in anvil.toml: no plan to report.
+        CHECK(svc.disable_next_start != nullptr);
+        write_file(anvil / "anvil.toml", "enabled = false\n");
+        CHECK(svc.switch_set("a", ANVIL_CONTROL_SWITCH_ON, 1, nullptr, &result) == ANVIL_OK);
+        CHECK(svc.next_start("b", &n) == 0);
         fs::remove_all(dir);
     });
     run("control: the previous crash is new once", [] {

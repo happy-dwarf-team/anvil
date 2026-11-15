@@ -5,6 +5,7 @@
 // schema, writes anvil.toml and the players' settings files, and adds what only
 // the Manager says (authors, problems, catalog updates, Remove).
 #include "core/anvil_toml_edit.hpp"
+#include "core/retired_move.hpp"
 #include "core/log.hpp"
 #include "i18n/translate.hpp"
 #include "manager_app.hpp"
@@ -17,6 +18,7 @@
 #include <misc/cpp/imgui_stdlib.h>
 
 #include <algorithm>
+#include <set>
 #include <span>
 #include <string_view>
 
@@ -33,12 +35,17 @@ std::string mod_source(const cli::GameModPlugin& p) {
 }
 
 // What a plugin from a mod waits for, or does, in the player's words.
-std::string mod_state_text(const cli::GameModPlugin& p) {
-    if (p.state == "approved") return p.status == "loaded" ? std::string(tr("approved: loads")) : trf("approved, but {0}", {i18n::text(p.skip_why)});
-    if (p.state == "update-pending") return trf("An update to {0} waits for your approval; the approved {1} loads.", {p.version, p.approved_version});
-    if (p.state == "pending") return tr("waits for approval: does not load");
-    if (p.state == "conflict") return tr("conflict: does not load");
-    if (p.state == "shadowed") return tr("a plugin in anvil/plugins has this id and loads instead");
+std::string mod_state_text(const cli::GameReport& report, const cli::GameModPlugin& p) {
+    if (p.state == ModPluginState::Approved) {
+        const PlannedPlugin* planned = cli::planned(report, p);
+        if (planned == nullptr || planned->loads()) return tr("approved: loads");
+        const i18n::Message& why = planned->why;
+        return trf("approved, but {0}", {i18n::text(why.code == "from_mod" && why.args.size() == 3 ? why.args[2] : why)});
+    }
+    if (p.state == ModPluginState::UpdatePending) return trf("An update to {0} waits for your approval; the approved {1} loads.", {p.version, p.approved_version});
+    if (p.state == ModPluginState::Pending) return tr("waits for approval: does not load");
+    if (p.state == ModPluginState::Conflict) return tr("conflict: does not load");
+    if (p.state == ModPluginState::Shadowed) return tr("a plugin in anvil/plugins has this id and loads instead");
     return tr("cannot be approved: does not load");
 }
 
@@ -120,7 +127,7 @@ struct ManagerApp::PluginsHost final : mui::PluginsHost {
                 if (gp.folder != src.folder) continue;
                 for (const cli::Problem& problem : problems_shown(gp.report)) {
                     // The reason it cannot load already says it.
-                    if (p.blocked == mui::Blocked::CannotLoad && p.blocked_reason.find(problem.message) != std::string::npos) continue;
+                    if (p.next.why == mui::LoadState::Why::CannotLoad && p.next.reason.find(problem.message) != std::string::npos) continue;
                     warnings.push_back(problem.message);
                 }
             }
@@ -149,16 +156,16 @@ struct ManagerApp::PluginsHost final : mui::PluginsHost {
     // From mods: shown with its playset's warnings even when it has no plugins.
     bool show_empty_section(mui::Origin origin) const override {
         const cli::GameReport& report = *app.snapshot_->report;
-        return origin == mui::Origin::FromMod && (!report.mod_warnings.empty() || !report.playset_found);
+        return origin == mui::Origin::FromMod && (!report.mod_warnings.empty() || !report.inventory.playset.found);
     }
     void draw_section_note(mui::Origin origin, const mui::SectionCounts&) override {
         if (origin != mui::Origin::FromMod) return;
         // The header counts what waits and what cannot load (docs/ui-design-system.md,
         // "Section header"); only the playset's warnings are added here.
         const cli::GameReport& report = *app.snapshot_->report;
-        if (!report.playset_found || !report.mod_warnings.empty()) {
+        if (!report.inventory.playset.found || !report.mod_warnings.empty()) {
             begin_banner("playset", Tone::Warn);
-            if (!report.playset_found) wrapped(trf("No dlc_load.json in {0}: no mods are enabled.", {report.user_dir}));
+            if (!report.inventory.playset.found) wrapped(trf("No dlc_load.json in {0}: no mods are enabled.", {report.user_dir}));
             for (const std::string& w : report.mod_warnings) wrapped(w);
             end_banner(Tone::Warn);
         }
@@ -169,7 +176,7 @@ void ManagerApp::rebuild_plugins() {
     std::optional<PluginsSnapshot> old = std::move(plugins_);
     plugins_.reset();
     if (!snapshot_ || !snapshot_->report || !package_) return;
-    plugins_ = build_plugins_snapshot(game_, *snapshot_->report, snapshot_->anvil_toml, package_->standard_plugins,
+    plugins_ = build_plugins_snapshot(game_, *snapshot_->report, package_->standard_plugins,
                                       [this](const fs::path& folder, const std::string& english) {
                                           return plugin_text(folder, english);
                                       });
@@ -257,7 +264,18 @@ void ManagerApp::draw_plugins_tab() {
         for (const cli::Problem& problem : report->problems) wrapped(u8(fs::path(widen(problem.file)).filename()) + ": " + problem.message);
         end_banner(Tone::Bad);
     }
-    if (!report->enabled) banner("disabled", Tone::Warn, tr("anvil.toml says enabled = false: no plugin loads."));
+    if (!report->choices.anvil_toml.enabled) banner("disabled", Tone::Warn, tr("anvil.toml says enabled = false: no plugin loads."));
+    // The next start as its plan says it (ADR 0014): safe mode, and what it writes first.
+    if (report->next_start.safe_mode) banner("safe-mode", Tone::Warn, tr("The next start would be in safe mode"));
+    if (const StartWrites& writes = report->plan.writes; !writes.empty()) {
+        begin_banner("next-start-writes", Tone::Info);
+        for (const PlannedCopy& copy : writes.copies) wrapped(trf("The next start first makes the approved copy of {0}.", {copy.id}));
+        for (const PlannedRetiredMove& move : writes.retired) {
+            wrapped(trf("The next start first turns the old settings of {0} into module switches in anvil.toml.", {move.plugin}));
+        }
+        if (!writes.remove.empty()) wrapped(tr("The next start first removes approved copies that are no longer approved."));
+        end_banner(Tone::Info);
+    }
     if (snapshot_->installation && !snapshot_->installation->installed()) {
         banner("not-installed", Tone::Warn, tr("version.dll is not Anvil's or missing: nothing below loads until Anvil is installed."));
     }
@@ -359,11 +377,17 @@ void ManagerApp::draw_mod_approval(size_t i) {
     const PluginSource& src = plugins_->sources[i];
     const cli::GameModPlugin& m = *src.mod;
     mui::ModApproval a;
-    a.good = m.state == "approved" && m.status == "loaded";
-    a.tone = m.state == "pending" || m.state == "update-pending" || m.state == "conflict" ? Tone::Warn : Tone::Bad;
-    a.state = mod_state_text(m);
+    const cli::GameReport& report = *snapshot_->report;
+    const PlannedPlugin* planned = cli::planned(report, m);
+    a.good = m.state == ModPluginState::Approved && planned != nullptr && planned->loads();
+    a.tone = m.state == ModPluginState::Pending || m.state == ModPluginState::UpdatePending || m.state == ModPluginState::Conflict
+                 ? Tone::Warn
+                 : Tone::Bad;
+    a.state = mod_state_text(report, m);
     // Waiting: the state says what the reason would (the version that waits, the one that loads).
-    if (!a.good && m.state != "update-pending" && m.state != "pending") a.details.push_back(m.why.code.empty() && m.why.text.empty() ? m.reason : i18n::text(m.why));
+    if (!a.good && m.state != ModPluginState::UpdatePending && m.state != ModPluginState::Pending) {
+        a.details.push_back(m.why.empty() ? m.reason : i18n::text(m.why));
+    }
     if (!m.others.empty()) a.details.push_back(trf("Other mods with this id: {0}", {join(m.others)}));
     for (const cli::Problem& problem : problems_shown(m.offered())) a.details.push_back(problem.message);
     if (!m.approved_hash.empty()) {
@@ -371,7 +395,7 @@ void ManagerApp::draw_mod_approval(size_t i) {
     }
     if (src.manifest) a.repository = mui::repository_link(src.manifest->repository);
     a.can_approve = can_approve_shown(m);
-    a.update = m.state == "update-pending";
+    a.update = m.state == ModPluginState::UpdatePending;
     a.can_revoke = !m.approved_hash.empty();
     a.disabled = read_only();
     switch (mui::draw_mod_approval(a)) {
@@ -416,10 +440,25 @@ void ManagerApp::apply_edits(const std::vector<mui::Edit>& edits) {
     bool switches = false;
     std::vector<size_t> settings;
     std::string error;
+    std::set<std::string> moved;
     for (const mui::Edit& e : edits) {
         const size_t i = plugin_index(e.plugin);
         if (i == SIZE_MAX) continue;
         bool ok = true;
+        // The next start would first move this plugin's retired settings into
+        // anvil.toml (ADR 0013, point 4) and undo a switch saved before it:
+        // the move is made now, as that start would make it (ADR 0014).
+        if (e.kind == mui::Edit::Kind::Switch && snapshot_->report && moved.insert(e.plugin).second) {
+            for (const PlannedRetiredMove& m : snapshot_->report->plan.writes.retired) {
+                if (m.plugin != e.plugin) continue;
+                bool written = true;
+                carry_out_retired_move(m.move, m.player_file, toml, &written);
+                if (!written) {
+                    failed(tr("anvil.toml was not changed"), "", false);
+                    return;
+                }
+            }
+        }
         if (e.kind == mui::Edit::Kind::Setting) {
             ok = apply_setting_edit(plugins_->sources[i], e, error);
             setting_texts_.erase(e.plugin + "/" + e.setting);  // a string or key field shows the new value

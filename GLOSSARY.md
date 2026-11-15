@@ -54,6 +54,14 @@ _Avoid_: plugin list, plugin registry, loaded plugins (some are not)
 What became of a plugin at one start: loaded, failed, skipped or disabled, with the reason for a failed or a skipped one. A module has no outcome of its own: it is on or off, and shares its plugin's.
 _Avoid_: state, status, result
 
+**Plugin inventory**:
+What a game folder and its playset hold: every plugin with its manifest, the result of its check against the game, and its settings; for a mod's plugin also its approval.
+_Avoid_: discovery (one part of taking it), plugin list, installed plugins
+
+**Start plan**:
+What one start would do with the plugins of a game folder: which load, in what order and with which modules on, and which do not load and why. The loader carries it out; `anvil check --game` and the Manager show it for the next start.
+_Avoid_: resolution (the resolver is one part of it), load order (one part of it), outcome (what happened)
+
 **Plugin catalog**:
 The list of the team's plugins that the Manager offers to install, each pinned to one release zip by its size and SHA-256 (`catalog/plugins.json`).
 _Avoid_: store, marketplace, plugin registry

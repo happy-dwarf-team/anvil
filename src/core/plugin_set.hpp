@@ -117,6 +117,7 @@ private:
     std::wstring plugin_dir_;
     std::wstring data_dir_;
     std::string approved_hash_;
+    i18n::Message cannot_load_;
     std::atomic<HMODULE> dll_{nullptr};
     std::string mod_;
     bool awaiting_approval_ = false;
@@ -133,6 +134,9 @@ struct ResolvedPlugin {
     std::optional<SettingsFile> settings;  // settings.toml, parsed
     std::filesystem::path data_dir;        // anvil/data/<id>; its settings.toml holds the player's values
     std::string approved_hash;             // a plugin from a mod: its approved copy's hash
+    // The start could not prepare it (its approved copy could not be made):
+    // its load fails with this reason, and so do the plugins that require it.
+    i18n::Message cannot_load;
     // On or off at this start, by [[modules]] entry (anvil.toml, `default`);
     // a missing entry takes the module's default.
     std::vector<bool> modules_on;

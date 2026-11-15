@@ -82,7 +82,7 @@ void resolver_tests() {
         ResolveInput in;
         in.host_api = kManifestApi;
         in.manifests = {a, manifest(plugin_toml("b"))};
-        in.verify = [](const Manifest& m) { return m.id == "b" ? std::string("symbols do not match") : std::string(); };
+        in.check_failures = {{}, i18n::Message("symbols do not match")};
         const auto r = resolve(in);
         CHECK((loaded(r) == Ids{"a"}) && (skipped_ids(r) == Ids{"b"}));
     });

@@ -32,7 +32,7 @@ namespace anvil::manager {
 
 // Where a plugin from a mod comes from, and what it waits for or does, in the player's words.
 std::string mod_source(const cli::GameModPlugin& p);
-std::string mod_state_text(const cli::GameModPlugin& p);
+std::string mod_state_text(const cli::GameReport& report, const cli::GameModPlugin& p);
 
 // The Manager's window contents (design §15, issue #59): one ImGui frame per
 // draw(). Everything that reads the game folder at length (hashes, anvil
@@ -73,7 +73,6 @@ private:
         GameFolder folder;
         std::optional<Installation> installation;
         std::optional<cli::GameReport> report;  // when the anvil folder exists
-        AnvilSettings anvil_toml;
         std::optional<LastStart> last_start;  // what the last start used (ADR 0013, point 8)
         std::vector<std::string> crashes;
     };

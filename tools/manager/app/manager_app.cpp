@@ -281,7 +281,6 @@ void ManagerApp::refresh() {
             if (!build.empty()) options.build_of = [build](std::string_view) { return build.c_str(); };
             snapshot.report = cli::check_game(options);
         }
-        snapshot.anvil_toml = read_anvil_settings(game / "anvil" / "anvil.toml");
         snapshot.last_start = read_last_start(game / "anvil" / "data" / "anvil" / "last-start.toml");
         snapshot.crashes = crash_report_names(game / "anvil" / "crashes");
         return snapshot;
@@ -962,8 +961,8 @@ void ManagerApp::draw_approve_modal() {
                        {claimed->name}));
         }
     }
-    if (p.state == "update-pending") bullet(trf("It replaces the approved {0} from the next start.", {p.approved_version}));
-    if (p.state == "conflict") bullet(tr("Other enabled mods have a plugin with this id; this approval picks this one."));
+    if (p.state == ModPluginState::UpdatePending) bullet(trf("It replaces the approved {0} from the next start.", {p.approved_version}));
+    if (p.state == ModPluginState::Conflict) bullet(tr("Other enabled mods have a plugin with this id; this approval picks this one."));
     if (!offered.skip_reason.empty()) {
         banner("skip", Tone::Bad, trf("Anvil would still skip it: {0}", {i18n::text(offered.skip_why)}));
     }

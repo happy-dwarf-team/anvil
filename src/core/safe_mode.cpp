@@ -71,13 +71,18 @@ std::vector<CrashSummary> safe_mode_crashes(const std::filesystem::path& crash_d
     return crashes;
 }
 
+StartRecord read_start_record(const std::filesystem::path& file) {
+    StartRecord record;
+    record.unfinished = read_count(file.wstring());
+    record.safe_mode = record.unfinished >= kSafeModeAfter;
+    return record;
+}
+
 StartRecord StartMarker::begin(const std::filesystem::path& file) {
     std::error_code ignored;
     std::filesystem::create_directories(file.parent_path(), ignored);
     file_ = file.wstring();
-    StartRecord record;
-    record.unfinished = read_count(file_);
-    record.safe_mode = record.unfinished >= kSafeModeAfter;
+    const StartRecord record = read_start_record(file);
     previous_ = record.safe_mode ? 0 : record.unfinished;
     write_count(file_, record.safe_mode ? 0 : record.unfinished + 1);
     active_ = !record.safe_mode;

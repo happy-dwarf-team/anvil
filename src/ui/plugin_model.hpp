@@ -1,8 +1,9 @@
 // The view model of the Plugins tab, shared by the Manager and the overlay
 // (ADR 0013, point 9; docs/ui-guidelines.md §5). It takes a snapshot of
 // plugins, modules and settings with their saved values, the values in effect
-// and their defaults, and answers what the player sees: what loads and why
-// not, what waits for the next start, what a search and the filter chips
+// and their defaults, and the start plan's verdict on each plugin (ADR 0014),
+// and answers what the player sees: what loads and why not (as the plan says
+// it), what waits for the next start, what a search and the filter chips
 // match, what a dependency chain turns on, and what a reset or an undo
 // changes, as a list of edits. It draws nothing and writes nothing: the
 // Manager applies edits to the files, the overlay through anvil.control.
@@ -66,13 +67,22 @@ struct ModuleSnap {
 
 enum class Origin { Own, FromMod, WithAnvil };
 
-// Why a plugin does not load, when the reason is its own (dependencies are
-// worked out by the model).
-enum class Blocked {
-    None,
-    CannotLoad,       // invalid, a conflict between mods, a local plugin with its id loads instead
-    Failed,           // it loaded and failed (the running game only)
-    WaitsForApproval  // from a mod, never approved
+// Whether a plugin loads at the next start and why not: the start plan's
+// verdict (ADR 0014), which the apps copy into the snapshot. The model does
+// not work it out.
+struct LoadState {
+    bool loads = false;  // at the next start, with the saved files
+    enum class Why {
+        None,
+        Off,                // the player's switch
+        NeedsPlugin,        // `missing` does not load; `through` is the path to it
+        NotInstalled,       // `missing` is required and not here at all
+        CannotLoad,         // `reason` says why
+        WaitsForApproval    // from a mod, not approved
+    } why = Why::None;
+    std::string missing;               // a plugin id
+    std::vector<std::string> through;  // plugin ids from the plugin to `missing`, both excluded
+    std::string reason;                // CannotLoad: the app's words; "" for none
 };
 
 struct PluginSnap {
@@ -88,8 +98,13 @@ struct PluginSnap {
     std::vector<std::string> requires_ids;  // plugin ids
     std::vector<ModuleSnap> modules;
     std::vector<SettingSnap> settings;
-    Blocked blocked = Blocked::None;
-    std::string blocked_reason;  // the app's words for CannotLoad and Failed
+    // The next start's plan of the plugin (ADR 0014).
+    LoadState next;
+    // The overlay's game: the plugin loaded at this start, or it failed (its
+    // reason in the app's words). Not set in the Manager.
+    bool runs = false;
+    bool failed = false;
+    std::string failed_reason;
     // From a mod: an update waits for approval (the approved copy runs) and
     // whether the approval itself waits for the next start.
     std::string update_waits;  // the version that waits, "" for none
@@ -131,22 +146,6 @@ struct Edit {
 // The list entry's glyph: ✓ on, ○ off, ▲ needs attention, ✕ cannot load.
 enum class Glyph { On, Off, Attention, CannotLoad };
 
-// Why a plugin does not load, after its dependencies.
-struct LoadState {
-    bool loads = false;  // at the next start, with the saved files
-    enum class Why {
-        None,
-        Off,                // the player's switch
-        NeedsPlugin,        // `missing` does not load; `through` is the path to it
-        NotInstalled,       // `missing` is required and not here at all
-        CannotLoad,
-        Failed,
-        WaitsForApproval
-    } why = Why::None;
-    std::string missing;               // a plugin id
-    std::vector<std::string> through;  // plugin ids from the plugin to `missing`, both excluded
-};
-
 // The list entry's second line: the exception if there is one, else a summary.
 struct EntryLine {
     enum class Kind {
@@ -155,7 +154,7 @@ struct EntryLine {
         NeedsPlugin,      // `name`: the missing plugin's name
         NotInstalled,     // `name`: the missing id
         CannotLoad,
-        Failed,
+        Failed,           // it failed at this start (the overlay's game)
         WaitsForApproval,
         UpdateWaits,      // `name`: the version that waits
         KeptOutOfIronman,
@@ -171,7 +170,7 @@ struct EntryLine {
 };
 
 struct PluginView {
-    LoadState load;
+    LoadState load;  // PluginSnap::next
     Glyph glyph = Glyph::On;
     EntryLine line;
     std::size_t pending = 0;  // changes that wait for the next start
@@ -195,8 +194,6 @@ std::size_t index_of_entry(const Snapshot& snapshot, std::string_view key);  // 
 bool first_of_id(const Snapshot& snapshot, std::size_t index);
 const ModuleSnap* find_module(const PluginSnap& plugin, std::string_view id);
 
-// What loads at the next start, with the saved files.
-LoadState load_state(const Snapshot& snapshot, const PluginSnap& plugin);
 PluginView view(const Snapshot& snapshot, const PluginSnap& plugin);
 
 // A module in the overlay's game, from what is in effect (the overlay's
@@ -219,6 +216,7 @@ bool setting_changed(const SettingSnap& setting);
 // least `min_label`; else 0, the label takes the line and the notes wrap under it.
 float label_reserve(float avail, float trailing, float min_label);
 // Plugins from mods waiting for a first approval or an update's (the tab's label).
+bool waits_for_approval(const PluginSnap& plugin);
 std::size_t to_approve(const Snapshot& snapshot);
 
 Where where(const Switches& switches);

@@ -305,6 +305,15 @@ int svc_requirement(const char* plugin_id, uint32_t index, AnvilControlRequireme
     return fill_sized(out, [&](AnvilControlRequirement& full) { return g_control->requirement(plugin_id, index, full); });
 }
 
+int svc_next_start(const char* plugin_id, AnvilControlNextStart* out) {
+    if (plugin_id == nullptr) return 0;
+    return fill_sized(out, [&](AnvilControlNextStart& full) { return g_control->next_start(plugin_id, full); });
+}
+
+int svc_mod_plugin_next_start(uint32_t index, AnvilControlNextStart* out) {
+    return fill_sized(out, [&](AnvilControlNextStart& full) { return g_control->mod_plugin_next_start(index, full); });
+}
+
 const AnvilControlService kService{
     sizeof(AnvilControlService),
     svc_status,
@@ -337,6 +346,8 @@ const AnvilControlService kService{
     svc_switch_set,
     svc_last_start,
     svc_requirement,
+    svc_next_start,
+    svc_mod_plugin_next_start,
 };
 
 // The reason as a message for the overlay (i18n::serialize).
@@ -699,6 +710,7 @@ AnvilResult Control::disable_next_start(std::string_view plugin_id, std::string&
         return ANVIL_ERROR_INTERNAL;
     }
     disabled_next_.insert(std::string(plugin_id));
+    next_plan_.reset();
     Log::instance().write(ANVIL_LOG_INFO, "anvil",
                           std::string(plugin_id) + " is disabled from the next start (disabled_plugins in anvil.toml)");
     return ANVIL_OK;
@@ -960,6 +972,7 @@ AnvilResult Control::switch_set(std::string_view key, uint32_t which, bool on, s
         if (e.listed) list->insert(e.id);
         else if (const auto it = list->find(e.id); it != list->end()) list->erase(it);
     }
+    next_plan_.reset();
     Log::instance().write(ANVIL_LOG_INFO, "anvil", t->key + " " + what + " (anvil.toml)");
     return ANVIL_OK;
 }
@@ -994,6 +1007,7 @@ AnvilResult Control::approve_mod_plugin(uint32_t index, std::string_view hash, s
         return ANVIL_ERROR_INTERNAL;
     }
     bindings_[p.id] = {p.mod.descriptor, p.hash};
+    next_plan_.reset();
     Log::instance().write(ANVIL_LOG_INFO, "anvil",
                           label + " " + (p.manifest ? p.manifest->version.to_string() : std::string()) + " is approved (hash " +
                               short_hash(p.hash) + "); it loads from the next start");
@@ -1017,9 +1031,65 @@ AnvilResult Control::revoke_mod_plugin(uint32_t index, std::string& error) {
         return ANVIL_ERROR_INTERNAL;
     }
     bindings_.erase(it);
+    next_plan_.reset();
     Log::instance().write(ANVIL_LOG_INFO, "anvil",
                           "the approval of " + p.id + " from mod '" + p.mod.name + "' is revoked; it does not load from the next start");
     return ANVIL_OK;
+}
+
+// ---- the next start (ADR 0014) ---------------------------------------------------
+
+const StartPlan* Control::next_plan() const {
+    if (sources_.inventory == nullptr) return nullptr;
+    if (!next_plan_) {
+        // A normal start with the choices saved now; this start's own
+        // conditions (safe mode, a benchmark arm) are not the next one's.
+        next_plan_ = std::make_unique<StartPlan>(
+            plan_start(*sources_.inventory, read_player_choices(*sources_.inventory), StartConditions{}));
+    }
+    return next_plan_->enabled ? next_plan_.get() : nullptr;
+}
+
+const char* Control::intern(std::string text) const { return strings_.insert(std::move(text)).first->c_str(); }
+
+void Control::fill_next(const PlannedPlugin& p, AnvilControlNextStart& out) const {
+    out.loads = p.loads() ? 1 : 0;
+    out.why = not_loading_name(p.not_loading);
+    out.reason = intern(p.loads() ? std::string() : p.reason);
+    out.reason_message = intern(p.loads() ? std::string() : i18n::serialize(p.why.empty() ? i18n::Message(p.reason) : p.why));
+    out.needs = intern(p.missing);
+    std::string through;
+    for (const std::string& id : p.through) through += (through.empty() ? "" : ", ") + id;
+    out.through = intern(std::move(through));
+}
+
+bool Control::next_start(std::string_view plugin_id, AnvilControlNextStart& out) const {
+    std::lock_guard lock(mutex_);
+    const StartPlan* plan = next_plan();
+    if (plan == nullptr) return false;
+    const PlannedPlugin* found = nullptr;
+    for (const auto* list : {&plan->load, &plan->skipped}) {
+        for (const PlannedPlugin& p : *list) {
+            if (p.id != plugin_id) continue;
+            if (p.local >= 0) {
+                fill_next(p, out);
+                return true;
+            }
+            if (found == nullptr) found = &p;
+        }
+    }
+    if (found == nullptr) return false;
+    fill_next(*found, out);
+    return true;
+}
+
+bool Control::mod_plugin_next_start(uint32_t index, AnvilControlNextStart& out) const {
+    std::lock_guard lock(mutex_);
+    const StartPlan* plan = next_plan();
+    const PlannedPlugin* p = plan != nullptr ? plan->of_mod(index) : nullptr;
+    if (p == nullptr) return false;
+    fill_next(*p, out);
+    return true;
 }
 
 // ---- helpers ---------------------------------------------------------------------

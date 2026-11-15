@@ -760,7 +760,7 @@ void run_action(const Notice& notice, const NoticeAction& action) {
     // The approvals notice opens the first plugin that waits for one.
     if (notice.id == "approvals" && u.model) {
         for (const anvil::ui::PluginSnap& p : u.model->model.plugins) {
-            if ((p.blocked == anvil::ui::Blocked::WaitsForApproval && !p.approved) || !p.update_waits.empty()) {
+            if (anvil::ui::waits_for_approval(p)) {
                 u.plugins_tab.selected = p.id;
                 break;
             }
@@ -1321,8 +1321,8 @@ struct OverlayHost final : anvil::ui::PluginsHost {
     void draw_notes(size_t i) override {
         Ui& u = ui();
         const anvil::ui::PluginSnap& p = plugin(i);
-        if (p.blocked == anvil::ui::Blocked::Failed && !p.blocked_reason.empty()) {
-            anvil::ui::state_row(Glyph::CannotLoad, p.blocked_reason);
+        if (p.failed && !p.failed_reason.empty()) {
+            anvil::ui::state_row(Glyph::CannotLoad, p.failed_reason);
         }
         const OverlaySource& src = source(i);
         if (src.row && *src.row < u.plugins.size() && u.plugins[*src.row].suspended) weak_wrapped(tr("suspended in this game"));

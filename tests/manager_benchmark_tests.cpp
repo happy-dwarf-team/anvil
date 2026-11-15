@@ -261,7 +261,7 @@ void manager_benchmark_tests() {
     run("start record: the core's own record reads back", [] {
         const StartObservation o = seen(core_record(true, 33800.0));
         CHECK(o.record.has_value());
-        const StartRecord& r = *o.record;
+        const manager::StartRecord& r = *o.record;
         CHECK(r.write == "end" && r.anvil == "1.5.0" && r.arm == Arm::With && r.arm_plugin == "bellows");
         CHECK(r.process_id == 4242 && r.creation_filetime == 133'000'000'000'000'000ull);
         CHECK(r.time_ms && std::abs(*r.time_ms - 33800.0) < 0.01);
@@ -939,7 +939,7 @@ void manager_runner_tests() {
         CHECK(checks_pass(checks) && !checks.back().ok && !checks.back().blocks);
         const std::vector<std::function<void(SetupFacts&)>> failing{
             [](SetupFacts& x) { x.steam_running = false; }, [](SetupFacts& x) { x.eu4_running = true; },
-            [](SetupFacts& x) { x.unfinished_starts = 2; }, [](SetupFacts& x) { x.installed_anvil = "1.3.0"; },
+            [](SetupFacts& x) { x.next_safe_mode = true; }, [](SetupFacts& x) { x.installed_anvil = "1.3.0"; },
             [](SetupFacts& x) { x.installed_anvil.clear(); }, [](SetupFacts& x) { x.anvil_game_loads = false; },
             [](SetupFacts& x) { x.comparable.reset(); }, [](SetupFacts& x) { x.comparable->update_pending = true; }};
         for (const auto& change : failing) {
@@ -947,7 +947,7 @@ void manager_runner_tests() {
             change(g);
             CHECK(!checks_pass(setup_checks(g)));
         }
-        f.unfinished_starts = 1;
+        f.next_safe_mode = false;
         CHECK(checks_pass(setup_checks(f)));
         // A GOG install starts without Steam, so its state is no check there.
         SetupFacts gog = f;

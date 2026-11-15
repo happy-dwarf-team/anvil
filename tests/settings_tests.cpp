@@ -641,6 +641,12 @@ void settings_tests() {
         const PlayerSettings broken = parse_player_settings(f, "budget_mb = \n");
         CHECK(broken.warnings.size() == 1 && broken.warnings[0].starts_with("line 1: ") && !broken.values[1]);
 
+        // A retired setting still in the file waits for the next start's move (ADR 0014): no warning.
+        SettingsFile with_retired = f;
+        with_retired.retired.push_back(RetiredSetting{});
+        with_retired.retired.back().name = "colour";
+        CHECK(parse_player_settings(with_retired, "colour = 3\n").warnings.empty());
+
         std::vector<SettingValue> values;
         for (const auto& s : f.settings) values.push_back(s.default_value);
         CHECK(player_settings_text(f, values).empty());

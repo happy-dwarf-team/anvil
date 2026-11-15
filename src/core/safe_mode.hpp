@@ -46,6 +46,11 @@ struct StartRecord {
     bool safe_mode = false;
 };
 
+// The record as the next start will read it, without counting a start in:
+// what the Manager and anvil check --game say about the next start. The
+// loader's StartMarker::begin reads it the same way.
+StartRecord read_start_record(const std::filesystem::path& file);
+
 class StartMarker {
 public:
     // Reads the record and counts this start in (or, in safe mode, clears it).

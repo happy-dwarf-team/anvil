@@ -336,6 +336,39 @@ std::vector<Requirement> ControlClient::requirements(const std::string& plugin) 
     return rows;
 }
 
+namespace {
+NextStartRow next_start_row(const AnvilControlNextStart& n) {
+    NextStartRow row;
+    row.loads = n.loads != 0;
+    row.why = text_or_empty(n.why);
+    row.reason = text_or_empty(n.reason);
+    row.why_message = anvil::i18n::parse(text_or_empty(n.reason_message));
+    row.needs = text_or_empty(n.needs);
+    row.through = split_list(text_or_empty(n.through));
+    return row;
+}
+}  // namespace
+
+bool ControlClient::has_next_start() const {
+    return service_ != nullptr && service_->size >= offsetof(AnvilControlService, mod_plugin_next_start) + sizeof(void*);
+}
+
+std::optional<NextStartRow> ControlClient::next_start(const std::string& plugin) const {
+    if (!has_next_start()) return std::nullopt;
+    AnvilControlNextStart n{};
+    n.size = sizeof(n);
+    if (service_->next_start(plugin.c_str(), &n) == 0) return std::nullopt;
+    return next_start_row(n);
+}
+
+std::optional<NextStartRow> ControlClient::mod_plugin_next_start(uint32_t index) const {
+    if (!has_next_start()) return std::nullopt;
+    AnvilControlNextStart n{};
+    n.size = sizeof(n);
+    if (service_->mod_plugin_next_start(index, &n) == 0) return std::nullopt;
+    return next_start_row(n);
+}
+
 std::vector<std::string> split_list(const std::string& text) {
     std::vector<std::string> items;
     size_t at = 0;

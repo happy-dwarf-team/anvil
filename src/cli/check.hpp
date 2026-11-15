@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/manifest.hpp"
+#include "core/plugin_check.hpp"
 #include "i18n/message.hpp"
 
 #include <cstddef>
@@ -94,6 +95,15 @@ struct CheckReport {
 // build, every symbol (verify_symbols) and instruction boundaries, then
 // writes symbols.lock; without one, that symbols.lock matches symbols.toml.
 CheckReport check_plugin(const CheckOptions& options);
+
+// The report of the core's check of a plugin folder (check_plugin_folder,
+// ADR 0014) with the checks anvil check adds for authors: the names anvil gen
+// refuses, instruction boundaries, symbols.lock (written with an exe when
+// options.write_lock, else compared), module and range warnings and, when
+// options.translations, translations/. `game` is what the check ran against;
+// null without an exe. options.plugin_dir names the folder as the author
+// passed it; options.exe is not read.
+CheckReport check_report(const PluginCheck& check, const CheckOptions& options, const GameImage* game);
 
 std::string format_report(const CheckReport& report, Format format);
 

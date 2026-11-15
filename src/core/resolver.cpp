@@ -206,7 +206,8 @@ ResolveResult resolve(const ResolveInput& input) {
     std::set<std::string> disabled(input.disabled.begin(), input.disabled.end());
 
     // 1. Per-plugin checks and duplicate ids (first one wins).
-    for (const auto& m : input.manifests) {
+    for (size_t i = 0; i < input.manifests.size(); ++i) {
+        const Manifest& m = input.manifests[i];
         if (candidates.contains(m.id)) {
             result.skipped.push_back(skipped_for(
                 m.id, i18n::Message("duplicate_id", {narrow(candidates[m.id].folder.wstring())}), m.folder,
@@ -233,12 +234,9 @@ ResolveResult resolve(const ResolveInput& input) {
                 m.id, i18n::Message("anvil_version", {m.anvil->text(), input.host_version->to_string()}), m.folder));
             continue;
         }
-        if (input.verify) {
-            i18n::Message reason = input.verify(m);
-            if (!reason.empty()) {
-                result.skipped.push_back(skipped_for(m.id, std::move(reason), m.folder, SkipKind::verification));
-                continue;
-            }
+        if (i < input.check_failures.size() && !input.check_failures[i].empty()) {
+            result.skipped.push_back(skipped_for(m.id, input.check_failures[i], m.folder, SkipKind::verification));
+            continue;
         }
         add_implied_dependencies(candidates.emplace(m.id, m).first->second);
     }

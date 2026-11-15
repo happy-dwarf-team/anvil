@@ -59,52 +59,6 @@ bool contains(std::string_view text, std::string_view query) {
     return false;
 }
 
-LoadState load_state(const Snapshot& snapshot, const PluginSnap& plugin, std::vector<std::string_view>& visiting) {
-    LoadState s;
-    if (plugin.blocked == Blocked::CannotLoad) {
-        s.why = LoadState::Why::CannotLoad;
-        return s;
-    }
-    if (plugin.blocked == Blocked::Failed) {
-        s.why = LoadState::Why::Failed;
-        return s;
-    }
-    if (plugin.blocked == Blocked::WaitsForApproval && !plugin.approved) {
-        s.why = LoadState::Why::WaitsForApproval;
-        return s;
-    }
-    if (!plugin.saved.on) {
-        s.why = LoadState::Why::Off;
-        return s;
-    }
-    visiting.push_back(plugin.id);
-    for (const std::string& id : plugin.requires_ids) {
-        // A cycle is the core's error to report; here it does not block.
-        if (std::find(visiting.begin(), visiting.end(), id) != visiting.end()) continue;
-        const PluginSnap* dep = find_plugin(snapshot, id);
-        if (dep == nullptr) {
-            s.why = LoadState::Why::NotInstalled;
-            s.missing = id;
-            break;
-        }
-        const LoadState d = load_state(snapshot, *dep, visiting);
-        if (d.loads) continue;
-        if (d.why == LoadState::Why::NeedsPlugin || d.why == LoadState::Why::NotInstalled) {
-            s.why = d.why;
-            s.missing = d.missing;
-            s.through.push_back(id);
-            s.through.insert(s.through.end(), d.through.begin(), d.through.end());
-        } else {
-            s.why = LoadState::Why::NeedsPlugin;
-            s.missing = id;
-        }
-        break;
-    }
-    visiting.pop_back();
-    s.loads = s.why == LoadState::Why::None;
-    return s;
-}
-
 // Opt-ins live on the modules when there are any, else on the plugin.
 bool kept_out(const Switches& in_effect, bool changes_game, Game game) {
     if (!changes_game) return false;
@@ -127,11 +81,6 @@ const ModuleSnap* find_module(const PluginSnap& plugin, std::string_view id) {
         if (m.id == id) return &m;
     }
     return nullptr;
-}
-
-LoadState load_state(const Snapshot& snapshot, const PluginSnap& plugin) {
-    std::vector<std::string_view> visiting;
-    return load_state(snapshot, plugin, visiting);
 }
 
 bool setting_pending(const SettingSnap& setting) { return setting.saved != setting.in_effect; }
@@ -179,11 +128,9 @@ std::size_t index_of_entry(const Snapshot& snapshot, std::string_view key) {
     return SIZE_MAX;
 }
 
-namespace {
 bool waits_for_approval(const PluginSnap& p) {
-    return (p.blocked == Blocked::WaitsForApproval && !p.approved) || !p.update_waits.empty();
+    return p.next.why == LoadState::Why::WaitsForApproval || !p.update_waits.empty();
 }
-}  // namespace
 
 std::size_t to_approve(const Snapshot& snapshot) {
     return static_cast<std::size_t>(std::count_if(snapshot.plugins.begin(), snapshot.plugins.end(), waits_for_approval));
@@ -200,7 +147,7 @@ InGame module_in_game(const Snapshot& snapshot, const PluginSnap& plugin, const 
 
 PluginView view(const Snapshot& snapshot, const PluginSnap& plugin) {
     PluginView v;
-    v.load = load_state(snapshot, plugin);
+    v.load = plugin.next;
     v.pending = pending_count(plugin);
     v.changed = static_cast<std::size_t>(std::count_if(plugin.settings.begin(), plugin.settings.end(), setting_changed));
     for (const PluginSnap& other : snapshot.plugins) {
@@ -211,17 +158,15 @@ PluginView view(const Snapshot& snapshot, const PluginSnap& plugin) {
     }
     const bool own_opt_ins = plugin.modules.empty() && plugin.changes_game;
     const bool kept = own_opt_ins && kept_out(plugin.in_effect, true, snapshot.game);
-    v.in_this_game = snapshot.game == Game::None
-                         ? v.load.loads
-                         : plugin.in_effect.on && plugin.blocked == Blocked::None &&
-                               (plugin.origin != Origin::FromMod || plugin.approved_in_effect) && !kept;
+    v.in_this_game = snapshot.game == Game::None ? v.load.loads : plugin.runs && !kept;
+    // The overlay's game: a plugin that failed at this start says so first.
+    const bool failed = snapshot.game != Game::None && plugin.failed;
 
     using W = LoadState::Why;
     using K = EntryLine::Kind;
     EntryLine& line = v.line;
     switch (v.load.why) {
         case W::CannotLoad: line.kind = K::CannotLoad; break;
-        case W::Failed: line.kind = K::Failed; break;
         case W::WaitsForApproval: line.kind = K::WaitsForApproval; break;
         case W::Off: line.kind = K::Off; break;
         case W::NeedsPlugin: {
@@ -236,6 +181,7 @@ PluginView view(const Snapshot& snapshot, const PluginSnap& plugin) {
             break;
         case W::None: break;
     }
+    if (failed) line.kind = K::Failed;
     if (line.kind == K::Summary && !plugin.update_waits.empty()) {
         line.kind = K::UpdateWaits;
         line.name = plugin.update_waits;
@@ -251,14 +197,14 @@ PluginView view(const Snapshot& snapshot, const PluginSnap& plugin) {
     line.changes_game = plugin.changes_game;
 
     switch (v.load.why) {
-        case W::CannotLoad:
-        case W::Failed: v.glyph = Glyph::CannotLoad; break;
+        case W::CannotLoad: v.glyph = Glyph::CannotLoad; break;
         case W::WaitsForApproval:
         case W::NeedsPlugin:
         case W::NotInstalled: v.glyph = Glyph::Attention; break;
         case W::Off: v.glyph = Glyph::Off; break;
         case W::None: v.glyph = !plugin.update_waits.empty() ? Glyph::Attention : kept ? Glyph::Off : Glyph::On; break;
     }
+    if (failed) v.glyph = Glyph::CannotLoad;
     v.needs_attention = v.glyph == Glyph::Attention || v.glyph == Glyph::CannotLoad;
     return v;
 }
@@ -443,7 +389,7 @@ bool has_chip(const Snapshot& snapshot, const PluginSnap& plugin, Chip chip) {
         case ChipChanged:
             return std::any_of(plugin.settings.begin(), plugin.settings.end(), setting_changed);
         case ChipAttention: return view(snapshot, plugin).needs_attention;
-        case ChipOff: return load_state(snapshot, plugin).why == LoadState::Why::Off;
+        case ChipOff: return plugin.next.why == LoadState::Why::Off;
     }
     return false;
 }

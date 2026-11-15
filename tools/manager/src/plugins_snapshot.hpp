@@ -41,10 +41,11 @@ struct PluginsSnapshot {
 using PluginText = std::function<std::string(const std::filesystem::path&, const std::string&)>;
 
 // The plugins of anvil/plugins in discovery order, then those of enabled
-// mods. Nothing waits for the next start until the core's start record is read.
+// mods, each with the verdict of the report's start plan (ADR 0014) and its
+// switches as that plan applies anvil.toml. Nothing waits for the next start
+// until the core's start record is read.
 PluginsSnapshot build_plugins_snapshot(const std::filesystem::path& game_dir, const cli::GameReport& report,
-                                       const AnvilSettings& toml, const std::vector<std::string>& standard_plugins,
-                                       const PluginText& text);
+                                       const std::vector<std::string>& standard_plugins, const PluginText& text);
 
 // The canonical text of a value, as the model compares values.
 std::string value_text(const Setting& setting, const SettingValue& value);

@@ -96,6 +96,7 @@ PluginSet::PluginSet(std::vector<ResolvedPlugin> resolved, std::vector<Skipped> 
         p.plugin_dir_ = p.manifest_.folder.wstring();
         p.data_dir_ = r.data_dir.wstring();
         p.approved_hash_ = std::move(r.approved_hash);
+        p.cannot_load_ = std::move(r.cannot_load);
         auto handle = std::make_unique<AnvilPlugin>();
         handle->context = deps_.context;
         handle->record = &p;
@@ -238,6 +239,7 @@ void PluginSet::load(const PluginRecord& record) {
         const Outcome* o = dependency->outcome();
         if (o == nullptr || o->kind != Outcome::Kind::loaded) return failed(i18n::Message("dependency_failed", {d.id}));
     }
+    if (!plugin.cannot_load_.empty()) return failed(plugin.cannot_load_);
     // A plugin from a mod: its approved copy must still have the approved
     // hash. Its files stay open without write or delete sharing until the
     // DLL is mapped, so nothing can change between the check and the load.

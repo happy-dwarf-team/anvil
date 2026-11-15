@@ -8,7 +8,8 @@
  * in the player's language (ADR 0010); since 1.22 the plugins' modules (ADR
  * 0011); since 1.23 the settings of modules, the writes of switches and
  * opt-ins, the record of the last start, the multiplayer lock, and the
- * modules, settings and dependencies of plugins that are off (ADR 0013).
+ * modules, settings and dependencies of plugins that are off (ADR 0013);
+ * since 1.24 the next start's plan of each plugin (ADR 0014).
  * Fields and functions are only appended: a caller checks `size` before it
  * reads a later one.
  *
@@ -198,6 +199,26 @@ typedef struct AnvilControlRequirement {
     int optional;        /* the plugin loads without it */
     int implied;         /* not declared: a plugin that affects gameplay needs anvil-game */
 } AnvilControlRequirement;
+
+/* What the next start does with one plugin (appended in 1.24, ADR 0014):
+ * the core plans it from this start's plugin inventory and the choices saved
+ * now (anvil.toml, trust.toml, the players' settings files), as a normal
+ * start, without reading the plugin folders again. A plugin installed while
+ * the game runs is not in it until the next start. Strings are valid for the
+ * process. */
+typedef struct AnvilControlNextStart {
+    uint32_t size;
+    int loads;
+    /* Why not, when loads is 0: "off" (the player's switch), "needs" (a
+     * plugin it needs does not load), "not-installed" (a plugin it needs is
+     * not there), "approval" (from a mod, not approved), "cannot-load"
+     * (anything else; `reason` says what); "" when it loads. */
+    const char *why;
+    const char *reason;         /* the English words; "" when it loads */
+    const char *reason_message; /* `reason` as a message, as AnvilControlPlugin's */
+    const char *needs;          /* "needs", "not-installed": the plugin id; "" otherwise */
+    const char *through;        /* the plugin ids between this one and `needs`, ", " between them */
+} AnvilControlNextStart;
 
 /* Which value setting_value gives. */
 enum {
@@ -391,6 +412,14 @@ typedef struct AnvilControlService {
      * order, then the implied one; 0 when index is past the last or the id
      * is unknown. */
     int (*requirement)(const char *plugin_id, uint32_t index, AnvilControlRequirement *out);
+
+    /* --- the next start's plan (appended in 1.24, ADR 0014) --- */
+    /* A plugin of this start by id (a local plugin before one from a mod),
+     * and a plugin in a mod by its mod_plugin index; 0 for an unknown one,
+     * one the next start does not see (a plugin in a mod a local plugin
+     * shadows), or without a plan (Anvil is off). */
+    int (*next_start)(const char *plugin_id, AnvilControlNextStart *out);
+    int (*mod_plugin_next_start)(uint32_t index, AnvilControlNextStart *out);
 } AnvilControlService;
 
 #ifdef __cplusplus

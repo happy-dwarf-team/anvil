@@ -97,29 +97,25 @@ std::string join(const std::vector<std::string>& items) {
 void plugin_rows(std::string& out, const cli::GameReport& game) {
     for (const cli::GamePlugin& p : game.plugins) {
         const auto& manifest = p.report.manifest;
-        std::string status = p.status.empty() ? "skipped" : p.status;
-        if (p.status == "loaded") {
-            const auto loaded = std::find_if(game.load_order.begin(), game.load_order.end(),
-                                             [&](const cli::LoadedPlugin& l) { return l.folder == p.folder; });
-            if (loaded != game.load_order.end() && !loaded->phase.empty()) status += " (" + loaded->phase + ")";
-        } else if (p.status != "disabled") {
-            const auto skipped = std::find_if(game.skipped.begin(), game.skipped.end(),
-                                              [&](const cli::SkippedPlugin& s) { return s.folder == p.folder; });
-            if (skipped != game.skipped.end() && !skipped->reason.empty()) {
-                status += ": " + skipped->reason;
-            } else if (!p.report.skip_reason.empty()) {
-                status += ": " + p.report.skip_reason;
-            }
+        const PlannedPlugin* planned = cli::planned(game, p);
+        std::string status = cli::status_name(planned);
+        if (planned != nullptr && planned->loads()) {
+            status += planned->manifest && planned->manifest->phase == Phase::Early ? " (early)" : " (main)";
+        } else if (planned != nullptr && !planned->disabled && !planned->reason.empty()) {
+            status += ": " + planned->reason;
+        } else if (planned == nullptr && !p.report.skip_reason.empty()) {
+            status += ": " + p.report.skip_reason;
         }
         out += "| " + cell(manifest ? manifest->id : p.folder) + " | " + cell(manifest ? manifest->version.to_string() : "") +
                " | " + cell("anvil/plugins/" + p.folder) + " | " + cell(status) + " |\n";
     }
     for (const cli::GameModPlugin& p : game.mod_plugins) {
         const std::string from = "mod '" + p.mod + "' (" + (p.workshop_id.empty() ? "local mod" : "Workshop " + p.workshop_id) + ")";
-        std::string status = p.status.empty() ? "skipped" : p.status;
-        if (!p.state.empty() && p.state != "approved") status += ", " + p.state;
-        const std::string& reason = !p.skip_reason.empty() ? p.skip_reason : p.reason;
-        if (p.status != "loaded" && !reason.empty()) status += ": " + reason;
+        const PlannedPlugin* planned = cli::planned(game, p);
+        std::string status = cli::status_name(planned);
+        if (p.state != ModPluginState::Approved) status += std::string(", ") + state_name(p.state);
+        const std::string& reason = planned != nullptr && !planned->reason.empty() ? planned->reason : p.reason;
+        if ((planned == nullptr || !planned->loads()) && !reason.empty()) status += ": " + reason;
         out += "| " + cell(p.id) + " | " + cell(p.version) + " | " + cell(from) + " | " + cell(status) + " |\n";
     }
 }
@@ -195,11 +191,13 @@ std::string problem_report(const ProblemReportInput& input) {
     }
     if (input.anvil_missed) out += "| Last game from this folder | it ran, but Anvil did not load (no anvil.log written during it) |\n";
     if (const cli::GameReport* game = input.game) {
-        std::string toml = game->enabled ? "plugins enabled" : "all plugins disabled (`enabled = false`)";
-        if (!game->disabled_plugins.empty()) toml += "; disabled_plugins: " + join(game->disabled_plugins);
+        const AnvilSettings& saved = game->choices.anvil_toml;
+        std::string toml = saved.enabled ? "plugins enabled" : "all plugins disabled (`enabled = false`)";
+        if (!saved.disabled_plugins.empty()) toml += "; disabled_plugins: " + join(saved.disabled_plugins);
         out += "| anvil.toml | " + cell(toml) + " |\n";
         out += "| Playset | " +
-               cell(game->playset_found ? std::to_string(game->enabled_mods) + " enabled mod(s)" : "dlc_load.json not found") +
+               cell(game->inventory.playset.found ? std::to_string(game->inventory.playset.mods.size()) + " enabled mod(s)"
+                                                   : "dlc_load.json not found") +
                " |\n";
     } else {
         out += "| anvil.toml | no anvil folder |\n";
