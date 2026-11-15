@@ -450,23 +450,42 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
         if ((cut_name || cut_version) && ImGui::IsItemHovered()) ImGui::SetTooltip("%s %s", p.name.c_str(), p.version.c_str());
     }
     if (one_line) ImGui::SameLine();
-    ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), right - controls_w));
+    // On a pane narrower than the buttons and the switch, the switch takes a line of its own
+    // under the buttons, and the buttons one each when they do not fit side by side: nothing
+    // is drawn over another, so a click on the switch never lands on a button. Each line
+    // keeps to the right edge, where the wide header has them.
+    const float reset_w = reset.empty() ? 0.0f : button_width(tr("Reset to defaults..."));
+    const float host_w = buttons ? host.header_buttons_width(i) : 0.0f;
+    const bool stacked = controls_w > right - left;
+    const bool apart = stacked && reset_w > 0 && host_w > 0 && reset_w + style.ItemSpacing.x + host_w > right - left;
+    const auto at_right = [&](float w) { ImGui::SetCursorPosX(std::max(left, right - w)); };
+    if (!stacked) {
+        ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), right - controls_w));
+    } else if (apart) {
+        at_right(reset_w);
+    } else if (reset_w > 0 || host_w > 0) {
+        at_right(reset_w + host_w + (reset_w > 0 && host_w > 0 ? style.ItemSpacing.x : 0.0f));
+    }
     ImGui::BeginDisabled(locked);
     if (!reset.empty()) {
         if (ImGui::Button(tr("Reset to defaults..."))) ask_edits(model, host, trf("Reset {0} to defaults", {p.name}), tr("Reset"), reset);
-        ImGui::SameLine();
+        if (!stacked || (buttons && !apart)) {
+            ImGui::SameLine();
+        } else if (buttons) {
+            at_right(host_w);
+        }
     }
     if (buttons) {
         host.draw_header_buttons(i);
-        ImGui::SameLine();
+        if (!stacked) ImGui::SameLine();
     }
     ImGui::EndDisabled();
-    if (buttons_w > 0) {
+    if (buttons_w > 0 && !stacked) {
         ImGui::AlignTextToFramePadding();
         weak("|");
         ImGui::SameLine();
     }
-    ImGui::SetCursorPosX(right - toggle_w);
+    at_right(toggle_w);
     toggle_left_ = ImGui::GetCursorScreenPos().x;
     const std::string refusal = host.switch_refusal(i);
     if (toggle("##on", p.saved.on, p.saved.on ? tr("On") : tr("Off"), locked || !known || !refusal.empty(), false,

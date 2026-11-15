@@ -72,10 +72,11 @@ inline void strong(const char* text) {
     if (g_title_font != nullptr) ImGui::PopFont();
 }
 
-// The same, wrapped: a notice's title.
-inline void strong_wrapped(const char* text) {
+// The same, wrapped at `wrap_x` (text_wrapped_at's meaning: window-local x, 0
+// for the end of the content region): a notice's title, short of its close button.
+inline void strong_wrapped(const char* text, float wrap_x = 0.0f) {
     if (g_title_font != nullptr) ImGui::PushFont(g_title_font, ImGui::GetFontSize());
-    text_wrapped(text);
+    text_wrapped_at(text, wrap_x);
     if (g_title_font != nullptr) ImGui::PopFont();
 }
 
