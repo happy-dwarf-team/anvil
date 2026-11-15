@@ -13,6 +13,16 @@
  * Fields and functions are only appended: a caller checks `size` before it
  * reads a later one.
  *
+ * A struct the caller passes for the core to fill starts with `size`: the
+ * caller sets it to sizeof that struct as the header it was built with
+ * declares it, and the core writes no further (AnvilControlCrash and
+ * AnvilControlResult have not grown and are written whole). status and
+ * setting_info take a `size` of 0 as the size in this header, since before
+ * 1.23 the core filled them whole: only a caller built with this same header
+ * may pass 0 there, and one built with an older header that passes 0 is
+ * written past its struct. The other calls fill nothing and return 0 when
+ * `size` is smaller than the field itself.
+ *
  * Not part of the SDK: it lives in the Anvil repository, only Anvil's own
  * plugins use it, and it may change in a minor release (a new version is
  * registered next to the old one only when a released overlay needs it).
