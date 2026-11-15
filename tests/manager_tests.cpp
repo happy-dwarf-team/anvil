@@ -1107,6 +1107,45 @@ int main(int argc, char** argv) {
         CHECK(s.model.plugins[1].approved_in_effect);
     });
 
+    run("plugins tab: Undo writes back the last start's value, neither the default nor the saved one", [] {
+        const SettingsFileResult schema = parse_settings_text(
+            "[setting.max_armies]\ntype = \"int\"\ndefault = 10\nlabel = \"Armies\"\n"
+            "[setting.style]\ntype = \"enum\"\ndefault = \"brief\"\nlabel = \"Style\"\nvalues = [{ name = \"brief\" }, { name = \"full\" }, { name = \"none\" }]\n");
+        CHECK(schema.file.has_value());
+        if (!schema.file) return;
+        PluginSource source;
+        source.schema = *schema.file;
+        source.values = {SettingValue{}, SettingValue{}};
+        source.values[0].integer = 40;  // saved 40, the last start had 20, the default is 10
+        source.values[1].integer = 2;   // saved "none", the last start had "full"
+
+        anvil::ui::PluginSnap p;
+        p.id = "tuning";
+        anvil::ui::SettingSnap armies;
+        armies.name = "max_armies";
+        armies.default_value = value_text(source.schema->settings[0], source.schema->settings[0].default_value);
+        armies.saved = value_text(source.schema->settings[0], source.values[0]);
+        armies.in_effect = "20";
+        anvil::ui::SettingSnap style;
+        style.name = "style";
+        style.default_value = value_text(source.schema->settings[1], source.schema->settings[1].default_value);
+        style.saved = value_text(source.schema->settings[1], source.values[1]);
+        style.in_effect = "\"full\"";
+        p.settings = {armies, style};
+
+        const std::vector<anvil::ui::Edit> undo = anvil::ui::undo_pending(p);
+        CHECK(undo.size() == 2);
+        std::string error;
+        for (const anvil::ui::Edit& e : undo) CHECK(apply_setting_edit(source, e, error) && error.empty());
+        CHECK(source.values[0].integer == 20 && source.values[1].integer == 1);
+
+        // A value the schema refuses still fails, and leaves the saved one.
+        anvil::ui::Edit bad = undo[0];
+        bad.value = "\"many\"";
+        CHECK(!apply_setting_edit(source, bad, error) && contains(error, "unknown value"));
+        CHECK(source.values[0].integer == 20);
+    });
+
     manager_benchmark_tests();
     manager_runner_tests();
     manager_report_tests();

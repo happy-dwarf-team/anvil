@@ -50,7 +50,8 @@ PluginsSnapshot build_plugins_snapshot(const std::filesystem::path& game_dir, co
 std::string value_text(const Setting& setting, const SettingValue& value);
 
 // Applies one setting edit of the model to `source`'s values: the edit's
-// value is the canonical text of the default or of a value it already knows.
+// value is the canonical text of a value (the default, the saved one, or the
+// last start's for Undo), read as the player's settings.toml would hold it.
 bool apply_setting_edit(PluginSource& source, const anvil::ui::Edit& edit, std::string& error);
 
 // What is in effect, from the record of the last start (ADR 0013, point 8):
