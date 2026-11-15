@@ -122,14 +122,17 @@ impl OosFlags {
     }
 }
 
-/// Why the game is paused (`ANVIL_GAME_PAUSE_*`).
+/// Why the game is paused (`ANVIL_GAME_PAUSE_*`): one reason, the player's
+/// pause while it is on (the game may hold one of its own as well), else the
+/// game's.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct PauseFlags(pub u32);
 
 impl PauseFlags {
     /// The player's pause, the one the space bar and the pause button toggle.
     pub const PLAYER: u32 = crate::sys::ANVIL_GAME_PAUSE_PLAYER;
-    /// In single player, the game's own list of pauses is not empty.
+    /// In single player, the game's own list of pauses is not empty and the
+    /// player's pause is off.
     pub const GAME: u32 = crate::sys::ANVIL_GAME_PAUSE_GAME;
 
     /// Whether the player paused the game.

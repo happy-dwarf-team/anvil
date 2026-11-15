@@ -2319,6 +2319,13 @@ int main(int argc, char** argv) {
         frame(game.app, 1);
         CHECK(service->paused(&flags) == 1 && flags == ANVIL_GAME_PAUSE_GAME);
         CHECK(service->speed(&speed) == 1 && speed == 5);
+        // Both pauses at once: one reason, the player's (the header's contract).
+        game.speed[0x48] = 1;
+        frame(game.app, 1);
+        CHECK(service->paused(&flags) == 1 && flags == ANVIL_GAME_PAUSE_PLAYER);
+        game.speed[0x48] = 0;
+        frame(game.app, 1);
+        CHECK(service->paused(&flags) == 1 && flags == ANVIL_GAME_PAUSE_GAME);
         g_multiplayer = true;
         frame(game.app, 1);
         CHECK(service->paused(&flags) == 0 && flags == 0 && service->speed(&speed) == 1 && speed == 5);
