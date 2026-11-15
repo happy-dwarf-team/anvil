@@ -278,7 +278,7 @@ void module_settings_tests() {
         CHECK(move && move->items.empty());
         // A multi-line value goes with all its lines; only comments left: no file.
         move = plan_retired_move(*r.file, "flows_mode = \"\"\"\noff\"\"\"\n# end\n", error);
-        CHECK(move && move->items.size() == 1 && move->text.empty());
+        CHECK(move && move->items.size() == 1 && move->items[0].turns_off && move->text.empty());
         // A file that does not parse waits.
         CHECK(!plan_retired_move(*r.file, "flows_mode = \n", error) && contains(error, "line 1"));
         CHECK(!plan_retired_move(*r.file, "[flows_mode]\na = 1\n", error) && contains(error, "is a table"));
@@ -445,18 +445,24 @@ module = "extra"
         notes = move_retired_settings(m, *r.file, player, toml, lists);
         CHECK(lists.enabled_modules.empty() && lists.disabled_modules == std::vector<std::string>{"lode.flows"} &&
               lists.allow_ironman == std::vector<std::string>{"lode.extra"});
+        const auto same_as_file = [&] {  // the file has what this start's lists say
+            const AnvilSettings file = read_anvil_settings(toml);
+            return file.enabled_modules == lists.enabled_modules && file.disabled_modules == lists.disabled_modules &&
+                   file.allow_ironman == lists.allow_ironman && file.allow_multiplayer == lists.allow_multiplayer;
+        };
+        CHECK(same_as_file() && read(toml).starts_with("# mine\n"));
         CHECK(!notes.empty() && contains(notes[0].message, "meant module lode.extra off: took it out of enabled_modules"));
         // As it is already: no write, an info line, the value still goes.
         const std::string before = read(toml);
         write(player, "extra_mode = \"off\"\nextra_ironman = true\n");
         notes = move_retired_settings(m, *r.file, player, toml, lists);
-        CHECK(read(toml) == before && !std::filesystem::exists(player) && notes.size() == 3 &&
+        CHECK(read(toml) == before && same_as_file() && !std::filesystem::exists(player) && notes.size() == 3 &&
               contains(notes[0].message, "lode.extra off; anvil.toml has it so already") &&
               contains(notes[1].message, "lode.extra allowed in ironman; anvil.toml has it so already"));
         // On again: back into enabled_modules.
         write(player, "extra_mode = \"on\"\n");
         move_retired_settings(m, *r.file, player, toml, lists);
-        CHECK(lists.enabled_modules == std::vector<std::string>{"lode.extra"});
+        CHECK(lists.enabled_modules == std::vector<std::string>{"lode.extra"} && same_as_file());
     });
 
     run("last-start.toml: written, read back, unknown keys and other formats (ADR 0013, point 8)", [] {
