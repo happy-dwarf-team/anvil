@@ -88,6 +88,10 @@ struct Layout {
     std::uint32_t oos_handler = 0;       // session+: the out-of-sync handler, may be null
     std::uint32_t oos_flag = 0;          // handler+: byte, a checksum mismatch
     std::uint32_t oos_paused = 0;        // speed object+: byte, paused because of that
+    bool pace = false;                   // false when the speed and pause symbols are absent on this build
+    std::uint32_t game_speed = 0;        // root+: int32, the game speed 0..4 (the speed bar shows 1..5)
+    std::uint32_t pause_flag = 0;        // speed object+: byte, the player's pause
+    sym::Types::is_paused::Pointer is_paused = nullptr;  // the speed bar's answer
     const std::uintptr_t* gui = nullptr;  // the GUI's global; null when these symbols are absent
     std::uint32_t gui_text_receiver = 0;  // gui+: the focused text field's receiver, may be null
     std::uint32_t gui_shortcut_on = 0;    // gui+: byte, the shortcut editor is on
@@ -134,6 +138,8 @@ std::mutex g_session_mutex;
 bool g_in_session = false;
 AnvilGameSession g_session{};
 AnvilGameDate g_date{};
+std::int32_t g_speed = 0;   // 1..5, 0 when unknown
+std::uint32_t g_pause = 0;  // ANVIL_GAME_PAUSE_*
 
 void publish(const char* event, const void* payload) noexcept {
     const anvil::Host host;
@@ -162,6 +168,14 @@ void read_session_unguarded(SessionView& view) {
             view.oos |= ANVIL_GAME_OOS_DETECTED;
         }
         if (*reinterpret_cast<const std::uint8_t*>(speed + g_layout.oos_paused) != 0) view.oos |= ANVIL_GAME_OOS_PAUSED;
+    }
+    if (g_layout.pace) {
+        const std::int32_t value = *reinterpret_cast<const std::int32_t*>(root + g_layout.game_speed);
+        view.speed = value >= 0 && value <= 4 ? value + 1 : 0;
+        if (g_layout.is_paused(reinterpret_cast<void*>(speed))) {
+            const bool player = *reinterpret_cast<const std::uint8_t*>(speed + g_layout.pause_flag) != 0;
+            view.pause = player ? ANVIL_GAME_PAUSE_PLAYER : ANVIL_GAME_PAUSE_GAME;
+        }
     }
     view.running = true;
 }
@@ -330,6 +344,8 @@ void after_frame_body(std::uint8_t* app, std::uint64_t number) {
         if (changes.count == 0) {
             std::lock_guard lock(g_session_mutex);
             g_date = date;
+            g_speed = view.speed;
+            g_pause = view.pause;
         }
     }
     for (int i = 0; i < changes.count; ++i) {
@@ -338,7 +354,11 @@ void after_frame_body(std::uint8_t* app, std::uint64_t number) {
             std::lock_guard lock(g_session_mutex);
             g_in_session = s.change == ANVIL_GAME_SESSION_STARTED;
             g_session = s;
-            if (g_in_session) g_date = date;  // STARTED comes only from a running view
+            if (g_in_session) {  // STARTED comes only from a running view
+                g_date = date;
+                g_speed = view.speed;
+                g_pause = view.pause;
+            }
         }
         host.info("session {} {} ({})", s.number, s.change == ANVIL_GAME_SESSION_STARTED ? "started" : "ended",
                   mode_text(s));
@@ -564,6 +584,20 @@ int service_main_menu() {
 
 std::uint32_t service_out_of_sync() { return g_oos_flags.load(std::memory_order_acquire); }
 
+int service_speed(std::int32_t* out) {
+    std::lock_guard lock(g_session_mutex);
+    const bool known = g_in_session && g_speed > 0;
+    if (out != nullptr && known) *out = g_speed;
+    return known ? 1 : 0;
+}
+
+int service_paused(std::uint32_t* flags) {
+    std::lock_guard lock(g_session_mutex);
+    const std::uint32_t pause = g_in_session ? g_pause : 0;
+    if (flags != nullptr) *flags = pause;
+    return pause != 0 ? 1 : 0;
+}
+
 // No objects with destructors: the body runs under __try.
 std::uint32_t read_keyboard_unguarded() {
     const std::uintptr_t gui = *g_layout.gui;
@@ -624,7 +658,7 @@ AnvilResult service_restart(AnvilPlugin* self, std::uint32_t flags) {
 constexpr AnvilGameService kService = {
     sizeof(AnvilGameService), service_ready, service_main_thread_id, service_frame_number, service_run_on_main_thread,
     service_session,          service_date,  service_main_menu,    service_out_of_sync,  service_keyboard,
-    service_restart,
+    service_restart,          service_speed, service_paused,
 };
 
 // ---- the world service ------------------------------------------------------
@@ -2229,6 +2263,15 @@ struct AnvilGame : anvil::Plugin {
             g_layout.oos = true;
         } else {
             host.info("the out-of-sync symbols are absent on this build: out_of_sync() stays 0");
+        }
+        // Likewise for the speed and the pause: speed() and paused() then answer 0.
+        if (host.present(sym::speed_of_root) && host.present(sym::is_paused)) {
+            g_layout.game_speed = sym::speed_of_root.speed;
+            g_layout.pause_flag = sym::is_paused.pause_flag;
+            g_layout.is_paused = host.function(sym::is_paused);
+            g_layout.pace = true;
+        } else {
+            host.info("the speed and pause symbols are absent on this build: speed() and paused() answer 0");
         }
         // Likewise for the GUI's keyboard: keyboard() then answers 0.
         if (host.present(sym::gui_text_receiver) && host.present(sym::gui_shortcut_pick)) {

@@ -14,6 +14,8 @@ pub const ANVIL_GAME_EVENT_MAIN_MENU: &[u8; 21] = b"anvil-game.main_menu\0";
 pub const ANVIL_GAME_SERVICE: &[u8; 16] = b"anvil-game.game\0";
 pub const ANVIL_GAME_SERVICE_VERSION: u32 = 1;
 pub const ANVIL_GAME_RESTART_CLOSE_CAMPAIGN: u32 = 1;
+pub const ANVIL_GAME_PAUSE_PLAYER: u32 = 1;
+pub const ANVIL_GAME_PAUSE_GAME: u32 = 2;
 pub const ANVIL_GAME_KEYBOARD_TEXT: u32 = 1;
 pub const ANVIL_GAME_KEYBOARD_SHORTCUT: u32 = 2;
 pub const ANVIL_GAME_OOS_DETECTED: u32 = 1;
@@ -753,10 +755,16 @@ pub struct AnvilGameService {
     pub restart: ::core::option::Option<
         unsafe extern "C" fn(self_: *mut AnvilPlugin, flags: u32) -> AnvilResult,
     >,
+    pub speed: ::core::option::Option<
+        unsafe extern "C" fn(out: *mut i32) -> core::ffi::c_int,
+    >,
+    pub paused: ::core::option::Option<
+        unsafe extern "C" fn(flags: *mut u32) -> core::ffi::c_int,
+    >,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AnvilGameService"][::core::mem::size_of::<AnvilGameService>() - 88usize];
+    ["Size of AnvilGameService"][::core::mem::size_of::<AnvilGameService>() - 104usize];
     [
         "Alignment of AnvilGameService",
     ][::core::mem::align_of::<AnvilGameService>() - 8usize];
@@ -793,6 +801,12 @@ const _: () = {
     [
         "Offset of field: AnvilGameService::restart",
     ][::core::mem::offset_of!(AnvilGameService, restart) - 80usize];
+    [
+        "Offset of field: AnvilGameService::speed",
+    ][::core::mem::offset_of!(AnvilGameService, speed) - 88usize];
+    [
+        "Offset of field: AnvilGameService::paused",
+    ][::core::mem::offset_of!(AnvilGameService, paused) - 96usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

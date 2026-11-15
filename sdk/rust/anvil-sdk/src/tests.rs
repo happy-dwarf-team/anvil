@@ -128,6 +128,9 @@ unsafe extern "C" fn fake_get_service(
             ptr::from_ref(&*FAKE_WORLD_FULL).cast()
         }
         ("anvil-game.world", 1) => ptr::from_ref(&*FAKE_WORLD).cast(),
+        ("anvil-game.game", 1) if WITH_GAME.load(Ordering::Relaxed) => {
+            ptr::from_ref(&*FAKE_GAME).cast()
+        }
         ("anvil-map.modes", 1) => ptr::from_ref(&*FAKE_MAP).cast(),
         ("anvil-overlay.input", 1) => ptr::from_ref(&*FAKE_INPUT).cast(),
         ("anvil-script.day_end", 1) => ptr::from_ref(&*FAKE_DAY_END).cast(),
@@ -581,6 +584,28 @@ static FAKE_WORLD: Shared<AnvilGameWorldService> = Shared({
 
 static FULL_WORLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+// --- a fake anvil-game.game: speed 3, paused by the player ------------------------
+
+static WITH_GAME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+unsafe extern "C" fn game_speed(out: *mut i32) -> core::ffi::c_int {
+    unsafe { *out = 3 };
+    1
+}
+
+unsafe extern "C" fn game_paused(flags: *mut u32) -> core::ffi::c_int {
+    unsafe { *flags = ANVIL_GAME_PAUSE_PLAYER };
+    1
+}
+
+static FAKE_GAME: Shared<AnvilGameService> = Shared({
+    let mut table: AnvilGameService = unsafe { std::mem::zeroed() };
+    table.size = std::mem::size_of::<AnvilGameService>() as u32;
+    table.speed = Some(game_speed);
+    table.paused = Some(game_paused);
+    table
+});
+
 unsafe extern "C" fn world_monarch(
     tag: *const c_char,
     kind: u32,
@@ -893,6 +918,7 @@ static FAKE_WORLD_FULL: Shared<AnvilGameWorldService> = Shared({
 fn fake_host() -> (MutexGuard<'static, ()>, &'static AnvilHost) {
     let guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     FULL_WORLD.store(false, Ordering::Relaxed);
+    WITH_GAME.store(false, Ordering::Relaxed);
     *RECORDED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Recorded::default());
     let mut table: AnvilHost = unsafe { std::mem::zeroed() };
     table.size = std::mem::size_of::<AnvilHost>() as u32;
@@ -1966,4 +1992,18 @@ fn a_module_is_a_host_of_its_own_handle() {
         old.module("drill_all").unwrap_err().code(),
         ErrorCode::Unsupported
     );
+}
+
+#[test]
+fn game_reads_the_speed_and_the_pause() {
+    let (_guard, table) = fake_host();
+    WITH_GAME.store(true, Ordering::Relaxed);
+    assert_eq!(load::<Quiet>(table), ANVIL_OK);
+    let host = Host::current().unwrap();
+    let g = game::Game::get(&host).unwrap();
+    assert_eq!(g.speed(), Some(3));
+    let pause = g.paused().unwrap();
+    assert!(pause.player() && !pause.game());
+    // In the table's size but not filled in: None.
+    assert_eq!(g.out_of_sync(), None);
 }

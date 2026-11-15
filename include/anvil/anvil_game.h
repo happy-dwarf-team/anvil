@@ -168,10 +168,33 @@ typedef struct AnvilGameService {
      * this build declares the symbols absent. ANVIL_OK again while a request
      * waits changes nothing but its flags. */
     AnvilResult (*restart)(AnvilPlugin *self, uint32_t flags);
+
+    /* Since anvil-game 1.24.0; check with ANVIL_GAME_HAS(service, speed). */
+
+    /* The game speed as the speed bar shows it, 1 to 5: nonzero and *out set
+     * while a session runs, 0 otherwise (*out untouched). It keeps its value
+     * while the game is paused. As of the last frame of the main loop, like
+     * date(); callable from any thread; `out` may be NULL. anvil-game.commands
+     * sets it (ANVIL_GAME_COMMAND_SPEED). */
+    int (*speed)(int32_t *out);
+    /* Whether the game is paused, by the game speed's own check: nonzero while a
+     * session runs and is paused, with *flags set to its reasons
+     * (ANVIL_GAME_PAUSE_*); 0 while it runs on or no session runs (*flags 0).
+     * As of the last frame of the main loop; callable from any thread; `flags`
+     * may be NULL. Whether a pause came from going out of sync is
+     * out_of_sync()'s ANVIL_GAME_OOS_PAUSED. */
+    int (*paused)(uint32_t *flags);
 } AnvilGameService;
 
 /* restart(): the player accepted closing a running single-player campaign. */
 #define ANVIL_GAME_RESTART_CLOSE_CAMPAIGN 0x1u
+
+/* paused(): the player's pause, the one the space bar and the pause button
+ * toggle. */
+#define ANVIL_GAME_PAUSE_PLAYER 0x1u
+/* paused(): in single player, the game's own list of pauses is not empty
+ * (paused for a reason other than the player's). */
+#define ANVIL_GAME_PAUSE_GAME 0x2u
 
 /* Nonzero when `service` provides `field`. */
 #define ANVIL_GAME_HAS(service, field) \
