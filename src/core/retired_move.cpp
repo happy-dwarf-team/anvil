@@ -6,6 +6,7 @@
 #include <toml++/toml.hpp>
 
 #include <algorithm>
+#include <set>
 
 namespace anvil {
 
@@ -108,16 +109,26 @@ RetiredMovePlan plan_retired_settings(const Manifest& manifest, const SettingsFi
         plan.forget_recorded = write_files && !recorded.empty();
         return plan;
     }
+    // Moved before, while its file could not be written: anvil.toml has the move, and
+    // the player may have switched the module since. Only its removal is left.
+    const auto moved_before = [&](const RetiredMove::Item& item) {
+        return moves_something(item) &&
+               std::find(recorded.begin(), recorded.end(), MovedRetired{item.name, item.value}) != recorded.end();
+    };
+    // Two values of one module that disagree (one in an `off` list, another
+    // in an `on` list): `off` wins, whatever their order in the file. Of the
+    // values that move at this start: one moved before does not move again.
+    std::set<std::string> turned_off;
+    for (const RetiredMove::Item& item : move->items) {
+        if (item.turns_off && !moved_before(item)) turned_off.insert(item.module);
+    }
     // Every edit of every value, in file order, against this start's lists,
     // so a later value sees what an earlier one did.
     for (const RetiredMove::Item& item : move->items) {
         const std::string key = manifest.id + "." + item.module;
         const std::string what = "retired setting " + item.name + " = " + item.value + " (settings.toml line " +
                                  std::to_string(item.line) + ")";
-        // Moved before, while its file could not be written: anvil.toml has the move, and
-        // the player may have switched the module since. Only its removal is left.
-        if (moves_something(item) &&
-            std::find(recorded.begin(), recorded.end(), MovedRetired{item.name, item.value}) != recorded.end()) {
+        if (moved_before(item)) {
             plan.notes.push_back({ANVIL_LOG_INFO, what + " was moved into anvil.toml before, when settings.toml could "
                                                          "not be written: module " + key +
                                                          " stays as anvil.toml has it"});
@@ -128,7 +139,13 @@ RetiredMovePlan plan_retired_settings(const Manifest& manifest, const SettingsFi
         const bool on_by_default = declared == manifest.modules.end() || declared->enabled_by_default;
         std::vector<std::pair<std::string, std::vector<ListEdit>>> meant;  // what, its edits
         if (item.turns_off) meant.push_back({"off", module_switch_edits(key, false, on_by_default)});
-        if (item.turns_on) meant.push_back({"on", module_switch_edits(key, true, on_by_default)});
+        if (item.turns_on && turned_off.contains(item.module)) {
+            plan.notes.push_back({ANVIL_LOG_INFO, what + (write_files ? " meant" : " means") + " module " + key +
+                                                      " on, but another retired setting of the module" +
+                                                      (write_files ? " meant" : " means") + " off, which wins"});
+        } else if (item.turns_on) {
+            meant.push_back({"on", module_switch_edits(key, true, on_by_default)});
+        }
         if (item.allows_ironman) meant.push_back({"allowed in ironman", {ListEdit{"allow_ironman", key, true}}});
         if (item.allows_multiplayer) meant.push_back({"allowed in multiplayer", {ListEdit{"allow_multiplayer", key, true}}});
         for (const auto& [state, list] : meant) {

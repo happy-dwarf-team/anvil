@@ -428,6 +428,25 @@ int main(int argc, char** argv) {
             CHECK(warned[1].line == 6 && contains(warned[1].message, "setting cooldown of module flows, which offers multiplayer"));
         }
 
+        // Two retired settings of one module, one with an on list: a warning at the later one;
+        // two with only off lists, or each of its own module, none.
+        write(dir / "plugin.toml", plugin_toml("lode", head + "\n[[modules]]\nid = \"log\"\nname = \"Log\"\naffects_gameplay = false\n"));
+        write(dir / "settings.toml", "[retired.flows_mode]\nmodule = \"flows\"\noff = [\"off\"]\n\n"
+                                     "[retired.flows_switch]\nmodule = \"flows\"\non = [true]\noff = [false]\n\n"
+                                     "[retired.log_mode]\nmodule = \"log\"\non = [\"on\"]\n");
+        const auto twice = own(fx.check(dir, false));
+        CHECK(twice.size() == 1);
+        if (twice.size() == 1) {
+            CHECK(twice[0].line == 5 && twice[0].message ==
+                  "retired flows_mode and flows_switch both name module flows and one of them has an on list: when a "
+                  "player's values of the two disagree (one in off, the other in on), off wins, whatever their order "
+                  "in the file: check that this is what the old settings meant");
+        }
+        write(dir / "settings.toml", "[retired.flows_mode]\nmodule = \"flows\"\noff = [\"off\"]\n\n"
+                                     "[retired.flows_old]\nmodule = \"flows\"\noff = [false]\n");
+        CHECK(own(fx.check(dir, false)).empty());
+        write(dir / "plugin.toml", plugin_toml("lode", head));
+
         // The keys need Anvil 1.23.0.
         write(dir / "plugin.toml", plugin_toml("lode", "settings = \"settings.toml\"\nanvil = \">=1.22.0\"\n"
                                                        "\n[[modules]]\nid = \"flows\"\nname = \"Flows\"\naffects_gameplay = false\n"));

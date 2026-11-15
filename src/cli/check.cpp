@@ -263,11 +263,26 @@ std::string module_settings_key(const Manifest& m, const SettingsFile* settings)
 }
 
 // The warnings of ADR 0013 on settings.toml: a setting named as a module (a
-// second switch for it, point 5), and a setting of an owner that offers
-// multiplayer without affects_gameplay (point 14), which then counts for the
-// game by its type alone.
+// second switch for it, point 5), two retired settings of one module of which
+// one has an `on` list (their values can disagree, and then off wins, point
+// 4), and a setting of an owner that offers multiplayer without
+// affects_gameplay (point 14), which then counts for the game by its type
+// alone.
 void module_settings_warnings(const Manifest& m, const SettingsFile& file, const std::string& path,
                               std::vector<Problem>& warnings) {
+    for (size_t i = 0; i < file.retired.size(); ++i) {
+        const RetiredSetting& later = file.retired[i];
+        for (size_t j = 0; j < i; ++j) {
+            const RetiredSetting& first = file.retired[j];
+            if (first.module != later.module || (first.on.empty() && later.on.empty())) continue;
+            warnings.push_back({path, later.line, "retired " + first.name + " and " + later.name + " both name module " +
+                                                      later.module + " and one of them has an on list: when a player's "
+                                                      "values of the two disagree (one in off, the other in on), "
+                                                      "off wins, whatever their order in the file: check that this "
+                                                      "is what the old settings meant"});
+            break;
+        }
+    }
     for (const Setting& s : file.settings) {
         for (const Module& mod : m.modules) {
             if (mod.id == s.name) {

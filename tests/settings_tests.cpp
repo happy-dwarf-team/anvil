@@ -558,6 +558,55 @@ module = "extra"
         CHECK(lists.enabled_modules == std::vector<std::string>{"lode.extra"} && same_as_file());
     });
 
+    run("settings: two retired values of one module that disagree: off wins, whatever their order", [] {
+        const Manifest m = manifest(kModular);
+        const SettingsFileResult r = parse_settings_text(R"toml([retired.flows_mode]
+module = "flows"
+off = ["off"]
+on = ["on"]
+
+[retired.flows_switch]
+module = "flows"
+on = [true]
+off = [false]
+)toml");
+        if (!r.file) {
+            CHECK(false);
+            return;
+        }
+        const auto dir = scratch("retire-off-wins");
+        const auto player = dir / "data" / "lode" / "settings.toml";
+        const auto toml = dir / "anvil.toml";
+        for (const char* text : {"flows_mode = \"off\"\nflows_switch = true\n", "flows_switch = true\nflows_mode = \"off\"\n",
+                                 "flows_mode = \"on\"\nflows_switch = false\n", "flows_switch = false\nflows_mode = \"on\"\n"}) {
+            std::filesystem::remove(toml);
+            write(player, text);
+            AnvilSettings lists;
+            const auto notes = move_retired_settings(m, *r.file, player, toml, lists);
+            CHECK(lists.disabled_modules == std::vector<std::string>{"lode.flows"} && lists.enabled_modules.empty());
+            CHECK(read_anvil_settings(toml).disabled_modules == std::vector<std::string>{"lode.flows"});
+            CHECK(!module_enabled(lists, "lode.flows", true) && !std::filesystem::exists(player));
+            CHECK(std::any_of(notes.begin(), notes.end(), [](const RetiredMoveNote& n) {
+                return n.level == ANVIL_LOG_INFO &&
+                       contains(n.message, "meant module lode.flows on, but another retired setting of the module meant off, which wins");
+            }));
+        }
+        // Two values that agree on on: the module goes on.
+        write(toml, "disabled_modules = [\"lode.flows\"]\n");
+        write(player, "flows_mode = \"on\"\nflows_switch = true\n");
+        AnvilSettings lists = read_anvil_settings(toml);
+        move_retired_settings(m, *r.file, player, toml, lists);
+        CHECK(lists.disabled_modules.empty() && read_anvil_settings(toml).disabled_modules.empty());
+        // A benchmark start: the same rule for its lists.
+        write(player, "flows_switch = true\nflows_mode = \"off\"\n");
+        lists = {};
+        const auto notes = move_retired_settings(m, *r.file, player, toml, lists, false);
+        CHECK(lists.disabled_modules == std::vector<std::string>{"lode.flows"});
+        CHECK(std::any_of(notes.begin(), notes.end(), [](const RetiredMoveNote& n) {
+            return contains(n.message, "means module lode.flows on, but another retired setting of the module means off");
+        }));
+    });
+
     run("last-start.toml: written, read back, unknown keys and other formats (ADR 0013, point 8)", [] {
         LastStart r;
         r.anvil_version = "1.23.0";

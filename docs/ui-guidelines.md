@@ -317,7 +317,8 @@ How a plugin's manifest makes this UI work. `anvil check` enforces what it can.
   default. Prefer `restart = false` where the plugin can take a new value at once.
 - **Stable names.** Module ids and setting names are what players' files hold; renaming one
   loses the player's choice. A setting a module replaces is listed under `[retired.<name>]`
-  (ADR 0013), so the core turns the module off for a player who had the setting off.
+  (ADR 0013), so the core turns the module off for a player who had the setting off. When
+  several retired settings name one module and a player's values disagree, off wins.
 - **Settings that change the result** of a module or plugin that changes the game count
   for the multiplayer code and are locked in a multiplayer game (ADR 0013). Mark the others
   `affects_gameplay = false` (keys, logging, drawing), so the player can still change them.

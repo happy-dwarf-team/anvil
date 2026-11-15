@@ -50,7 +50,9 @@ bool write_moved_retired(const std::filesystem::path& file, const MovedRetiredRe
 // file (`player_file`, anvil/data/<id>/settings.toml) named as a
 // [retired.<name>] of `schema`: a value in its `off` or `on` sets the switch
 // of "<plugin>.<module>" by the rule of module_switch_edits (the Manager's
-// and the overlay's), so the module is never in both lists; one in its
+// and the overlay's), so the module is never in both lists; when values of
+// one module disagree (one in an `off`, another in an `on`), off wins
+// whatever their order in the file; one in its
 // `ironman` or `multiplayer` adds the key to allow_ironman or
 // allow_multiplayer. All of them go into `anvil_toml` in one write and into
 // `lists`, this start's lists, so they apply at this start. Every such value
