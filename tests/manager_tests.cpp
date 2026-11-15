@@ -1183,9 +1183,10 @@ int main(int argc, char** argv) {
         write(lode / "plugin.toml", plugin_toml("lode", "settings = \"settings.toml\"\n\n[[modules]]\nid = \"flows\"\n"
                                                         "name = \"Flows\"\naffects_gameplay = false\n"));
         write(lode / "lode.dll", "MZ");
-        write(lode / "settings.toml", "[retired.flows_mode]\nmodule = \"flows\"\noff = [\"off\"]\n");
+        write(lode / "settings.toml", "[setting.level]\ntype = \"int\"\ndefault = 1\nlabel = \"Level\"\n\n"
+                                      "[retired.flows_mode]\nmodule = \"flows\"\noff = [\"off\"]\n");
         const fs::path player = game / "anvil" / "data" / "lode" / "settings.toml";
-        write(player, "flows_mode = \"off\"\n");
+        write(player, "level = 3\nflows_mode = \"off\"\n");
         cli::GameOptions options;
         options.game_dir = game;
         options.user_dir = user;
@@ -1203,12 +1204,30 @@ int main(int argc, char** argv) {
         CHECK(contains(cli::format_game_report(report, cli::Format::Json), "\"retired\": [{\"plugin\": \"lode\""));
         CHECK(fs::exists(player) && !fs::exists(game / "anvil" / "anvil.toml"));  // nothing written by the check
 
-        // A switch the player makes first carries the move out as that start would,
-        // so the start has nothing left to undo it with.
+        // A setting saved after the folder was read keeps the retired value (#402); the plan
+        // read the file before it, so the move is planned again from the file as it is now.
+        write(player, "level = 5\nflows_mode = \"off\"\n");
+        CHECK(report.plan.writes.retired[0].move.player_text == "level = 3\n");  // the plan's, now stale
+
+        // The player's file cannot be replaced (another program holds it open): anvil.toml has the
+        // move, the file keeps the value, and the Manager is told (a warning), so it does not make the switch.
+        const fs::path toml = game / "anvil" / "anvil.toml";
+        const HANDLE held = CreateFileW(player.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+        CHECK(held != INVALID_HANDLE_VALUE);
         bool written = false;
-        carry_out_retired_move(report.plan.writes.retired[0].move, report.plan.writes.retired[0].player_file,
-                               game / "anvil" / "anvil.toml", &written);
-        CHECK(written && !fs::exists(player));
+        std::vector<RetiredMoveNote> notes = carry_out_retired_move_now(report.plan.writes.retired[0], toml, &written);
+        CloseHandle(held);
+        CHECK(written && contains(read(player), "flows_mode"));
+        CHECK(std::any_of(notes.begin(), notes.end(), [](const RetiredMoveNote& n) {
+            return n.level == ANVIL_LOG_WARNING && contains(n.message, "cannot remove the retired settings");
+        }));
+
+        // A switch the player makes first carries the move out as that start would,
+        // so the start has nothing left to undo it with, and the setting saved since stays.
+        written = false;
+        notes = carry_out_retired_move_now(report.plan.writes.retired[0], toml, &written);
+        CHECK(written && read(player) == "level = 5\n");
+        CHECK(std::none_of(notes.begin(), notes.end(), [](const RetiredMoveNote& n) { return n.level == ANVIL_LOG_WARNING; }));
         std::string error;
         CHECK(set_listed(game / "anvil" / "anvil.toml", module_switch_edits("lode.flows", true, true), error));
         report = cli::check_game(options);

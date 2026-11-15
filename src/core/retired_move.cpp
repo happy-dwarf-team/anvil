@@ -118,12 +118,13 @@ std::vector<RetiredMoveNote> carry_out_retired_move(const RetiredMovePlan& plan,
 std::vector<RetiredMoveNote> move_retired_settings(const Manifest& manifest, const SettingsFile& schema,
                                                    const std::filesystem::path& player_file,
                                                    const std::filesystem::path& anvil_toml,
-                                                   AnvilSettings& lists, bool write_files) {
+                                                   AnvilSettings& lists, bool write_files, bool* anvil_toml_written) {
+    if (anvil_toml_written != nullptr) *anvil_toml_written = true;
     if (schema.retired.empty()) return {};
     const std::optional<std::string> text = read_text_file(player_file, kMaxPluginTomlBytes);
     AnvilSettings after = lists;
     const RetiredMovePlan plan = plan_retired_settings(manifest, schema, text, after, write_files);
-    std::vector<RetiredMoveNote> notes = carry_out_retired_move(plan, player_file, anvil_toml);
+    std::vector<RetiredMoveNote> notes = carry_out_retired_move(plan, player_file, anvil_toml, anvil_toml_written);
     // Also when anvil.toml cannot be written: the module is as the value says at this start
     // (ADR 0013 point 4), and the player's file keeps the value for the next start.
     lists = std::move(after);

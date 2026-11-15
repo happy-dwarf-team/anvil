@@ -2,6 +2,7 @@
 
 #include "discovery.hpp"
 #include "log.hpp"
+#include "trust.hpp"
 
 #include <algorithm>
 
@@ -35,6 +36,14 @@ bool PluginInventory::copy_exists(const std::string& id, const std::string& hash
 const InventoryCopy* PluginInventory::copy(const std::string& id, const std::string& hash) const {
     for (const InventoryCopy& c : copies) {
         if (c.id == id && c.name == hash) return &c;
+    }
+    return nullptr;
+}
+
+const PluginCheck* PluginInventory::copy_check(const std::string& id, const std::string& hash) const {
+    if (const InventoryCopy* c = copy(id, hash); c != nullptr && c->check) return &*c->check;
+    for (const InventoryModPlugin& m : mods) {
+        if (m.found.id == id && !m.found.hash.empty() && m.found.hash == hash) return &m.check;
     }
     return nullptr;
 }
@@ -73,6 +82,10 @@ PluginInventory take_inventory(const fs::path& anvil_dir, const fs::path& user_d
     }
 
     // The approved copies: what trust.toml's decisions and the prune read.
+    // A start loads a copy in place of its mod's folder only while an update
+    // waits: the copy of the hash trust.toml approves, which no mod's folder
+    // of the id has. Only that one is checked.
+    const TrustFile trust = read_trust(anvil_dir / "trust.toml");
     for (const fs::path& id_dir : sub_folders(anvil_dir / "data" / "anvil" / "approved")) {
         inventory.copy_ids.push_back(id_dir);
         const std::string id = narrow(id_dir.filename().wstring());
@@ -87,8 +100,9 @@ PluginInventory take_inventory(const fs::path& anvil_dir, const fs::path& user_d
                 of_a_mod = true;
                 same_as_a_mod = same_as_a_mod || (!m.found.hash.empty() && m.found.hash == c.name);
             }
-            const bool unfinished = c.name.starts_with(".");
-            if (of_a_mod && !same_as_a_mod && !unfinished) c.check = check_plugin_folder(folder, game);
+            const TrustEntry* approved = trust.error.empty() ? trust.find(id) : nullptr;
+            const bool may_load = approved != nullptr && approved->hash == c.name;
+            if (of_a_mod && !same_as_a_mod && may_load) c.check = check_plugin_folder(folder, game);
             inventory.copies.push_back(std::move(c));
         }
     }

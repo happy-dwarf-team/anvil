@@ -14,8 +14,11 @@
 
 namespace anvil {
 
-// ADR 0013, point 4: the one-time move of a plugin's retired settings, at the
-// start, before its modules are resolved. For every value of the player's
+// ADR 0013, point 4: the one-time move of a plugin's retired settings, read
+// from the files as they are now and carried out at once. A start plans it
+// (plan_retired_settings, ADR 0014) and carries the plan out; the Manager
+// makes it this way before a switch (carry_out_retired_move_now), so a
+// setting saved since the plan stays. For every value of the player's
 // file (`player_file`, anvil/data/<id>/settings.toml) named as a
 // [retired.<name>] of `schema`: a value in its `off` or `on` sets the switch
 // of "<plugin>.<module>" by the rule of module_switch_edits (the Manager's
@@ -29,6 +32,7 @@ namespace anvil {
 // it waits. With `write_files` false (a benchmark start, which never writes
 // anvil.toml: docs/spec/benchmark-v1.md §2) the values apply to `lists` for
 // this start only and both files stay, so a later start moves them.
+// `anvil_toml_written` false: anvil.toml could not be written.
 struct RetiredMoveNote {
     AnvilLogLevel level = ANVIL_LOG_INFO;
     std::string message;
@@ -37,7 +41,8 @@ struct RetiredMoveNote {
 std::vector<RetiredMoveNote> move_retired_settings(const Manifest& manifest, const SettingsFile& schema,
                                                    const std::filesystem::path& player_file,
                                                    const std::filesystem::path& anvil_toml,
-                                                   AnvilSettings& lists, bool write_files = true);
+                                                   AnvilSettings& lists, bool write_files = true,
+                                                   bool* anvil_toml_written = nullptr);
 
 // The same move in two halves, so the start plan (ADR 0014) can say what a
 // start writes before it writes it. plan_retired_settings reads nothing:

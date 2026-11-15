@@ -115,6 +115,10 @@ struct PlannedRetiredMove {
     std::string plugin;
     std::filesystem::path player_file;  // anvil/data/<id>/settings.toml
     RetiredMovePlan move;
+    // What the move was planned from, so it can be planned again from the
+    // files as they are later (carry_out_retired_move_now).
+    Manifest manifest;
+    SettingsFile schema;
 };
 
 // What a start writes before any plugin loads, in this order.
@@ -160,6 +164,15 @@ struct StartPlan {
 // switch, the benchmark arm, the API and Anvil range, the plugin's check
 // against the game, conflicts, dependencies, cycles).
 StartPlan plan_start(const PluginInventory& inventory, const PlayerChoices& choices, const StartConditions& conditions);
+
+// Carries a planned move out later than the plan was made (the Manager,
+// before a switch the player makes): planned again from the player's file
+// and anvil.toml as they are now, so a value saved since the plan stays.
+// Returns what to show; a warning means a file was not written, and
+// `anvil_toml_written` false that it was anvil.toml (nothing changed).
+std::vector<RetiredMoveNote> carry_out_retired_move_now(const PlannedRetiredMove& move,
+                                                        const std::filesystem::path& anvil_toml,
+                                                        bool* anvil_toml_written = nullptr);
 
 // The check of the folder a planned plugin loads from (for a mod's plugin
 // whose update waits, its approved copy's); nullptr when there is none.

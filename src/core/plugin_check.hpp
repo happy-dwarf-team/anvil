@@ -61,8 +61,9 @@ struct PluginCheck {
     // settings.toml or a `module` it does not declare. Empty: the plugin may
     // load as far as its own files go.
     i18n::Message skip;
-    // A file plugin.toml names that could not be read: its path inside the
-    // folder. The check stops there.
+    // The first file plugin.toml names that could not be read: its path inside
+    // the folder. An unreadable symbols.toml leaves settings.toml checked; the
+    // check stops at an unreadable settings.toml.
     std::string unreadable;
     // symbols.toml: parsed, the game's build selected when the file declares
     // it (else its first), and with a game every symbol verified. The loader

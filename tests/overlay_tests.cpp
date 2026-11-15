@@ -10,6 +10,7 @@
 #include "../plugins/anvil-overlay/src/input.hpp"
 #include "../plugins/anvil-overlay/src/notices.hpp"
 #include "../plugins/anvil-overlay/src/panels.hpp"
+#include "../plugins/anvil-overlay/src/plugins_model.hpp"
 #include "../plugins/anvil-overlay/src/release.hpp"
 
 #include <windows.h>
@@ -730,6 +731,49 @@ int main() {
         changed.hash = std::string(64, '0');
         CHECK(client.approve_mod_plugin(changed) == "the plugin's hash is not the one shown");
         CHECK(!client.revoke_mod_plugin(rows[0]).empty());
+        fs::remove_all(dir, ignored);
+    });
+
+    run("plugins model: a plugin from a mod when the core gives no next start's plan", [] {
+        const fs::path dir = fs::temp_directory_path() / "anvil-overlay-model-no-plan";
+        std::error_code ignored;
+        fs::remove_all(dir, ignored);
+        const fs::path anvil = dir / "eu4" / "anvil";
+        const fs::path user = dir / "user";
+        const auto write = [](const fs::path& file, const std::string& text) {
+            fs::create_directories(file.parent_path());
+            std::ofstream(file, std::ios::binary) << text;
+        };
+        write(user / "mod" / "m" / "anvil" / "probe" / "plugin.toml", plugin_toml("probe"));
+        write(user / "mod" / "m" / "anvil" / "probe" / "probe.dll", "MZ");
+        write(user / "mod" / "m.mod", "name=\"M\"\npath=\"mod/m\"\n");
+        write(user / "dlc_load.json", "{\"enabled_mods\":[\"mod/m.mod\"]}");
+        const anvil::ModDiscovery mods = anvil::discover_mod_plugins(anvil, user, {});
+        anvil::ControlSources sources;
+        sources.anvil_dir = anvil;
+        sources.mods = &mods;
+        anvil::Control control(sources);  // no inventory: the core has no plan of the next start
+        control.loading_done();
+        const AnvilControlStatus status{};
+        const auto model_of = [&](const ControlClient& client) {
+            return build_overlay_plugins(client, status, client.plugins(), client.mod_plugins(), {});
+        };
+        // A core with the call but no plan (Anvil off, or no inventory): not "it cannot load".
+        ControlClient client(control.service());
+        CHECK(client.has_next_start() && !client.mod_plugin_next_start(0));
+        OverlayPlugins m = model_of(client);
+        CHECK(m.model.plugins.size() == 1 && m.model.plugins[0].next.why == anvil::ui::LoadState::Why::WaitsForApproval);
+        CHECK(anvil::ui::to_approve(m.model) == 1);
+
+        // An older core without the call: approved in this game, it loads from the next start and waits no more.
+        AnvilControlService older = *control.service();
+        older.size = static_cast<uint32_t>(offsetof(AnvilControlService, next_start));
+        ControlClient old_client(&older);
+        CHECK(!old_client.has_next_start());
+        CHECK(old_client.approve_mod_plugin(old_client.mod_plugins()[0]).empty());
+        m = model_of(old_client);
+        CHECK(m.model.plugins.size() == 1 && m.model.plugins[0].approved && m.model.plugins[0].next.loads);
+        CHECK(!anvil::ui::waits_for_approval(m.model.plugins[0]) && anvil::ui::to_approve(m.model) == 0);
         fs::remove_all(dir, ignored);
     });
 

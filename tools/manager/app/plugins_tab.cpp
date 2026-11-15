@@ -447,17 +447,25 @@ void ManagerApp::apply_edits(const std::vector<mui::Edit>& edits) {
         bool ok = true;
         // The next start would first move this plugin's retired settings into
         // anvil.toml (ADR 0013, point 4) and undo a switch saved before it:
-        // the move is made now, as that start would make it (ADR 0014).
+        // the move is made now, as that start would make it (ADR 0014),
+        // from the files as they are now (a setting saved since the folder
+        // was read stays). A file it cannot write stops the switch.
+        const char* move_failed = nullptr;
         if (e.kind == mui::Edit::Kind::Switch && snapshot_->report && moved.insert(e.plugin).second) {
             for (const PlannedRetiredMove& m : snapshot_->report->plan.writes.retired) {
                 if (m.plugin != e.plugin) continue;
+                switches = true;  // anvil.toml or the player's file changed: read the folder again
                 bool written = true;
-                carry_out_retired_move(m.move, m.player_file, toml, &written);
-                if (!written) {
-                    failed(tr("anvil.toml was not changed"), "", false);
-                    return;
+                for (const RetiredMoveNote& note : carry_out_retired_move_now(m, toml, &written)) {
+                    if (note.level != ANVIL_LOG_WARNING || move_failed != nullptr) continue;
+                    move_failed = written ? tr("The settings were not saved") : tr("anvil.toml was not changed");
+                    error = note.message;
                 }
             }
+        }
+        if (move_failed != nullptr) {
+            failed(move_failed, error, false);
+            break;
         }
         if (e.kind == mui::Edit::Kind::Setting) {
             ok = apply_setting_edit(plugins_->sources[i], e, error);

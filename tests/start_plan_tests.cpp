@@ -17,6 +17,8 @@ namespace {
 
 const fs::path kAnvil = L"C:\\game\\anvil";
 
+bool contains(const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; }
+
 std::string requires_plugin(const std::string& id) { return "\n[[dependencies]]\nid = \"" + id + "\"\nversion = \"*\"\n"; }
 
 // A folder of anvil/plugins whose check passed (or failed with `skip`).
@@ -243,6 +245,29 @@ void start_plan_tests() {
         choices.trust.error = "line 1: broken";
         plan = plan_start(inv, choices, {});
         CHECK(loaded(plan) == "a-local" && plan.writes.remove.empty() && plan.writes.copies.empty() && plan.warnings.size() == 1);
+    });
+
+    run("start plan: two mods with one id load neither until the player approves one", [] {
+        PluginInventory inv = inventory({});
+        inv.mods = {in_mod("Mod A", "probe", "ha"), in_mod("Mod B", "probe", "hb")};
+        PlayerChoices choices;
+        StartPlan plan = plan_start(inv, choices, {});
+        CHECK(plan.load.empty() && plan.skipped.size() == 2);
+        for (const PlannedPlugin& p : plan.skipped) {
+            CHECK(p.kind == SkipKind::conflict && p.awaiting_approval && p.not_loading == NotLoading::CannotLoad);
+            CHECK(contains(i18n::english(p.why), "2 enabled mods have a plugin 'probe'"));
+        }
+        // Approved from Mod B: it loads, and Mod A's says why not.
+        choices.trust.entries = {approval("Mod B", "probe", "hb")};
+        InventoryCopy copy;
+        copy.id = "probe";
+        copy.name = "hb";
+        copy.folder = approved_copy(kAnvil, "probe", "hb");
+        inv.copies = {copy};
+        plan = plan_start(inv, choices, {});
+        CHECK(loaded(plan) == "probe" && plan.load[0].mod == 1 && plan.load[0].folder == copy.folder);
+        CHECK(plan.skipped.size() == 1 && plan.skipped[0].mod == 0 &&
+              contains(i18n::english(plan.skipped[0].why), "mod 'Mod B' has this plugin too"));
     });
 
     run("start plan: a retired setting turns its module off in the plan before the start that moves it", [] {
