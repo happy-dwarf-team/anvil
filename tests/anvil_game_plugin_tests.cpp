@@ -2264,9 +2264,12 @@ int main(int argc, char** argv) {
         CHECK(service->user_dir() == nullptr);
         g_write_dir = "";
         CHECK(service->user_dir() == nullptr);
-        g_write_dir = "C:/Users/Zo\xC3\xAB/Documents/Paradox Interactive/Europa Universalis IV/";
+        // A folder longer than MAX_PATH (-userdir with long paths on): given whole.
+        static const std::string written =
+            "C:/Users/Zo\xC3\xAB/Documents/Paradox Interactive/" + std::string(1200, 'd') + "/";
+        g_write_dir = written.c_str();
         const wchar_t* dir = service->user_dir();
-        CHECK(dir != nullptr && std::wstring(dir) == L"C:\\Users\\Zo\u00EB\\Documents\\Paradox Interactive\\Europa Universalis IV");
+        CHECK(dir != nullptr && std::wstring(dir) == L"C:\\Users\\Zo\u00EB\\Documents\\Paradox Interactive\\" + std::wstring(1200, L'd'));
         // Given once, it stays: the same string, whatever PhysFS says later.
         g_write_dir = "D:/other/";
         CHECK(service->user_dir() == dir);

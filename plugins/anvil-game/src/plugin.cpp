@@ -615,8 +615,26 @@ bool copy_write_dir(sym::Types::physfs_get_write_dir::Pointer get, char* out, st
     }
 }
 
+// The length of PhysFS' write folder, at most kWriteDirMax bytes; 0 without one
+// (or when it faulted, or is longer).
+constexpr std::size_t kWriteDirMax = 32767 * 4;  // a long path in UTF-8
+
+std::size_t write_dir_length(sym::Types::physfs_get_write_dir::Pointer get) {
+    __try {
+        const char* dir = get();
+        if (dir == nullptr) return 0;
+        std::size_t n = 0;
+        while (n < kWriteDirMax && dir[n] != '\0') ++n;
+        return n < kWriteDirMax ? n : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+
 std::mutex g_user_dir_mutex;
-std::wstring g_user_dir;  // set once, never changed after: its c_str() is handed out
+// Set once, never changed after: its c_str() is handed out until the process
+// exits, so it is never destroyed (a plugin may ask in its own detach).
+std::wstring& g_user_dir = *new std::wstring;
 std::atomic<const wchar_t*> g_user_dir_given{nullptr};
 
 const wchar_t* service_user_dir() {
@@ -624,9 +642,13 @@ const wchar_t* service_user_dir() {
     if (!g_layout.write_dir) return nullptr;
     std::lock_guard lock(g_user_dir_mutex);
     if (const wchar_t* given = g_user_dir_given.load(std::memory_order_acquire)) return given;
-    char dir[MAX_PATH * 4] = {};
-    if (!copy_write_dir(g_layout.write_dir, dir, sizeof dir)) return nullptr;
     try {
+        // Measured first, so a long folder fits; one that changed in between is asked again next time.
+        const std::size_t length = write_dir_length(g_layout.write_dir);
+        if (length == 0) return nullptr;
+        std::string dir(length + 1, '\0');
+        if (!copy_write_dir(g_layout.write_dir, dir.data(), dir.size())) return nullptr;
+        dir.resize(length);
         std::wstring wide = anvil_game::user_dir_path(dir);
         if (wide.empty()) return nullptr;
         g_user_dir = std::move(wide);
