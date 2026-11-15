@@ -121,6 +121,7 @@ private:
 
     std::optional<Confirm> confirm_;
     bool open_confirm_ = false;
+    float toggle_left_ = 0;  // the plugin's toggle, in screen x: the modules' toggles line up under it
 };
 
 }  // namespace anvil::ui

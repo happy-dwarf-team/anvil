@@ -11,6 +11,7 @@
 #include "ui/forge_widgets.hpp"
 #include "ui/imgui_colors.hpp"
 #include "ui/log_view.hpp"
+#include "ui/plugin_widgets.hpp"
 #include "ui/plugins_view.hpp"
 
 #include <imgui.h>
@@ -1152,11 +1153,15 @@ void setting_control(size_t i, size_t s) {
     const float width = ImGui::GetFontSize() * 12.0f;
     switch (info.type) {
     case ANVIL_CONTROL_SETTING_BOOL: {
-        bool value = saved == "true";
-        if (anvil::ui::checkbox(label, &value)) {
-            AnvilControlValue v{value ? 1 : 0, 0.0, nullptr};
+        // A yes/no setting acts at once, so it is a toggle, its label after it.
+        const bool value = saved == "true";
+        if (anvil::ui::toggle("##bool", value, nullptr, false, true)) {
+            AnvilControlValue v{value ? 0 : 1, 0.0, nullptr};
             report(control.set(plugin, id, v));
         }
+        ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(label);
         break;
     }
     case ANVIL_CONTROL_SETTING_INT:
