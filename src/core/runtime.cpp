@@ -541,9 +541,21 @@ void startup_impl(const std::filesystem::path& game_dir) {
             log_info(label + ": made the approved copy");
         }
     }
+    // A retired value whose player's file cannot be written once anvil.toml has its move
+    // goes into the record of moved retired settings, so the next start does not move it
+    // again over a switch the player makes meanwhile; it leaves once its file lost it.
+    MovedRetiredRecord moved_retired = choices.moved_retired;
     for (const PlannedRetiredMove& m : plan.writes.retired) {
-        for (const RetiredMoveNote& note : carry_out_retired_move(m.move, m.player_file, g_runtime->anvil_dir / "anvil.toml")) {
+        for (const RetiredMoveNote& note : carry_out_retired_move(m.move, m.player_file, g_runtime->anvil_dir / "anvil.toml",
+                                                                  nullptr, &moved_retired[m.plugin])) {
             Log::instance().write(note.level, m.plugin, note.message);
+        }
+    }
+    for (const std::string& id : plan.writes.forget_moved) moved_retired.erase(id);
+    if (moved_retired_text(moved_retired) != moved_retired_text(choices.moved_retired)) {
+        if (std::string error; !write_moved_retired(moved_retired_file(g_runtime->anvil_dir), moved_retired, error)) {
+            log_warning("cannot write data/anvil/retired-moved.toml: " + error +
+                        "; the next start moves the retired values still in a player's settings.toml again");
         }
     }
     for (const auto& [id, note] : plan.notes) Log::instance().write(note.level, id, note.message);

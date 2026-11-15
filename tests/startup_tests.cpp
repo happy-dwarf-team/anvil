@@ -305,6 +305,27 @@ int main(int argc, char** argv) {
         log = game.start();
         CHECK(contains(log, "meant module mod-probe.flows off: added it to disabled_modules in anvil.toml"));
         CHECK(contains(read(game.anvil / "anvil.toml"), "disabled_modules = [\"mod-probe.flows\"]") && !fs::exists(player));
+
+        // The player's file is read-only: anvil.toml gets the move, the record of moved retired
+        // settings holds the value the file keeps.
+        const fs::path record = game.anvil / "data" / "anvil" / "retired-moved.toml";
+        write(game.anvil / "anvil.toml", toml);
+        write(player, "level = 2\nflows_mode = \"off\"\n");
+        SetFileAttributesW(player.c_str(), FILE_ATTRIBUTE_READONLY);
+        log = game.start();
+        CHECK(contains(log, "meant module mod-probe.flows off: added it to disabled_modules in anvil.toml"));
+        CHECK(contains(log, "cannot remove the retired settings from settings.toml") && contains(log, kRunning));
+        CHECK(contains(read(game.anvil / "anvil.toml"), "disabled_modules = [\"mod-probe.flows\"]"));
+        CHECK(contains(read(player), "flows_mode") && contains(read(record), "[moved.\"mod-probe\"]"));
+        // The player turns the module back on; the next start keeps that and only retries the removal.
+        write(game.anvil / "anvil.toml", toml);
+        log = game.start();
+        CHECK(contains(log, "was moved into anvil.toml before") && !contains(log, "meant module mod-probe.flows"));
+        CHECK(read(game.anvil / "anvil.toml") == toml && contains(read(player), "flows_mode") && fs::exists(record));
+        // Writable again: the value leaves the player's file and the record goes.
+        SetFileAttributesW(player.c_str(), FILE_ATTRIBUTE_NORMAL);
+        log = game.start();
+        CHECK(read(game.anvil / "anvil.toml") == toml && read(player) == "level = 2\n" && !fs::exists(record));
     });
 
     run("start-up: a benchmark start writes its record at ready and when it quits", [&] {

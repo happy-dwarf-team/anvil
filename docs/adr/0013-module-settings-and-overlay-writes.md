@@ -49,7 +49,7 @@ The overlay's multiplayer code is the start of a SHA-256 over `<plugin>[.<module
 - **Older Anvil.** `module`, `advanced`, a module's `group`, `[retired.*]` and a setting's `affects_gameplay` are unknown keys there, so an older Anvil skips the plugin (design §5.3). A plugin that uses them declares `anvil = ">=<the release with them>"`, as for any added key (CONTRIBUTING).
 - **API 2.** No host function changes. `AnvilControlSetting` and the module entry of `anvil.control` grow appended fields (the module index, `advanced`, the module's group), and the service grows the write calls of point 7; the overlay is the only caller.
 - **`anvil.toml`.** No new keys. The overlay writes the same text the Manager writes.
-- **Players' files.** Unchanged, except the one-time move of point 4 and the new `last-start.toml`.
+- **Players' files.** Unchanged, except the one-time move of point 4 and the new `last-start.toml`, and `retired-moved.toml` while a player's file that point 4 must change cannot be written (design §11).
 
 ## Considered options
 

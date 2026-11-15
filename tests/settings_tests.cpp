@@ -381,6 +381,99 @@ void module_settings_tests() {
         CHECK(move_retired_settings(m, *r.file, dir / "missing.toml", toml, lists).empty());
     });
 
+    run("settings: a retired value its read-only file keeps is recorded, so a later start only removes it", [] {
+        const SettingsFileResult r = parse_settings_text(kModuleSettings);
+        if (!r.file) {
+            CHECK(false);
+            return;
+        }
+        const Manifest m = manifest(kModular);
+        const auto dir = scratch("retire-record");
+        const auto player = dir / "data" / "lode" / "settings.toml";
+        const auto toml = dir / "anvil.toml";
+        const auto record = moved_retired_file(dir);
+        const auto read_only = [&](bool on) {
+            SetFileAttributesW(player.c_str(), on ? FILE_ATTRIBUTE_READONLY : FILE_ATTRIBUTE_NORMAL);
+        };
+        write(toml, "# the player's\n");
+        write(player, "flows_mode = \"off\"\ncooldown_months = 12\n");
+        read_only(true);
+
+        // anvil.toml gets the move, the player's file cannot lose it: the record holds it.
+        AnvilSettings lists = read_anvil_settings(toml);
+        bool written = false;
+        bool settled = false;
+        auto notes = move_retired_settings(m, *r.file, player, toml, lists, true, &written, record, &settled);
+        CHECK(written && settled && lists.disabled_modules == std::vector<std::string>{"lode.flows"});
+        CHECK(read_anvil_settings(toml).disabled_modules == std::vector<std::string>{"lode.flows"});
+        CHECK(read(player) == "flows_mode = \"off\"\ncooldown_months = 12\n");
+        CHECK(read_moved_retired(record) == (MovedRetiredRecord{{"lode", {{"flows_mode", "\"off\""}}}}));
+        CHECK(!notes.empty() && notes.back().level == ANVIL_LOG_WARNING &&
+              contains(notes.back().message, "cannot remove the retired settings from settings.toml") &&
+              contains(notes.back().message, "recorded in data/anvil/retired-moved.toml"));
+
+        // The player turns the module back on (the overlay or the Manager writes anvil.toml).
+        std::string error;
+        CHECK(set_listed(toml, module_switch_edits("lode.flows", true, true), error));
+        // The next start keeps the player's choice: the recorded value only waits for its removal.
+        lists = read_anvil_settings(toml);
+        notes = move_retired_settings(m, *r.file, player, toml, lists, true, &written, record, &settled);
+        CHECK(written && settled && lists.disabled_modules.empty() && read_anvil_settings(toml).disabled_modules.empty());
+        CHECK(module_enabled(lists, "lode.flows", true) && contains(read(player), "flows_mode"));
+        CHECK(!notes.empty() && notes[0].level == ANVIL_LOG_INFO &&
+              notes[0].message == "retired setting flows_mode = \"off\" (settings.toml line 1) was moved into anvil.toml "
+                                  "before, when settings.toml could not be written: module lode.flows stays as anvil.toml has it");
+        CHECK(read_moved_retired(record).size() == 1);
+        // The start plan's half sees the same: no edit of anvil.toml, only the removal.
+        AnvilSettings planned = lists;
+        const RetiredMovePlan plan =
+            plan_retired_settings(m, *r.file, read(player), planned, true, read_moved_retired(record)["lode"]);
+        CHECK(plan.edits.empty() && plan.writes_player_file && planned.disabled_modules.empty() &&
+              plan.moved == (std::vector<MovedRetired>{{"flows_mode", "\"off\""}}));
+
+        // A value that changed since is a new one and moves as usual (0 is in `off` too).
+        read_only(false);
+        write(player, "flows_mode = 0\ncooldown_months = 12\n");
+        read_only(true);
+        lists = read_anvil_settings(toml);
+        notes = move_retired_settings(m, *r.file, player, toml, lists, true, &written, record, &settled);
+        CHECK(written && settled && lists.disabled_modules == std::vector<std::string>{"lode.flows"});
+        CHECK(read_moved_retired(record) == (MovedRetiredRecord{{"lode", {{"flows_mode", "0"}}}}));
+
+        // Writable again: the removal succeeds and the record goes (the file with it).
+        read_only(false);
+        CHECK(set_listed(toml, module_switch_edits("lode.flows", true, true), error));
+        lists = read_anvil_settings(toml);
+        notes = move_retired_settings(m, *r.file, player, toml, lists, true, &written, record, &settled);
+        CHECK(written && settled && read(player) == "cooldown_months = 12\n" && lists.disabled_modules.empty());
+        CHECK(!std::filesystem::exists(record) && read_moved_retired(record).empty());
+        CHECK(!notes.empty() && contains(notes.back().message, "removed the retired setting(s) flows_mode = 0"));
+
+        // Without a record (or when it cannot be written) the move is not settled: a later start moves it again.
+        write(player, "flows_mode = \"off\"\ncooldown_months = 12\n");  // not only it: a removal ignores read-only
+        read_only(true);
+        lists = read_anvil_settings(toml);
+        notes = move_retired_settings(m, *r.file, player, toml, lists, true, &written, {}, &settled);
+        CHECK(written && !settled && !std::filesystem::exists(record));
+        std::filesystem::create_directories(record);  // a folder in the record's place: it cannot be written
+        lists = read_anvil_settings(toml);
+        notes = move_retired_settings(m, *r.file, player, toml, lists, true, &written, record, &settled);
+        CHECK(written && !settled && contains(notes.back().message, "cannot write data/anvil/retired-moved.toml"));
+        std::filesystem::remove(record);
+        read_only(false);
+
+        // The record's own text: read back as written; another format or a broken file is no record.
+        const MovedRetiredRecord sample{{"lode", {{"flows_level", "1.5"}, {"flows_mode", "\"off\""}}}, {"tongs", {}}};
+        CHECK(parse_moved_retired(moved_retired_text(sample)) == (MovedRetiredRecord{{"lode", sample.at("lode")}}));
+        CHECK(moved_retired_text({{"tongs", {}}}).empty());
+        CHECK(!parse_moved_retired("format = 2\n") && !parse_moved_retired("format = \n"));
+        // A recorded plugin whose file holds no retired value any more leaves the record.
+        AnvilSettings none;
+        CHECK(plan_retired_settings(m, *r.file, std::string("cooldown_months = 3\n"), none, true, sample.at("lode")).forget_recorded);
+        CHECK(plan_retired_settings(m, *r.file, std::nullopt, none, true, sample.at("lode")).forget_recorded);
+        CHECK(!plan_retired_settings(m, *r.file, std::nullopt, none, false, sample.at("lode")).forget_recorded);
+    });
+
     run("settings: retired values turn a module on and allow it, by the rule of the module switch", [] {
         const std::string extra = std::string(kModular) +
                                   "\n[[modules]]\nid = \"extra\"\nname = \"Extra\"\naffects_gameplay = true\n"
