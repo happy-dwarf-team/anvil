@@ -1109,6 +1109,7 @@ void apply_edits(const std::vector<anvil::ui::Edit>& edits) {
     Ui& u = ui();
     const ControlClient& control = shared().control;
     if (!u.model) return;
+    std::string first_error;
     for (const anvil::ui::Edit& e : edits) {
         std::string error;
         if (e.kind == anvil::ui::Edit::Kind::Switch) {
@@ -1129,11 +1130,10 @@ void apply_edits(const std::vector<anvil::ui::Edit>& edits) {
                 }
             }
         }
-        if (!error.empty()) {
-            report(error);
-            return;
-        }
+        // One refusal does not stop the rest of a confirmed list; the first is reported.
+        if (!error.empty() && first_error.empty()) first_error = error;
     }
+    if (!first_error.empty()) report(first_error);
     u.model_stale = true;
 }
 
