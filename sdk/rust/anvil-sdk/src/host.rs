@@ -226,7 +226,7 @@ fn write_log(table: &AnvilHost, plugin: *mut AnvilPlugin, level: LogLevel, messa
     unsafe { log(plugin, level.raw(), text.as_ptr()) };
 }
 
-fn wide_path(text: *const u16) -> PathBuf {
+pub(crate) fn wide_path(text: *const u16) -> PathBuf {
     if text.is_null() {
         return PathBuf::new();
     }

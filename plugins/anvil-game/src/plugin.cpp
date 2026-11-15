@@ -42,6 +42,7 @@
 #include "commands.hpp"
 #include "restart.hpp"
 #include "session.hpp"
+#include "user_dir.hpp"
 #include "work_queue.hpp"
 #include "world.hpp"
 
@@ -92,6 +93,7 @@ struct Layout {
     std::uint32_t game_speed = 0;        // root+: int32, the game speed 0..4 (the speed bar shows 1..5)
     std::uint32_t pause_flag = 0;        // speed object+: byte, the player's pause
     sym::Types::is_paused::Pointer is_paused = nullptr;  // the speed bar's answer
+    sym::Types::physfs_get_write_dir::Pointer write_dir = nullptr;  // null when absent on this build
     const std::uintptr_t* gui = nullptr;  // the GUI's global; null when these symbols are absent
     std::uint32_t gui_text_receiver = 0;  // gui+: the focused text field's receiver, may be null
     std::uint32_t gui_shortcut_on = 0;    // gui+: byte, the shortcut editor is on
@@ -598,6 +600,43 @@ int service_paused(std::uint32_t* flags) {
     return pause != 0 ? 1 : 0;
 }
 
+// PHYSFS_getWriteDir takes PhysFS' state lock for a moment and returns its
+// string, copied at once under SEH like every read of the game's memory.
+bool copy_write_dir(sym::Types::physfs_get_write_dir::Pointer get, char* out, std::size_t size) {
+    __try {
+        const char* dir = get();
+        if (dir == nullptr) return false;
+        std::size_t i = 0;
+        for (; i + 1 < size && dir[i] != '\0'; ++i) out[i] = dir[i];
+        out[i] = '\0';
+        return i > 0 && dir[i] == '\0';
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+std::mutex g_user_dir_mutex;
+std::wstring g_user_dir;  // set once, never changed after: its c_str() is handed out
+std::atomic<const wchar_t*> g_user_dir_given{nullptr};
+
+const wchar_t* service_user_dir() {
+    if (const wchar_t* given = g_user_dir_given.load(std::memory_order_acquire)) return given;
+    if (!g_layout.write_dir) return nullptr;
+    std::lock_guard lock(g_user_dir_mutex);
+    if (const wchar_t* given = g_user_dir_given.load(std::memory_order_acquire)) return given;
+    char dir[MAX_PATH * 4] = {};
+    if (!copy_write_dir(g_layout.write_dir, dir, sizeof dir)) return nullptr;
+    try {
+        std::wstring wide = anvil_game::user_dir_path(dir);
+        if (wide.empty()) return nullptr;
+        g_user_dir = std::move(wide);
+    } catch (const std::bad_alloc&) {
+        return nullptr;
+    }
+    g_user_dir_given.store(g_user_dir.c_str(), std::memory_order_release);
+    return g_user_dir.c_str();
+}
+
 // No objects with destructors: the body runs under __try.
 std::uint32_t read_keyboard_unguarded() {
     const std::uintptr_t gui = *g_layout.gui;
@@ -658,7 +697,7 @@ AnvilResult service_restart(AnvilPlugin* self, std::uint32_t flags) {
 constexpr AnvilGameService kService = {
     sizeof(AnvilGameService), service_ready, service_main_thread_id, service_frame_number, service_run_on_main_thread,
     service_session,          service_date,  service_main_menu,    service_out_of_sync,  service_keyboard,
-    service_restart,          service_speed, service_paused,
+    service_restart,          service_speed, service_paused,       service_user_dir,
 };
 
 // ---- the world service ------------------------------------------------------
@@ -2272,6 +2311,12 @@ struct AnvilGame : anvil::Plugin {
             g_layout.pace = true;
         } else {
             host.info("the speed and pause symbols are absent on this build: speed() and paused() answer 0");
+        }
+        // Likewise for the write folder: user_dir() then answers NULL.
+        if (host.present(sym::physfs_get_write_dir)) {
+            g_layout.write_dir = host.function(sym::physfs_get_write_dir);
+        } else {
+            host.info("PHYSFS_getWriteDir is absent on this build: user_dir() answers NULL");
         }
         // Likewise for the GUI's keyboard: keyboard() then answers 0.
         if (host.present(sym::gui_text_receiver) && host.present(sym::gui_shortcut_pick)) {

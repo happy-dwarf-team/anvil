@@ -761,10 +761,11 @@ pub struct AnvilGameService {
     pub paused: ::core::option::Option<
         unsafe extern "C" fn(flags: *mut u32) -> core::ffi::c_int,
     >,
+    pub user_dir: ::core::option::Option<unsafe extern "C" fn() -> *const wchar_t>,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AnvilGameService"][::core::mem::size_of::<AnvilGameService>() - 104usize];
+    ["Size of AnvilGameService"][::core::mem::size_of::<AnvilGameService>() - 112usize];
     [
         "Alignment of AnvilGameService",
     ][::core::mem::align_of::<AnvilGameService>() - 8usize];
@@ -807,6 +808,9 @@ const _: () = {
     [
         "Offset of field: AnvilGameService::paused",
     ][::core::mem::offset_of!(AnvilGameService, paused) - 96usize];
+    [
+        "Offset of field: AnvilGameService::user_dir",
+    ][::core::mem::offset_of!(AnvilGameService, user_dir) - 104usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

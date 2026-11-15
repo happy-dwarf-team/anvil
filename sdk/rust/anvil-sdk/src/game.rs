@@ -539,4 +539,16 @@ impl Game {
         // SAFETY: the service's function with a valid out pointer.
         (unsafe { f(&mut flags) } != 0).then_some(PauseFlags(flags))
     }
+
+    /// The game's own write folder, where it keeps `save games`, `logs` and
+    /// `settings.txt` (by default `Documents\Paradox Interactive\Europa
+    /// Universalis IV`, or what `-userdir` and `userdir.txt` choose). `None`
+    /// until the game set it at start-up (it has by `anvil-game.ready`), with
+    /// an older anvil-game or on a build without its symbol. Any thread.
+    pub fn user_dir(&self) -> Option<std::path::PathBuf> {
+        let f = function!(self.table, AnvilGameService, user_dir).ok()?;
+        // SAFETY: the service's function; it answers NULL or a string anvil-game keeps.
+        let dir = unsafe { f() };
+        (!dir.is_null()).then(|| crate::host::wide_path(dir))
+    }
 }
