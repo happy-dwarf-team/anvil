@@ -50,7 +50,10 @@ public:
     // Parts of the detail only the app knows, in their place: buttons after
     // Reset in the header; facts under the header (id, authors, approval);
     // notes after the description (problems, updates).
+    // draw_header_buttons draws them on one line, without a SameLine before the first;
+    // header_buttons_width is that line's width, so the switch keeps its place.
     virtual bool has_header_buttons(std::size_t /*plugin*/) const { return false; }
+    virtual float header_buttons_width(std::size_t /*plugin*/) const { return 0; }
     virtual void draw_header_buttons(std::size_t /*plugin*/) {}
     virtual void draw_facts(std::size_t /*plugin*/) {}
     virtual void draw_notes(std::size_t /*plugin*/) {}

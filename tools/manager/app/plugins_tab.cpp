@@ -91,8 +91,8 @@ struct ManagerApp::PluginsHost final : mui::PluginsHost {
     bool has_header_buttons(size_t i) const override {
         return app.plugins_->model.plugins[i].origin == mui::Origin::Own && !source(i).folder.empty();
     }
+    float header_buttons_width(size_t) const override { return mui::button_width(tr("Remove...")); }
     void draw_header_buttons(size_t i) override {
-        ImGui::SameLine();
         if (ImGui::Button(tr("Remove..."))) app.ask_remove(source(i).folder);
     }
 

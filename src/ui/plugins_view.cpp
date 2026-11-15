@@ -379,14 +379,62 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
     const bool known = host.known(i);
     ImGui::PushID(p.id.c_str());
 
-    // The header: the name, the plugin's own switch, then Reset and the app's buttons (ui-guidelines §5).
+    // The header (ui-guidelines §5): the glyph, the name and version at the left; at the right
+    // Reset and the app's buttons, then the plugin's own switch in a place of its own, as wide
+    // as its longer word, so it stays put from plugin to plugin and when it is clicked.
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float gap = style.ItemSpacing.x * 3;
+    const std::vector<Edit> reset = reset_plugin(p);
+    const bool buttons = host.has_header_buttons(i);
+    const float toggle_w = ImGui::GetFrameHeight() * 1.9f + style.ItemSpacing.x +
+                           std::max(ImGui::CalcTextSize(tr("On")).x, ImGui::CalcTextSize(tr("Off")).x);
+    float buttons_w = 0;
+    if (!reset.empty()) buttons_w += button_width(tr("Reset to defaults...")) + style.ItemSpacing.x;
+    if (buttons) buttons_w += host.header_buttons_width(i) + style.ItemSpacing.x;
+    if (buttons_w > 0) buttons_w += ImGui::CalcTextSize("|").x + style.ItemSpacing.x;
+    const float controls_w = buttons_w + toggle_w;
+    const float left = ImGui::GetCursorPosX();
+    const float right = left + ImGui::GetContentRegionAvail().x;
     glyph_item(v.glyph);
     ImGui::SameLine();
-    ImGui::AlignTextToFramePadding();
-    strong(p.name.c_str());
-    ImGui::SameLine();
-    weak(p.version);
-    ImGui::SameLine(0, ImGui::GetStyle().ItemSpacing.x * 3);
+    // The name and version, cut with "…" where the controls begin; on a narrow pane the
+    // controls take the next line rather than leave the name no room.
+    ImFont* strong_font =g_title_font != nullptr ? g_title_font : ImGui::GetFont();
+    const float name_w = strong_font->CalcTextSizeA(ImGui::GetFontSize(), FLT_MAX, 0.0f, p.name.c_str()).x + style.ItemSpacing.x +
+                         ImGui::CalcTextSize(p.version.c_str()).x;
+    const bool one_line = right - ImGui::GetCursorPosX() - gap - controls_w >= std::min(name_w, ImGui::GetFontSize() * 6);
+    {
+        const float name_right = one_line ? right - controls_w - gap : right;
+        ImGui::AlignTextToFramePadding();
+        const ImVec2 at = ImGui::GetCursorScreenPos();
+        const float to = at.x + (name_right - ImGui::GetCursorPosX());
+        const float y = at.y + style.FramePadding.y;
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        bool cut_name = false, cut_version = false;
+        const float w = draw_strong(draw, ImVec2(at.x, y), ImGui::GetColorU32(kText), p.name.c_str(), to, &cut_name);
+        const float vx = at.x + w + style.ItemSpacing.x;
+        if (!cut_name && vx < to) draw_text_fit(draw, ImGui::GetFont(), ImVec2(vx, y), to, ImGui::GetColorU32(kTextWeak), p.version, &cut_version);
+        ImGui::Dummy(ImVec2(std::max(0.0f, to - at.x), ImGui::GetFrameHeight()));
+        if ((cut_name || cut_version) && ImGui::IsItemHovered()) ImGui::SetTooltip("%s %s", p.name.c_str(), p.version.c_str());
+    }
+    if (one_line) ImGui::SameLine();
+    ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), right - controls_w));
+    ImGui::BeginDisabled(locked);
+    if (!reset.empty()) {
+        if (ImGui::Button(tr("Reset to defaults..."))) ask_edits(model, host, trf("Reset {0} to defaults", {p.name}), tr("Reset"), reset);
+        ImGui::SameLine();
+    }
+    if (buttons) {
+        host.draw_header_buttons(i);
+        ImGui::SameLine();
+    }
+    ImGui::EndDisabled();
+    if (buttons_w > 0) {
+        ImGui::AlignTextToFramePadding();
+        weak("|");
+        ImGui::SameLine();
+    }
+    ImGui::SetCursorPosX(right - toggle_w);
     const std::string refusal = host.switch_refusal(i);
     if (plugin_toggle("##on", p.saved.on, p.saved.on ? tr("On") : tr("Off"), locked || !known || !refusal.empty())) {
         if (p.saved.on) {
@@ -401,19 +449,6 @@ void PluginsTab::draw_detail(const Snapshot& model, size_t i, PluginsHost& host)
         }
     }
     if (!refusal.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", refusal.c_str());
-    const std::vector<Edit> reset = reset_plugin(p);
-    const bool buttons = host.has_header_buttons(i);
-    if (!reset.empty() || buttons) {
-        ImGui::SameLine(0, ImGui::GetStyle().ItemSpacing.x * 3);
-        weak("|");
-    }
-    ImGui::BeginDisabled(locked);
-    if (!reset.empty()) {
-        ImGui::SameLine();
-        if (ImGui::Button(tr("Reset to defaults..."))) ask_edits(model, host, trf("Reset {0} to defaults", {p.name}), tr("Reset"), reset);
-    }
-    if (buttons) host.draw_header_buttons(i);
-    ImGui::EndDisabled();
     if (!refusal.empty()) weak_wrapped(refusal);
 
     // The rest scrolls as one, so its modules and settings get the whole pane
