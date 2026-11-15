@@ -150,6 +150,16 @@ build."eu4-1.37.5-steam-win64" = { rva = 0x932F0 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x93320 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x93320 }
 
+[symbol.set_current_map_mode]
+# mov [rsp+8],rbx; mov [rsp+10h],rbp; mov [rsp+18h],rsi; mov [rsp+20h],rdi; push r14
+bytes = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56"
+memory = "code"
+signature = "void (void* session, int32_t mode, uint8_t a, uint8_t b)"
+note = "CEU3Idler::SetCurrentMapMode(EPdxMapColorUpdateMode, bool, bool): what the minimap's buttons and the console's mapmode call, both with false, false; the same declaration as Tongs'"
+build."eu4-1.37.5-steam-win64" = { rva = 0x6EC450 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x6EBE10 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x6EBE10 }
+
 [symbol.set_map_mode_dirty]
 memory = "code"
 signature = "void (void* session, int32_t mode)"

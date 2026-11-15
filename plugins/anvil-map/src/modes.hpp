@@ -91,13 +91,31 @@ public:
     // Every mode, in the order of registration.
     std::vector<AnvilMapMode*> all() const;
 
-    // Drops every colour buffer and kept text (the end of a session).
+    // Drops every colour buffer and kept text and a waiting show request
+    // (the end of a session).
     void clear_session();
+
+    // Whether `mode` is one of this registry's modes.
+    bool owns(const AnvilMapMode* mode) const noexcept {
+        return mode != nullptr && by_number(mode->number) == mode;
+    }
+
+    // show(): keeps `mode` for the next step, replacing a request before it.
+    // False for a mode this registry does not own.
+    bool request_show(const AnvilMapMode* mode) noexcept {
+        if (!owns(mode)) return false;
+        show_.store(const_cast<AnvilMapMode*>(mode), std::memory_order_release);
+        return true;
+    }
+
+    // The step: the waiting request, or null; it is taken.
+    AnvilMapMode* take_show() noexcept { return show_.exchange(nullptr, std::memory_order_acq_rel); }
 
 private:
     mutable std::mutex mutex_;
     std::vector<AnvilMapMode*> modes_;
     std::array<std::atomic<AnvilMapMode*>, kModeLimit> numbers_{};
+    std::atomic<AnvilMapMode*> show_{nullptr};
 };
 
 // Checks a buffer for set_colors and copies it. `limit` is the session's

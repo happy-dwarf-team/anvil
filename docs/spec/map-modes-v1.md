@@ -13,7 +13,8 @@ In v1:
 - province colours from a buffer the plugin hands over (a colour or "none" per province ID);
 - the mode's part of the province tooltip, asked for in the service's step;
 - the events `anvil-map.shown` and `anvil-map.hidden`;
-- for tools such as Tongs, the id of the mode that has a number (`mode_id`).
+- for tools such as Tongs, the id of the mode that has a number (`mode_id`);
+- showing a plugin mode from a plugin, as its button does (`show`, appended in 1.24.0, anvil#380).
 
 Not in v1 (each can be appended after `size` or come as a service of its own):
 
@@ -35,7 +36,7 @@ Not in v1 (each can be appended after `size` or come as a service of its own):
 
 [`include/anvil/anvil_map.h`](../../include/anvil/anvil_map.h), plain C11 like `anvil_plugin.h`; the header is the contract and this section only names its parts. Within service version 1, functions and fields are only appended; check `size` (`ANVIL_MAP_HAS`).
 
-- `ANVIL_MAP_MODES_SERVICE` `"anvil-map.modes"`, version 1: `register_mode(info, &out)`, `set_colors(mode, colors, count)`, `mode_id(number)`, `shown()` and `id(mode)`.
+- `ANVIL_MAP_MODES_SERVICE` `"anvil-map.modes"`, version 1: `register_mode(info, &out)`, `set_colors(mode, colors, count)`, `mode_id(number)`, `shown()`, `id(mode)` and, appended in 1.24.0 (`ANVIL_MAP_HAS(service, show)`), `show(mode)`.
 - `AnvilMapModeInfo`: `size`, `tab` (`ANVIL_MAP_TAB_DEFAULT` is the last tab, or `ANVIL_MAP_TAB_1` to `_4`), `id` (`<plugin-id>.<name>`, a name of `[a-z0-9_-]{1,32}`), `label` (UTF-8, 1 to 64 bytes), `description` (UTF-8, at most 512 bytes, may be NULL), `sprite` (a GFX name of `[A-Za-z0-9_]`, may be NULL), `describe` and `context`.
 - `AnvilMapDescribe(context, mode, province, text, capacity)`: the tooltip's lines in UTF-8, lines separated by `\n`; the return value is the text's length.
 - Colours: `ANVIL_MAP_RGB(r, g, b)` is `0x00RRGGBB`; a top byte of `0xFF` (`ANVIL_MAP_NO_COLOR`) leaves the province its political colour; any other top byte is an error. Province 0 never has a colour.
@@ -47,7 +48,8 @@ The id's prefix cannot be checked by the service (a service does not know its ca
 
 | What | Where it runs | Reads the world |
 | --- | --- | --- |
-| `register_mode`, `set_colors`, `mode_id`, `shown`, `id` | any thread | — |
+| `register_mode`, `set_colors`, `mode_id`, `shown`, `id`, `show` | any thread | — |
+| the mode `show` asked for, set | main thread, the step | — |
 | `anvil-map.shown`, `anvil-map.hidden` | main thread, the step | yes |
 | `describe` | main thread, the step | yes |
 | the paint hook (`UpdateMapColorProvinceBuffer`) | main thread, any frame, nested ones included | no: copies the last buffer |
@@ -55,11 +57,12 @@ The id's prefix cannot be checked by the service (a service does not know its ca
 
 **The step** is `anvil-map`'s handler of `anvil-game.frame`: after a frame of the main loop (`outer = 1`), on the main thread, while a session runs. In it, in this order:
 
-1. The current map mode (the session's field, §8) is compared with the last step's. A change from or to a borrowed number publishes `hidden` for the old plugin mode, then `shown` for the new one.
-2. A shown plugin mode whose buffer changed since its last paint is marked dirty (`SetMapModeDirty(number)`), so the game repaints it in a coming frame.
-3. When the tooltip hook asked for a province of the shown plugin mode since the last step, `describe` is called for the last one it asked for, and its text replaces the kept one.
+1. A mode `show` asked for since the last step (the last request wins) is set with the game's own `CEU3Idler::SetCurrentMapMode(number, false, false)`, as the minimap's button and the console's `mapmode` do, unless it is already the current mode. A fault in the call is logged.
+2. The current map mode (the session's field, §8) is compared with the last step's. A change from or to a borrowed number publishes `hidden` for the old plugin mode, then `shown` for the new one.
+3. A shown plugin mode whose buffer changed since its last paint is marked dirty (`SetMapModeDirty(number)`), so the game repaints it in a coming frame.
+4. When the tooltip hook asked for a province of the shown plugin mode since the last step, `describe` is called for the last one it asked for, and its text replaces the kept one.
 
-**Session.** At `anvil-game.session` `ENDED` the buffers and kept texts are dropped, and a shown plugin mode gets `hidden`. Modes and their numbers stay registered for the whole process. `set_colors` outside a session is `WRONG_PHASE`; the province limit comes from `anvil-game.world` (`province_limit`) at the session's first step.
+**Session.** At `anvil-game.session` `ENDED` the buffers, kept texts and a waiting `show` request are dropped, and a shown plugin mode gets `hidden`. Modes and their numbers stay registered for the whole process. `set_colors` outside a session is `WRONG_PHASE`; the province limit comes from `anvil-game.world` (`province_limit`) at the session's first step.
 
 **First frames.** A plugin mode that the player picks is painted at once with the buffer the service has (all "none" when the plugin has given none yet). A plugin that computes in its `shown` handler gets its colours on the map one step later. A tooltip asked for the first time shows the province's name and, a frame later, the plugin's lines.
 
@@ -100,11 +103,12 @@ One `symbols.toml`, the builds `anvil-game` knows (Steam 1.37.5, GOG 1.37.5.2 an
 | `tab_1` … `tab_4` | the game's arrays of the four tabs, which `ShowMapModesList` adds for the bits 1, 2, 4 and 8 of its argument: 14 modes from political (1), 13 from terrain (0), 16 from trade (4), 11 from diplomacy (5) | `0x1FD4E88`, `0x1FD50C8`, `0x1FD7A50`, `0x1FD79D8` | `0x1FB8E88`, `0x1FB90C8`, `0x1FBBA50`, `0x1FBB9D8` | data in `.data`, compared by address only; tabs 1 to 4 are the buttons with a building, a globe, a sack and a dove (lab run, GOG 1.37.5.2) |
 | `cstring_from_text` | `CString::CString(const char*)` | `0x1703550` | `0x16ED320` | called |
 | `text_append` | `CString::append(const char*, size_t)` on `CToolTip::_Instant` | `0x932F0` | `0x93320` | called |
+| `set_current_map_mode` | `CEU3Idler::SetCurrentMapMode(EPdxMapColorUpdateMode, bool, bool)`, the same declaration as Tongs' | `0x6EC450` | `0x6EBE10` | called (1.24.0) |
 | `set_map_mode_dirty` | `CEU3Idler::SetMapModeDirty(EPdxMapColorUpdateMode)`; its bytes give the current mode's offset in the session (`+0x2C`, GOG `+0x24`) | `0x6EA0B0` | `0x6E9A90` | called; value from bytes |
 | `session_of_root` | the root object and its session (`root+0x1E00`), as `anvil-game` reads them | as `anvil-game` | as `anvil-game` | value from bytes |
 | `province_own_id` | the province's own ID in `CProvince` (`+0x20`), as `anvil-game` reads it | as `anvil-game` | as `anvil-game` | value from bytes |
 
-That is 6 changes, 4 data symbols, 3 calls and 3 symbols that only give values, 16 per build. None of them is a byte patch or a write to `.rdata`; the only writes to the game's image are the trampolines of Anvil's hooks.
+That is 6 changes, 4 data symbols, 4 calls and 3 symbols that only give values, 17 per build. None of them is a byte patch or a write to `.rdata`; the only writes to the game's image are the trampolines of Anvil's hooks.
 
 The pool, with the console names that reach each number (lab run, both builds):
 

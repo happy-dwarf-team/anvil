@@ -125,6 +125,7 @@ std::vector<AnvilMapMode*> Registry::all() const {
 }
 
 void Registry::clear_session() {
+    show_.store(nullptr, std::memory_order_release);
     for (AnvilMapMode* m : all()) {
         set_colors(*m, nullptr);
         keep_text(*m, 0, {});

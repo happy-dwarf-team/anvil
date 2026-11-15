@@ -2524,12 +2524,15 @@ pub struct AnvilMapModesService {
     pub id: ::core::option::Option<
         unsafe extern "C" fn(mode: *const AnvilMapMode) -> *const core::ffi::c_char,
     >,
+    pub show: ::core::option::Option<
+        unsafe extern "C" fn(mode: *const AnvilMapMode) -> AnvilResult,
+    >,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     [
         "Size of AnvilMapModesService",
-    ][::core::mem::size_of::<AnvilMapModesService>() - 48usize];
+    ][::core::mem::size_of::<AnvilMapModesService>() - 56usize];
     [
         "Alignment of AnvilMapModesService",
     ][::core::mem::align_of::<AnvilMapModesService>() - 8usize];
@@ -2551,6 +2554,9 @@ const _: () = {
     [
         "Offset of field: AnvilMapModesService::id",
     ][::core::mem::offset_of!(AnvilMapModesService, id) - 40usize];
+    [
+        "Offset of field: AnvilMapModesService::show",
+    ][::core::mem::offset_of!(AnvilMapModesService, show) - 48usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

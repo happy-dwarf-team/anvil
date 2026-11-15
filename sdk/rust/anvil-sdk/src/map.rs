@@ -352,4 +352,14 @@ impl MapModes {
         // SAFETY: the service's function with its mode; the id lives for the process.
         unsafe { static_str(f(mode.as_raw())) }
     }
+
+    /// Shows `mode` on the map, as its button does: anvil-map sets it in its
+    /// next step, and `anvil-map.shown` follows there. Any thread while a
+    /// session runs (`WrongPhase` otherwise); `Unsupported` with an older
+    /// anvil-map or without its hooks.
+    pub fn show(&self, mode: Mode) -> Result<()> {
+        let f = function!(self.table, AnvilMapModesService, show)?;
+        // SAFETY: the service's function with its mode.
+        check(unsafe { f(mode.as_raw()) }, || "map mode show")
+    }
 }
