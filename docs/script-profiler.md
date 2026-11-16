@@ -155,8 +155,9 @@ the owner it found.
   member offsets as the profiler's lists, and owners without a hook in the profiler (a casus belli, a
   triggered modifier) are found the same way.
 - **What it costs:** nothing until a crash. Then the helper thread reads the stack a page at a time and
-  checks each value that looks like a pointer with up to 25 small reads, before the report is written; it was
-  not timed. A fault in the note is the note's own: it does not count as an earlier exception of the report.
+  checks each value that looks like a pointer (other than one into the stack itself) with up to 25 small reads,
+  after the report is first written; it was not timed. It stops after 2 seconds, with what it found by then and
+  a line that says so. A fault in the note is the note's own: it does not count as an earlier exception of the report.
 - **Limits:**
   - It is a scan, so a slot can hold a pointer left from an earlier call, and the note says so.
   - An owner the game reaches only through registers it did not save, or through a frame deeper than

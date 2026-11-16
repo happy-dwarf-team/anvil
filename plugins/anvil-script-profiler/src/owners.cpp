@@ -323,6 +323,7 @@ constexpr std::size_t kNoteStackBytes = 256 * 1024;  // of stack above rsp
 constexpr std::size_t kNoteChunk = 512;               // qwords read at once: 4 KiB
 constexpr std::size_t kNoteFound = 8;
 constexpr std::size_t kNoteName = 96;
+constexpr ULONGLONG kNoteBudgetMs = 2000;  // the scan stops after this, and says so
 constexpr std::uintptr_t kNoteUserTop = 0x7FFFFFFFFFFF;
 
 std::uintptr_t g_note_chunk[kNoteChunk];  // only the crash helper thread writes it
@@ -419,9 +420,15 @@ std::size_t write_crash_note(const Vtables& v, std::uintptr_t skip_low, std::uin
     const std::uintptr_t base = rsp & ~std::uintptr_t{7};
     std::uintptr_t end = base;
     if (rsp != 0 && stack_high > base) end = stack_high - base > kNoteStackBytes ? base + kNoteStackBytes : stack_high;
+    const ULONGLONG deadline = GetTickCount64() + kNoteBudgetMs;
+    bool stopped = false;
     // Each value from rsp up, read a page at a time; a page that cannot be read is skipped.
     const auto each_value = [&](auto&& fn) {
         for (std::uintptr_t at = base; at < end;) {
+            if (stopped || GetTickCount64() > deadline) {
+                stopped = true;
+                return;
+            }
             std::uintptr_t next = (at & ~std::uintptr_t{0xFFF}) + 0x1000;
             if (next > end) next = end;
             const std::size_t n = static_cast<std::size_t>((next - at) / 8);
@@ -451,6 +458,7 @@ std::size_t write_crash_note(const Vtables& v, std::uintptr_t skip_low, std::uin
     };
     each_value([&](std::uintptr_t p) {
         if (p < 0x10000 || p > kNoteUserTop || (p & 7) != 0 || (p >= skip_low && p < skip_high)) return true;
+        if (p >= base && p < stack_high) return true;  // into the stack itself: a frame, not an owner
         std::uintptr_t vtable = 0;
         if (!note_read(p, &vtable, sizeof(vtable))) return true;
         if (const NoteOwner o = note_owner_of(v, vtable); o.kind != OwnerKind::none) add(o.kind, p, "", o.name);
@@ -506,6 +514,7 @@ std::size_t write_crash_note(const Vtables& v, std::uintptr_t skip_low, std::uin
 
     text.put("Owners of script found on the crashed thread's stack, innermost first (a scan of the stack: an entry may "
              "be left from an earlier call):\n");
+    if (stopped) text.put("(the scan stopped after 2 s; what it found by then)\n");
     if (count == 0) {
         text.put("none found\n");
         return text.size();

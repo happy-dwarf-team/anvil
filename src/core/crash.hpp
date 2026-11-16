@@ -97,13 +97,15 @@ bool crashed();
 bool check_filter(std::string& by);
 
 // A plugin's note in every later report (anvil.control set_crash_note,
-// anvil#426): the helper thread calls it, guarded, before the report is built,
-// with the crashed thread's context and stack, and the report shows its lines
-// under the plugin's id. One note per handle, kNoteMax handles; a null `note`
-// removes the handle's note. False when every slot is held by another handle.
-// The note is called only while its plugin is loaded or loading.
+// anvil#426): the helper thread calls it, guarded, after the report is first
+// written, with the crashed thread's context and stack, and the report shows
+// its lines under the plugin's id. One note per plugin (its handles share it,
+// the last one set counts), kNoteMax plugins; a null `note` removes the
+// plugin's note, and the plugin keeps its slot. False for a handle without a
+// plugin, or when every slot is held by another plugin. The note is called
+// only while its plugin is loaded or loading.
 constexpr size_t kNoteMax = 4;
 using NoteFn = size_t (*)(void* context, const AnvilControlCrashScope* scope, char* out, size_t capacity);
-bool set_note(const AnvilPlugin* owner, NoteFn note, void* context);
+bool set_note(const AnvilPlugin* handle, NoteFn note, void* context);
 
 }  // namespace anvil::crash

@@ -779,18 +779,23 @@ int main(int argc, char** argv) {
         in.notes = nullptr;
         in.note_count = 0;
 
-        // The table of notes: four owners at most; an owner keeps its slot, may change its note or clear it.
+        // The table of notes: four plugins at most, one note per plugin (a module's handle shares its
+        // plugin's); a plugin keeps its slot, may change its note or clear it.
         {
-            static char owners[5];
-            const auto owner = [](int i) { return reinterpret_cast<const AnvilPlugin*>(&owners[i]); };
+            static char records[5];
+            static AnvilPlugin handles[7];
+            for (int i = 0; i < 5; ++i) handles[i].record = reinterpret_cast<anvil::PluginRecord*>(&records[i]);
+            handles[5].record = handles[0].record;  // a module of plugin 0
             const auto note = [](void*, const AnvilControlCrashScope*, char*, size_t) -> size_t { return 0; };
             const auto other = [](void*, const AnvilControlCrashScope*, char*, size_t) -> size_t { return 1; };
-            CHECK(crash::set_note(owner(4), nullptr, nullptr));  // nothing to clear
-            for (int i = 0; i < 4; ++i) CHECK(crash::set_note(owner(i), note, nullptr));
-            CHECK(!crash::set_note(owner(4), note, nullptr));
-            CHECK(crash::set_note(owner(1), other, &owners[1]));
-            CHECK(crash::set_note(owner(1), nullptr, nullptr));
-            CHECK(!crash::set_note(owner(4), note, nullptr));  // a cleared slot stays its owner's
+            CHECK(crash::set_note(&handles[4], nullptr, nullptr));  // nothing to clear
+            for (int i = 0; i < 4; ++i) CHECK(crash::set_note(&handles[i], note, nullptr));
+            CHECK(crash::set_note(&handles[5], other, nullptr));  // plugin 0's slot, not a fifth
+            CHECK(!crash::set_note(&handles[4], note, nullptr));
+            CHECK(crash::set_note(&handles[1], other, &records[1]));
+            CHECK(crash::set_note(&handles[1], nullptr, nullptr));
+            CHECK(!crash::set_note(&handles[4], note, nullptr));  // a cleared slot stays its plugin's
+            CHECK(!crash::set_note(&handles[6], note, nullptr));  // a handle without a plugin
             CHECK(!crash::set_note(nullptr, note, nullptr));
         }
 
