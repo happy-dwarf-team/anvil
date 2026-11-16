@@ -11,11 +11,11 @@ use crate::error::{check, Result};
 use crate::event::{read_sized, Event, Payload};
 use crate::host::Host;
 use crate::sys::{
-    AnvilGameDate, AnvilGameDateChange, AnvilGameFrame, AnvilGameOosChange, AnvilGamePendingChange,
-    AnvilGamePlayerChange, AnvilGameService, AnvilGameSession, AnvilGameWarChange,
-    ANVIL_GAME_PENDING_ADDED, ANVIL_GAME_PENDING_REMOVED, ANVIL_GAME_SERVICE_VERSION,
-    ANVIL_GAME_SESSION_ENDED, ANVIL_GAME_SESSION_STARTED, ANVIL_GAME_WAR_ENDED,
-    ANVIL_GAME_WAR_STARTED,
+    AnvilGameCamera, AnvilGameDate, AnvilGameDateChange, AnvilGameFrame, AnvilGameOosChange,
+    AnvilGamePendingChange, AnvilGamePlayerChange, AnvilGameService, AnvilGameSession,
+    AnvilGameWarChange, ANVIL_GAME_CAMERA_LOCKED, ANVIL_GAME_PENDING_ADDED,
+    ANVIL_GAME_PENDING_REMOVED, ANVIL_GAME_SERVICE_VERSION, ANVIL_GAME_SESSION_ENDED,
+    ANVIL_GAME_SESSION_STARTED, ANVIL_GAME_WAR_ENDED, ANVIL_GAME_WAR_STARTED,
 };
 use crate::text::{owned_string, Tag};
 
@@ -163,6 +163,19 @@ impl KeyboardFlags {
     pub const fn shortcut(self) -> bool {
         self.0 & Self::SHORTCUT != 0
     }
+}
+
+/// The map camera, as [`Game::camera`] reads it, in map units: `[1]` is the
+/// height above the map's plane, `[0]` and `[2]` lie on it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Camera {
+    /// Where the camera is.
+    pub position: [f32; 3],
+    /// The point it looks at.
+    pub look_at: [f32; 3],
+    /// The game holds the camera still: [`Game::camera_pan`] answers
+    /// `WrongPhase`.
+    pub locked: bool,
 }
 
 /// `anvil-game.oos`'s payload.
@@ -553,5 +566,38 @@ impl Game {
         // SAFETY: the service's function; it answers NULL or a string anvil-game keeps.
         let dir = unsafe { f() };
         (!dir.is_null()).then(|| crate::host::wide_path(dir))
+    }
+
+    /// The map camera now (anvil-game 1.25.0). On the main thread after an
+    /// outer frame, while a session runs, like the world's reads: `WrongPhase`
+    /// elsewhere; `Unsupported` with an older anvil-game or on a build without
+    /// its symbols.
+    pub fn camera(&self) -> Result<Camera> {
+        let f = function!(self.table, AnvilGameService, camera)?;
+        let mut out = AnvilGameCamera {
+            size: std::mem::size_of::<AnvilGameCamera>() as u32,
+            position: [0.0; 3],
+            look_at: [0.0; 3],
+            flags: 0,
+        };
+        // SAFETY: the service's function with a valid out pointer.
+        check(unsafe { f(&mut out) }, || "camera")?;
+        Ok(Camera {
+            position: out.position,
+            look_at: out.look_at,
+            locked: out.flags & ANVIL_GAME_CAMERA_LOCKED != 0,
+        })
+    }
+
+    /// Pans the map camera for this frame as the arrow keys do (anvil-game
+    /// 1.25.0): `right` and `up` from -1 to 1, a longer vector shortened to
+    /// length 1, at the arrows' speed. Call it once a frame while the input
+    /// lasts. It answers as [`Game::camera`] does, and also `WrongPhase` while
+    /// the camera is locked and `InvalidArgument` for a value that is not
+    /// finite.
+    pub fn camera_pan(&self, right: f32, up: f32) -> Result<()> {
+        let f = function!(self.table, AnvilGameService, camera_pan)?;
+        // SAFETY: the service's function.
+        check(unsafe { f(right, up) }, || "camera_pan")
     }
 }

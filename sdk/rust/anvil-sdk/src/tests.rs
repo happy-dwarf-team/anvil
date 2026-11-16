@@ -624,12 +624,31 @@ unsafe extern "C" fn game_user_dir() -> *const u16 {
     DIR.as_ptr()
 }
 
+unsafe extern "C" fn game_camera(out: *mut AnvilGameCamera) -> AnvilResult {
+    let out = unsafe { &mut *out };
+    assert_eq!(out.size as usize, std::mem::size_of::<AnvilGameCamera>());
+    out.position = [10.0, 300.0, 20.0];
+    out.look_at = [10.0, 0.0, 40.0];
+    out.flags = ANVIL_GAME_CAMERA_LOCKED;
+    ANVIL_OK
+}
+
+unsafe extern "C" fn game_camera_pan(right: f32, up: f32) -> AnvilResult {
+    if right == 1.0 && up == -0.5 {
+        ANVIL_OK
+    } else {
+        ANVIL_ERROR_WRONG_PHASE
+    }
+}
+
 static FAKE_GAME: Shared<AnvilGameService> = Shared({
     let mut table: AnvilGameService = unsafe { std::mem::zeroed() };
     table.size = std::mem::size_of::<AnvilGameService>() as u32;
     table.speed = Some(game_speed);
     table.paused = Some(game_paused);
     table.user_dir = Some(game_user_dir);
+    table.camera = Some(game_camera);
+    table.camera_pan = Some(game_camera_pan);
     table
 });
 
@@ -2199,4 +2218,17 @@ fn game_reads_the_speed_and_the_pause() {
     );
     // In the table's size but not filled in: None.
     assert_eq!(g.out_of_sync(), None);
+    assert_eq!(
+        g.camera().unwrap(),
+        game::Camera {
+            position: [10.0, 300.0, 20.0],
+            look_at: [10.0, 0.0, 40.0],
+            locked: true,
+        }
+    );
+    assert!(g.camera_pan(1.0, -0.5).is_ok());
+    assert_eq!(
+        g.camera_pan(0.0, 1.0).unwrap_err().code(),
+        ErrorCode::WrongPhase
+    );
 }

@@ -11,6 +11,7 @@ pub const ANVIL_GAME_EVENT_READY: &[u8; 17] = b"anvil-game.ready\0";
 pub const ANVIL_GAME_EVENT_FRAME: &[u8; 17] = b"anvil-game.frame\0";
 pub const ANVIL_GAME_EVENT_SESSION: &[u8; 19] = b"anvil-game.session\0";
 pub const ANVIL_GAME_EVENT_MAIN_MENU: &[u8; 21] = b"anvil-game.main_menu\0";
+pub const ANVIL_GAME_CAMERA_LOCKED: u32 = 1;
 pub const ANVIL_GAME_SERVICE: &[u8; 16] = b"anvil-game.game\0";
 pub const ANVIL_GAME_SERVICE_VERSION: u32 = 1;
 pub const ANVIL_GAME_RESTART_CLOSE_CAMPAIGN: u32 = 1;
@@ -727,6 +728,33 @@ const _: () = {
         "Offset of field: AnvilGameDate::session",
     ][::core::mem::offset_of!(AnvilGameDate, session) - 16usize];
 };
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AnvilGameCamera {
+    pub size: u32,
+    pub position: [f32; 3usize],
+    pub look_at: [f32; 3usize],
+    pub flags: u32,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AnvilGameCamera"][::core::mem::size_of::<AnvilGameCamera>() - 32usize];
+    [
+        "Alignment of AnvilGameCamera",
+    ][::core::mem::align_of::<AnvilGameCamera>() - 4usize];
+    [
+        "Offset of field: AnvilGameCamera::size",
+    ][::core::mem::offset_of!(AnvilGameCamera, size) - 0usize];
+    [
+        "Offset of field: AnvilGameCamera::position",
+    ][::core::mem::offset_of!(AnvilGameCamera, position) - 4usize];
+    [
+        "Offset of field: AnvilGameCamera::look_at",
+    ][::core::mem::offset_of!(AnvilGameCamera, look_at) - 16usize];
+    [
+        "Offset of field: AnvilGameCamera::flags",
+    ][::core::mem::offset_of!(AnvilGameCamera, flags) - 28usize];
+};
 pub type AnvilGameWork = ::core::option::Option<
     unsafe extern "C" fn(context: *mut core::ffi::c_void),
 >;
@@ -764,10 +792,16 @@ pub struct AnvilGameService {
         unsafe extern "C" fn(flags: *mut u32) -> core::ffi::c_int,
     >,
     pub user_dir: ::core::option::Option<unsafe extern "C" fn() -> *const wchar_t>,
+    pub camera: ::core::option::Option<
+        unsafe extern "C" fn(out: *mut AnvilGameCamera) -> AnvilResult,
+    >,
+    pub camera_pan: ::core::option::Option<
+        unsafe extern "C" fn(right: f32, up: f32) -> AnvilResult,
+    >,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AnvilGameService"][::core::mem::size_of::<AnvilGameService>() - 112usize];
+    ["Size of AnvilGameService"][::core::mem::size_of::<AnvilGameService>() - 128usize];
     [
         "Alignment of AnvilGameService",
     ][::core::mem::align_of::<AnvilGameService>() - 8usize];
@@ -813,6 +847,12 @@ const _: () = {
     [
         "Offset of field: AnvilGameService::user_dir",
     ][::core::mem::offset_of!(AnvilGameService, user_dir) - 104usize];
+    [
+        "Offset of field: AnvilGameService::camera",
+    ][::core::mem::offset_of!(AnvilGameService, camera) - 112usize];
+    [
+        "Offset of field: AnvilGameService::camera_pan",
+    ][::core::mem::offset_of!(AnvilGameService, camera_pan) - 120usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
