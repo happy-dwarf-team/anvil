@@ -35,19 +35,19 @@ use crate::sys::{
     AnvilGamePendingEvent, AnvilGamePlayer, AnvilGameProvince, AnvilGameRelation,
     AnvilGameStatisticPoint, AnvilGameTag, AnvilGameTimedModifier, AnvilGameUnit, AnvilGameUnitRef,
     AnvilGameWar, AnvilGameWorldService, ANVIL_GAME_COUNTRY_OBSERVER, ANVIL_GAME_DIPLOMACY_TRUCE,
-    ANVIL_GAME_MONARCH_CONSORT, ANVIL_GAME_MONARCH_FEMALE, ANVIL_GAME_MONARCH_HEIR,
-    ANVIL_GAME_MONARCH_REGENCY, ANVIL_GAME_MONARCH_RULER, ANVIL_GAME_PENDING_HIDDEN,
-    ANVIL_GAME_PLAYER_OBSERVER, ANVIL_GAME_PROVINCE_LAND, ANVIL_GAME_PROVINCE_WASTELAND,
-    ANVIL_GAME_RELATION_ALLIANCE, ANVIL_GAME_RELATION_DEPENDENCY,
-    ANVIL_GAME_RELATION_GIVING_MILITARY_ACCESS, ANVIL_GAME_RELATION_GUARANTEE,
-    ANVIL_GAME_RELATION_MILITARY_ACCESS, ANVIL_GAME_RELATION_ROYAL_MARRIAGE,
-    ANVIL_GAME_RELATION_SUBSIDIES, ANVIL_GAME_RELATION_WARNING, ANVIL_GAME_STATISTIC_INCOME,
-    ANVIL_GAME_STATISTIC_INFLATION, ANVIL_GAME_STATISTIC_NATION_SIZE, ANVIL_GAME_STATISTIC_SCORE,
-    ANVIL_GAME_TIMED_HIDDEN, ANVIL_GAME_TIMED_NO_END, ANVIL_GAME_TIMED_NO_START,
-    ANVIL_GAME_TIMED_RULER, ANVIL_GAME_UNIT_ARMY, ANVIL_GAME_UNIT_NAVY, ANVIL_GAME_VALUE_MANPOWER,
-    ANVIL_GAME_VALUE_MONTHLY_INCOME, ANVIL_GAME_VALUE_PRESTIGE, ANVIL_GAME_VALUE_STABILITY,
-    ANVIL_GAME_VALUE_TREASURY, ANVIL_GAME_WAR_ATTACKERS, ANVIL_GAME_WAR_DEFENDERS,
-    ANVIL_GAME_WORLD_SERVICE_VERSION,
+    ANVIL_GAME_EXPLORE_COAST, ANVIL_GAME_EXPLORE_SEA, ANVIL_GAME_MONARCH_CONSORT,
+    ANVIL_GAME_MONARCH_FEMALE, ANVIL_GAME_MONARCH_HEIR, ANVIL_GAME_MONARCH_REGENCY,
+    ANVIL_GAME_MONARCH_RULER, ANVIL_GAME_PENDING_HIDDEN, ANVIL_GAME_PLAYER_OBSERVER,
+    ANVIL_GAME_PROVINCE_LAND, ANVIL_GAME_PROVINCE_WASTELAND, ANVIL_GAME_RELATION_ALLIANCE,
+    ANVIL_GAME_RELATION_DEPENDENCY, ANVIL_GAME_RELATION_GIVING_MILITARY_ACCESS,
+    ANVIL_GAME_RELATION_GUARANTEE, ANVIL_GAME_RELATION_MILITARY_ACCESS,
+    ANVIL_GAME_RELATION_ROYAL_MARRIAGE, ANVIL_GAME_RELATION_SUBSIDIES, ANVIL_GAME_RELATION_WARNING,
+    ANVIL_GAME_STATISTIC_INCOME, ANVIL_GAME_STATISTIC_INFLATION, ANVIL_GAME_STATISTIC_NATION_SIZE,
+    ANVIL_GAME_STATISTIC_SCORE, ANVIL_GAME_TIMED_HIDDEN, ANVIL_GAME_TIMED_NO_END,
+    ANVIL_GAME_TIMED_NO_START, ANVIL_GAME_TIMED_RULER, ANVIL_GAME_UNIT_ARMY, ANVIL_GAME_UNIT_NAVY,
+    ANVIL_GAME_VALUE_MANPOWER, ANVIL_GAME_VALUE_MONTHLY_INCOME, ANVIL_GAME_VALUE_PRESTIGE,
+    ANVIL_GAME_VALUE_STABILITY, ANVIL_GAME_VALUE_TREASURY, ANVIL_GAME_WAR_ATTACKERS,
+    ANVIL_GAME_WAR_DEFENDERS, ANVIL_GAME_WORLD_SERVICE_VERSION,
 };
 use crate::text::{read_list, read_text, Tag};
 
@@ -214,6 +214,42 @@ pub struct UnitRef {
     pub country: Option<Tag>,
     /// Army or navy.
     pub kind: UnitKind,
+}
+
+impl UnitRef {
+    pub(crate) fn to_raw(self) -> AnvilGameUnitRef {
+        AnvilGameUnitRef {
+            id: self.id,
+            country: self
+                .country
+                .map(|tag| tag.to_raw())
+                .unwrap_or(AnvilGameTag { text: [0; 4] }),
+            kind: match self.kind {
+                UnitKind::Army => ANVIL_GAME_UNIT_ARMY,
+                UnitKind::Navy => ANVIL_GAME_UNIT_NAVY,
+                UnitKind::Other(other) => other,
+            },
+        }
+    }
+}
+
+/// Which list of the naval exploration dialog [`World::exploration_regions`]
+/// reads (anvil-game 1.25.0).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ExplorationList {
+    /// The regions a coast exploration may take.
+    Coast,
+    /// The regions a sea exploration may take.
+    Sea,
+}
+
+impl ExplorationList {
+    fn raw(self) -> i32 {
+        match self {
+            Self::Coast => ANVIL_GAME_EXPLORE_COAST as i32,
+            Self::Sea => ANVIL_GAME_EXPLORE_SEA as i32,
+        }
+    }
 }
 
 /// The id of a modifier, from its script key ([`World::modifier_id`]).
@@ -1196,6 +1232,42 @@ impl World {
             observed: Tag::from_raw(&raw.observed),
             observer: raw.flags & ANVIL_GAME_PLAYER_OBSERVER != 0,
         })
+    }
+
+    /// The regions the fleet may explore, as the game's naval exploration
+    /// dialog lists them: each region once, in the game's order. It calls the
+    /// dialog's own function and changes nothing; `InvalidArgument` for an
+    /// army (anvil-game 1.25.0).
+    pub fn exploration_regions(&self, fleet: &UnitRef, list: ExplorationList) -> Result<Vec<i32>> {
+        let f = function!(self.table, AnvilGameWorldService, exploration_regions)?;
+        let raw = fleet.to_raw();
+        // SAFETY: a unit reference; the service fills at most `capacity` indexes.
+        read_list(
+            0i32,
+            || format!("world exploration_regions {} {list:?}", fleet.id),
+            |out, capacity, count| unsafe { f(&raw, list.raw(), out, capacity, count) },
+        )
+    }
+
+    /// The region's name as the game shows it, in the game's language
+    /// (anvil-game 1.25.0).
+    pub fn region_name(&self, region: i32) -> Result<String> {
+        let f = function!(self.table, AnvilGameWorldService, region_name)?;
+        // SAFETY: the service fills at most `capacity` bytes.
+        read_text(
+            || format!("world region_name {region}"),
+            |buffer, capacity, length| unsafe { f(region, buffer, capacity, length) },
+        )
+    }
+
+    /// The region's script key, such as `baltic_sea_region` (anvil-game 1.25.0).
+    pub fn region_key(&self, region: i32) -> Result<String> {
+        let f = function!(self.table, AnvilGameWorldService, region_key)?;
+        // SAFETY: the service fills at most `capacity` bytes.
+        read_text(
+            || format!("world region_key {region}"),
+            |buffer, capacity, length| unsafe { f(region, buffer, capacity, length) },
+        )
     }
 }
 

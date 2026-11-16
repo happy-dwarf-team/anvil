@@ -71,6 +71,52 @@ void* faulting_pick_object(void*, const float*, void*, std::uint8_t, std::uint8_
     return reinterpret_cast<void*>(static_cast<std::intptr_t>(*g_fault_at));
 }
 
+// The stand-in of CExplorationNavalMission::GetSelectableRegions: what it was
+// called with, and the lists it appends, allocated as the game's vectors are
+// (malloc, and a large block aligned with its start stored before the data).
+const void* g_explore_country = nullptr;
+const void* g_explore_navy = nullptr;
+std::vector<std::int32_t> g_coast_list;
+std::vector<std::int32_t> g_sea_list;
+std::uint32_t g_sea_capacity = 0;  // in ints; 0 for the list's own size
+int g_freed = 0;
+std::vector<void*> g_blocks;  // what a free must get
+void append_game_list(void* vector, const std::vector<std::int32_t>& values, std::uint32_t capacity) {
+    auto** v = static_cast<std::int32_t**>(vector);
+    if (capacity < values.size()) capacity = static_cast<std::uint32_t>(values.size());
+    if (capacity == 0) return;
+    const std::size_t bytes = capacity * sizeof(std::int32_t);
+    std::int32_t* data = nullptr;
+    if (bytes >= 0x1000) {
+        auto* block = static_cast<std::uint8_t*>(std::malloc(bytes + 0x27));
+        auto at = (reinterpret_cast<std::uintptr_t>(block) + 0x27) & ~std::uintptr_t{0x1F};
+        reinterpret_cast<void**>(at)[-1] = block;
+        data = reinterpret_cast<std::int32_t*>(at);
+        g_blocks.push_back(block);
+    } else {
+        data = static_cast<std::int32_t*>(std::malloc(bytes));
+        g_blocks.push_back(data);
+    }
+    std::copy(values.begin(), values.end(), data);
+    v[0] = data;
+    v[1] = data + values.size();
+    v[2] = data + capacity;
+}
+void fake_explore_regions(const void* country, const void* navy, void* coast, void* sea) {
+    g_explore_country = country;
+    g_explore_navy = navy;
+    append_game_list(coast, g_coast_list, 0);
+    append_game_list(sea, g_sea_list, g_sea_capacity);
+}
+void fake_game_delete(void* block, std::size_t) {
+    const auto it = std::find(g_blocks.begin(), g_blocks.end(), block);
+    if (it == g_blocks.end()) return;  // not a block the stand-in gave: counted as not freed
+    g_blocks.erase(it);
+    std::free(block);
+    ++g_freed;
+}
+void faulting_explore_regions(const void*, const void*, void*, void*) { (void)*g_fault_at; }
+
 // The types of the events the stand-in of SDL_PushEvent got, and its time stamp.
 std::vector<uint32_t> g_pushed;
 int fake_push_event_rest(const void* event) {
@@ -1891,7 +1937,7 @@ int main(int argc, char** argv) {
         start.add(gp_toml);
         start.add(plugin_toml("other"));
         start.make();
-        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 173);
+        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 179);
         AnvilPlugin* p = start.load(ANVIL_GAME_ID);
         CHECK(p != nullptr);
         if (p == nullptr) return;
@@ -3262,6 +3308,162 @@ int main(int argc, char** argv) {
               anvil_game::pick_province(l, 1, 1, id) == ANVIL_ERROR_NOT_DECLARED);
         AnvilGameUnitRef none{};
         CHECK(anvil_game::pick_unit(l, 1, 1, none) == ANVIL_ERROR_NOT_DECLARED);
+    });
+
+    run("anvil-game.world: regions and the regions a fleet may explore", [&] {
+        const auto* world = static_cast<const AnvilGameWorldService*>(
+            bus.get_service(ANVIL_GAME_WORLD_SERVICE, ANVIL_GAME_WORLD_SERVICE_VERSION));
+        CHECK(world != nullptr && ANVIL_GAME_WORLD_HAS(world, region_key));
+        if (world == nullptr || !ANVIL_GAME_WORLD_HAS(world, region_key)) return;
+        FakeWorld& fake = *new FakeWorld;
+        fake.install(game.root, image);
+        fake.install_units(game.session, image);
+        // The map (CMap::_pMap, Steam 0x233FED8) with three regions at +0x4F0,
+        // each holding its index (+0x7C), key (+0x10) and translation (+0x30).
+        alignas(8) static uint8_t map[0x500] = {};
+        alignas(8) static uint8_t regions[3][0x108] = {};
+        alignas(8) static uintptr_t region_list[3] = {};
+        const char* keys[3] = {"baltic_region", "north_sea", "kattegat_area"};
+        const char* names[3] = {"\xD6stersj\xF6n", "North Sea", "Kattegat"};  // Windows-1252, as the game keeps them
+        for (int i = 0; i < 3; ++i) {
+            FakeWorld::set(regions[i], 0x7C, int32_t{i});
+            FakeWorld::set_short_string(regions[i] + 0x10, keys[i]);
+            FakeWorld::set_short_string(regions[i] + 0x30, names[i]);
+            region_list[i] = reinterpret_cast<uintptr_t>(regions[i]);
+        }
+        FakeWorld::set(map, 0x4F0, reinterpret_cast<uintptr_t>(region_list));
+        FakeWorld::set(map, 0x4F8, reinterpret_cast<uintptr_t>(region_list + 3));
+        image.put_pointer(0x233FED8, reinterpret_cast<uintptr_t>(map));
+        // GetSelectableRegions and the game's operator delete (the call target of
+        // the dialog's free, Steam 0x17394F0) jump to the stand-ins.
+        constexpr uint32_t kExplore = 0x927C60;
+        constexpr uint32_t kDelete = 0x17394F0;
+        std::uint8_t explore_bytes[12];
+        std::memcpy(explore_bytes, image.base + kExplore, sizeof(explore_bytes));
+        const auto jump_to = [&](std::uint32_t rva, std::uintptr_t target) {
+            image.put(rva, {0x48, 0xB8});
+            image.put_pointer(rva + 2, target);
+            image.put(rva + 10, {0xFF, 0xE0});
+        };
+        image.commit(kDelete & ~0xFFFu, PAGE_EXECUTE_READWRITE);  // no symbol's page: the call's target only
+        jump_to(kExplore, reinterpret_cast<std::uintptr_t>(&fake_explore_regions));
+        jump_to(kDelete, reinterpret_cast<std::uintptr_t>(&fake_game_delete));
+        const uintptr_t root = reinterpret_cast<uintptr_t>(game.root);
+        std::memcpy(image.base + 0x233FE78, &root, sizeof(root));
+        game.set_session(game.session);
+        frame(game.app, 1);
+
+        AnvilGameUnitRef fleet{};
+        fleet.id = FakeWorld::kNavyId;
+        std::memcpy(fleet.country.text, "RUS", 4);
+        fleet.kind = ANVIL_GAME_UNIT_NAVY;
+        std::int32_t list[8] = {};
+        std::uint32_t count = 99;
+        char text[32] = {};
+        std::uint32_t length = 0;
+        CHECK(world->exploration_regions(&fleet, ANVIL_GAME_EXPLORE_SEA, list, 8, &count) == ANVIL_ERROR_WRONG_PHASE &&
+              count == 99);  // between frames
+        CHECK(world->region_name(0, text, sizeof(text), &length) == ANVIL_ERROR_WRONG_PHASE);
+        bool ran = false;
+        g_in_frame_handler = [&] {
+            ran = true;
+            g_coast_list = {2, 0};
+            g_sea_list = {1};
+            g_sea_capacity = 0;
+            g_freed = 0;
+            CHECK(world->exploration_regions(&fleet, ANVIL_GAME_EXPLORE_COAST, list, 8, &count) == ANVIL_OK &&
+                  count == 2 && list[0] == 2 && list[1] == 0);
+            CHECK(g_explore_country == fake.rus && g_explore_navy == fake.navy);  // the owner and the fleet
+            CHECK(g_freed == 2 && g_blocks.empty());                               // both lists freed
+            CHECK(world->exploration_regions(&fleet, ANVIL_GAME_EXPLORE_SEA, list, 8, &count) == ANVIL_OK &&
+                  count == 1 && list[0] == 1);
+            // A short buffer gets what fits and the whole count; none, the count alone.
+            list[1] = -7;
+            CHECK(world->exploration_regions(&fleet, ANVIL_GAME_EXPLORE_COAST, list, 1, &count) == ANVIL_OK &&
+                  count == 2 && list[0] == 2 && list[1] == -7);
+            CHECK(world->exploration_regions(&fleet, ANVIL_GAME_EXPLORE_COAST, nullptr, 0, &count) == ANVIL_OK &&
+                  count == 2);
+            // A large block (4 KiB or more) is freed from the start the game stored before it.
+            g_sea_capacity = 1100;
+            g_freed = 0;
+            CHECK(world->exploration_regions(&fleet, ANVIL_GAME_EXPLORE_SEA, list, 8, &count) == ANVIL_OK &&
+                  count == 1 && g_freed == 2 && g_blocks.empty());
+            g_sea_capacity = 0;
+            // An index past the map's regions is garbage, and the lists are freed all the same.
+            g_coast_list = {1, 3};
+            g_freed = 0;
+            count = 99;
+            CHECK(world->exploration_regions(&fleet, ANVIL_GAME_EXPLORE_COAST, list, 8, &count) ==
+                      ANVIL_ERROR_INTERNAL &&
+                  count == 99 && g_freed == 2);
+            g_coast_list = {};
+            CHECK(world->exploration_regions(&fleet, ANVIL_GAME_EXPLORE_COAST, list, 8, &count) == ANVIL_OK &&
+                  count == 0);
+            // The arguments.
+            CHECK(world->exploration_regions(nullptr, ANVIL_GAME_EXPLORE_SEA, list, 8, &count) ==
+                  ANVIL_ERROR_INVALID_ARGUMENT);
+            CHECK(world->exploration_regions(&fleet, ANVIL_GAME_EXPLORE_LAND, list, 8, &count) ==
+                  ANVIL_ERROR_INVALID_ARGUMENT);
+            CHECK(world->exploration_regions(&fleet, ANVIL_GAME_EXPLORE_SEA, nullptr, 8, &count) ==
+                  ANVIL_ERROR_INVALID_ARGUMENT);
+            AnvilGameUnitRef army = fleet;
+            army.id = FakeWorld::kArmyId;
+            army.kind = ANVIL_GAME_UNIT_ARMY;
+            CHECK(world->exploration_regions(&army, ANVIL_GAME_EXPLORE_SEA, list, 8, &count) ==
+                  ANVIL_ERROR_INVALID_ARGUMENT);
+            army.kind = ANVIL_GAME_UNIT_NAVY;  // an army named a navy: the game's kind decides
+            CHECK(world->exploration_regions(&army, ANVIL_GAME_EXPLORE_SEA, list, 8, &count) ==
+                  ANVIL_ERROR_INVALID_ARGUMENT);
+            AnvilGameUnitRef gone = fleet;
+            gone.id = 0x77;
+            CHECK(world->exploration_regions(&gone, ANVIL_GAME_EXPLORE_SEA, list, 8, &count) == ANVIL_ERROR_NOT_FOUND);
+            std::memcpy(gone.country.text, "RUSS", 4);  // no NUL: not a tag
+            gone.id = fleet.id;
+            CHECK(world->exploration_regions(&gone, ANVIL_GAME_EXPLORE_SEA, list, 8, &count) ==
+                  ANVIL_ERROR_INVALID_ARGUMENT);
+
+            // Names and keys.
+            CHECK(world->region_name(0, text, sizeof(text), &length) == ANVIL_OK &&
+                  std::string(text) == "\xC3\x96stersj\xC3\xB6n" && length == 11);
+            CHECK(world->region_key(0, text, sizeof(text), &length) == ANVIL_OK &&
+                  std::string(text) == "baltic_region" && length == 13);
+            CHECK(world->region_name(2, text, 5, &length) == ANVIL_OK && std::string(text) == "Katt" &&
+                  length == 8);
+            CHECK(world->region_key(1, nullptr, 0, &length) == ANVIL_OK && length == 9);
+            CHECK(world->region_name(3, text, sizeof(text), &length) == ANVIL_ERROR_NOT_FOUND &&
+                  world->region_name(-1, text, sizeof(text), &length) == ANVIL_ERROR_NOT_FOUND);
+            CHECK(world->region_key(0, nullptr, 4, &length) == ANVIL_ERROR_INVALID_ARGUMENT);
+            FakeWorld::set(regions[1], 0x7C, int32_t{5});  // listed at 1, holding another index
+            CHECK(world->region_name(1, text, sizeof(text), &length) == ANVIL_ERROR_INTERNAL);
+            FakeWorld::set(regions[1], 0x7C, int32_t{1});
+            image.put_pointer(0x233FED8, 0);  // no map
+            CHECK(world->region_name(0, text, sizeof(text), &length) == ANVIL_ERROR_INTERNAL);
+            CHECK(world->exploration_regions(&fleet, ANVIL_GAME_EXPLORE_SEA, list, 8, &count) == ANVIL_ERROR_INTERNAL);
+            image.put_pointer(0x233FED8, reinterpret_cast<uintptr_t>(map));
+        };
+        frame(game.app, 1);
+        CHECK(ran);
+
+        // A call that faults costs that answer, not the game.
+        jump_to(kExplore, reinterpret_cast<std::uintptr_t>(&faulting_explore_regions));
+        ran = false;
+        g_in_frame_handler = [&] {
+            ran = true;
+            count = 99;
+            CHECK(world->exploration_regions(&fleet, ANVIL_GAME_EXPLORE_SEA, list, 8, &count) == ANVIL_ERROR_INTERNAL &&
+                  count == 99);
+        };
+        frame(game.app, 1);
+        CHECK(ran);
+        g_in_frame_handler = nullptr;
+        std::memcpy(image.base + kExplore, explore_bytes, sizeof(explore_bytes));
+
+        anvil_game::WorldLayout l;
+        std::vector<std::int32_t> none;
+        std::string name;
+        CHECK(anvil_game::read_exploration_regions(l, "RUS", 1, ANVIL_GAME_EXPLORE_SEA, none) ==
+                  ANVIL_ERROR_NOT_DECLARED &&
+              anvil_game::read_region_text(l, 0, false, name) == ANVIL_ERROR_NOT_DECLARED);
     });
 
     run("anvil-game.world: diplomacy", [&] {

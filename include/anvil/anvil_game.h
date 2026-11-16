@@ -836,6 +836,32 @@ typedef struct AnvilGameWorldService {
      * owner and kind. ANVIL_ERROR_NOT_FOUND when the map picks no unit there
      * (a province, or nothing). Any country's unit, as the game shows it. */
     AnvilResult (*unit_at)(int32_t x, int32_t y, AnvilGameUnitRef *out);
+    /* Since anvil-game 1.25.0, for the three calls below: regions. Each
+     * answers ANVIL_ERROR_NOT_DECLARED when a port declared its symbols absent.
+     * A region is the index the game lists it by in the map's regions, from 0;
+     * it stays the same for the whole game (the map is loaded once).
+     *
+     * The regions the fleet `fleet` may explore, as the game's naval
+     * exploration dialog offers them: `explore` ANVIL_GAME_EXPLORE_COAST for
+     * the dialog's coast list, ANVIL_GAME_EXPLORE_SEA for its sea list. It
+     * calls the dialog's own CExplorationNavalMission::GetSelectableRegions
+     * for the fleet and its owner, frees what that allocates, and changes
+     * nothing; the game works out both lists in each call. Each region once,
+     * in the game's order (not sorted). From the game's code, the lists follow
+     * the country (its range, from its provinces) and the fleet's flagships
+     * (a range bonus), not the fleet's place; the game does not ask here
+     * whether the country may explore at all. Any country's fleet, as the
+     * game would offer it to that country.
+     * ANVIL_ERROR_INVALID_ARGUMENT for a NULL `fleet`, another `explore` or an
+     * army; ANVIL_ERROR_NOT_FOUND for no such unit. */
+    AnvilResult (*exploration_regions)(const AnvilGameUnitRef *fleet, int32_t explore, int32_t *regions,
+                                       uint32_t capacity, uint32_t *count);
+    /* The region's name as the game shows it (CRegionBase::GetName, its
+     * translation in the game's language), and its script key
+     * (`baltic_sea_region`); ANVIL_ERROR_NOT_FOUND for an index past the map's
+     * regions. */
+    AnvilResult (*region_name)(int32_t region, char *utf8, uint32_t capacity, uint32_t *length);
+    AnvilResult (*region_key)(int32_t region, char *utf8, uint32_t capacity, uint32_t *length);
 } AnvilGameWorldService;
 
 /* Nonzero when `service` provides `field`. */
@@ -950,7 +976,8 @@ typedef struct AnvilGameWorldService {
  *   - ANVIL_GAME_EXPLORE_STOP: armies and fleets that explore (land, sea or a
  *     circumnavigation) stop; the others count as `skipped`.
  *   A fleet's sea or coast exploration needs a region of the game's own list
- *   for that fleet, which the service does not offer yet. The game checks the
+ *   for that fleet: anvil-game.world's exploration_regions() (1.25.0) reads
+ *   it, but this command type does not post SEA or COAST yet. The game checks the
  *   command when it runs it, as for the button: a unit the game does not let
  *   explore stays as it was, so read anvil-game.world a few frames later.
  *   `flags` 0; ANVIL_ERROR_INVALID_ARGUMENT for another `explore`, a navy with
@@ -994,7 +1021,9 @@ typedef struct AnvilGameWorldService {
 /* AnvilGameCommand.explore (version 3) */
 #define ANVIL_GAME_EXPLORE_STOP 0
 #define ANVIL_GAME_EXPLORE_LAND 1           /* armies */
-#define ANVIL_GAME_EXPLORE_CIRCUMNAVIGATE 4 /* fleets; 2 and 3 (sea, coast) are the game's, not offered yet */
+#define ANVIL_GAME_EXPLORE_SEA 2            /* fleets; exploration_regions() only, not posted yet (1.25.0) */
+#define ANVIL_GAME_EXPLORE_COAST 3          /* likewise */
+#define ANVIL_GAME_EXPLORE_CIRCUMNAVIGATE 4 /* fleets */
 
 #define ANVIL_GAME_COMMAND_MAX_UNITS 64u
 #define ANVIL_GAME_COMMAND_MAX_PER_FRAME 256u

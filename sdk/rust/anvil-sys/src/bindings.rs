@@ -95,6 +95,8 @@ pub const ANVIL_GAME_COMMAND_START: u32 = 1;
 pub const ANVIL_GAME_COMMAND_QUEUE: u32 = 2;
 pub const ANVIL_GAME_EXPLORE_STOP: u32 = 0;
 pub const ANVIL_GAME_EXPLORE_LAND: u32 = 1;
+pub const ANVIL_GAME_EXPLORE_SEA: u32 = 2;
+pub const ANVIL_GAME_EXPLORE_COAST: u32 = 3;
 pub const ANVIL_GAME_EXPLORE_CIRCUMNAVIGATE: u32 = 4;
 pub const ANVIL_GAME_COMMAND_MAX_UNITS: u32 = 64;
 pub const ANVIL_GAME_COMMAND_MAX_PER_FRAME: u32 = 256;
@@ -1809,12 +1811,37 @@ pub struct AnvilGameWorldService {
     pub unit_at: ::core::option::Option<
         unsafe extern "C" fn(x: i32, y: i32, out: *mut AnvilGameUnitRef) -> AnvilResult,
     >,
+    pub exploration_regions: ::core::option::Option<
+        unsafe extern "C" fn(
+            fleet: *const AnvilGameUnitRef,
+            explore: i32,
+            regions: *mut i32,
+            capacity: u32,
+            count: *mut u32,
+        ) -> AnvilResult,
+    >,
+    pub region_name: ::core::option::Option<
+        unsafe extern "C" fn(
+            region: i32,
+            utf8: *mut core::ffi::c_char,
+            capacity: u32,
+            length: *mut u32,
+        ) -> AnvilResult,
+    >,
+    pub region_key: ::core::option::Option<
+        unsafe extern "C" fn(
+            region: i32,
+            utf8: *mut core::ffi::c_char,
+            capacity: u32,
+            length: *mut u32,
+        ) -> AnvilResult,
+    >,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     [
         "Size of AnvilGameWorldService",
-    ][::core::mem::size_of::<AnvilGameWorldService>() - 424usize];
+    ][::core::mem::size_of::<AnvilGameWorldService>() - 448usize];
     [
         "Alignment of AnvilGameWorldService",
     ][::core::mem::align_of::<AnvilGameWorldService>() - 8usize];
@@ -1982,6 +2009,15 @@ const _: () = {
     [
         "Offset of field: AnvilGameWorldService::unit_at",
     ][::core::mem::offset_of!(AnvilGameWorldService, unit_at) - 416usize];
+    [
+        "Offset of field: AnvilGameWorldService::exploration_regions",
+    ][::core::mem::offset_of!(AnvilGameWorldService, exploration_regions) - 424usize];
+    [
+        "Offset of field: AnvilGameWorldService::region_name",
+    ][::core::mem::offset_of!(AnvilGameWorldService, region_name) - 432usize];
+    [
+        "Offset of field: AnvilGameWorldService::region_key",
+    ][::core::mem::offset_of!(AnvilGameWorldService, region_key) - 440usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

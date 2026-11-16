@@ -215,6 +215,19 @@ struct WorldLayout {
     std::int32_t (*pick)(void* map, const float* point) = nullptr;
     void* (*pick_object)(void* map, const float* point, void* selection, std::uint8_t a, std::uint8_t b) = nullptr;
 
+    // Regions: `regions` 0 when absent on this build; the exploration lists
+    // also need `explore_regions` and `game_delete`.
+    std::uintptr_t game_map = 0;            // the address of CMap's global
+    std::uint32_t regions = 0;              // map: std::vector of CRegion*, by index, its begin
+    std::uint32_t regions_end = 0;
+    std::uint32_t region_index = 0;         // region: int32, its index
+    std::uint32_t region_key = 0;           // region: std::string, its script key
+    std::uint32_t region_name = 0;          // region: std::string, its translation
+    std::uint32_t large_block = 0;          // a vector block this long or longer starts at the pointer before its data
+    std::uint32_t large_extra = 0;          // and is this much longer
+    void (*explore_regions)(const void* country, const void* navy, void* coast, void* sea) = nullptr;
+    void (*game_delete)(void* block, std::size_t size) = nullptr;
+
     // Diplomacy: `diplomacy` 0 when absent on this build. Each kind of relation
     // is a CPdxArray in the country's CCountryDiplomacy of 16-byte entries: the
     // other country's index (int32), then the CRelation*.
@@ -345,6 +358,15 @@ AnvilResult read_selected_province(const WorldLayout& l, std::int32_t& province)
 AnvilResult pick_province(const WorldLayout& l, std::int32_t x, std::int32_t y, std::int32_t& province);
 // Calls the game's pick of a selectable at the client point; NOT_FOUND for no unit.
 AnvilResult pick_unit(const WorldLayout& l, std::int32_t x, std::int32_t y, AnvilGameUnitRef& out);
+// Calls the game's GetSelectableRegions for the fleet `id` of `tag` and its
+// owner, and keeps the coast list (ANVIL_GAME_EXPLORE_COAST) or the sea list
+// (ANVIL_GAME_EXPLORE_SEA); the caller checks `explore`. INVALID_ARGUMENT for
+// an army. Every index is checked against the map's regions.
+AnvilResult read_exploration_regions(const WorldLayout& l, std::string_view tag, std::uint64_t id, std::int32_t explore,
+                                     std::vector<std::int32_t>& out);
+// The region's translation (`key` false) or its script key, as UTF-8;
+// NOT_FOUND for an index past the map's regions.
+AnvilResult read_region_text(const WorldLayout& l, std::int32_t region, bool key, std::string& utf8);
 
 // `kind` is ANVIL_GAME_RELATION_*; the caller checks it. Each relation must
 // name the country as `first` or `second`.
