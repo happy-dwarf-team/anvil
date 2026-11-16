@@ -849,9 +849,11 @@ typedef struct AnvilGameWorldService {
      * nothing; the game works out both lists in each call. Each region once,
      * in the game's order (not sorted). From the game's code, the lists follow
      * the country (its range, from its provinces) and the fleet's flagships
-     * (a range bonus), not the fleet's place; the game does not ask here
-     * whether the country may explore at all. Any country's fleet, as the
-     * game would offer it to that country.
+     * (a range bonus), not the fleet's place. The lists do not say whether
+     * the fleet may explore now: in the game, the dialog's Explore button
+     * refused fleets these lists answered for (one at sea, one without an
+     * explorer). Any country's fleet, as the game would offer it to that
+     * country.
      * ANVIL_ERROR_INVALID_ARGUMENT for a NULL `fleet`, another `explore` or an
      * army; ANVIL_ERROR_NOT_FOUND for no such unit. */
     AnvilResult (*exploration_regions)(const AnvilGameUnitRef *fleet, int32_t explore, int32_t *regions,
