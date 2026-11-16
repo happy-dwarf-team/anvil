@@ -25,7 +25,6 @@
 
 #include <windows.h>
 
-#include <cstdio>
 #include <cstring>
 
 namespace script_profiler {
@@ -327,6 +326,8 @@ constexpr std::size_t kNoteName = 96;
 constexpr std::uintptr_t kNoteUserTop = 0x7FFFFFFFFFFF;
 
 std::uintptr_t g_note_chunk[kNoteChunk];  // only the crash helper thread writes it
+std::uintptr_t g_note_options[kNoteFound][kMaxHeld];  // the found events' options, the same
+std::size_t g_note_option_count[kNoteFound];
 
 bool note_read(std::uintptr_t at, void* out, std::size_t size) noexcept {
     if (at < 0x10000 || at > kNoteUserTop) return false;
@@ -464,8 +465,11 @@ std::size_t write_crash_note(const Vtables& v, std::uintptr_t skip_low, std::uin
         return count < kNoteFound;
     });
 
-    // An event's option: a value on the stack that is the option, its trigger or its effect.
+    // An event's option: the innermost value on the stack that is one of its options, or an option's
+    // trigger or effect, in one more pass over the stack.
+    std::size_t events = 0;
     for (std::size_t k = 0; k < count; ++k) {
+        g_note_option_count[k] = 0;
         if (found[k].kind != OwnerKind::event) continue;
         std::uintptr_t vec[3] = {};
         if (!note_read(found[k].object + kEventOptions, vec, sizeof(vec)) || vec[1] < vec[0] ||
@@ -473,20 +477,31 @@ std::size_t write_crash_note(const Vtables& v, std::uintptr_t skip_low, std::uin
             continue;
         }
         const std::size_t options = static_cast<std::size_t>((vec[1] - vec[0]) / 8);
-        for (std::size_t n = 0; n < options && found[k].option == 0; ++n) {
-            std::uintptr_t option = 0;
-            if (!note_read(vec[0] + n * 8, &option, sizeof(option)) || option == 0) continue;
-            each_value([&](std::uintptr_t p) {
-                const char* role = p == option + kOptionEffect    ? "effect"
-                                   : p == option + kOptionTrigger ? "trigger"
-                                   : p == option                  ? ""
-                                                                  : nullptr;
-                if (role == nullptr) return true;
-                found[k].option = static_cast<int>(n) + 1;
-                found[k].option_role = role;
-                return false;
-            });
-        }
+        if (options == 0 || !note_read(vec[0], g_note_options[k], options * 8)) continue;
+        g_note_option_count[k] = options;
+        ++events;
+    }
+    if (events > 0) {
+        each_value([&](std::uintptr_t p) {
+            if (p < 0x10000 || p > kNoteUserTop || (p & 7) != 0) return true;
+            for (std::size_t k = 0; k < count; ++k) {
+                if (found[k].option != 0) continue;
+                for (std::size_t n = 0; n < g_note_option_count[k]; ++n) {
+                    const std::uintptr_t option = g_note_options[k][n];
+                    if (option == 0) continue;
+                    const char* role = p == option + kOptionEffect    ? "effect"
+                                       : p == option + kOptionTrigger ? "trigger"
+                                       : p == option                  ? ""
+                                                                      : nullptr;
+                    if (role == nullptr) continue;
+                    found[k].option = static_cast<int>(n) + 1;
+                    found[k].option_role = role;
+                    --events;
+                    break;
+                }
+            }
+            return events > 0;
+        });
     }
 
     text.put("Owners of script found on the crashed thread's stack, innermost first (a scan of the stack: an entry may "
@@ -515,9 +530,14 @@ std::size_t write_crash_note(const Vtables& v, std::uintptr_t skip_low, std::uin
             text.put(e.roles[r]);
         }
         if (e.option > 0) {
-            char number[24];
-            std::snprintf(number, sizeof(number), "%soption %d", e.role_count > 0 ? "; " : ": ", e.option);
-            text.put(number);
+            text.put(e.role_count > 0 ? "; option " : ": option ");
+            char digits[12];
+            std::size_t d = sizeof(digits) - 1;
+            digits[d] = '\0';
+            for (unsigned value = static_cast<unsigned>(e.option); value != 0 || d == sizeof(digits) - 1; value /= 10) {
+                digits[--d] = static_cast<char>('0' + value % 10);
+            }
+            text.put(digits + d);
             if (*e.option_role != '\0') {
                 text.put(" ");
                 text.put(e.option_role);

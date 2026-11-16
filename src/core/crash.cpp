@@ -37,18 +37,23 @@ CrashSources sources_now() {
     return s;
 }
 // ---- the plugins' notes (set_note) -------------------------------------------
-// A slot is claimed by its owner once (compare-exchange) and keeps it; the
-// note and its context are swapped atomically, so the helper reads either the
-// old or the new pair's note, never a torn pointer.
+// A slot is claimed by its owner once and keeps it. Writers take g_note_lock;
+// the helper takes no lock: `version` is odd while a writer changes the pair,
+// so the helper reads a note with its own context or skips the slot.
 struct NoteSlot {
     std::atomic<const AnvilPlugin*> owner{nullptr};
+    std::atomic<uint32_t> version{0};
     std::atomic<NoteFn> note{nullptr};
     std::atomic<void*> context{nullptr};
 };
 NoteSlot g_notes[kNoteMax];
+SRWLOCK g_note_lock = SRWLOCK_INIT;
 constexpr size_t kNoteBytes = 4096;
 char g_note_text[kNoteMax][kNoteBytes];
 ReportNote g_report_notes[kNoteMax];
+// The thread whose fatal-looking exceptions the vectored handler leaves out
+// of the report: the helper while it runs the notes, whose faults are their own.
+std::atomic<DWORD> g_quiet_thread{0};
 
 wchar_t g_dir[MAX_PATH * 2] = {};  // the crash folder, with a trailing backslash
 wchar_t g_log[MAX_PATH * 2] = {};
@@ -270,16 +275,48 @@ void call_note(void* argument) {
     call.written = n < kNoteBytes ? n : kNoteBytes;
 }
 
+// A slot's note and context as one pair; false while a writer changes it.
+bool read_slot(const NoteSlot& slot, NoteFn& note, void*& context) {
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        const uint32_t before = slot.version.load(std::memory_order_acquire);
+        if ((before & 1) != 0) continue;
+        note = slot.note.load(std::memory_order_acquire);
+        context = slot.context.load(std::memory_order_acquire);
+        std::atomic_thread_fence(std::memory_order_acquire);
+        if (slot.version.load(std::memory_order_relaxed) == before) return true;
+    }
+    return false;
+}
+
+// Bytes that are not UTF-8 become '?', so the JSON stays valid; a note may
+// copy the game's cp1252 text, or be cut in a character.
+void keep_utf8(char* text, size_t size) {
+    for (size_t i = 0; i < size;) {
+        const auto c = static_cast<unsigned char>(text[i]);
+        size_t length = c < 0x80 ? 1 : (c & 0xE0) == 0xC0 && c >= 0xC2 ? 2 : (c & 0xF0) == 0xE0 ? 3
+                                   : (c & 0xF8) == 0xF0 && c <= 0xF4  ? 4
+                                                                      : 0;
+        for (size_t k = 1; k < length; ++k) {
+            if (i + k >= size || (static_cast<unsigned char>(text[i + k]) & 0xC0) != 0x80) length = 0;
+        }
+        if (length == 0) {
+            text[i++] = '?';
+            continue;
+        }
+        i += length;
+    }
+}
+
 // The notes of the plugins that set one, each called guarded.
 size_t gather_notes(const Request& request) {
     AnvilControlCrashScope scope{sizeof(AnvilControlCrashScope), request.pointers->ContextRecord, request.stack_low,
                                  request.stack_high};
+    g_quiet_thread.store(GetCurrentThreadId());
     size_t count = 0;
     for (size_t i = 0; i < kNoteMax; ++i) {
         const AnvilPlugin* owner = g_notes[i].owner.load(std::memory_order_acquire);
-        NoteCall call{g_notes[i].note.load(std::memory_order_acquire), g_notes[i].context.load(std::memory_order_acquire),
-                      &scope, g_note_text[count]};
-        if (call.note == nullptr || !note_allowed(owner)) continue;
+        NoteCall call{nullptr, nullptr, &scope, g_note_text[count]};
+        if (!read_slot(g_notes[i], call.note, call.context) || call.note == nullptr || !note_allowed(owner)) continue;
         std::memset(call.out, 0, kNoteBytes);
         ReportNote& note = g_report_notes[count++];
         note.plugin = owner->record->id().c_str();
@@ -297,8 +334,10 @@ size_t gather_notes(const Request& request) {
                 }
             }
         }
+        keep_utf8(call.out, size);
         note.text = std::string_view(call.out, size);
     }
+    g_quiet_thread.store(0);
     return count;
 }
 
@@ -436,6 +475,7 @@ void hand_over(EXCEPTION_POINTERS* pointers) {
 LONG CALLBACK vectored(EXCEPTION_POINTERS* pointers) {
     const EXCEPTION_RECORD* record = pointers->ExceptionRecord;
     if (record == nullptr || !is_fatal_looking(record->ExceptionCode)) return EXCEPTION_CONTINUE_SEARCH;
+    if (GetCurrentThreadId() == g_quiet_thread.load()) return EXCEPTION_CONTINUE_SEARCH;
     InterlockedExchange64(&g_last_fatal, static_cast<LONG64>(GetTickCount64()));
     const LONG index = InterlockedIncrement(&g_seen_count) - 1;
     if (index < static_cast<LONG>(kSeenMax)) {
@@ -585,19 +625,28 @@ void attach_plugins(const PluginSet* plugins) { g_plugins.store(plugins, std::me
 
 bool set_note(const AnvilPlugin* owner, NoteFn note, void* context) {
     if (owner == nullptr) return false;
+    AcquireSRWLockExclusive(&g_note_lock);
     NoteSlot* slot = nullptr;
     for (NoteSlot& s : g_notes) {
         if (s.owner.load(std::memory_order_acquire) == owner) slot = &s;
     }
     for (size_t i = 0; slot == nullptr && note != nullptr && i < kNoteMax; ++i) {
-        const AnvilPlugin* free = nullptr;
-        if (g_notes[i].owner.compare_exchange_strong(free, owner, std::memory_order_acq_rel)) slot = &g_notes[i];
+        if (g_notes[i].owner.load(std::memory_order_acquire) == nullptr) {
+            slot = &g_notes[i];
+            slot->owner.store(owner, std::memory_order_release);
+        }
     }
-    if (slot == nullptr) return note == nullptr;
-    slot->note.store(nullptr, std::memory_order_release);
-    slot->context.store(context, std::memory_order_release);
-    slot->note.store(note, std::memory_order_release);
-    return true;
+    const bool done = slot != nullptr || note == nullptr;
+    if (slot != nullptr) {
+        const uint32_t version = slot->version.load(std::memory_order_relaxed);
+        slot->version.store(version + 1, std::memory_order_relaxed);  // odd: changing
+        std::atomic_thread_fence(std::memory_order_release);
+        slot->note.store(note, std::memory_order_relaxed);
+        slot->context.store(context, std::memory_order_relaxed);
+        slot->version.store(version + 2, std::memory_order_release);
+    }
+    ReleaseSRWLockExclusive(&g_note_lock);
+    return done;
 }
 
 bool check_filter(std::string& by) {

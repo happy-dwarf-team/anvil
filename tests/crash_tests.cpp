@@ -221,7 +221,8 @@ void crash_in_callback(AnvilCpuContext*, void*) { crash_here(); }
 size_t note_rsp(void*, const AnvilControlCrashScope* scope, char* out, size_t capacity) {
     const auto& c = *static_cast<const CONTEXT*>(scope->context);
     const bool inside = c.Rsp >= scope->stack_low && c.Rsp < scope->stack_high;
-    const int n = std::snprintf(out, capacity, "rsp %s the stack\n", inside ? "inside" : "outside");
+    // A byte of cp1252 (as in a game's key) must not reach the JSON as it is.
+    const int n = std::snprintf(out, capacity, "rsp %s the stack\ncaf\xE9\n", inside ? "inside" : "outside");
     return n > 0 ? static_cast<size_t>(n) : 0;
 }
 size_t note_fault(void*, const AnvilControlCrashScope*, char* out, size_t) {
@@ -778,6 +779,21 @@ int main(int argc, char** argv) {
         in.notes = nullptr;
         in.note_count = 0;
 
+        // The table of notes: four owners at most; an owner keeps its slot, may change its note or clear it.
+        {
+            static char owners[5];
+            const auto owner = [](int i) { return reinterpret_cast<const AnvilPlugin*>(&owners[i]); };
+            const auto note = [](void*, const AnvilControlCrashScope*, char*, size_t) -> size_t { return 0; };
+            const auto other = [](void*, const AnvilControlCrashScope*, char*, size_t) -> size_t { return 1; };
+            CHECK(crash::set_note(owner(4), nullptr, nullptr));  // nothing to clear
+            for (int i = 0; i < 4; ++i) CHECK(crash::set_note(owner(i), note, nullptr));
+            CHECK(!crash::set_note(owner(4), note, nullptr));
+            CHECK(crash::set_note(owner(1), other, &owners[1]));
+            CHECK(crash::set_note(owner(1), nullptr, nullptr));
+            CHECK(!crash::set_note(owner(4), note, nullptr));  // a cleared slot stays its owner's
+            CHECK(!crash::set_note(nullptr, note, nullptr));
+        }
+
         // An access violation in code of no plugin, a plugin on the stack.
         record.ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
         record.NumberParameters = 2;
@@ -962,7 +978,16 @@ int main(int argc, char** argv) {
         CHECK(contains(r.json, "\"minidump\": \"20"));  // <time>.dmp
         CHECK(contains(r.text, "Verdict: in plugin crasher's code."));
         CHECK(contains(r.text, "Minidump: 20"));
-        CHECK(contains(r.text, "  crasher:\r\n    rsp inside the stack\r\n"));
+        CHECK(contains(r.text, "  crasher:\r\n    rsp inside the stack\r\n    caf?\r\n"));
+        // The note's own fault, on the helper thread, is not an earlier exception: only the crash is.
+        const size_t earlier = r.json.find("\"earlier_exceptions\": [");
+        CHECK(earlier != std::string::npos);
+        if (earlier != std::string::npos) {
+            const std::string list = r.json.substr(earlier, r.json.find(']', earlier) - earlier);
+            size_t entries = 0;
+            for (size_t at = list.find("{\"code\""); at != std::string::npos; at = list.find("{\"code\"", at + 1)) ++entries;
+            CHECK(entries == 1);
+        }
         CHECK(contains(r.text, "  patcher: (its note failed with exception 0xC0000005; what it wrote before)\r\n"
                                "    before the fault\r\n"));
         CHECK(!contains(r.text, "half"));

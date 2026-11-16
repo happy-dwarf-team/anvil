@@ -149,11 +149,14 @@ note lists the owners it finds on the crashed thread's stack, innermost first, a
 the owner it found.
 
 - **How:** it reads up to 256 KiB of the stack above the crash. A value counts when it points at an owner (the
-  owner's vtable at +0) or at one of its blocks (the vtable at the block's offset in the owner). An event's
-  option counts when a value points at the option, its trigger or its effect. The names come from the same
+  owner's vtable at +0) or at one of its blocks (the vtable at the block's offset in the owner). For an event
+  it found, the innermost value that points at one of the event's options, its trigger or its effect names the
+  option. The names come from the same
   member offsets as the profiler's lists, and owners without a hook in the profiler (a casus belli, a
   triggered modifier) are found the same way.
-- **What it costs:** nothing until a crash. Then it takes the helper thread a fraction of a second.
+- **What it costs:** nothing until a crash. Then the helper thread reads the stack a page at a time and
+  checks each value that looks like a pointer with up to 25 small reads, before the report is written; it was
+  not timed. A fault in the note is the note's own: it does not count as an earlier exception of the report.
 - **Limits:**
   - It is a scan, so a slot can hold a pointer left from an earlier call, and the note says so.
   - An owner the game reaches only through registers it did not save, or through a frame deeper than
