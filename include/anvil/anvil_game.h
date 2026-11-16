@@ -864,6 +864,17 @@ typedef struct AnvilGameWorldService {
      * regions. */
     AnvilResult (*region_name)(int32_t region, char *utf8, uint32_t capacity, uint32_t *length);
     AnvilResult (*region_key)(int32_t region, char *utf8, uint32_t capacity, uint32_t *length);
+    /* Since anvil-game 1.25.0. The keys of the province triggered modifiers a
+     * province has been given (add_province_triggered_modifier), in the
+     * game's order, in the format of province_timed_modifier_keys. With the
+     * timed modifiers' keys they are all the keys has_province_modifier looks
+     * for. A key is listed whether or not the modifier's trigger holds now,
+     * as has_province_modifier answers. A key that also names a static
+     * modifier (vanilla's religious_center) has_province_modifier looks for
+     * only among the timed ones. ANVIL_ERROR_NOT_DECLARED when a port
+     * declared this symbol or the timed modifier symbols absent. */
+    AnvilResult (*province_triggered_modifier_keys)(int32_t province, char *keys, uint32_t capacity,
+                                                    uint32_t *length);
 } AnvilGameWorldService;
 
 /* Nonzero when `service` provides `field`. */

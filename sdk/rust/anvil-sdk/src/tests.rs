@@ -829,6 +829,26 @@ unsafe extern "C" fn world_country_timed_modifier_keys(
     ANVIL_OK
 }
 
+unsafe extern "C" fn world_province_triggered_modifier_keys(
+    province: i32,
+    keys: *mut c_char,
+    capacity: u32,
+    length: *mut u32,
+) -> AnvilResult {
+    let all: &[u8] = if province == 1 {
+        b"pr_mughal_tomb\0center_of_trade_modifier\0"
+    } else {
+        b""
+    };
+    unsafe {
+        *length = all.len() as u32;
+        if capacity as usize >= all.len() && !all.is_empty() {
+            ptr::copy_nonoverlapping(all.as_ptr(), keys.cast::<u8>(), all.len());
+        }
+    }
+    ANVIL_OK
+}
+
 unsafe extern "C" fn world_province_view(province: *mut i32) -> AnvilResult {
     unsafe { *province = 295 };
     ANVIL_OK
@@ -1041,6 +1061,7 @@ static FAKE_WORLD_FULL: Shared<AnvilGameWorldService> = Shared({
     table.exploration_regions = Some(world_exploration_regions);
     table.region_name = Some(world_region_name);
     table.region_key = Some(world_region_key);
+    table.province_triggered_modifier_keys = Some(world_province_triggered_modifier_keys);
     table
 });
 
@@ -1397,6 +1418,11 @@ fn world_reads_rulers_flags_and_variable_names() {
         ("Östersjön".to_owned(), "baltic_sea_region".to_owned())
     );
     assert_eq!(w.region_name(13).unwrap_err().code(), ErrorCode::NotFound);
+    assert_eq!(
+        w.province_triggered_modifiers(1).unwrap(),
+        ["pr_mughal_tomb", "center_of_trade_modifier"]
+    );
+    assert!(w.province_triggered_modifiers(2).unwrap().is_empty());
     assert_eq!(
         w.province_timed_modifiers(295).unwrap_err().code(),
         ErrorCode::Unsupported

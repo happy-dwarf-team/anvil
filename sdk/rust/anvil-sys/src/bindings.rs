@@ -1836,12 +1836,20 @@ pub struct AnvilGameWorldService {
             length: *mut u32,
         ) -> AnvilResult,
     >,
+    pub province_triggered_modifier_keys: ::core::option::Option<
+        unsafe extern "C" fn(
+            province: i32,
+            keys: *mut core::ffi::c_char,
+            capacity: u32,
+            length: *mut u32,
+        ) -> AnvilResult,
+    >,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     [
         "Size of AnvilGameWorldService",
-    ][::core::mem::size_of::<AnvilGameWorldService>() - 448usize];
+    ][::core::mem::size_of::<AnvilGameWorldService>() - 456usize];
     [
         "Alignment of AnvilGameWorldService",
     ][::core::mem::align_of::<AnvilGameWorldService>() - 8usize];
@@ -2018,6 +2026,10 @@ const _: () = {
     [
         "Offset of field: AnvilGameWorldService::region_key",
     ][::core::mem::offset_of!(AnvilGameWorldService, region_key) - 440usize];
+    [
+        "Offset of field: AnvilGameWorldService::province_triggered_modifier_keys",
+    ][::core::mem::offset_of!(AnvilGameWorldService, province_triggered_modifier_keys)
+        - 448usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

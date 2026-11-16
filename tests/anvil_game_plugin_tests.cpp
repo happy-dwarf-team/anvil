@@ -589,6 +589,10 @@ struct FakeWorld {
     alignas(8) uint8_t timed[3][0x50] = {};
     alignas(8) uint8_t timed_nodes[3][0x20] = {};
     uintptr_t moskva_timed[1] = {};
+    // Province triggered modifiers (1.25.0): Moskva has two, in a CPdxArray.
+    std::string triggered_texts[2] = {"pr_mughal_tomb", "center_of_trade_modifier"};
+    alignas(8) uint8_t triggered_modifiers[2][0x2E0] = {};
+    uintptr_t moskva_triggered[2] = {};
     alignas(8) uint8_t selection_object[0x20] = {};
     alignas(8) uint8_t province_view[0x1000] = {};
     alignas(8) uint8_t view_window[0x200] = {};
@@ -618,6 +622,12 @@ struct FakeWorld {
         moskva_timed[0] = reinterpret_cast<uintptr_t>(timed[0]);
         set(province(1), 0x2F0, reinterpret_cast<uintptr_t>(moskva_timed));
         set(province(1), 0x2F8, reinterpret_cast<uintptr_t>(moskva_timed + 1));
+        for (int i = 0; i < 2; ++i) {
+            set_key(triggered_modifiers[i] + 0x158, triggered_texts[i]);
+            moskva_triggered[i] = reinterpret_cast<uintptr_t>(triggered_modifiers[i]);
+        }
+        set(province(1), 0x310, reinterpret_cast<uintptr_t>(moskva_triggered));
+        set(province(1), 0x31C, int32_t{2});
 
         set(session, 0x1220, reinterpret_cast<uintptr_t>(selection_object));
         set(selection_object, 0x10, reinterpret_cast<uintptr_t>(province_view));
@@ -1937,7 +1947,7 @@ int main(int argc, char** argv) {
         start.add(gp_toml);
         start.add(plugin_toml("other"));
         start.make();
-        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 179);
+        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 180);
         AnvilPlugin* p = start.load(ANVIL_GAME_ID);
         CHECK(p != nullptr);
         if (p == nullptr) return;
@@ -3153,6 +3163,25 @@ int main(int argc, char** argv) {
                   length == fake.timed_texts[0].size() + 1 && keys == fake.timed_texts[0]);
             CHECK(world->province_timed_modifiers(2, list, 4, &count) == ANVIL_OK && count == 0);
             CHECK(world->province_timed_modifiers(4, list, 4, &count) == ANVIL_ERROR_NOT_FOUND);
+            // The province's triggered modifiers: their keys, in the array's order.
+            CHECK(ANVIL_GAME_WORLD_HAS(world, province_triggered_modifier_keys));
+            const std::string triggered = fake.triggered_texts[0] + '\0' + fake.triggered_texts[1] + '\0';
+            CHECK(world->province_triggered_modifier_keys(1, keys, sizeof keys, &length) == ANVIL_OK &&
+                  length == triggered.size() && std::memcmp(keys, triggered.data(), triggered.size()) == 0);
+            std::memset(keys, 0x7F, sizeof keys);
+            CHECK(world->province_triggered_modifier_keys(1, keys, 20, &length) == ANVIL_OK &&
+                  length == triggered.size() && keys == fake.triggered_texts[0] && keys[15] == 0x7F);
+            CHECK(world->province_triggered_modifier_keys(1, nullptr, 0, &length) == ANVIL_OK &&
+                  length == triggered.size());
+            CHECK(world->province_triggered_modifier_keys(2, keys, sizeof keys, &length) == ANVIL_OK && length == 0);
+            CHECK(world->province_triggered_modifier_keys(4, keys, sizeof keys, &length) == ANVIL_ERROR_NOT_FOUND);
+            CHECK(world->province_triggered_modifier_keys(1, nullptr, 4, &length) == ANVIL_ERROR_INVALID_ARGUMENT);
+            FakeWorld::set(fake.province(1), 0x31C, int32_t{-1});
+            CHECK(world->province_triggered_modifier_keys(1, keys, sizeof keys, &length) == ANVIL_ERROR_INTERNAL);
+            FakeWorld::set(fake.province(1), 0x31C, int32_t{2});
+            fake.moskva_triggered[1] = 0;
+            CHECK(world->province_triggered_modifier_keys(1, keys, sizeof keys, &length) == ANVIL_ERROR_INTERNAL);
+            fake.moskva_triggered[1] = reinterpret_cast<uintptr_t>(fake.triggered_modifiers[1]);
             // A broken list costs that answer.
             FakeWorld::set(fake.timed[1], 0x30, uintptr_t{0});
             CHECK(world->country_timed_modifiers("RUS", list, 4, &count) == ANVIL_ERROR_INTERNAL);
@@ -3181,6 +3210,7 @@ int main(int argc, char** argv) {
         std::int32_t id = 0;
         CHECK(anvil_game::read_country_timed(l, "RUS", none) == ANVIL_ERROR_NOT_DECLARED &&
               anvil_game::read_province_timed(l, 1, none) == ANVIL_ERROR_NOT_DECLARED &&
+              anvil_game::read_province_triggered(l, 1, none) == ANVIL_ERROR_NOT_DECLARED &&
               anvil_game::read_province_view(l, id) == ANVIL_ERROR_NOT_DECLARED);
     });
 

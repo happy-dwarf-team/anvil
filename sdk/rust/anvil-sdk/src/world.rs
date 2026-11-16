@@ -1119,6 +1119,25 @@ impl World {
         })
     }
 
+    /// The keys of the province triggered modifiers a province has been given
+    /// (`add_province_triggered_modifier`), in the game's order, whether or
+    /// not their triggers hold now. With
+    /// [`province_timed_modifiers`](Self::province_timed_modifiers) they are
+    /// every key `has_province_modifier` looks for (anvil-game 1.25.0).
+    pub fn province_triggered_modifiers(&self, province: i32) -> Result<Vec<String>> {
+        let keys = function!(
+            self.table,
+            AnvilGameWorldService,
+            province_triggered_modifier_keys
+        )?;
+        let context = || format!("world province_triggered_modifiers {province}");
+        // SAFETY: the service fills at most `capacity` bytes.
+        let all = read_text(context, |buffer, capacity, length| unsafe {
+            keys(province, buffer, capacity, length)
+        })?;
+        Ok(split_names(&all))
+    }
+
     /// A country's relations of one kind, in the game's order (anvil-game 1.22.0).
     pub fn country_relations(&self, tag: Tag, kind: RelationKind) -> Result<Vec<Relation>> {
         let f = function!(self.table, AnvilGameWorldService, country_relations)?;
