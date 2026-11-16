@@ -7,6 +7,8 @@
 #include <filesystem>
 #include <string>
 
+struct AnvilControlCrashScope;  // src/control/anvil_control.h
+
 namespace anvil::crash {
 
 // Crash capture (design §12). Installed once per process at the entry point:
@@ -93,5 +95,15 @@ bool crashed();
 // module replaced it, the replacement stays (it was installed later and
 // usually chains to the filter it replaced) and `by` names its address.
 bool check_filter(std::string& by);
+
+// A plugin's note in every later report (anvil.control set_crash_note,
+// anvil#426): the helper thread calls it, guarded, before the report is built,
+// with the crashed thread's context and stack, and the report shows its lines
+// under the plugin's id. One note per handle, kNoteMax handles; a null `note`
+// removes the handle's note. False when every slot is held by another handle.
+// The note is called only while its plugin is loaded or loading.
+constexpr size_t kNoteMax = 4;
+using NoteFn = size_t (*)(void* context, const AnvilControlCrashScope* scope, char* out, size_t capacity);
+bool set_note(const AnvilPlugin* owner, NoteFn note, void* context);
 
 }  // namespace anvil::crash

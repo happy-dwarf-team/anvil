@@ -138,6 +138,14 @@ struct SeenException {
 bool is_fatal_looking(DWORD code);
 const char* exception_name(DWORD code);
 
+// A plugin's note (crash::set_note), as the helper got it before the report.
+struct ReportNote {
+    const char* plugin = "";  // the plugin's id
+    std::string_view text;    // lines ended by '\n'
+    bool failed = false;      // the note faulted: `code`, and what it wrote before
+    unsigned long code = 0;
+};
+
 struct ReportInput {
     const EXCEPTION_RECORD* record = nullptr;
     const CONTEXT* context = nullptr;
@@ -155,6 +163,8 @@ struct ReportInput {
     size_t seen_count = 0;
     std::string_view log_tail;
     const char* minidump = nullptr;  // file name next to the report, or null
+    const ReportNote* notes = nullptr;
+    size_t note_count = 0;
 };
 
 // Writes the report as JSON and as text; returns the verdict.

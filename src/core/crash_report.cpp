@@ -507,6 +507,18 @@ void json_located(TextBuffer& j, const Located& at, const CrashSources& s) {
 
 const char* state_name(const PluginRecord& p) { return outcome_name(p.outcome()); }
 
+// Each non-empty line of a note, without its '\r'.
+template <typename Fn>
+void each_line(std::string_view text, Fn&& fn) {
+    while (!text.empty()) {
+        const size_t end = text.find('\n');
+        std::string_view line = text.substr(0, end);
+        text = end == std::string_view::npos ? std::string_view() : text.substr(end + 1);
+        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+        if (!line.empty()) fn(line);
+    }
+}
+
 // "1.2.3-beta", without allocating.
 void put_version(TextBuffer& out, const Version& v) {
     out.putf("%u.%u.%u", v.major, v.minor, v.patch);
@@ -649,6 +661,21 @@ CrashVerdict build_report(const ReportInput& in, TextBuffer& j, TextBuffer& t) {
         t.put("\r\n");
     }
 
+    if (in.note_count > 0) {
+        t.put("\r\nNotes from plugins (what each plugin adds to the report):\r\n");
+        for (size_t i = 0; i < in.note_count; ++i) {
+            const ReportNote& n = in.notes[i];
+            t.putf("  %s:", n.plugin);
+            if (n.failed) t.putf(" (its note failed with exception 0x%08lX; what it wrote before)", n.code);
+            t.put("\r\n");
+            each_line(n.text, [&](std::string_view line) {
+                t.put("    ");
+                t.put(line);
+                t.put("\r\n");
+            });
+        }
+    }
+
     if (in.context != nullptr) {
         t.put("\r\nRegisters:\r\n");
         for (const Register& r : kRegisters) {
@@ -755,7 +782,22 @@ CrashVerdict build_report(const ReportInput& in, TextBuffer& j, TextBuffer& t) {
         if (g_frames[i].repeats > 0) j.putf(", \"repeats\": %u", g_frames[i].repeats);
         j.put(i + 1 < frames ? "},\n" : "}\n");
     }
-    j.put("  ],\n  \"registers\": {");
+    j.put("  ],\n  \"notes\": [");
+    for (size_t i = 0; i < in.note_count; ++i) {
+        const ReportNote& n = in.notes[i];
+        j.put(i == 0 ? "\n    {\"plugin\": " : ",\n    {\"plugin\": ");
+        j.json(n.plugin);
+        if (n.failed) j.putf(", \"failed\": \"0x%08lX\"", n.code);
+        j.put(", \"lines\": [");
+        bool first_note_line = true;
+        each_line(n.text, [&](std::string_view line) {
+            if (!first_note_line) j.put(", ");
+            first_note_line = false;
+            j.json(line);
+        });
+        j.put("]}");
+    }
+    j.put(in.note_count == 0 ? "],\n  \"registers\": {" : "\n  ],\n  \"registers\": {");
     if (in.context != nullptr) {
         bool first = true;
         for (const Register& r : kRegisters) {

@@ -1,7 +1,9 @@
 #include "crash.hpp"
 
 #include "changes.hpp"
+#include "control/anvil_control.h"
 #include "log.hpp"
+#include "plugin_set.hpp"
 #include "seh_guard.hpp"
 
 #include <windows.h>
@@ -34,6 +36,20 @@ CrashSources sources_now() {
     if (const PluginSet* plugins = g_plugins.load(std::memory_order_acquire)) s.plugins = plugins;
     return s;
 }
+// ---- the plugins' notes (set_note) -------------------------------------------
+// A slot is claimed by its owner once (compare-exchange) and keeps it; the
+// note and its context are swapped atomically, so the helper reads either the
+// old or the new pair's note, never a torn pointer.
+struct NoteSlot {
+    std::atomic<const AnvilPlugin*> owner{nullptr};
+    std::atomic<NoteFn> note{nullptr};
+    std::atomic<void*> context{nullptr};
+};
+NoteSlot g_notes[kNoteMax];
+constexpr size_t kNoteBytes = 4096;
+char g_note_text[kNoteMax][kNoteBytes];
+ReportNote g_report_notes[kNoteMax];
+
 wchar_t g_dir[MAX_PATH * 2] = {};  // the crash folder, with a trailing backslash
 wchar_t g_log[MAX_PATH * 2] = {};
 DWORD g_main_thread = 0;
@@ -232,10 +248,65 @@ void write_dump(void* argument) {
     for (size_t i = 0; i + 1 < std::size(dump.name) && name[i] != L'\0'; ++i) dump.name[i] = static_cast<char>(name[i]);
 }
 
+// A plugin's note may run while its plugin is loaded or still loading; a
+// failed plugin's DLL may be gone.
+bool note_allowed(const AnvilPlugin* owner) {
+    if (owner == nullptr || owner->record == nullptr) return false;
+    const Outcome* outcome = owner->record->outcome();
+    return outcome == nullptr || outcome->kind == Outcome::Kind::loaded;
+}
+
+struct NoteCall {
+    NoteFn note = nullptr;
+    void* context = nullptr;
+    const AnvilControlCrashScope* scope = nullptr;
+    char* out = nullptr;
+    size_t written = 0;
+};
+
+void call_note(void* argument) {
+    auto& call = *static_cast<NoteCall*>(argument);
+    const size_t n = call.note(call.context, call.scope, call.out, kNoteBytes);
+    call.written = n < kNoteBytes ? n : kNoteBytes;
+}
+
+// The notes of the plugins that set one, each called guarded.
+size_t gather_notes(const Request& request) {
+    AnvilControlCrashScope scope{sizeof(AnvilControlCrashScope), request.pointers->ContextRecord, request.stack_low,
+                                 request.stack_high};
+    size_t count = 0;
+    for (size_t i = 0; i < kNoteMax; ++i) {
+        const AnvilPlugin* owner = g_notes[i].owner.load(std::memory_order_acquire);
+        NoteCall call{g_notes[i].note.load(std::memory_order_acquire), g_notes[i].context.load(std::memory_order_acquire),
+                      &scope, g_note_text[count]};
+        if (call.note == nullptr || !note_allowed(owner)) continue;
+        std::memset(call.out, 0, kNoteBytes);
+        ReportNote& note = g_report_notes[count++];
+        note.plugin = owner->record->id().c_str();
+        unsigned long code = 0;
+        note.failed = !call_guarded(&call_note, &call, &code);
+        note.code = code;
+        // What a faulting note wrote before the fault is kept up to its last whole line.
+        size_t size = call.written;
+        if (note.failed) {
+            size = 0;
+            for (size_t k = kNoteBytes; k > 0; --k) {
+                if (call.out[k - 1] == '\n') {
+                    size = k;
+                    break;
+                }
+            }
+        }
+        note.text = std::string_view(call.out, size);
+    }
+    return count;
+}
+
 void write_report(void*) {
     const Request request = g_request;
     const EXCEPTION_RECORD* record = request.pointers->ExceptionRecord;
     if (!open_reports()) return;
+    const size_t notes = gather_notes(request);
 
     const Setup& setup = *g_setup;
     const CrashSources sources = sources_now();
@@ -262,6 +333,8 @@ void write_report(void*) {
     in.seen_count = static_cast<size_t>(g_seen_count) < kSeenMax ? static_cast<size_t>(g_seen_count) : kSeenMax;
     in.log_tail = read_log_tail();
     in.minidump = nullptr;
+    in.notes = g_report_notes;
+    in.note_count = notes;
 
     // The report first: a minidump writer stuck on a lock the crashed thread
     // holds costs only the dump. With the dump kept, the report names it.
@@ -509,6 +582,23 @@ bool crashed() {
 }
 
 void attach_plugins(const PluginSet* plugins) { g_plugins.store(plugins, std::memory_order_release); }
+
+bool set_note(const AnvilPlugin* owner, NoteFn note, void* context) {
+    if (owner == nullptr) return false;
+    NoteSlot* slot = nullptr;
+    for (NoteSlot& s : g_notes) {
+        if (s.owner.load(std::memory_order_acquire) == owner) slot = &s;
+    }
+    for (size_t i = 0; slot == nullptr && note != nullptr && i < kNoteMax; ++i) {
+        const AnvilPlugin* free = nullptr;
+        if (g_notes[i].owner.compare_exchange_strong(free, owner, std::memory_order_acq_rel)) slot = &g_notes[i];
+    }
+    if (slot == nullptr) return note == nullptr;
+    slot->note.store(nullptr, std::memory_order_release);
+    slot->context.store(context, std::memory_order_release);
+    slot->note.store(note, std::memory_order_release);
+    return true;
+}
 
 bool check_filter(std::string& by) {
     if (g_real_set == nullptr) return true;

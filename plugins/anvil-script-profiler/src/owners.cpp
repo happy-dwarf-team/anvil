@@ -25,6 +25,7 @@
 
 #include <windows.h>
 
+#include <cstdio>
 #include <cstring>
 
 namespace script_profiler {
@@ -304,6 +305,227 @@ void Resolver::clear() {
     cache_.clear();
     held_.clear();
     expanded_.clear();
+}
+
+
+// ---- the note in crash reports (anvil#426) ---------------------------------------
+//
+// A scan of the crashed thread's stack, from its rsp up: a value that points
+// at an owner (its vtable at +0) or at one of an owner's blocks (the owner's
+// vtable at the rule's offset before it) names that owner; an event's option
+// is found when a value points at the option or at its trigger or effect.
+// Frames keep `this` and their callers' pointers in saved registers and
+// locals, so the owner of the script that ran usually is there, but a slot
+// may also hold a stale value from an earlier call: the note says so.
+
+namespace {
+
+constexpr std::size_t kNoteStackBytes = 256 * 1024;  // of stack above rsp
+constexpr std::size_t kNoteChunk = 512;               // qwords read at once: 4 KiB
+constexpr std::size_t kNoteFound = 8;
+constexpr std::size_t kNoteName = 96;
+constexpr std::uintptr_t kNoteUserTop = 0x7FFFFFFFFFFF;
+
+std::uintptr_t g_note_chunk[kNoteChunk];  // only the crash helper thread writes it
+
+bool note_read(std::uintptr_t at, void* out, std::size_t size) noexcept {
+    if (at < 0x10000 || at > kNoteUserTop) return false;
+    SIZE_T read = 0;
+    return ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(at), out, size, &read) != 0 &&
+           read == size;
+}
+
+// An MSVC std::string into `out` (control bytes as spaces), without allocating.
+void note_string(std::uintptr_t at, char (&out)[kNoteName]) {
+    out[0] = '\0';
+    struct {
+        char buffer[16];
+        std::uint64_t size, capacity;
+    } s{};
+    if (!note_read(at, &s, sizeof(s)) || s.size == 0 || s.size > 256 || s.capacity < s.size) return;
+    const std::size_t n = s.size < kNoteName - 1 ? static_cast<std::size_t>(s.size) : kNoteName - 1;
+    if (s.capacity <= 15) {
+        std::memcpy(out, s.buffer, n);
+    } else {
+        std::uintptr_t p = 0;
+        std::memcpy(&p, s.buffer, sizeof(p));
+        if (!note_read(p, out, n)) return;
+    }
+    out[n] = '\0';
+    for (std::size_t i = 0; i < n; ++i) {
+        if (static_cast<unsigned char>(out[i]) < 0x20) out[i] = ' ';
+    }
+}
+
+struct NoteOwner {
+    OwnerKind kind;
+    int name;  // offset of the owner's name
+};
+
+// The owner an object's vtable names, with where its name is.
+NoteOwner note_owner_of(const Vtables& v, std::uintptr_t vtable) {
+    if (vtable == 0) return {OwnerKind::none, 0};
+    if (vtable == v.event) return {OwnerKind::event, kEventKey};
+    if (vtable == v.decision) return {OwnerKind::decision, 16};
+    if (vtable == v.on_action) return {OwnerKind::on_action, 24};
+    if (vtable == v.casus_belli) return {OwnerKind::casus_belli, 24};
+    if (vtable == v.country_modifier) return {OwnerKind::country_modifier, 344};
+    if (vtable == v.province_modifier) return {OwnerKind::province_modifier, 344};
+    if (vtable == v.mission) return {OwnerKind::mission, 16};
+    if (vtable == v.church_aspect) return {OwnerKind::church_aspect, kAspectKey};
+    if (vtable == v.scripted_trigger) return {OwnerKind::scripted_trigger, kScriptedKey};
+    return {OwnerKind::none, 0};
+}
+
+struct NoteEntry {
+    static constexpr std::size_t kRoles = 4;
+    OwnerKind kind = OwnerKind::none;
+    std::uintptr_t object = 0;
+    const char* roles[kRoles] = {};  // the blocks found, in the order found
+    std::size_t role_count = 0;
+    int name = 0;
+    int option = 0;                   // an event's option, from 1
+    const char* option_role = "";     // "trigger", "effect" or "" (the option itself)
+
+    void add_role(const char* role) {
+        if (*role == '\0') return;
+        for (std::size_t i = 0; i < role_count; ++i) {
+            if (std::strcmp(roles[i], role) == 0) return;
+        }
+        if (role_count < kRoles) roles[role_count++] = role;
+    }
+};
+
+class NoteText {
+public:
+    NoteText(char* out, std::size_t capacity) : out_(out), capacity_(capacity) {}
+    void put(const char* text) {
+        while (*text != '\0' && size_ < capacity_) out_[size_++] = *text++;
+    }
+    std::size_t size() const { return size_; }
+
+private:
+    char* out_;
+    std::size_t capacity_;
+    std::size_t size_ = 0;
+};
+
+}  // namespace
+
+std::size_t write_crash_note(const Vtables& v, std::uintptr_t skip_low, std::uintptr_t skip_high, std::uintptr_t rsp,
+                             std::uintptr_t stack_high, char* out, std::size_t capacity) {
+    NoteText text(out, capacity);
+    const std::uintptr_t base = rsp & ~std::uintptr_t{7};
+    std::uintptr_t end = base;
+    if (rsp != 0 && stack_high > base) end = stack_high - base > kNoteStackBytes ? base + kNoteStackBytes : stack_high;
+    // Each value from rsp up, read a page at a time; a page that cannot be read is skipped.
+    const auto each_value = [&](auto&& fn) {
+        for (std::uintptr_t at = base; at < end;) {
+            std::uintptr_t next = (at & ~std::uintptr_t{0xFFF}) + 0x1000;
+            if (next > end) next = end;
+            const std::size_t n = static_cast<std::size_t>((next - at) / 8);
+            if (note_read(at, g_note_chunk, n * 8)) {
+                for (std::size_t i = 0; i < n; ++i) {
+                    if (!fn(g_note_chunk[i])) return;
+                }
+            }
+            at = next;
+        }
+    };
+
+    NoteEntry found[kNoteFound];
+    std::size_t count = 0;
+    const auto add = [&](OwnerKind kind, std::uintptr_t object, const char* role, int name) {
+        for (std::size_t k = 0; k < count; ++k) {
+            if (found[k].object != object) continue;
+            found[k].add_role(role);
+            return;
+        }
+        if (count == kNoteFound) return;
+        NoteEntry& e = found[count++];
+        e.kind = kind;
+        e.object = object;
+        e.name = name;
+        e.add_role(role);
+    };
+    each_value([&](std::uintptr_t p) {
+        if (p < 0x10000 || p > kNoteUserTop || (p & 7) != 0 || (p >= skip_low && p < skip_high)) return true;
+        std::uintptr_t vtable = 0;
+        if (!note_read(p, &vtable, sizeof(vtable))) return true;
+        if (const NoteOwner o = note_owner_of(v, vtable); o.kind != OwnerKind::none) add(o.kind, p, "", o.name);
+        for (const Rule& r : kRules) {
+            const std::uintptr_t want = v.*r.vtable;
+            if (want == 0 || r.offset == 0) continue;
+            std::uintptr_t at = 0;
+            if (note_read(p - static_cast<std::uintptr_t>(r.offset), &at, sizeof(at)) && at == want) {
+                add(r.kind, p - static_cast<std::uintptr_t>(r.offset), r.role, r.name);
+            }
+        }
+        return count < kNoteFound;
+    });
+
+    // An event's option: a value on the stack that is the option, its trigger or its effect.
+    for (std::size_t k = 0; k < count; ++k) {
+        if (found[k].kind != OwnerKind::event) continue;
+        std::uintptr_t vec[3] = {};
+        if (!note_read(found[k].object + kEventOptions, vec, sizeof(vec)) || vec[1] < vec[0] ||
+            (vec[1] - vec[0]) % 8 != 0 || (vec[1] - vec[0]) / 8 > kMaxHeld) {
+            continue;
+        }
+        const std::size_t options = static_cast<std::size_t>((vec[1] - vec[0]) / 8);
+        for (std::size_t n = 0; n < options && found[k].option == 0; ++n) {
+            std::uintptr_t option = 0;
+            if (!note_read(vec[0] + n * 8, &option, sizeof(option)) || option == 0) continue;
+            each_value([&](std::uintptr_t p) {
+                const char* role = p == option + kOptionEffect    ? "effect"
+                                   : p == option + kOptionTrigger ? "trigger"
+                                   : p == option                  ? ""
+                                                                  : nullptr;
+                if (role == nullptr) return true;
+                found[k].option = static_cast<int>(n) + 1;
+                found[k].option_role = role;
+                return false;
+            });
+        }
+    }
+
+    text.put("Owners of script found on the crashed thread's stack, innermost first (a scan of the stack: an entry may "
+             "be left from an earlier call):\n");
+    if (count == 0) {
+        text.put("none found\n");
+        return text.size();
+    }
+    for (std::size_t k = 0; k < count; ++k) {
+        const NoteEntry& e = found[k];
+        char name[kNoteName];
+        if (e.kind == OwnerKind::scripted_trigger) {
+            note_string(e.object + kScriptedKey, name);
+            std::uintptr_t tpl = 0;
+            if (name[0] == '\0' && note_read(e.object + kScriptedTemplate, &tpl, sizeof(tpl)) && tpl != 0) {
+                note_string(tpl + kTemplateKey, name);
+            }
+        } else {
+            note_string(e.object + static_cast<std::uintptr_t>(e.name), name);
+        }
+        text.put(kind_key(e.kind));
+        text.put(" ");
+        text.put(name[0] != '\0' ? name : "(no name)");
+        for (std::size_t r = 0; r < e.role_count; ++r) {
+            text.put(r == 0 ? ": " : ", ");
+            text.put(e.roles[r]);
+        }
+        if (e.option > 0) {
+            char number[24];
+            std::snprintf(number, sizeof(number), "%soption %d", e.role_count > 0 ? "; " : ": ", e.option);
+            text.put(number);
+            if (*e.option_role != '\0') {
+                text.put(" ");
+                text.put(e.option_role);
+            }
+        }
+        text.put("\n");
+    }
+    return text.size();
 }
 
 }  // namespace script_profiler

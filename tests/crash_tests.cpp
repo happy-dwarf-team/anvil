@@ -6,6 +6,7 @@
 //
 // Usage: anvil_crash_tests              (runs everything)
 //        anvil_crash_tests --child <mode> <dir>   (internal)
+#include "control/anvil_control.h"
 #include "core/changes.hpp"
 #include "core/crash.hpp"
 #include "core/crash_history.hpp"
@@ -16,6 +17,7 @@
 
 #include <windows.h>
 
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -214,6 +216,20 @@ __declspec(noinline) void crash_here() { *g_null = 1; }
 // context stub.
 void crash_in_callback(AnvilCpuContext*, void*) { crash_here(); }
 
+// Notes of the child's plugins: one says whether rsp is in the stack it was
+// given, one faults after a line and a half.
+size_t note_rsp(void*, const AnvilControlCrashScope* scope, char* out, size_t capacity) {
+    const auto& c = *static_cast<const CONTEXT*>(scope->context);
+    const bool inside = c.Rsp >= scope->stack_low && c.Rsp < scope->stack_high;
+    const int n = std::snprintf(out, capacity, "rsp %s the stack\n", inside ? "inside" : "outside");
+    return n > 0 ? static_cast<size_t>(n) : 0;
+}
+size_t note_fault(void*, const AnvilControlCrashScope*, char* out, size_t) {
+    std::memcpy(out, "before the fault\nhalf", 21);
+    crash_here();
+    return 21;
+}
+
 // The size of a CONTEXT with every extended state the host enables: what
 // Windows puts on the crashed thread's stack before it calls any handler.
 DWORD exception_context_bytes() {
@@ -344,6 +360,10 @@ int child(const std::string& mode, const fs::path& dir) {
     if (!crash::install(setup, error)) {
         std::printf("install: %s\n", error.c_str());
         return 11;
+    }
+    if (!crash::set_note(plugins.handle("crasher"), note_rsp, nullptr) ||
+        !crash::set_note(plugins.handle("patcher"), note_fault, nullptr)) {
+        return 18;
     }
     // As the game does after Anvil's entry: through its own import.
     const bool keep_running = mode == "survive";
@@ -738,6 +758,25 @@ int main(int argc, char** argv) {
         CHECK(contains(t, "  quiet 1.0.0, loaded, main phase"));
         CHECK(contains(j, "\"modules_involved\": []") && !contains(t, "Through module"));
         CHECK(contains(t, "End of anvil.log:"));
+        CHECK(contains(j, "\"notes\": [],") && !contains(t, "Notes from plugins"));
+
+        // The plugins' notes: their lines under the plugin, a failed note named with what it wrote.
+        const ReportNote notes[2] = {{"quiet", "Owners of script:\nevent a426.2: immediate\r\n\n"},
+                                     {"patcher", "partial \"line\"\n", true, 0xC0000005}};
+        in.notes = notes;
+        in.note_count = 2;
+        json.clear();
+        text.clear();
+        build_report(in, json, text);
+        CHECK(Json::valid(json.view()));
+        CHECK(contains(json.view(), "\"notes\": [\n    {\"plugin\": \"quiet\", \"lines\": [\"Owners of script:\", "
+                                    "\"event a426.2: immediate\"]},\n    {\"plugin\": \"patcher\", \"failed\": "
+                                    "\"0xC0000005\", \"lines\": [\"partial \\\"line\\\"\"]}\n  ],"));
+        CHECK(contains(text.view(), "Notes from plugins (what each plugin adds to the report):\r\n  quiet:\r\n"
+                                    "    Owners of script:\r\n    event a426.2: immediate\r\n  patcher: (its note "
+                                    "failed with exception 0xC0000005; what it wrote before)\r\n    partial \"line\"\r\n"));
+        in.notes = nullptr;
+        in.note_count = 0;
 
         // An access violation in code of no plugin, a plugin on the stack.
         record.ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
@@ -923,6 +962,11 @@ int main(int argc, char** argv) {
         CHECK(contains(r.json, "\"minidump\": \"20"));  // <time>.dmp
         CHECK(contains(r.text, "Verdict: in plugin crasher's code."));
         CHECK(contains(r.text, "Minidump: 20"));
+        CHECK(contains(r.text, "  crasher:\r\n    rsp inside the stack\r\n"));
+        CHECK(contains(r.text, "  patcher: (its note failed with exception 0xC0000005; what it wrote before)\r\n"
+                               "    before the fault\r\n"));
+        CHECK(!contains(r.text, "half"));
+        CHECK(contains(r.json, "{\"plugin\": \"patcher\", \"failed\": \"0xC0000005\""));
         CHECK(r.dump && !r.pending_left);
         explain(r);
     });

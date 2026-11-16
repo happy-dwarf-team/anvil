@@ -16,11 +16,14 @@
 #include <anvil/anvil_game.h>
 #include <anvil/anvil_panel.h>
 
+#include "anvil_control.h"
+
 #include <windows.h>
 #include <intrin.h>
 #include <shlobj.h>
 
 #include <atomic>
+#include <cstddef>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -477,6 +480,18 @@ void republish() {
         nullptr);
 }
 
+// The note in Anvil's crash reports (anvil#426): the owners of script on the
+// crashed thread's stack. Set once at load; read by the crash helper thread.
+sp::Vtables g_note_vtables;
+std::uintptr_t g_image_low = 0, g_image_high = 0;
+
+std::size_t crash_note(void*, const AnvilControlCrashScope* scope, char* out, std::size_t capacity) {
+    if (scope == nullptr || scope->size < sizeof(AnvilControlCrashScope) || scope->context == nullptr) return 0;
+    const auto& context = *static_cast<const CONTEXT*>(scope->context);
+    return sp::write_crash_note(g_note_vtables, g_image_low, g_image_high, context.Rsp, scope->stack_high, out,
+                                capacity);
+}
+
 std::uintptr_t vtable(const anvil::Host& host, const auto& symbol) {
     return host.present(symbol) ? reinterpret_cast<std::uintptr_t>(host.address(symbol)) : 0;
 }
@@ -497,6 +512,14 @@ struct ScriptProfiler : anvil::Plugin {
         v.church_aspect = vtable(host, sym::church_aspect_vtable);
         v.scripted_trigger = vtable(host, sym::scripted_trigger_vtable);
         g_resolver = std::make_unique<sp::Resolver>(v);
+        g_note_vtables = v;
+        g_image_low = g_base;
+        g_image_high = g_base + host.game().image_size;
+        const auto* core = host.service<AnvilControlService>(ANVIL_CONTROL_SERVICE, ANVIL_CONTROL_VERSION);
+        if (core != nullptr && core->size >= offsetof(AnvilControlService, set_crash_note) + sizeof(core->set_crash_note) &&
+            core->set_crash_note(host.self(), &crash_note, nullptr) == ANVIL_OK) {
+            host.info("crash reports name the owners of script found on the crashed thread's stack");
+        }
         if (host.present(sym::church_aspect_db_site)) g_aspect_db = host.data(sym::aspect_db);
         g_measure_days = cfg::days.get();
         g_top = cfg::rows.get();
