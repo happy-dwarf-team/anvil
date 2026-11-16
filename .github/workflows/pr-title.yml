@@ -12,7 +12,25 @@ permissions:
 jobs:
   conventional-title:
     runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: write
     steps:
+      # Dependabot guesses the title style from the history and writes "Bump" in
+      # some repositories. On its own pull requests, lower the subject's first
+      # letter before the check, which reads the current title from the API.
+      - name: Lowercase Dependabot's subject
+        if: github.event.pull_request.user.login == 'dependabot[bot]'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}
+        run: |
+          title=$(gh api "$PR_URL" --jq .title)
+          fixed=$(printf '%s' "$title" | sed -E 's/^([a-z]+(\([^)]*\))?!?: )([A-Z])/\1\L\3/')
+          if [ "$fixed" != "$title" ]; then
+            gh api -X PATCH "$PR_URL" -f title="$fixed" --silent
+            echo "Title: $fixed"
+          fi
+
       - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
         env:
           GITHUB_TOKEN: ${{ github.token }}
