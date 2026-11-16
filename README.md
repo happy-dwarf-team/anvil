@@ -120,6 +120,10 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
 - Each start writes `anvil/anvil.log`: what was loaded, what was skipped and why.
 - A crash writes a report to `anvil/crashes/` (the last 10 are kept): where it
   happened and which plugins were involved, with each plugin's `issues` link.
+  From Anvil 1.25 it also lists the notes of Anvil's own plugins: the one of
+  `anvil-script-profiler` names the events, decisions and other script found
+  on the crashed thread's stack
+  ([docs/script-profiler.md](docs/script-profiler.md#crash-reports)).
   After two starts in a row that ended before the game was ready, the next
   start loads only `anvil-game` and `anvil-overlay` (safe mode), and the
   overlay says why.
