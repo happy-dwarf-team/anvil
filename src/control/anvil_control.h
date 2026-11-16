@@ -455,10 +455,12 @@ typedef struct AnvilControlService {
 
     /* --- notes in crash reports (appended in 1.25, anvil#426) --- */
     /* The plugin `self` adds a note to every crash report of this process;
-     * NULL removes it. One note per plugin, four plugins at most:
-     * ALREADY_EXISTS when four other plugins hold one, INVALID_ARGUMENT for a
-     * handle that is not a plugin's. The core calls the note only while the
-     * plugin is loaded or loading. */
+     * NULL removes it. One note per plugin: the plugin's handle and its
+     * modules' handles share it, and the last one set counts. Four plugins at
+     * most, and a plugin that ever set a note keeps its place:
+     * ALREADY_EXISTS when four other plugins did, INVALID_ARGUMENT for a
+     * handle without a plugin. The core calls the note only while the
+     * plugin is loaded or loading, after the report is first written. */
     AnvilResult (*set_crash_note)(AnvilPlugin *self, AnvilControlCrashNote note, void *context);
 } AnvilControlService;
 

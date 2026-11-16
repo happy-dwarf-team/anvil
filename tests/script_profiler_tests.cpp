@@ -492,6 +492,8 @@ void owner_tests() {
         stack[11] = reinterpret_cast<std::uintptr_t>(w.option_effect(1));
         stack[12] = reinterpret_cast<std::uintptr_t>(w.trigger());  // a second block of the same event
         stack[13] = reinterpret_cast<std::uintptr_t>(w.scripted);
+        stack[14] = reinterpret_cast<std::uintptr_t>(w.option_effect(0));  // an outer option: the inner one counts
+        stack[15] = reinterpret_cast<std::uintptr_t>(&stack[2]);           // into the stack: skipped
         const auto rsp = reinterpret_cast<std::uintptr_t>(&stack[0]);
         const auto high = reinterpret_cast<std::uintptr_t>(&stack[16]);
         char out[1024];
