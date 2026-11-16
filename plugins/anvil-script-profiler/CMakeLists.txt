@@ -1,5 +1,7 @@
 # anvil-script-profiler: built through the AnvilPlugin package like any plugin
-# repository; within the Anvil tree the package is already loaded.
+# repository; within the Anvil tree the package is already loaded. It also
+# reads the core's private anvil.control header (src/control), so it builds
+# only inside the Anvil tree.
 cmake_minimum_required(VERSION 3.25)
 project(anvil_script_profiler LANGUAGES CXX)
 
@@ -10,4 +12,6 @@ endif()
 anvil_add_plugin(anvil_script_profiler SOURCES src/plugin.cpp src/recorder.cpp src/owners.cpp src/report.cpp
     src/texts.cpp)
 target_compile_definitions(anvil_script_profiler PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+# anvil.control, for the note in crash reports (anvil#426).
+target_include_directories(anvil_script_profiler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../src/control)
 target_link_libraries(anvil_script_profiler PRIVATE shell32 ole32)

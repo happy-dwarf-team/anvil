@@ -481,6 +481,36 @@ void owner_tests() {
         sp::Resolver cold(v);
         CHECK(cold.owner_of(w.trigger(), sp::Kind::trigger, false).kind == sp::OwnerKind::none);
     });
+    run("crash note: owners on a stack, innermost first, an option by its effect, nothing for strangers", [&] {
+        // A stack as the crashed thread's: the immediate block, a decision object, then an option's effect.
+        std::uintptr_t stack[16] = {};
+        stack[1] = reinterpret_cast<std::uintptr_t>(w.immediate());
+        stack[3] = 42;
+        stack[4] = reinterpret_cast<std::uintptr_t>(w.loose);
+        stack[6] = reinterpret_cast<std::uintptr_t>(w.decision);
+        stack[9] = reinterpret_cast<std::uintptr_t>(w.potential());  // the same decision again: one line
+        stack[11] = reinterpret_cast<std::uintptr_t>(w.option_effect(1));
+        stack[12] = reinterpret_cast<std::uintptr_t>(w.trigger());  // a second block of the same event
+        stack[13] = reinterpret_cast<std::uintptr_t>(w.scripted);
+        const auto rsp = reinterpret_cast<std::uintptr_t>(&stack[0]);
+        const auto high = reinterpret_cast<std::uintptr_t>(&stack[16]);
+        char out[1024];
+        const std::size_t n = sp::write_crash_note(v, 0, 0, rsp, high, out, sizeof(out));
+        const std::string note(out, n);
+        CHECK(note.find("innermost first") != std::string::npos);
+        const std::size_t event = note.find("\nevent test_events.1: immediate, trigger; option 2 effect\n");
+        const std::size_t decision = note.find("\ndecision my_decision_with_a_long_name: potential\n");
+        const std::size_t scripted = note.find("\nscripted_trigger my_scripted\n");
+        CHECK(event != std::string::npos && decision != std::string::npos && scripted != std::string::npos);
+        CHECK(event < decision && decision < scripted);
+        CHECK(note.find("\ndecision ", decision + 1) == std::string::npos);  // one line for one decision
+        if (event == std::string::npos || decision == std::string::npos) std::printf("    note: %s\n", note.c_str());
+        // Values in the skipped range are not objects; an empty stack names none; the text is cut at capacity.
+        const std::size_t skipped = sp::write_crash_note(v, 0, ~std::uintptr_t{0}, rsp, high, out, sizeof(out));
+        CHECK(std::string(out, skipped).find("\nnone found\n") != std::string::npos);
+        CHECK(std::string(out, sp::write_crash_note(v, 0, 0, 0, 0, out, sizeof(out))).find("none found") != std::string::npos);
+        CHECK(sp::write_crash_note(v, 0, 0, rsp, high, out, 10) == 10);
+    });
     run("report: blocks merge by owner and role; blocks without an owner by caller in the CSV only", [&] {
         sp::Resolver r(v);
         r.owner_of(w.trigger(), sp::Kind::trigger);

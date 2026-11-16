@@ -88,6 +88,15 @@ private:
     std::unordered_set<const void*> expanded_;      // owners whose held blocks are in held_
 };
 
+// The profiler's note in Anvil's crash reports (anvil#426): the owners whose
+// blocks or objects are on the crashed thread's stack between `rsp` and
+// `stack_high`, innermost first, as lines of text into `out`; returns the
+// bytes written. It allocates nothing, takes no lock and reads memory only
+// with ReadProcessMemory, as a note must (anvil.control set_crash_note).
+// Values in [skip_low, skip_high) (eu4.exe's image) are not taken as objects.
+std::size_t write_crash_note(const Vtables& vtables, std::uintptr_t skip_low, std::uintptr_t skip_high,
+                             std::uintptr_t rsp, std::uintptr_t stack_high, char* out, std::size_t capacity);
+
 // Guarded reads of game memory.
 bool read_memory(std::uintptr_t at, void* out, std::size_t size) noexcept;
 // An MSVC std::string as eu4.exe lays it out; "" when it does not look like one.

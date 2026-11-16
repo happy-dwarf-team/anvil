@@ -140,6 +140,30 @@ Most of what is left: the AI's decision checks (`CEU3AI::ExecuteDecisions`), `OR
   time they measure.
 - The window's texts are drafts in every language but English, not yet checked by native speakers.
 
+## Crash reports
+
+Since 1.25 ([#426](https://github.com/happy-dwarf-team/anvil/issues/426)) the profiler also adds a note to
+Anvil's crash reports, whether or not a span runs, through the core's `anvil.control` (design §12). The
+note lists the owners it finds on the crashed thread's stack, innermost first, at most eight, such as
+`event flavor_rus.12: immediate; option 2 effect` or `decision form_germany: allow`, each with every block of
+the owner it found.
+
+- **How:** it reads up to 256 KiB of the stack above the crash. A value counts when it points at an owner (the
+  owner's vtable at +0) or at one of its blocks (the vtable at the block's offset in the owner). For an event
+  it found, the innermost value that points at one of the event's options, its trigger or its effect names the
+  option. The names come from the same
+  member offsets as the profiler's lists, and owners without a hook in the profiler (a casus belli, a
+  triggered modifier) are found the same way.
+- **What it costs:** nothing until a crash. Then the helper thread reads the stack a page at a time and
+  checks each value that looks like a pointer with up to 25 small reads, before the report is written; it was
+  not timed. A fault in the note is the note's own: it does not count as an earlier exception of the report.
+- **Limits:**
+  - It is a scan, so a slot can hold a pointer left from an earlier call, and the note says so.
+  - An owner the game reaches only through registers it did not save, or through a frame deeper than
+    256 KiB, is missed.
+  - A trigger or effect that no owner holds directly (an `OR` run on its own, the AI's decision checks)
+    names only the owners above it.
+
 ## For the lab: the control file
 
 For repeatable measurements without the window (the lab's overhead series), the environment variable

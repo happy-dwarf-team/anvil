@@ -9,7 +9,8 @@
  * 0011); since 1.23 the settings of modules, the writes of switches and
  * opt-ins, the record of the last start, the multiplayer lock, and the
  * modules, settings and dependencies of plugins that are off (ADR 0013);
- * since 1.24 the next start's plan of each plugin (ADR 0014).
+ * since 1.24 the next start's plan of each plugin (ADR 0014); since 1.25 the
+ * plugins' notes in crash reports (anvil#426).
  * Fields and functions are only appended: a caller checks `size` before it
  * reads a later one.
  *
@@ -47,6 +48,23 @@ extern "C" {
 
 /* Receives a text that is valid only during the call. */
 typedef void (*AnvilControlSink)(void *context, const char *text, size_t size);
+
+/* The crashed thread, for a plugin's note in a crash report (set_crash_note). */
+typedef struct AnvilControlCrashScope {
+    uint32_t size;
+    const void *context;  /* its CONTEXT at the exception */
+    uintptr_t stack_low;  /* its stack: [stack_low, stack_high) */
+    uintptr_t stack_high;
+} AnvilControlCrashScope;
+
+/* Writes the note as lines of UTF-8 text, each ended by '\n', into `out`
+ * (`capacity` bytes, no terminator needed) and returns the bytes written.
+ * It runs on the crash helper thread while the crashed thread waits: it must
+ * not allocate, take a lock, log or call into the game, and it reads game
+ * memory only in ways that cannot fault (ReadProcessMemory). A fault in it
+ * costs only its own note, which the report then names as failed. */
+typedef size_t (*AnvilControlCrashNote)(void *context, const AnvilControlCrashScope *scope, char *out,
+                                        size_t capacity);
 
 typedef struct AnvilControlStatus {
     uint32_t size;
@@ -434,6 +452,14 @@ typedef struct AnvilControlService {
      * shadows), or without a plan (Anvil is off). */
     int (*next_start)(const char *plugin_id, AnvilControlNextStart *out);
     int (*mod_plugin_next_start)(uint32_t index, AnvilControlNextStart *out);
+
+    /* --- notes in crash reports (appended in 1.25, anvil#426) --- */
+    /* The plugin `self` adds a note to every crash report of this process;
+     * NULL removes it. One note per plugin, four plugins at most:
+     * ALREADY_EXISTS when four other plugins hold one, INVALID_ARGUMENT for a
+     * handle that is not a plugin's. The core calls the note only while the
+     * plugin is loaded or loading. */
+    AnvilResult (*set_crash_note)(AnvilPlugin *self, AnvilControlCrashNote note, void *context);
 } AnvilControlService;
 
 #ifdef __cplusplus

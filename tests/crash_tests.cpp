@@ -6,6 +6,7 @@
 //
 // Usage: anvil_crash_tests              (runs everything)
 //        anvil_crash_tests --child <mode> <dir>   (internal)
+#include "control/anvil_control.h"
 #include "core/changes.hpp"
 #include "core/crash.hpp"
 #include "core/crash_history.hpp"
@@ -16,6 +17,7 @@
 
 #include <windows.h>
 
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -214,6 +216,21 @@ __declspec(noinline) void crash_here() { *g_null = 1; }
 // context stub.
 void crash_in_callback(AnvilCpuContext*, void*) { crash_here(); }
 
+// Notes of the child's plugins: one says whether rsp is in the stack it was
+// given, one faults after a line and a half.
+size_t note_rsp(void*, const AnvilControlCrashScope* scope, char* out, size_t capacity) {
+    const auto& c = *static_cast<const CONTEXT*>(scope->context);
+    const bool inside = c.Rsp >= scope->stack_low && c.Rsp < scope->stack_high;
+    // A byte of cp1252 (as in a game's key) must not reach the JSON as it is.
+    const int n = std::snprintf(out, capacity, "rsp %s the stack\ncaf\xE9\n", inside ? "inside" : "outside");
+    return n > 0 ? static_cast<size_t>(n) : 0;
+}
+size_t note_fault(void*, const AnvilControlCrashScope*, char* out, size_t) {
+    std::memcpy(out, "before the fault\nhalf", 21);
+    crash_here();
+    return 21;
+}
+
 // The size of a CONTEXT with every extended state the host enables: what
 // Windows puts on the crashed thread's stack before it calls any handler.
 DWORD exception_context_bytes() {
@@ -344,6 +361,10 @@ int child(const std::string& mode, const fs::path& dir) {
     if (!crash::install(setup, error)) {
         std::printf("install: %s\n", error.c_str());
         return 11;
+    }
+    if (!crash::set_note(plugins.handle("crasher"), note_rsp, nullptr) ||
+        !crash::set_note(plugins.handle("patcher"), note_fault, nullptr)) {
+        return 18;
     }
     // As the game does after Anvil's entry: through its own import.
     const bool keep_running = mode == "survive";
@@ -738,6 +759,40 @@ int main(int argc, char** argv) {
         CHECK(contains(t, "  quiet 1.0.0, loaded, main phase"));
         CHECK(contains(j, "\"modules_involved\": []") && !contains(t, "Through module"));
         CHECK(contains(t, "End of anvil.log:"));
+        CHECK(contains(j, "\"notes\": [],") && !contains(t, "Notes from plugins"));
+
+        // The plugins' notes: their lines under the plugin, a failed note named with what it wrote.
+        const ReportNote notes[2] = {{"quiet", "Owners of script:\nevent a426.2: immediate\r\n\n"},
+                                     {"patcher", "partial \"line\"\n", true, 0xC0000005}};
+        in.notes = notes;
+        in.note_count = 2;
+        json.clear();
+        text.clear();
+        build_report(in, json, text);
+        CHECK(Json::valid(json.view()));
+        CHECK(contains(json.view(), "\"notes\": [\n    {\"plugin\": \"quiet\", \"lines\": [\"Owners of script:\", "
+                                    "\"event a426.2: immediate\"]},\n    {\"plugin\": \"patcher\", \"failed\": "
+                                    "\"0xC0000005\", \"lines\": [\"partial \\\"line\\\"\"]}\n  ],"));
+        CHECK(contains(text.view(), "Notes from plugins (what each plugin adds to the report):\r\n  quiet:\r\n"
+                                    "    Owners of script:\r\n    event a426.2: immediate\r\n  patcher: (its note "
+                                    "failed with exception 0xC0000005; what it wrote before)\r\n    partial \"line\"\r\n"));
+        in.notes = nullptr;
+        in.note_count = 0;
+
+        // The table of notes: four owners at most; an owner keeps its slot, may change its note or clear it.
+        {
+            static char owners[5];
+            const auto owner = [](int i) { return reinterpret_cast<const AnvilPlugin*>(&owners[i]); };
+            const auto note = [](void*, const AnvilControlCrashScope*, char*, size_t) -> size_t { return 0; };
+            const auto other = [](void*, const AnvilControlCrashScope*, char*, size_t) -> size_t { return 1; };
+            CHECK(crash::set_note(owner(4), nullptr, nullptr));  // nothing to clear
+            for (int i = 0; i < 4; ++i) CHECK(crash::set_note(owner(i), note, nullptr));
+            CHECK(!crash::set_note(owner(4), note, nullptr));
+            CHECK(crash::set_note(owner(1), other, &owners[1]));
+            CHECK(crash::set_note(owner(1), nullptr, nullptr));
+            CHECK(!crash::set_note(owner(4), note, nullptr));  // a cleared slot stays its owner's
+            CHECK(!crash::set_note(nullptr, note, nullptr));
+        }
 
         // An access violation in code of no plugin, a plugin on the stack.
         record.ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
@@ -923,6 +978,20 @@ int main(int argc, char** argv) {
         CHECK(contains(r.json, "\"minidump\": \"20"));  // <time>.dmp
         CHECK(contains(r.text, "Verdict: in plugin crasher's code."));
         CHECK(contains(r.text, "Minidump: 20"));
+        CHECK(contains(r.text, "  crasher:\r\n    rsp inside the stack\r\n    caf?\r\n"));
+        // The note's own fault, on the helper thread, is not an earlier exception: only the crash is.
+        const size_t earlier = r.json.find("\"earlier_exceptions\": [");
+        CHECK(earlier != std::string::npos);
+        if (earlier != std::string::npos) {
+            const std::string list = r.json.substr(earlier, r.json.find(']', earlier) - earlier);
+            size_t entries = 0;
+            for (size_t at = list.find("{\"code\""); at != std::string::npos; at = list.find("{\"code\"", at + 1)) ++entries;
+            CHECK(entries == 1);
+        }
+        CHECK(contains(r.text, "  patcher: (its note failed with exception 0xC0000005; what it wrote before)\r\n"
+                               "    before the fault\r\n"));
+        CHECK(!contains(r.text, "half"));
+        CHECK(contains(r.json, "{\"plugin\": \"patcher\", \"failed\": \"0xC0000005\""));
         CHECK(r.dump && !r.pending_left);
         explain(r);
     });

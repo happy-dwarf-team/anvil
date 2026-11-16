@@ -1,6 +1,7 @@
 #include "control.hpp"
 
 #include "anvil_toml_edit.hpp"
+#include "crash.hpp"
 #include "game_build.hpp"
 #include "log.hpp"
 #include "plugin_set.hpp"
@@ -314,6 +315,11 @@ int svc_mod_plugin_next_start(uint32_t index, AnvilControlNextStart* out) {
     return fill_sized(out, [&](AnvilControlNextStart& full) { return g_control->mod_plugin_next_start(index, full); });
 }
 
+AnvilResult svc_set_crash_note(AnvilPlugin* self, AnvilControlCrashNote note, void* context) {
+    if (self == nullptr || self->record == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
+    return crash::set_note(self, note, context) ? ANVIL_OK : ANVIL_ERROR_ALREADY_EXISTS;
+}
+
 const AnvilControlService kService{
     sizeof(AnvilControlService),
     svc_status,
@@ -348,6 +354,7 @@ const AnvilControlService kService{
     svc_requirement,
     svc_next_start,
     svc_mod_plugin_next_start,
+    svc_set_crash_note,
 };
 
 // The reason as a message for the overlay (i18n::serialize).
