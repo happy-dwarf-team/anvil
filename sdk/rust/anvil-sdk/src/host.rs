@@ -310,22 +310,37 @@ impl Host {
 
     /// The running game executable.
     pub fn game(&self) -> GameInfo {
-        // SAFETY: the host's game info lives for the process.
-        match unsafe { self.table.game.as_ref() } {
-            Some(game) => GameInfo {
-                // SAFETY: as above; build_id and sha256 may be null.
-                build_id: unsafe { static_str(game.build_id) },
-                image_base: game.image_base,
-                image_size: game.image_size,
-                // SAFETY: as above.
-                sha256: unsafe { static_str(game.sha256) },
-            },
-            None => GameInfo {
+        let game = self.table.game;
+        if game.is_null() {
+            return GameInfo {
                 build_id: None,
                 image_base: 0,
                 image_size: 0,
                 sha256: None,
-            },
+            };
+        }
+        // SAFETY: the host's game info lives for the process. Only sha256
+        // changes after load: the core stores it atomically once the hash is
+        // verified, on another thread, so it is read atomically through a raw
+        // pointer (a reference to the struct would claim it does not change).
+        let sha256 = unsafe {
+            AtomicPtr::from_ptr(
+                ptr::addr_of!((*game).sha256)
+                    .cast_mut()
+                    .cast::<*mut c_char>(),
+            )
+            .load(Ordering::Acquire)
+        };
+        // SAFETY: as above; the other fields are set before any plugin loads.
+        let (build_id, image_base, image_size) =
+            unsafe { ((*game).build_id, (*game).image_base, (*game).image_size) };
+        GameInfo {
+            // SAFETY: as above; build_id and sha256 may be null.
+            build_id: unsafe { static_str(build_id) },
+            image_base,
+            image_size,
+            // SAFETY: as above.
+            sha256: unsafe { static_str(sha256.cast_const()) },
         }
     }
 
