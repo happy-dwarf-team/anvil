@@ -1077,6 +1077,8 @@ struct FakeCommands final : anvil_game::CommandBackend {
         return make("move " + hex(u.object) + " " + std::to_string(province) + (clear_previous ? "" : " queue"));
     }
     std::vector<int32_t> illegal;  // provinces the fake's IsValid refuses
+    int32_t province_limit = 4942;  // as vanilla's map: ids 1 .. 4941
+    bool province_exists(int32_t province) override { return province > 0 && province < province_limit; }
     // Map areas by province (0: none), and the areas the game says no to.
     std::map<int32_t, uintptr_t> areas;
     std::vector<uintptr_t> refused_areas;
@@ -1749,6 +1751,14 @@ int main(int argc, char** argv) {
         CHECK(game.submitted.size() == submitted && game.destroyed.size() == 2);
         c.province = 0;
         CHECK(refused(c, ANVIL_ERROR_INVALID_ARGUMENT));
+        // A province the map does not have (a mod's 5075 on a 4942-province map): the game
+        // would index its province array with it unchecked, so nothing is made.
+        for (const int32_t value : {4942, 5075, INT32_MAX}) {
+            c.province = value;
+            CHECK(refused(c, ANVIL_ERROR_NOT_FOUND));
+        }
+        c.province = 4941;
+        CHECK(poster.post(game, self, &c, &out) == ANVIL_OK && out.posted == 2);
         c.province = 53;
         c.flags = ANVIL_GAME_COMMAND_START;
         CHECK(refused(c, ANVIL_ERROR_INVALID_ARGUMENT));
