@@ -24,10 +24,16 @@
 //! Host and service calls are safe. What reaches the game's memory by address
 //! or puts raw bytes and pointers into it stays an `unsafe fn` with its
 //! contract: calling a hook's [`next`](FunctionHook::next) (the generated
-//! function types are `unsafe extern "C" fn`), [`Host::function`],
-//! [`Host::data`], writing the mid-hook context ([`Cpu::regs_mut`]), byte
-//! patches, pointer swaps, call redirects, import replacements and changes at
-//! raw addresses.
+//! function types are `unsafe extern "C" fn`), [`Host::hook`] (a symbol id is
+//! a plain `u32`, so the caller ties it to its `sym::<Name>Fn`),
+//! [`Host::function`], [`Host::data`], writing the mid-hook context
+//! ([`Cpu::regs_mut`]), byte patches, pointer swaps, call redirects, import
+//! replacements, changes at raw addresses, and publishing a raw payload
+//! ([`Host::publish_raw`]).
+//!
+//! Service tables are [`Table`]s: a provider older than this crate has a
+//! shorter table, and the crate reads a function only when the table's `size`
+//! covers it, never through a reference to the whole table.
 //!
 //! # A plugin
 //!
@@ -66,17 +72,27 @@
 
 pub use anvil_sys as sys;
 
-/// The function `$field` of a service table, when the table's `size` covers
-/// it (the `ANVIL_*_HAS` macros of the C headers); else `Unsupported`.
+/// The field `$field` of a [`Table`], when the provider's `size` covers it
+/// (the `ANVIL_*_HAS` macros of the C headers); else `None`. It reads through
+/// the table's pointer and never makes a `&$ty`.
+macro_rules! field {
+    ($table:expr, $ty:ty, $field:ident) => {{
+        let table: $crate::Table<$ty> = $table;
+        // SAFETY: the offset and the type of a field of $ty.
+        unsafe {
+            table.read_field(
+                ::core::mem::offset_of!($ty, $field),
+                $crate::table::field_type::<$ty, _>(|t| &t.$field),
+            )
+        }
+    }};
+}
+
+/// The function `$field` of a [`Table`], when the provider's `size` covers
+/// it and the function is there; else `Unsupported`.
 macro_rules! function {
     ($table:expr, $ty:ty, $field:ident) => {{
-        let table: &$ty = $table;
-        let present = table.size as usize
-            >= ::core::mem::offset_of!($ty, $field) + ::core::mem::size_of_val(&table.$field);
-        $crate::error::need(
-            if present { table.$field } else { None },
-            stringify!($field),
-        )
+        $crate::error::need(field!($table, $ty, $field).flatten(), stringify!($field))
     }};
 }
 
@@ -87,6 +103,7 @@ mod event;
 mod fnptr;
 mod host;
 mod panic;
+pub(crate) mod table;
 mod text;
 
 pub mod benchmark;
@@ -110,6 +127,7 @@ pub use event::{Event, Payload, PLUGINS_LOADED, RESUMED, SUSPENDED};
 pub use fnptr::FnPtr;
 pub use host::{GameInfo, Host, Key, LogLevel};
 pub use panic::catch_panic;
+pub use table::Table;
 pub use text::Tag;
 
 /// A plugin: one value, created by [`plugin!`] when Anvil loads the DLL and
@@ -151,7 +169,7 @@ pub mod __private {
         AnvilHost, AnvilPlugin, AnvilResult, ANVIL_API_VERSION, ANVIL_ERROR_INTERNAL,
         ANVIL_ERROR_INVALID_ARGUMENT, ANVIL_ERROR_UNSUPPORTED, ANVIL_OK,
     };
-    use crate::{host, panic, Host, LogLevel, Plugin};
+    use crate::{host, panic, Host, LogLevel, Plugin, Table};
 
     /// What `plugin!` exports.
     ///
@@ -162,11 +180,12 @@ pub mod __private {
         table: *const AnvilHost,
         plugin: *mut AnvilPlugin,
     ) -> AnvilResult {
-        // SAFETY: see the contract above.
-        let Some(table) = (unsafe { table.as_ref() }) else {
+        // SAFETY: see the contract above; only `size` is read here, and
+        // `Table` reads no field its size does not cover.
+        let Some(table) = (unsafe { Table::from_raw(table) }) else {
             return ANVIL_ERROR_INVALID_ARGUMENT;
         };
-        if table.api_version != ANVIL_API_VERSION
+        if field!(table, AnvilHost, api_version) != Some(ANVIL_API_VERSION)
             || !host::covers_api_2_0(table)
             || plugin.is_null()
         {

@@ -17,6 +17,7 @@ use crate::sys::{
     ANVIL_GAME_SESSION_ENDED, ANVIL_GAME_SESSION_STARTED, ANVIL_GAME_WAR_ENDED,
     ANVIL_GAME_WAR_STARTED,
 };
+use crate::table::Table;
 use crate::text::{owned_string, Tag};
 
 /// The service's name.
@@ -382,13 +383,13 @@ pub const PENDING_EVENT: Event<PendingChange> = unsafe { Event::new(c"anvil-game
 /// The `anvil-game.game` service.
 #[derive(Clone, Copy)]
 pub struct Game {
-    table: &'static AnvilGameService,
+    table: Table<AnvilGameService>,
 }
 
 impl fmt::Debug for Game {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Game")
-            .field("size", &self.table.size)
+            .field("size", &self.table.size())
             .finish()
     }
 }
@@ -415,7 +416,7 @@ impl Game {
     }
 
     /// The C table, for what this crate does not wrap.
-    pub fn c_api(&self) -> &'static AnvilGameService {
+    pub fn c_api(&self) -> Table<AnvilGameService> {
         self.table
     }
 

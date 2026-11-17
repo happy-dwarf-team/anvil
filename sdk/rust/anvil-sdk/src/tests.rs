@@ -1158,7 +1158,7 @@ fn an_error_from_load_is_its_result_and_a_log_line() {
     struct Refuses;
     impl Plugin for Refuses {
         fn load(host: &mut Host) -> crate::Result<Self> {
-            host.hook(&HOOK, 99, add_two)?;
+            unsafe { host.hook(&HOOK, 99, add_two) }?;
             Ok(Refuses)
         }
     }
@@ -1204,10 +1204,10 @@ fn a_function_hook_gets_next_and_holds_one_change() {
     assert_eq!(load::<Quiet>(table), ANVIL_OK);
     let host = Host::current().unwrap();
     assert!(HOOK.next().is_none());
-    host.hook(&HOOK, 1, detour).unwrap();
+    unsafe { host.hook(&HOOK, 1, detour) }.unwrap();
     assert!(HOOK.is_active());
     assert_eq!(unsafe { detour(4) }, 50);
-    let again = host.hook(&HOOK, 1, detour).unwrap_err();
+    let again = unsafe { host.hook(&HOOK, 1, detour) }.unwrap_err();
     assert_eq!(again.code(), ErrorCode::InvalidArgument);
     HOOK.remove().unwrap();
     assert!(!HOOK.is_active());
@@ -2187,7 +2187,7 @@ fn a_module_is_a_host_of_its_own_handle() {
     let (_guard, table) = fake_host();
     let mut with_modules = *table;
     with_modules.module = Some(fake_module);
-    let host = Host::from_parts(Box::leak(Box::new(with_modules)), SELF);
+    let host = Host::from_parts(leak_table(with_modules), SELF);
     let drill = host.module("drill_all").unwrap();
     assert_eq!(drill.raw_plugin(), 0x40D as *mut AnvilPlugin);
     assert_eq!(
@@ -2206,7 +2206,7 @@ fn a_module_is_a_host_of_its_own_handle() {
     // A host table that ends before the field: the call is not there.
     let mut short = with_modules;
     short.size = std::mem::offset_of!(AnvilHost, module) as u32;
-    let old = Host::from_parts(Box::leak(Box::new(short)), SELF);
+    let old = Host::from_parts(leak_table(short), SELF);
     assert_eq!(
         old.module("drill_all").unwrap_err().code(),
         ErrorCode::Unsupported
@@ -2247,4 +2247,39 @@ fn camera_reads_the_view_and_pans() {
     );
     assert!(c.pan(1.0, -0.5).is_ok());
     assert_eq!(c.pan(0.0, 1.0).unwrap_err().code(), ErrorCode::WrongPhase);
+}
+
+/// A host table for the life of the test process, as Anvil keeps its own.
+fn leak_table(table: AnvilHost) -> crate::Table<AnvilHost> {
+    let table: &'static AnvilHost = Box::leak(Box::new(table));
+    unsafe { crate::Table::from_raw(table) }.unwrap()
+}
+
+#[test]
+fn a_shorter_table_is_read_only_as_far_as_its_size() {
+    // An older provider's table: `view` only, and no bytes for `pan` behind it.
+    #[repr(C)]
+    struct OldCamera {
+        size: u32,
+        view: Option<unsafe extern "C" fn(*mut AnvilGameCameraView) -> AnvilResult>,
+    }
+    static OLD: OldCamera = OldCamera {
+        size: std::mem::size_of::<OldCamera>() as u32,
+        view: Some(camera_view),
+    };
+    let table =
+        unsafe { crate::Table::from_raw(ptr::from_ref(&OLD).cast::<AnvilGameCameraService>()) }
+            .unwrap();
+    assert_eq!(table.size() as usize, std::mem::size_of::<OldCamera>());
+    assert!(table.get().is_none());
+    assert!(function!(table, AnvilGameCameraService, view).is_ok());
+    assert_eq!(
+        function!(table, AnvilGameCameraService, pan)
+            .unwrap_err()
+            .code(),
+        ErrorCode::Unsupported
+    );
+    assert!(unsafe { crate::Table::<AnvilGameCameraService>::from_raw(ptr::null()) }.is_none());
+    let full = unsafe { crate::Table::from_raw(ptr::from_ref(&FAKE_CAMERA.0)) }.unwrap();
+    assert!(full.get().is_some());
 }

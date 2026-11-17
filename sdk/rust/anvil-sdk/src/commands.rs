@@ -46,6 +46,7 @@ use crate::sys::{
     ANVIL_GAME_COMMAND_SPLIT, ANVIL_GAME_COMMAND_START, ANVIL_GAME_COMMAND_SUPPRESS_AREA,
     ANVIL_GAME_EXPLORE_CIRCUMNAVIGATE, ANVIL_GAME_EXPLORE_LAND, ANVIL_GAME_EXPLORE_STOP,
 };
+use crate::table::Table;
 use crate::world::UnitRef;
 
 /// The service's name.
@@ -71,7 +72,7 @@ pub struct Posted {
 /// The `anvil-game.commands` service, for this plugin.
 #[derive(Clone, Copy)]
 pub struct Commands {
-    table: &'static AnvilGameCommandsService,
+    table: Table<AnvilGameCommandsService>,
     plugin: *mut AnvilPlugin,
     version: u32,
 }
@@ -86,7 +87,7 @@ unsafe impl Sync for Commands {}
 impl fmt::Debug for Commands {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Commands")
-            .field("size", &self.table.size)
+            .field("size", &self.table.size())
             .finish()
     }
 }
@@ -118,7 +119,7 @@ impl Commands {
     }
 
     /// The C table, for what this crate does not wrap.
-    pub fn c_api(&self) -> &'static AnvilGameCommandsService {
+    pub fn c_api(&self) -> Table<AnvilGameCommandsService> {
         self.table
     }
 

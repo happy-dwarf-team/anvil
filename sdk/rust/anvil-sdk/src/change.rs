@@ -65,7 +65,7 @@ fn remove_handle(handle: Option<NonNull<AnvilChange>>) -> Result<()> {
     let (Some(handle), Some(host)) = (handle, Host::current()) else {
         return Ok(());
     };
-    let Some(remove) = host.c_api().remove else {
+    let Some(remove) = field!(host.c_api(), crate::sys::AnvilHost, remove).flatten() else {
         return Ok(());
     };
     // SAFETY: a handle Anvil gave this plugin; Anvil answers NOT_FOUND for one that is gone.

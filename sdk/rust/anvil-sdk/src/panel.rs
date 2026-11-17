@@ -25,6 +25,7 @@ use crate::sys::{
     AnvilPanel, AnvilPanelRow, AnvilPanelService, ANVIL_PANEL_BUTTON, ANVIL_PANEL_SEPARATOR,
     ANVIL_PANEL_SERVICE_VERSION, ANVIL_PANEL_TEXT,
 };
+use crate::table::Table;
 use crate::text::{c_string, static_str};
 
 /// The service's name.
@@ -76,13 +77,13 @@ impl<'a> Row<'a> {
 /// The `anvil-overlay.panel` service.
 #[derive(Clone, Copy)]
 pub struct Panels {
-    table: &'static AnvilPanelService,
+    table: Table<AnvilPanelService>,
 }
 
 impl fmt::Debug for Panels {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Panels")
-            .field("size", &self.table.size)
+            .field("size", &self.table.size())
             .finish()
     }
 }
@@ -96,7 +97,7 @@ impl Panels {
     }
 
     /// The C table, for what this crate does not wrap.
-    pub fn c_api(&self) -> &'static AnvilPanelService {
+    pub fn c_api(&self) -> Table<AnvilPanelService> {
         self.table
     }
 
@@ -137,7 +138,7 @@ impl Panels {
 /// A panel. It is `Copy`: the overlay keeps it until the process ends.
 #[derive(Clone, Copy)]
 pub struct Panel {
-    table: &'static AnvilPanelService,
+    table: Table<AnvilPanelService>,
     raw: NonNull<AnvilPanel>,
 }
 

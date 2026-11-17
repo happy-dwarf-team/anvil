@@ -50,7 +50,11 @@ impl<P: Payload> fmt::Debug for Event<P> {
 /// handler.
 ///
 /// # Safety
-/// `read` must accept exactly the payloads its events publish.
+/// `read` must accept exactly the payloads its events publish, and null (an
+/// event published without a payload, as [`Host::publish`] does), for which
+/// it reads nothing.
+///
+/// [`Host::publish`]: crate::Host::publish
 pub unsafe trait Payload: Sized + 'static {
     /// The payload behind `raw`; `None` when it cannot be read (e.g. null).
     ///

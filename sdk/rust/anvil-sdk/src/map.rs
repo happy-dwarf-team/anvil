@@ -28,6 +28,7 @@ use crate::sys::{
     ANVIL_MAP_MODES_SERVICE_VERSION, ANVIL_MAP_NO_COLOR, ANVIL_MAP_TAB_1, ANVIL_MAP_TAB_2,
     ANVIL_MAP_TAB_3, ANVIL_MAP_TAB_4, ANVIL_MAP_TAB_DEFAULT,
 };
+use crate::table::Table;
 use crate::text::{c_string, static_str};
 
 /// The service's name.
@@ -167,13 +168,13 @@ pub const HIDDEN: Event<ModeChange> = unsafe { Event::new(c"anvil-map.hidden") }
 /// The `anvil-map.modes` service.
 #[derive(Clone, Copy)]
 pub struct MapModes {
-    table: &'static AnvilMapModesService,
+    table: Table<AnvilMapModesService>,
 }
 
 impl fmt::Debug for MapModes {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MapModes")
-            .field("size", &self.table.size)
+            .field("size", &self.table.size())
             .finish()
     }
 }
@@ -238,7 +239,7 @@ impl MapModes {
     }
 
     /// The C table, for what this crate does not wrap.
-    pub fn c_api(&self) -> &'static AnvilMapModesService {
+    pub fn c_api(&self) -> Table<AnvilMapModesService> {
         self.table
     }
 

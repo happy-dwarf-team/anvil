@@ -32,6 +32,7 @@ use crate::sys::{
     ANVIL_INPUT_GAME_UNKNOWN, ANVIL_INPUT_OVERLAY_KEYBOARD, ANVIL_INPUT_OVERLAY_MOUSE,
     ANVIL_INPUT_OVERLAY_PANEL, ANVIL_INPUT_REPEAT, ANVIL_INPUT_SERVICE_VERSION,
 };
+use crate::table::Table;
 
 /// The service's name.
 pub const SERVICE: &std::ffi::CStr = c"anvil-overlay.input";
@@ -102,13 +103,13 @@ pub struct Press {
 /// The `anvil-overlay.input` service.
 #[derive(Clone, Copy)]
 pub struct Input {
-    table: &'static AnvilInputService,
+    table: Table<AnvilInputService>,
 }
 
 impl fmt::Debug for Input {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Input")
-            .field("size", &self.table.size)
+            .field("size", &self.table.size())
             .finish()
     }
 }
@@ -116,7 +117,7 @@ impl fmt::Debug for Input {
 /// A binding. It is `Copy`: the overlay keeps it until the process ends.
 #[derive(Clone, Copy)]
 pub struct Binding {
-    table: &'static AnvilInputService,
+    table: Table<AnvilInputService>,
     raw: NonNull<AnvilInputBinding>,
 }
 
@@ -167,7 +168,7 @@ impl Input {
     }
 
     /// The C table, for what this crate does not wrap.
-    pub fn c_api(&self) -> &'static AnvilInputService {
+    pub fn c_api(&self) -> Table<AnvilInputService> {
         self.table
     }
 
