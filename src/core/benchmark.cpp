@@ -1,4 +1,5 @@
 #include "benchmark.hpp"
+#include "c_api.hpp"
 
 #include "plugin_set.hpp"
 #include "manifest.hpp"
@@ -151,8 +152,8 @@ AnvilResult svc_open_cost(AnvilPlugin* self, uint64_t files, double ms) {
 }
 
 constexpr AnvilBenchmarkService kService = {
-    sizeof(AnvilBenchmarkService), svc_active, svc_declare, svc_set_int,  svc_set_number, svc_set_enum,
-    svc_set_flag,                  svc_done,   svc_learning, svc_open_cost,
+    sizeof(AnvilBenchmarkService), c_api<svc_active>, c_api<svc_declare>, c_api<svc_set_int>,  c_api<svc_set_number>, c_api<svc_set_enum>,
+    c_api<svc_set_flag>,                  c_api<svc_done>,   c_api<svc_learning>, c_api<svc_open_cost>,
 };
 
 }  // namespace
