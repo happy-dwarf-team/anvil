@@ -2633,6 +2633,8 @@ int main(int argc, char** argv) {
             set_camera(reinterpret_cast<uintptr_t>(camera));
             image.put_pointer(kSettings, 0);
             CHECK(cam->pan(1, 0) == ANVIL_ERROR_INTERNAL);
+            // The view needs no settings.
+            CHECK(cam->view(&now) == ANVIL_OK && now.position[1] == 300.0f);
             image.put_pointer(kSettings, reinterpret_cast<uintptr_t>(settings));
             CHECK(Pan::calls == 7);
         };

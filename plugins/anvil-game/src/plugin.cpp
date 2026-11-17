@@ -49,6 +49,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <limits>
 #include <mutex>
 #include <new>
 #include <string>
@@ -773,9 +774,10 @@ int read_camera(CameraRead& out) {
         out.height = *reinterpret_cast<const float*>(camera + g_layout.camera_height);
         const std::uintptr_t idler = *reinterpret_cast<const std::uintptr_t*>(*g_layout.root + g_layout.session);
         out.frame_time = *reinterpret_cast<const float*>(idler + g_layout.frame_time);
+        // Only a pan needs the settings: without them its speed is not finite, which it refuses.
         const std::uintptr_t settings = *g_layout.settings;
-        if (settings == 0) return -1;
-        out.scroll_speed = *reinterpret_cast<const float*>(settings + g_layout.scroll_speed);
+        out.scroll_speed = settings == 0 ? std::numeric_limits<float>::quiet_NaN()
+                                         : *reinterpret_cast<const float*>(settings + g_layout.scroll_speed);
         return 1;
     } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER
                                                                   : EXCEPTION_CONTINUE_SEARCH) {
@@ -2611,6 +2613,7 @@ struct AnvilGame : anvil::Plugin {
         } else {
             host.info("the restart symbols are absent on this build: restart() answers unsupported");
         }
+
         host.register_service(ANVIL_GAME_SERVICE, ANVIL_GAME_SERVICE_VERSION, kService);
         load_world(host);
         load_commands(host);
