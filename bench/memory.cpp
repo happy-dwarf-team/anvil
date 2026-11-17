@@ -295,6 +295,16 @@ bool run_core(Core& core, std::string& error) {
         std::filesystem::temp_directory_path(ec) / ("anvil-bench-memory-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::remove_all(dir, ec);
     std::filesystem::create_directories(dir / "anvil" / "plugins", ec);
+    // An empty EU4 user folder, named as the game's own userdir.txt names one:
+    // without it the start-up reads the playset of the machine's player
+    // (Documents), and every plugin its mods ship is in the measurement
+    // (#461: Bellows, Tongs and Hamweard added about 150 KB of heap).
+    std::filesystem::create_directories(dir / "user", ec);
+    if (FILE* u = nullptr; !ec && _wfopen_s(&u, (dir / "userdir.txt").c_str(), L"wb") == 0 && u != nullptr) {
+        const std::u8string named = (dir / "user").u8string();
+        std::fwrite(named.data(), 1, named.size(), u);
+        std::fclose(u);
+    }
     if (ec) {
         error = "cannot create " + dir.string();
         return false;

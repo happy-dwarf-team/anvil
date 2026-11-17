@@ -643,6 +643,9 @@ void startup_impl(const std::filesystem::path& game_dir) {
     deps.policy = g_runtime->policy.get();
     deps.host = &g_runtime->host;
     g_runtime->plugins = std::make_unique<PluginSet>(std::move(to_load), std::move(skipped), std::move(deps));
+    // The plugin set has its own symbols now; the inventory keeps only what
+    // the next start's plan reads (#461).
+    release_symbols(*g_runtime->inventory);
     crash::attach_plugins(g_runtime->plugins.get());
     // What this start used (ADR 0013, point 8), now that the retired settings
     // moved and every plugin's settings were read: the Manager marks what

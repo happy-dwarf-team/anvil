@@ -90,6 +90,36 @@ InventoryPlugin lode() {
 }  // namespace
 
 void start_plan_tests() {
+    run("plugin inventory: release_symbols frees the parsed symbols and keeps what the next plan reads", [] {
+        const auto symbols = parse_symbols_text("build = \"b\"\n[symbol.f]\nexport = \"F\"\n");
+        CHECK(symbols.file.has_value());
+        InventoryPlugin plugin = lode();
+        plugin.check.symbols = symbols.file;
+        plugin.check.verified = true;
+        plugin.check.verification.symbols.resize(1);
+        plugin.check.verification.problems = {"f: bytes differ"};
+        InventoryModPlugin of_mod = in_mod("m", "of-mod", "h1");
+        of_mod.check.symbols = symbols.file;
+        InventoryCopy copy;
+        copy.id = "of-mod";
+        copy.name = "h0";
+        copy.check = PluginCheck{};
+        copy.check->symbols = symbols.file;
+        PluginInventory inv = inventory({plugin});
+        inv.mods.push_back(of_mod);
+        inv.copies.push_back(copy);
+        const StartPlan before = plan_start(inv, {}, {});
+
+        release_symbols(inv);
+        CHECK(!inv.local[0].check.symbols && inv.local[0].check.verification.symbols.empty());
+        CHECK(inv.local[0].check.verification.problems.empty() && inv.local[0].check.verified);
+        CHECK(!inv.mods[0].check.symbols && inv.copies[0].check && !inv.copies[0].check->symbols);
+        // What the next start's plan reads is still there, and it plans the same.
+        CHECK(inv.local[0].check.manifest.manifest && inv.local[0].check.settings_fit);
+        const StartPlan after = plan_start(inv, {}, {});
+        CHECK(loaded(after) == loaded(before) && after.skipped.size() == before.skipped.size());
+        CHECK(after.writes.retired.size() == before.writes.retired.size());
+    });
     run("start plan: the load order, and dependencies that do not load as the player reads them", [] {
         PluginInventory inv = inventory({local("anvil-map", requires_plugin("mei")), local("mei"),
                                          local("tongs", requires_plugin("anvil-map")), local("orphan", requires_plugin("gone")),
