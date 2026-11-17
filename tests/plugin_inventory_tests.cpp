@@ -144,4 +144,34 @@ void plugin_inventory_tests() {
         CloseHandle(held);
         fs::remove_all(dir);
     });
+
+    run("plugin inventory: entry, symbols and settings names outside the ANSI code page are read as UTF-8", [] {
+        // Japanese names fit no Western or Central European code page: read through it,
+        // the entry was not found and generic_string() threw out of the whole start-up.
+        const std::string entry = "\xE3\x83\x97\xE3\x83\xA9\xE3\x82\xB0.dll";      // プラグ.dll
+        const std::string settings = "\xE8\xA8\xAD\xE5\xAE\x9A.toml";               // 設定.toml
+        const std::string symbols = "\xE8\xA8\x98\xE5\x8F\xB7.toml";                // 記号.toml
+        const fs::path dir = fresh("anvil-inventory-utf8-names");
+        const fs::path anvil = dir / "anvil";
+        const fs::path ja = anvil / "plugins" / "ja";
+        const auto u8 = [](const std::string& s) { return fs::path(std::u8string(s.begin(), s.end())); };
+        write(ja / "plugin.toml", "id = \"ja\"\nname = \"ja\"\nversion = \"1.0.0\"\napi = 2\nentry = \"" + entry +
+                                      "\"\nphase = \"main\"\naffects_gameplay = false\nsettings = \"" + settings +
+                                      "\"\nsymbols = \"" + symbols + "\"\n");
+        write(ja / u8(entry), "MZ");
+        write(ja / u8(settings), "[setting.speed]\ntype = \"int\"\ndefault = 3\nlabel = \"Speed\"\n");
+        write(ja / u8(symbols), "builds = [\"eu4-1.37.5-steam-win64\"]\n");
+
+        const PluginInventory inventory = take_inventory(anvil, dir / "user", GameImage{});
+        CHECK(inventory.local.size() == 1);
+        if (inventory.local.size() == 1) {
+            const PluginCheck& check = inventory.local[0].check;
+            CHECK(check.manifest.manifest.has_value());
+            CHECK(check.entry_missing.empty());
+            CHECK(check.unreadable.empty());
+            CHECK(check.settings.has_value() && check.settings->settings.size() == 1);
+            CHECK(check.symbols.has_value());
+        }
+        fs::remove_all(dir);
+    });
 }

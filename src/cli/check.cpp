@@ -57,6 +57,14 @@ std::string shown_path(const std::filesystem::path& dir, const std::filesystem::
 
 std::filesystem::path utf8_path(const std::string& text) { return std::filesystem::path(std::u8string(text.begin(), text.end())); }
 
+// A path as UTF-8 with forward slashes. generic_string() would convert to the
+// ANSI code page and throw on a character it lacks (a Japanese name on a
+// Western system), which would end the whole start-up.
+std::string generic_utf8(const std::filesystem::path& path) {
+    const std::u8string u8 = path.generic_u8string();
+    return std::string(u8.begin(), u8.end());
+}
+
 // Removes the prefix the parsers give their errors: the file is shown separately.
 std::string without_prefix(std::string message, std::string_view prefix) {
     if (message.starts_with(prefix)) message.erase(0, prefix.size());
@@ -502,14 +510,14 @@ CheckReport check_report(const PluginCheck& check, const CheckOptions& options, 
     if (report.has_symbols) {
         const std::filesystem::path relative = utf8_path(m.symbols);
         const std::string symbols_path = shown_path(options.plugin_dir, relative);
-        if (check.unreadable == relative.generic_string()) return cannot_read(symbols_path);
+        if (check.unreadable == generic_utf8(relative)) return cannot_read(symbols_path);
         if (check.symbols) {
             const SymbolFile& file = *check.symbols;
             report.build = file.build;
             report.builds = file.builds;
             report.symbols = file.symbols.size();
             // Names `anvil gen` refuses, in any language it writes, fail the build later.
-            const GeneratedHeaders headers = generate_headers(file, relative.generic_string(), true, true, true);
+            const GeneratedHeaders headers = generate_headers(file, generic_utf8(relative), true, true, true);
             if (!headers.error.empty()) {
                 report.problems.push_back({symbols_path, headers.line, without_prefix(headers.error, "symbols.toml: ")});
             }
@@ -530,12 +538,12 @@ CheckReport check_report(const PluginCheck& check, const CheckOptions& options, 
     if (!m.settings.empty()) {
         const std::filesystem::path relative = utf8_path(m.settings);
         const std::string settings_path = shown_path(options.plugin_dir, relative);
-        if (check.unreadable == relative.generic_string()) return cannot_read(settings_path);
+        if (check.unreadable == generic_utf8(relative)) return cannot_read(settings_path);
         report.has_settings = check.unreadable.empty();
         if (check.settings) {
             report.settings = check.settings->settings.size();
             const GeneratedHeaders headers =
-                generate_settings_headers(*check.settings, relative.generic_string(), true, true, true);
+                generate_settings_headers(*check.settings, generic_utf8(relative), true, true, true);
             if (!headers.error.empty()) {
                 report.problems.push_back({settings_path, headers.line, without_prefix(headers.error, "settings.toml: ")});
             }
