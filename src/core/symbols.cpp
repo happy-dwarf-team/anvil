@@ -570,18 +570,27 @@ SymbolFileResult parse_symbols_text(std::string_view text) {
     return result;
 }
 
+namespace {
+// The file's name as UTF-8 (string() would convert to the ANSI code page and
+// may throw).
+std::string utf8_name(const std::filesystem::path& file) {
+    const std::u8string u8 = file.filename().u8string();
+    return std::string(u8.begin(), u8.end());
+}
+}  // namespace
+
 SymbolFileResult load_symbols(const std::filesystem::path& file) {
     std::error_code size_error;
     if (const std::uintmax_t size = std::filesystem::file_size(file, size_error);
         !size_error && size > kMaxPluginTomlBytes) {
         SymbolFileResult result;
-        result.error = file.filename().string() + " is larger than 16 MB";
+        result.error = utf8_name(file) + " is larger than 16 MB";
         return result;
     }
     std::ifstream in(file, std::ios::binary);
     if (!in) {
         SymbolFileResult result;
-        result.error = "cannot read " + file.filename().string();
+        result.error = "cannot read " + utf8_name(file);
         return result;
     }
     std::stringstream buffer;

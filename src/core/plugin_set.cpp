@@ -223,7 +223,8 @@ void PluginSet::load(const PluginRecord& record) {
     if (plugin.handle() == nullptr || plugin.outcome() != nullptr) return;
     const double begin = now_ms();
     const Manifest& manifest = plugin.manifest();
-    const std::filesystem::path dll = std::filesystem::path(plugin.plugin_dir()) / manifest.entry;
+    const std::filesystem::path dll =
+        std::filesystem::path(plugin.plugin_dir()) / std::u8string(manifest.entry.begin(), manifest.entry.end());
     const std::string label = manifest.id + " " + manifest.version.to_string();
     // Every way a load fails ends here: the outcome, then its line in the
     // log (`line`, or "not loaded; <the reason>").

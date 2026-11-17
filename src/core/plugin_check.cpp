@@ -23,6 +23,14 @@ bool read_file(const std::filesystem::path& path, std::string& out) {
 
 std::filesystem::path utf8_path(const std::string& text) { return std::filesystem::path(std::u8string(text.begin(), text.end())); }
 
+// A path as UTF-8 with forward slashes. generic_string() would convert to the
+// ANSI code page and throw on a character it lacks (a Japanese name on a
+// Western system), which would end the whole start-up.
+std::string generic_utf8(const std::filesystem::path& path) {
+    const std::u8string u8 = path.generic_u8string();
+    return std::string(u8.begin(), u8.end());
+}
+
 // The parsers start their errors with the file's name; a problem names it apart.
 std::string without_prefix(std::string message, std::string_view prefix) {
     if (message.starts_with(prefix)) message.erase(0, prefix.size());
@@ -103,7 +111,7 @@ PluginCheck check_plugin_folder(const std::filesystem::path& folder, const GameI
     check.entry_missing = missing_entry_reason(m);
     if (!m.symbols.empty()) {
         const std::filesystem::path relative = utf8_path(m.symbols);
-        const std::string name = relative.generic_string();
+        const std::string name = generic_utf8(relative);
         std::string text;
         if (!read_file(folder / relative, text)) {
             // The plugin cannot load, but its settings.toml is still read: the
@@ -123,7 +131,7 @@ PluginCheck check_plugin_folder(const std::filesystem::path& folder, const GameI
     // parse, as it could not read its settings (design §11).
     if (!m.settings.empty()) {
         const std::filesystem::path relative = utf8_path(m.settings);
-        const std::string name = relative.generic_string();
+        const std::string name = generic_utf8(relative);
         std::string text;
         if (!read_file(folder / relative, text)) {
             if (check.unreadable.empty()) check.unreadable = name;

@@ -55,8 +55,12 @@ AnvilSettings read_anvil_settings(const std::filesystem::path& file) {
 std::vector<std::filesystem::path> plugin_folders(const std::filesystem::path& plugins_dir) {
     std::error_code ec;
     std::vector<std::filesystem::path> folders;
-    for (const auto& entry : std::filesystem::directory_iterator(plugins_dir, ec)) {
-        if (entry.is_directory(ec)) folders.push_back(entry.path());
+    // increment(ec): a range-for's operator++ throws when the listing fails
+    // midway (a drive that goes away), which would end the whole start-up.
+    for (auto it = std::filesystem::directory_iterator(plugins_dir, ec);
+         !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
+        std::error_code type_ec;
+        if (it->is_directory(type_ec)) folders.push_back(it->path());
     }
     std::sort(folders.begin(), folders.end());
     return folders;
@@ -64,7 +68,9 @@ std::vector<std::filesystem::path> plugin_folders(const std::filesystem::path& p
 
 i18n::Message missing_entry_reason(const Manifest& manifest) {
     std::error_code ec;
-    if (std::filesystem::exists(manifest.folder / manifest.entry, ec)) return {};
+    // plugin.toml is UTF-8; `/ std::string` would read the name in the ANSI code page.
+    const std::u8string entry(manifest.entry.begin(), manifest.entry.end());
+    if (std::filesystem::exists(manifest.folder / entry, ec)) return {};
     return i18n::Message("entry_missing", {manifest.entry});
 }
 

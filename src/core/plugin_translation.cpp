@@ -181,7 +181,10 @@ std::vector<TranslationProblem> check_plugin_translations(const std::filesystem:
     const auto& codes = translation_codes();
     std::set<std::string> found;
     std::vector<std::filesystem::path> entries;
-    for (const auto& entry : std::filesystem::directory_iterator(translations, ec)) entries.push_back(entry.path());
+    for (auto it = std::filesystem::directory_iterator(translations, ec);
+         !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
+        entries.push_back(it->path());
+    }
     std::sort(entries.begin(), entries.end());
     for (const auto& path : entries) {
         const auto name8 = path.filename().u8string();
