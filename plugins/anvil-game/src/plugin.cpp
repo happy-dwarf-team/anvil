@@ -2265,6 +2265,9 @@ public:
         return g_commands.move(command, reinterpret_cast<const void*>(unit.object), province, clear_previous, false,
                                true, false);
     }
+    bool province_exists(std::int32_t province) override {
+        return province > 0 && province < anvil_game::read_province_limit(g_world);
+    }
     AnvilResult area_of(std::int32_t province, std::uintptr_t& area) override {
         return anvil_game::read_province_area(g_world, province, g_commands.map_part, g_commands.map_area, area);
     }

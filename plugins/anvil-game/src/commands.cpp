@@ -233,6 +233,9 @@ AnvilResult CommandPoster::post(CommandBackend& b, const AnvilPlugin* self, cons
     if (c.type == ANVIL_GAME_COMMAND_SIEGE_AREA || c.type == ANVIL_GAME_COMMAND_SUPPRESS_AREA) {
         if (const AnvilResult r = b.area_of(c.province, area); r != ANVIL_OK) return r;
     }
+    // The game's move command and its IsValid index the province array with
+    // the id and never check it: one past the map reads after the array.
+    if (c.type == ANVIL_GAME_COMMAND_MOVE && !b.province_exists(c.province)) return ANVIL_ERROR_NOT_FOUND;
 
     AnvilGameCommandResult result{};
     result.size = sizeof(result);

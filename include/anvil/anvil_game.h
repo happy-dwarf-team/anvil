@@ -1003,6 +1003,8 @@ typedef struct AnvilGameWorldService {
  * whether the move is legal now (a path the unit may take); one that is not is
  * freed and counted as `refused`. An attack, a siege or a transport that a
  * right-click would choose for some provinces is not part of this type.
+ * ANVIL_ERROR_NOT_FOUND for a province the map does not have (anvil-game.world's
+ * province_limit or above).
  *
  * Siege and rebel suppression by area (version 3, anvil-game 1.22.0).
  * ANVIL_GAME_COMMAND_SIEGE_AREA and ANVIL_GAME_COMMAND_SUPPRESS_AREA do what a
