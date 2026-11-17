@@ -13,6 +13,7 @@
 #include "core/crash_report.hpp"
 #include "core/log.hpp"
 #include "core/safe_mode.hpp"
+#include "core/seh_guard.hpp"
 #include "plugin_set_fixture.hpp"
 
 #include <windows.h>
@@ -381,6 +382,18 @@ int child(const std::string& mode, const fs::path& dir) {
     } else if (mode == "change" || mode == "mid") {
         body = [](LPVOID p) -> DWORD {
             return static_cast<DWORD>(call_scratch(reinterpret_cast<Fn>(p), 1));
+        };
+    } else if (mode == "handled-overflow") {
+        body = [](LPVOID) -> DWORD {
+            crash::guard_thread(crash::thread_guarantee());
+            // As a plugin's load that recurses without end: Anvil's guard
+            // catches it and the game goes on, until a real crash later.
+            unsigned long code = 0;
+            if (call_guarded([](void*) { (void)recurse(0); }, nullptr, &code) || code != EXCEPTION_STACK_OVERFLOW) {
+                return 21;
+            }
+            crash_here();
+            return 0;
         };
     } else if (mode == "overflow") {
         body = [](LPVOID) -> DWORD {
@@ -971,6 +984,40 @@ int main(int argc, char** argv) {
 
     const fs::path root = fs::temp_directory_path() / "anvil-crash-tests";
 
+    run("crash: a frame pointer a stack overrun overwrote ends the walk, not the report", [] {
+        // A function with frame-pointer unwind data: push rbp; mov rbp, rsp;
+        // then rbp is overwritten (0x10). RtlVirtualUnwind reads the saved rbp
+        // at [rbp], unchecked.
+        auto* page = static_cast<uint8_t*>(VirtualAlloc(nullptr, 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE));
+        CHECK(page != nullptr);
+        if (page == nullptr) return;
+        const uint8_t code[] = {0x55, 0x48, 0x8B, 0xEC, 0x90, 0x90, 0x90, 0x90, 0x5D, 0xC3};
+        std::memcpy(page, code, sizeof(code));
+        // UNWIND_INFO: version 1, prolog 4 bytes, 2 codes, frame register rbp at offset 0;
+        // UWOP_SET_FPREG at +4, UWOP_PUSH_NONVOL rbp at +1.
+        const uint8_t info[] = {0x01, 0x04, 0x02, 0x05, 0x04, 0x03, 0x01, 0x50};
+        std::memcpy(page + 0x100, info, sizeof(info));
+        auto* function = reinterpret_cast<RUNTIME_FUNCTION*>(page + 0x200);
+        function->BeginAddress = 0;
+        function->EndAddress = sizeof(code);
+        function->UnwindData = 0x100;
+        CHECK(RtlAddFunctionTable(function, 1, reinterpret_cast<DWORD64>(page)));
+        CONTEXT ctx{};
+        RtlCaptureContext(&ctx);
+        ctx.Rip = reinterpret_cast<DWORD64>(page + 5);
+        ctx.Rbp = 0x10;
+        const auto* tib = reinterpret_cast<const NT_TIB*>(NtCurrentTeb());
+        CrashSources sources{};
+        Frame frames[16];
+        const size_t n = walk_stack(ctx, reinterpret_cast<uintptr_t>(tib->StackLimit),
+                                    reinterpret_cast<uintptr_t>(tib->StackBase), sources, frames, 16);
+        // The crashed frame, then what the scan finds on this thread's stack.
+        CHECK(n >= 2 && frames[0].where.address == reinterpret_cast<uintptr_t>(page + 5));
+        CHECK(n >= 2 && frames[1].source == FrameSource::Scan);
+        RtlDeleteFunctionTable(function);
+        VirtualFree(page, 0, MEM_RELEASE);
+    });
+
     run("crash capture: an access violation in a plugin's code (child process)", [&] {
         const ChildResult r = run_child("av", root / "av");
         CHECK(r.exit == 0xC0DE);  // Anvil's filter called the game's
@@ -1092,6 +1139,13 @@ int main(int argc, char** argv) {
             std::printf("  note: the exception context is %lu bytes here; the overflowing thread gets a %lu KB guarantee\n",
                         exception_context_bytes(), guarantee / 1024);
         }
+        const ChildResult handled = run_child("handled-overflow", root / "handled-overflow");
+        // A stack overflow Anvil's guard caught leaves the one report to the crash after it.
+        CHECK(handled.exit == 0xC0DE);
+        CHECK(Json::valid(handled.json));
+        CHECK(contains(handled.json, "\"code\": \"0xC0000005\""));
+        CHECK(handled.dump && !handled.pending_left);
+        explain(handled);
         const ChildResult r = run_child("overflow", root / "overflow");
         // Wine ends the process with its own status once the filter returns; the report and dump are still checked.
         CHECK(under_wine() ? r.exit != 0 : (r.exit == 0xC0DE || r.exit == EXCEPTION_STACK_OVERFLOW));

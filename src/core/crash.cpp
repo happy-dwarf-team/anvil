@@ -371,7 +371,8 @@ void write_report(void*) {
     in.unfinished_starts = setup.unfinished_starts;
     in.safe_mode = setup.safe_mode;
     in.seen = g_seen;
-    in.seen_count = static_cast<size_t>(g_seen_count) < kSeenMax ? static_cast<size_t>(g_seen_count) : kSeenMax;
+    const LONG seen = g_seen_count;
+    in.seen_count = seen < 0 || static_cast<size_t>(seen) >= kSeenMax ? kSeenMax : static_cast<size_t>(seen);
     in.log_tail = read_log_tail();
     in.minidump = nullptr;
     in.notes = g_report_notes;
@@ -484,10 +485,13 @@ void hand_over(EXCEPTION_POINTERS* pointers) {
 LONG CALLBACK vectored(EXCEPTION_POINTERS* pointers) {
     const EXCEPTION_RECORD* record = pointers->ExceptionRecord;
     if (record == nullptr || !is_fatal_looking(record->ExceptionCode)) return EXCEPTION_CONTINUE_SEARCH;
-    if (GetCurrentThreadId() == g_quiet_thread.load()) return EXCEPTION_CONTINUE_SEARCH;
+    // The helper's own faults (a note's, the walk's on a broken stack) are its
+    // own, caught where they happen.
+    const DWORD thread = GetCurrentThreadId();
+    if (thread == g_quiet_thread.load() || (g_helper != 0 && thread == g_helper)) return EXCEPTION_CONTINUE_SEARCH;
     InterlockedExchange64(&g_last_fatal, static_cast<LONG64>(GetTickCount64()));
     const LONG index = InterlockedIncrement(&g_seen_count) - 1;
-    if (index < static_cast<LONG>(kSeenMax)) {
+    if (index >= 0 && index < static_cast<LONG>(kSeenMax)) {
         SeenException& seen = g_seen[index];
         seen.code = record->ExceptionCode;
         seen.thread = GetCurrentThreadId();
@@ -496,8 +500,11 @@ LONG CALLBACK vectored(EXCEPTION_POINTERS* pointers) {
         for (DWORD i = 0; i < 2 && i < record->NumberParameters; ++i) seen.info[i] = record->ExceptionInformation[i];
         seen.tick = GetTickCount64();
     }
-    // The filter may never run on an overflowed stack: the report is written now.
-    if (record->ExceptionCode == EXCEPTION_STACK_OVERFLOW) hand_over(pointers);
+    // The filter may never run on an overflowed stack: the report is written
+    // now, unless one of Anvil's own guards (a plugin's load) catches it. The
+    // process has one report: a caught overflow must not take it from a later
+    // crash.
+    if (record->ExceptionCode == EXCEPTION_STACK_OVERFLOW && !inside_guard()) hand_over(pointers);
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
