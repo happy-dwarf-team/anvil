@@ -199,8 +199,13 @@ void* get_desc(void* self, void* out, void* scope, void* prefix, int indent, boo
     line[kMaxLine] = 0;
     // The game's own lines end with a line break, and the parent adds the
     // indentation (eu4-engine-lab#77): without it the next line joins ours.
-    const std::string text = game_text(line);
-    if (!text.empty()) anvil::Host{}.call(sym::cstring_from_text, out, (text + "\n").c_str());
+    // noexcept: out of memory here would be std::terminate. The tooltip then
+    // keeps the base's empty line instead of the plugin's.
+    try {
+        const std::string text = game_text(line);
+        if (!text.empty()) anvil::Host{}.call(sym::cstring_from_text, out, (text + "\n").c_str());
+    } catch (...) {
+    }
     return out;
 }
 
@@ -271,7 +276,31 @@ void detour_daily_tick(void* game_state) noexcept {
     }
 }
 
+// The services' bodies: their C entries below let no exception leave.
+AnvilResult subscribe_day_end(AnvilPlugin* self, AnvilScriptDayEnd callback, void* context);
+AnvilResult register_effect(AnvilPlugin* self, const AnvilScriptEffect* effect);
+
 AnvilResult svc_subscribe_day_end(AnvilPlugin* self, AnvilScriptDayEnd callback, void* context) {
+    try {
+        return subscribe_day_end(self, callback, context);
+    } catch (const std::bad_alloc&) {
+        return ANVIL_ERROR_OUT_OF_MEMORY;
+    } catch (...) {
+        return ANVIL_ERROR_INTERNAL;
+    }
+}
+
+AnvilResult svc_register_effect(AnvilPlugin* self, const AnvilScriptEffect* effect) {
+    try {
+        return register_effect(self, effect);
+    } catch (const std::bad_alloc&) {
+        return ANVIL_ERROR_OUT_OF_MEMORY;
+    } catch (...) {
+        return ANVIL_ERROR_INTERNAL;
+    }
+}
+
+AnvilResult subscribe_day_end(AnvilPlugin* self, AnvilScriptDayEnd callback, void* context) {
     AnvilControlPlugin info;
     const bool known = caller_of(self, info);
     std::string why;
@@ -286,7 +315,7 @@ const AnvilScriptDayEndService kDayEndService{sizeof(AnvilScriptDayEndService), 
 
 // --- the service ------------------------------------------------------------------
 
-AnvilResult svc_register_effect(AnvilPlugin* self, const AnvilScriptEffect* effect) {
+AnvilResult register_effect(AnvilPlugin* self, const AnvilScriptEffect* effect) {
     AnvilControlPlugin info;
     Caller caller;
     if (caller_of(self, info)) {
@@ -326,7 +355,12 @@ bool detour_has_dlc_assign(void* self, const void* token) noexcept {
     const char* text = static_cast<const char*>(token) + kTokenText;
     const std::string_view id = gate_id(std::string_view(text, strnlen(text, kMaxGateId + kDlcPrefix.size() + 1)));
     if (id.empty()) return g_has_dlc_assign.next(self, token);
-    const int index = g_gates.intern(id);
+    int index = -1;
+    try {
+        index = g_gates.intern(id);
+    } catch (...) {
+        return g_has_dlc_assign.next(self, token);  // out of memory: the game's own answer (false)
+    }
     if (index < 0) {
         if (!g_gate_full_logged.exchange(true)) {
             anvil::Host{}.warn("has_dlc: more than {} plugin names; {} is left to the game, which answers false",

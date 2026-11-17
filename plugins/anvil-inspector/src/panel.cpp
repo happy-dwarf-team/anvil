@@ -110,7 +110,18 @@ void publish() {
 }
 
 // On the main thread: a fold only changes the view, Refresh asks for a read.
+void click(std::uint64_t id);
+
+// The overlay calls this through a C pointer on the main thread, after a
+// frame: no exception may leave it (the click is then lost, not the game).
 void on_click(void*, std::uint64_t id) {
+    try {
+        click(id);
+    } catch (...) {
+    }
+}
+
+void click(std::uint64_t id) {
     if (action_of(id) == Action::refresh) {
         g_force.store(true);
     } else {
