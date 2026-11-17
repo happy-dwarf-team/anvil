@@ -8,6 +8,7 @@
 
 #include <windows.h>
 #include <dbghelp.h>
+#include <winternl.h>
 
 #include <atomic>
 #include <cstdio>
@@ -58,9 +59,24 @@ std::atomic<DWORD> g_quiet_thread{0};
 
 wchar_t g_dir[MAX_PATH * 2] = {};  // the crash folder, with a trailing backslash
 wchar_t g_log[MAX_PATH * 2] = {};
+// Opened at install: the report's files and the log are opened relative to
+// these with NtCreateFile. CreateFileW turns a path into an NT path on the
+// process heap, whose lock a crash in HeapAlloc may hold (anvil#458).
+HANDLE g_dir_handle = INVALID_HANDLE_VALUE;
+HANDLE g_log_dir = INVALID_HANDLE_VALUE;
+wchar_t g_log_folder[MAX_PATH * 2] = {};  // anvil.log's folder, with a trailing backslash
+wchar_t g_log_name[MAX_PATH] = {};          // and its name there
+using NtCreateFileFn = NTSTATUS(NTAPI*)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK, PLARGE_INTEGER, ULONG,
+                                         ULONG, ULONG, ULONG, PVOID, ULONG);
+NtCreateFileFn g_nt_create = nullptr;
+// A thread that only takes and gives back the process heap's lock, asked
+// before the steps that allocate (the minidump, prune, the log line).
+HANDLE g_probe_go = nullptr;  // auto-reset
+HANDLE g_probe_ok = nullptr;  // manual reset
 DWORD g_main_thread = 0;
 std::atomic<bool> g_installed{false};
 std::atomic<bool> g_game_ready{false};
+std::atomic<bool> g_helper_ready{false};  // the helper has dbghelp and the pending dump file
 
 // ---- the filter chain --------------------------------------------------------
 using Filter = LPTOP_LEVEL_EXCEPTION_FILTER;
@@ -96,6 +112,63 @@ TextBuffer g_json_text(g_json, sizeof(g_json));
 TextBuffer g_text_text(g_text, sizeof(g_text));
 
 // ---- files -------------------------------------------------------------------
+
+constexpr NTSTATUS kNameCollision = static_cast<NTSTATUS>(0xC0000035L);  // STATUS_OBJECT_NAME_COLLISION
+
+// `name` in the folder `dir` with NtCreateFile: no allocation. `disposition`
+// is FILE_CREATE, FILE_OVERWRITE_IF or FILE_OPEN; `status` gets the result.
+// Without the folder's handle, `folder` (with a trailing backslash) and
+// CreateFileW, as before anvil#458.
+HANDLE open_in(HANDLE dir, const wchar_t* folder, const wchar_t* name, ACCESS_MASK access, ULONG share, ULONG disposition,
+               NTSTATUS& status) {
+    status = static_cast<NTSTATUS>(0xC0000001L);  // STATUS_UNSUCCESSFUL
+    if (g_nt_create == nullptr || dir == INVALID_HANDLE_VALUE) {
+        wchar_t path[MAX_PATH * 2 + 80];
+        std::swprintf(path, std::size(path), L"%ls%ls", folder, name);
+        const DWORD how = disposition == FILE_CREATE ? CREATE_NEW : disposition == FILE_OVERWRITE_IF ? CREATE_ALWAYS : OPEN_EXISTING;
+        const HANDLE file = CreateFileW(path, access, share, nullptr, how, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file != INVALID_HANDLE_VALUE) status = 0;
+        else if (GetLastError() == ERROR_FILE_EXISTS) status = kNameCollision;
+        return file;
+    }
+    UNICODE_STRING object{};
+    const size_t length = std::wcslen(name);
+    object.Length = static_cast<USHORT>(length * sizeof(wchar_t));
+    object.MaximumLength = object.Length;
+    object.Buffer = const_cast<wchar_t*>(name);
+    OBJECT_ATTRIBUTES attributes{};
+    InitializeObjectAttributes(&attributes, &object, OBJ_CASE_INSENSITIVE, dir, nullptr);
+    IO_STATUS_BLOCK io{};
+    HANDLE file = INVALID_HANDLE_VALUE;
+    status = g_nt_create(&file, access | SYNCHRONIZE, &attributes, &io, nullptr, FILE_ATTRIBUTE_NORMAL, share, disposition,
+                         FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT, nullptr, 0);
+    return status >= 0 ? file : INVALID_HANDLE_VALUE;
+}
+
+HANDLE open_folder(const wchar_t* path) {
+    return CreateFileW(path, FILE_LIST_DIRECTORY | FILE_ADD_FILE | FILE_TRAVERSE | SYNCHRONIZE,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                       FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+}
+
+// Whether the process heap's lock can be taken now: the probe thread takes
+// and gives it back within `ms`. False when the crashed thread (or anyone)
+// holds it, as at a crash inside HeapAlloc on a corrupted heap.
+bool heap_available(DWORD ms) {
+    if (g_probe_go == nullptr || g_probe_ok == nullptr) return true;  // no probe: as before
+    ResetEvent(g_probe_ok);
+    SetEvent(g_probe_go);
+    return WaitForSingleObject(g_probe_ok, ms) == WAIT_OBJECT_0;
+}
+
+DWORD WINAPI probe_main(void*) {
+    for (;;) {
+        WaitForSingleObject(g_probe_go, INFINITE);
+        const HANDLE heap = GetProcessHeap();
+        if (HeapLock(heap)) HeapUnlock(heap);
+        SetEvent(g_probe_ok);
+    }
+}
 
 void path_of(wchar_t (&out)[MAX_PATH * 2 + 80], const wchar_t* stem, const wchar_t* extension) {
     std::swprintf(out, std::size(out), L"%ls%ls%ls", g_dir, stem, extension);
@@ -148,9 +221,10 @@ void prune(size_t keep) {
 
 // The last lines of anvil.log, read from the file: no lock of the log.
 std::string_view read_log_tail() {
-    if (g_log[0] == L'\0') return {};
-    const HANDLE file = CreateFileW(g_log, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-                                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (g_log[0] == L'\0' || g_log_name[0] == L'\0') return {};
+    NTSTATUS status = 0;
+    const HANDLE file = open_in(g_log_dir, g_log_folder, g_log_name, FILE_GENERIC_READ,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, FILE_OPEN, status);
     if (file == INVALID_HANDLE_VALUE) return {};
     LARGE_INTEGER size{};
     DWORD read = 0;
@@ -212,16 +286,18 @@ bool open_reports() {
     for (int attempt = 1; attempt < 10; ++attempt) {
         std::swprintf(g_stem, std::size(g_stem), attempt == 1 ? L"%04u-%02u-%02u_%02u-%02u-%02u" : L"%04u-%02u-%02u_%02u-%02u-%02u-%d",
                       now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond, attempt);
-        wchar_t path[MAX_PATH * 2 + 80];
-        path_of(path, g_stem, L".json");
-        g_json_file = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        wchar_t name[80];
+        std::swprintf(name, std::size(name), L"%ls.json", g_stem);
+        NTSTATUS status = 0;
+        g_json_file = open_in(g_dir_handle, g_dir, name, FILE_GENERIC_WRITE, FILE_SHARE_READ, FILE_CREATE, status);
         if (g_json_file != INVALID_HANDLE_VALUE) break;
-        if (GetLastError() != ERROR_FILE_EXISTS) return false;
+        if (status != kNameCollision) return false;
     }
     if (g_json_file == INVALID_HANDLE_VALUE) return false;
-    wchar_t path[MAX_PATH * 2 + 80];
-    path_of(path, g_stem, L".txt");
-    g_text_file = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    wchar_t name[80];
+    std::swprintf(name, std::size(name), L"%ls.txt", g_stem);
+    NTSTATUS status = 0;
+    g_text_file = open_in(g_dir_handle, g_dir, name, FILE_GENERIC_WRITE, FILE_SHARE_READ, FILE_OVERWRITE_IF, status);
     return true;
 }
 
@@ -396,6 +472,15 @@ void write_report(void*) {
     };
     in.note_count = gather_notes(request);
     if (in.note_count > 0) write_again();
+    // The minidump writer, prune and the log allocate on the process heap. If
+    // its lock is held, they would wait for good, and the crashed thread with
+    // them for kWaitMs: the report says so and ends here.
+    if (!heap_available(250)) {
+        in.no_minidump = "the process heap was locked at the crash";
+        write_again();
+        close_reports();
+        return;
+    }
     Dump dump{&request, {}};
     unsigned long dump_fault = 0;
     if (call_guarded(&write_dump, &dump, &dump_fault) && dump.name[0] != '\0') {
@@ -455,6 +540,7 @@ DWORD WINAPI helper_main(void*) {
             g_dump = INVALID_HANDLE_VALUE;
         }
     }
+    g_helper_ready.store(true, std::memory_order_release);
     for (;;) {
         WaitForSingleObject(g_wake, INFINITE);
         unsigned long code = 0;
@@ -556,11 +642,30 @@ bool install(const Setup& setup, std::string& error) {
     std::filesystem::create_directories(setup.crash_dir, ignored);
     std::swprintf(g_dir, std::size(g_dir), L"%ls\\", setup.crash_dir.wstring().c_str());
     std::swprintf(g_log, std::size(g_log), L"%ls", setup.log_file.wstring().c_str());
+    if (HMODULE ntdll = GetModuleHandleW(L"ntdll.dll")) {
+        g_nt_create = reinterpret_cast<NtCreateFileFn>(GetProcAddress(ntdll, "NtCreateFile"));
+    }
+    g_dir_handle = open_folder(setup.crash_dir.wstring().c_str());
+    if (!setup.log_file.empty()) {
+        g_log_dir = open_folder(setup.log_file.parent_path().wstring().c_str());
+        std::swprintf(g_log_folder, std::size(g_log_folder), L"%ls\\", setup.log_file.parent_path().wstring().c_str());
+        std::swprintf(g_log_name, std::size(g_log_name), L"%ls", setup.log_file.filename().wstring().c_str());
+    }
     prune(kKeep);
 
     bool ok = true;
     g_wake = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     g_done = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    g_probe_go = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    g_probe_ok = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (g_probe_go != nullptr && g_probe_ok != nullptr) {
+        HANDLE probe = CreateThread(nullptr, 64 * 1024, probe_main, nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+        if (probe != nullptr) {
+            CloseHandle(probe);
+        } else {
+            g_probe_go = g_probe_ok = nullptr;  // heap_available answers true: the report goes on as before
+        }
+    }
     HANDLE helper = g_wake != nullptr && g_done != nullptr
                         ? CreateThread(nullptr, 512 * 1024, helper_main, nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, &g_helper)
                         : nullptr;
@@ -630,6 +735,8 @@ bool guard_thread(ULONG guarantee) {
 void set_game_ready() { g_game_ready.store(true); }
 
 bool reported() { return g_claimed != 0; }
+
+bool helper_ready() { return g_helper_ready.load(std::memory_order_acquire); }
 
 bool crashed() {
     // A crash the game's own handler caught ends the process soon after.

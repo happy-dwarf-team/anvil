@@ -163,6 +163,7 @@ struct ReportInput {
     size_t seen_count = 0;
     std::string_view log_tail;
     const char* minidump = nullptr;  // file name next to the report, or null
+    const char* no_minidump = nullptr;  // why none was written, when the helper knows
     const ReportNote* notes = nullptr;
     size_t note_count = 0;
 };
