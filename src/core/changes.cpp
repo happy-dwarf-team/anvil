@@ -514,6 +514,7 @@ struct ChangeRegistry::Owner {
     std::string name;
     bool group = false;
     bool suspended = false;  // its enabled changes are Suspended, new ones too
+    bool retired = false;    // its plugin failed to load: no new changes (retire)
     std::vector<ChangeId> staged;  // in request order
 };
 
@@ -645,6 +646,11 @@ ChangeStatus ChangeRegistry::refuse(OwnerId owner, ChangeStatus status, const st
 
 ChangeStatus ChangeRegistry::check_owner(OwnerId owner) const {
     return owner < owners_.size() ? ChangeStatus::Ok : ChangeStatus::InvalidArgument;
+}
+
+ChangeStatus ChangeRegistry::check_requester(OwnerId owner) const {
+    if (owner >= owners_.size()) return ChangeStatus::InvalidArgument;
+    return owners_[owner].retired ? ChangeStatus::WrongPhase : ChangeStatus::Ok;
 }
 
 bool ChangeRegistry::in_image(uintptr_t address, size_t size) const {
@@ -1169,7 +1175,7 @@ ChangeStatus ChangeRegistry::hook_function(OwnerId owner, const ChangeTarget& ta
                                            ChangeId* out) {
     if (detour == nullptr || next == nullptr) return ChangeStatus::InvalidArgument;
     std::lock_guard lock(mutex_);
-    if (check_owner(owner) != ChangeStatus::Ok) return ChangeStatus::InvalidArgument;
+    if (const ChangeStatus s = check_requester(owner); s != ChangeStatus::Ok) return s;
     const std::string label = "function hook " + where(target.address);
     // At least the 5 bytes of the jump; the exact stolen length follows below.
     if (const ChangeStatus s = check_target(owner, target, 5, "function hook"); s != ChangeStatus::Ok) return s;
@@ -1185,7 +1191,7 @@ ChangeStatus ChangeRegistry::mid_hook(OwnerId owner, const ChangeTarget& target,
                                       void* user, ChangeId* out) {
     if (callback == nullptr) return ChangeStatus::InvalidArgument;
     std::lock_guard lock(mutex_);
-    if (check_owner(owner) != ChangeStatus::Ok) return ChangeStatus::InvalidArgument;
+    if (const ChangeStatus s = check_requester(owner); s != ChangeStatus::Ok) return s;
     const std::string label = "mid hook " + where(target.address);
     if (const ChangeStatus s = check_target(owner, target, 5, "mid hook"); s != ChangeStatus::Ok) return s;
     Site* site = nullptr;
@@ -1200,7 +1206,7 @@ ChangeStatus ChangeRegistry::replace_block(OwnerId owner, const ChangeTarget& ta
                                            AnvilCpuCallback callback, void* user, ChangeId* out) {
     if (callback == nullptr || size > 4096) return ChangeStatus::InvalidArgument;
     std::lock_guard lock(mutex_);
-    if (check_owner(owner) != ChangeStatus::Ok) return ChangeStatus::InvalidArgument;
+    if (const ChangeStatus s = check_requester(owner); s != ChangeStatus::Ok) return s;
     const std::string label = "block replacement " + where(target.address) + " (" + std::to_string(size) + " B)";
     if (size < 5) {
         return refuse(owner, ChangeStatus::UnsafeSite, label + ": shorter than the hook's 5-byte jump");
@@ -1232,7 +1238,7 @@ ChangeStatus ChangeRegistry::redirect_call(OwnerId owner, const ChangeTarget& ta
                                            void* new_target, void** next, ChangeId* out) {
     if (new_target == nullptr || next == nullptr) return ChangeStatus::InvalidArgument;
     std::lock_guard lock(mutex_);
-    if (check_owner(owner) != ChangeStatus::Ok) return ChangeStatus::InvalidArgument;
+    if (const ChangeStatus s = check_requester(owner); s != ChangeStatus::Ok) return s;
     const std::string label = "call redirect " + where(target.address);
     if (const ChangeStatus s = check_target(owner, target, 5, "call redirect"); s != ChangeStatus::Ok) return s;
     Site* site = find_site(target.address, ChangeKind::CallRedirect);
@@ -1292,7 +1298,7 @@ ChangeStatus ChangeRegistry::patch_bytes(OwnerId owner, const ChangeTarget& targ
                                          ChangeId* out) {
     if (bytes == nullptr || size == 0 || size > 4096) return ChangeStatus::InvalidArgument;
     std::lock_guard lock(mutex_);
-    if (check_owner(owner) != ChangeStatus::Ok) return ChangeStatus::InvalidArgument;
+    if (const ChangeStatus s = check_requester(owner); s != ChangeStatus::Ok) return s;
     const std::string label = "byte patch " + where(target.address) + " (" + std::to_string(size) + " B)";
     if (const ChangeStatus s = check_target(owner, target, size, "byte patch"); s != ChangeStatus::Ok) return s;
     const auto* data = static_cast<const uint8_t*>(bytes);
@@ -1325,7 +1331,7 @@ ChangeStatus ChangeRegistry::swap_pointer(OwnerId owner, const ChangeTarget& tar
         return ChangeStatus::InvalidArgument;  // stored atomically like the slot
     }
     std::lock_guard lock(mutex_);
-    if (check_owner(owner) != ChangeStatus::Ok) return ChangeStatus::InvalidArgument;
+    if (const ChangeStatus s = check_requester(owner); s != ChangeStatus::Ok) return s;
     const std::string label = "pointer swap " + where(target.address);
     if (const ChangeStatus s = check_target(owner, target, sizeof(uintptr_t), "pointer swap"); s != ChangeStatus::Ok) {
         return s;
@@ -1374,7 +1380,7 @@ ChangeStatus ChangeRegistry::replace_import(OwnerId owner, HMODULE image, const 
     const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
     const auto& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
     std::lock_guard lock(mutex_);
-    if (check_owner(owner) != ChangeStatus::Ok) return ChangeStatus::InvalidArgument;
+    if (const ChangeStatus s = check_requester(owner); s != ChangeStatus::Ok) return s;
     const std::string label = std::string("import replacement ") + module + "!" + function;
     if (dir.VirtualAddress == 0) return refuse(owner, ChangeStatus::NotFound, label + ": the image has no imports");
     for (auto* desc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + dir.VirtualAddress); desc->Name != 0; ++desc) {
@@ -1420,7 +1426,7 @@ ChangeStatus ChangeRegistry::remove(OwnerId owner, ChangeId id) {
 
 ChangeStatus ChangeRegistry::begin_group(OwnerId owner) {
     std::lock_guard lock(mutex_);
-    if (check_owner(owner) != ChangeStatus::Ok) return ChangeStatus::InvalidArgument;
+    if (const ChangeStatus s = check_requester(owner); s != ChangeStatus::Ok) return s;
     if (owners_[owner].group) return ChangeStatus::WrongPhase;
     owners_[owner].group = true;
     return ChangeStatus::Ok;
@@ -1471,6 +1477,15 @@ size_t ChangeRegistry::rollback(OwnerId owner) {
     owners_[owner].group = false;
     owners_[owner].staged.clear();
     return undone;
+}
+
+size_t ChangeRegistry::retire(OwnerId owner) {
+    {
+        std::lock_guard lock(mutex_);
+        if (check_owner(owner) != ChangeStatus::Ok) return 0;
+        owners_[owner].retired = true;  // first: a request racing the rollback is refused
+    }
+    return rollback(owner);
 }
 
 // Moves the owner's enabled links between Active and Suspended, one site at a

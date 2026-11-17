@@ -68,7 +68,10 @@ int detour_b(int x) { return g_next[2](x) + 100; }
 
 }  // namespace
 
+const AnvilHost* g_failing_host = nullptr;  // kept: a thread of the failed plugin may still call it
+
 extern "C" __declspec(dllexport) AnvilResult anvil_plugin_load(const AnvilHost* host, AnvilPlugin* self) {
+    g_failing_host = host;
     AnvilPlugin* extra = nullptr;
     if (g_failing_target == nullptr || host->module(self, "extra", &extra) != ANVIL_OK) return ANVIL_ERROR_INTERNAL;
     host->hook_function_at(self, g_failing_target->base, kAddOne, 5, reinterpret_cast<void*>(&failing_detour),
@@ -182,6 +185,17 @@ void plugin_set_tests() {
         AnvilPlugin* extra = start.module("refuses", "refuses.extra");
         CHECK(extra != nullptr && start.changes.count(refuses->owner) == 0 && start.changes.count(extra->owner) == 0);
         CHECK(start.changes.staged_count(refuses->owner) == 0 && target.fn()(1) == 2);
+        // Nor later: a thread the failed load started asks for a change through either handle.
+        CHECK(g_failing_host != nullptr);
+        if (g_failing_host != nullptr) {
+            for (AnvilPlugin* handle : {refuses, extra}) {
+                CHECK(g_failing_host->hook_function_at(handle, target.base, kAddOne, 5,
+                                                       reinterpret_cast<void*>(&failing_detour), &g_failing_next[0],
+                                                       nullptr) == ANVIL_ERROR_WRONG_PHASE);
+                CHECK(g_failing_host->begin_group(handle) == ANVIL_ERROR_WRONG_PHASE);
+            }
+            CHECK(start.changes.count(refuses->owner) == 0 && start.changes.count(extra->owner) == 0 && target.fn()(1) == 2);
+        }
         // No policy entry: in ironman only the plugin that loaded is suspended.
         AnvilGameSession s{sizeof(s), ANVIL_GAME_SESSION_STARTED, 1, 0, 1};
         start.bus.publish(ANVIL_GAME_EVENT_SESSION, &s);

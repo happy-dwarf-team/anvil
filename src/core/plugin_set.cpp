@@ -70,7 +70,7 @@ LoadResult run_plugin_load(const PluginRecord& plugin, const AnvilHost& host, Pl
     }
     if (out.result != ANVIL_OK) {
         each_handle(plugin, [&](AnvilPlugin& h) {
-            changes.rollback(h.owner);
+            changes.retire(h.owner);
             bus.remove_owner(h.name);
         });
         plugin.settings().drop_subscriptions();
