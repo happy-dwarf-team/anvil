@@ -215,7 +215,18 @@ bool start_search(std::uint64_t key, std::string token, se::FindIn in) {
     }
 }
 
+void click(std::uint64_t id);
+
+// The overlay calls this through a C pointer on the main thread, after a
+// frame: no exception may leave it (the click is then lost, not the game).
 void on_click(void*, std::uint64_t id) {
+    try {
+        click(id);
+    } catch (...) {
+    }
+}
+
+void click(std::uint64_t id) {
     {
         std::lock_guard lock(g_mutex);
         g_dirty = true;

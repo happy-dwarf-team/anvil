@@ -374,7 +374,18 @@ void start_locked(std::uint32_t days) {
     publish_locked();
 }
 
+void click(std::uint64_t id);
+
+// The overlay calls this through a C pointer on the main thread, after a
+// frame: no exception may leave it (the click is then lost, not the game).
 void on_click(void*, std::uint64_t id) {
+    try {
+        click(id);
+    } catch (...) {
+    }
+}
+
+void click(std::uint64_t id) {
     std::lock_guard lock(g_mutex);
     switch (id) {
     case sp::kStart: start_locked(0); break;
@@ -465,16 +476,21 @@ void control_loop() {
         char buf[128] = {};
         const std::size_t n = std::fread(buf, 1, sizeof(buf) - 1, f);
         std::fclose(f);
-        std::string text(buf, n);
-        while (!text.empty() && (text.back() == '\n' || text.back() == '\r' || text.back() == ' ')) text.pop_back();
-        if (text.empty() || text == seen) continue;
-        seen = text;
-        const std::uint64_t seq = std::strtoull(text.c_str(), nullptr, 10);
-        {
-            std::lock_guard lock(g_mutex);
-            g_command_text = text;
+        // A thread of its own: an exception here would end the game, so a
+        // command that cannot be copied is read again at the next poll.
+        try {
+            std::string text(buf, n);
+            while (!text.empty() && (text.back() == '\n' || text.back() == '\r' || text.back() == ' ')) text.pop_back();
+            if (text.empty() || text == seen) continue;
+            const std::uint64_t seq = std::strtoull(text.c_str(), nullptr, 10);
+            {
+                std::lock_guard lock(g_mutex);
+                g_command_text = text;
+            }
+            seen = std::move(text);
+            g_game->run_on_main_thread(&run_command, reinterpret_cast<void*>(static_cast<std::uintptr_t>(seq)));
+        } catch (...) {
         }
-        g_game->run_on_main_thread(&run_command, reinterpret_cast<void*>(static_cast<std::uintptr_t>(seq)));
     }
 }
 

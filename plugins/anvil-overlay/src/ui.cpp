@@ -32,6 +32,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <new>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -261,15 +262,25 @@ void start_release_check() {
     try {
         std::thread([agent] {
             anvil::net::ReleaseCheck check;
-            // winhttp.dll is delay-loaded: only from System32, and only here.
-            if (LoadLibraryExW(L"winhttp.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32) == nullptr) {
-                check.english_error = "winhttp.dll cannot be loaded (error " + std::to_string(GetLastError()) + ")";
-            } else {
-                check = anvil::net::fetch_latest_release(agent);
+            // A thread of its own: an exception that left it would end the
+            // game. The check then answers with an error, or with none.
+            try {
+                // winhttp.dll is delay-loaded: only from System32, and only here.
+                if (LoadLibraryExW(L"winhttp.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32) == nullptr) {
+                    check.english_error = "winhttp.dll cannot be loaded (error " + std::to_string(GetLastError()) + ")";
+                } else {
+                    check = anvil::net::fetch_latest_release(agent);
+                }
+            } catch (...) {
+                try {
+                    check.english_error = "the release check failed";
+                } catch (...) {
+                }
             }
-            {
+            try {
                 std::lock_guard lock(release_result().mutex);
                 release_result().check = std::move(check);
+            } catch (...) {
             }
             shared().release_done.store(true, std::memory_order_release);
             shared().mark_dirty();
@@ -1543,9 +1554,15 @@ void ui_capture_clipboard() {
         if (HANDLE data = GetClipboardData(CF_UNICODETEXT)) {
             if (const auto* wide = static_cast<const wchar_t*>(GlobalLock(data))) {
                 const int bytes = WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
-                if (bytes > 1) {
-                    text.resize(static_cast<size_t>(bytes - 1));
-                    WideCharToMultiByte(CP_UTF8, 0, wide, -1, text.data(), bytes, nullptr, nullptr);
+                // In the window procedure: a clipboard too large to copy is
+                // not pasted, and the clipboard is still closed.
+                try {
+                    if (bytes > 1) {
+                        text.resize(static_cast<size_t>(bytes - 1));
+                        WideCharToMultiByte(CP_UTF8, 0, wide, -1, text.data(), bytes, nullptr, nullptr);
+                    }
+                } catch (const std::bad_alloc&) {
+                    text.clear();
                 }
                 GlobalUnlock(data);
             }
