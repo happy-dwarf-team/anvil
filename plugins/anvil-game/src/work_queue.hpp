@@ -16,8 +16,10 @@ namespace anvil_game {
 class WorkQueue {
 public:
     void push(AnvilGameWork work, void* context);  // may throw std::bad_alloc
-    // Main thread only. Returns how many items ran.
-    std::size_t run();
+    // Main thread only. Returns how many items ran. Each item runs once: one
+    // that throws a C++ exception is counted in `failed` and the others still
+    // run (an item left in the list would run again at a later frame).
+    std::size_t run(std::size_t* failed = nullptr);
     std::size_t pending() const { return pending_.load(std::memory_order_acquire); }
 
 private:

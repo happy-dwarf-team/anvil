@@ -48,6 +48,14 @@ namespace sp = script_profiler;
 
 namespace {
 
+// A path as UTF-8, for the log and the panel. path::string() converts through
+// the ANSI code page and throws for a character it does not have (a user
+// folder in Chinese on a Western Windows), after the span's CSV was written.
+std::string utf8(const std::filesystem::path& path) {
+    const std::u8string text = path.u8string();
+    return std::string(text.begin(), text.end());
+}
+
 // ---- the hooks (game threads) ------------------------------------------------
 
 anvil::HookOf<sym::and_trigger_evaluate> g_and;
@@ -308,16 +316,16 @@ void stop_locked(sp::Ending ending, bool exiting) {
         const std::string stem = g_state.csv_name.substr(0, g_state.csv_name.size() - 4);
         path = g_state.logs / (stem + "_" + std::to_string(n) + ".csv");
     }
-    g_state.csv_name = path.filename().string();
+    g_state.csv_name = utf8(path.filename());
     const bool ok = write_file(path, sp::csv(full));
     if (exiting) return;
     g_state.last = std::make_unique<sp::Report>(sp::make_report(snapshot, *g_resolver, span, false));
-    g_state.csv_path = (std::filesystem::path(L"logs") / g_state.csv_name).string();
+    g_state.csv_path = utf8(std::filesystem::path(L"logs") / g_state.csv_name);
     g_state.csv_failed = !ok;
     const anvil::Host host;
     host.info("profiling span ended ({}): {} days, {:.1f} s, {} root calls on {} threads; hooks removed; {} {}",
               ending == sp::Ending::complete ? "complete" : "interrupted: the session ended", span.days, seconds,
-              full.root_calls, full.threads, ok ? "wrote" : "could not write", path.string());
+              full.root_calls, full.threads, ok ? "wrote" : "could not write", utf8(path));
     publish_locked();
 }
 
@@ -549,7 +557,7 @@ struct ScriptProfiler : anvil::Plugin {
         wchar_t control[MAX_PATH] = {};
         if (GetEnvironmentVariableW(L"ANVIL_SCRIPT_PROFILER_CONTROL", control, MAX_PATH) > 0 && g_game != nullptr) {
             g_control = control;
-            host.info("ANVIL_SCRIPT_PROFILER_CONTROL: commands from {}", g_control.string());
+            host.info("ANVIL_SCRIPT_PROFILER_CONTROL: commands from {}", utf8(g_control));
             try {
                 std::thread(control_loop).detach();
             } catch (const std::exception&) {

@@ -380,7 +380,13 @@ void after_frame_body(std::uint8_t* app, std::uint64_t number) {
         }
         publish(ANVIL_GAME_EVENT_MAIN_MENU, nullptr);
     }
-    g_work.run();
+    std::size_t failed = 0;
+    g_work.run(&failed);
+    if (static bool told = false; failed != 0 && !told) {
+        told = true;
+        host.warn("{} item(s) queued with run_on_main_thread ended with a C++ exception; the others ran (logged once)",
+                  failed);
+    }
     g_frame_number.store(number, std::memory_order_release);
     const bool running = view.running && g_tracker.active();
     const DateEvents dates = g_dates.update(running, g_tracker.current().number, view.date);

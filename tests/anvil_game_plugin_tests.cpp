@@ -30,6 +30,7 @@
 #include <map>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -1371,6 +1372,18 @@ int main(int argc, char** argv) {
         }, nullptr);
         CHECK(q.pending() == 2 && q.run() == 2 && (ran == std::vector<int>{1, 2}) && q.pending() == 1);
         CHECK(q.run() == 1 && (ran == std::vector<int>{1, 2, 3}) && q.run() == 0);
+
+        // An item that throws: the others still run, each once, and none of
+        // them runs again after the next push.
+        ran.clear();
+        q.push([](void*) { ran.push_back(4); }, nullptr);
+        q.push([](void*) { throw std::runtime_error("a plugin's work item"); }, nullptr);
+        q.push([](void*) { ran.push_back(5); }, nullptr);
+        std::size_t failed = 0;
+        CHECK(q.run(&failed) == 3 && failed == 1 && (ran == std::vector<int>{4, 5}));
+        q.push([](void*) { ran.push_back(6); }, nullptr);
+        CHECK(q.pending() == 1 && q.run(&failed) == 1 && failed == 0 && (ran == std::vector<int>{4, 5, 6}));
+        CHECK(q.run() == 0);
     });
 
     run("anvil-game: the restart's rules (ADR 0012)", [] {
