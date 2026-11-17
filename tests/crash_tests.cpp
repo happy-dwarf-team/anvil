@@ -287,8 +287,9 @@ LONG WINAPI child_keep_running_filter(EXCEPTION_POINTERS*) {
 size_t kept_dumps(const fs::path& crashes) {
     size_t count = 0;
     for (const auto& entry : fs::directory_iterator(crashes)) {
+        std::error_code ec;
         if (entry.path().extension() == L".dmp" && entry.path().filename().wstring().rfind(L"pending-", 0) != 0 &&
-            fs::file_size(entry.path()) > 0) {
+            fs::file_size(entry.path(), ec) > 0 && !ec) {
             ++count;
         }
     }
@@ -467,7 +468,12 @@ ChildResult run_child(const char* mode, const fs::path& dir) {
     for (const auto& entry : fs::directory_iterator(dir / "crashes")) {
         const auto name = entry.path().filename().wstring();
         if (name.rfind(L"2000-", 0) != 0) {
-            r.listing += " " + entry.path().filename().string() + " (" + std::to_string(fs::file_size(entry.path())) + " B)";
+            // A file another process still holds (an antivirus scanning the
+            // dump) can be listed while its size cannot be read.
+            std::error_code ec;
+            const auto size = fs::file_size(entry.path(), ec);
+            r.listing += " " + entry.path().filename().string() + " (" +
+                         (ec ? "size unknown: " + ec.message() : std::to_string(size) + " B") + ")";
         }
         if (entry.path().extension() == L".json") r.reports.push_back(entry.path());
         if (name.rfind(L"pending-", 0) == 0) r.pending_left = true;

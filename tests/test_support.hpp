@@ -6,6 +6,7 @@
 #include <windows.h>
 
 #include <cstdio>
+#include <exception>
 #include <functional>
 #include <string>
 
@@ -37,9 +38,20 @@ inline int g_checks = 0;
         }                                                                              \
     } while (0)
 
+// An exception a test throws (a std::filesystem call on a file another
+// process holds, say) fails that test with its text, instead of ending the
+// process through std::terminate with 0xC0000409 and no output.
 inline void run(const char* name, const std::function<void()>& body) {
     const int before = g_failures;
-    body();
+    try {
+        body();
+    } catch (const std::exception& e) {
+        ++g_failures;
+        std::printf("  FAILED: exception: %s\n", e.what());
+    } catch (...) {
+        ++g_failures;
+        std::printf("  FAILED: an exception that is not a std::exception\n");
+    }
     std::printf("%s %s\n", g_failures == before ? "ok  " : "FAIL", name);
     std::fflush(stdout);
 }
