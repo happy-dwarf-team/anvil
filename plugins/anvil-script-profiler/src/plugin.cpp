@@ -550,7 +550,11 @@ struct ScriptProfiler : anvil::Plugin {
         if (GetEnvironmentVariableW(L"ANVIL_SCRIPT_PROFILER_CONTROL", control, MAX_PATH) > 0 && g_game != nullptr) {
             g_control = control;
             host.info("ANVIL_SCRIPT_PROFILER_CONTROL: commands from {}", g_control.string());
-            std::thread(control_loop).detach();
+            try {
+                std::thread(control_loop).detach();
+            } catch (const std::exception&) {
+                host.warn("ANVIL_SCRIPT_PROFILER_CONTROL: cannot start its thread; no commands from the file");
+            }
         }
         host.info("idle: no hooks until a profiling span starts in the panel ({} owner classes known)",
                   (v.event != 0) + (v.decision != 0) + (v.on_action != 0) + (v.casus_belli != 0) +

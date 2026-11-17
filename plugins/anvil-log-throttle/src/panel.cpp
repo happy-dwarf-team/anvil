@@ -132,20 +132,29 @@ void publish() {
     if (r != ANVIL_OK) anvil::Host{}.warn("the script errors panel: set_rows failed ({}) for {} rows", static_cast<int>(r), out.size());
 }
 
+// The panel's click callback runs these, under g_mutex, inside the overlay's
+// call: an exception must leave neither the callback nor a thread (which would
+// end the game through std::terminate).
 void open_link(const std::string& uri, const std::string& what) {
     anvil::Host{}.info("the script errors panel opens {}", uri);
-    std::thread([uri, what] {
-        const std::wstring w = se::path_of(uri).native();
-        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-        const auto r = reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", w.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
-        CoUninitialize();
-        {
-            std::lock_guard lock(g_mutex);
-            g_view.note = r > 32 ? texts().f("Opened {0}", {what}) : texts().f("No program opened {0}.", {what});
-            g_dirty = true;
-        }
-        wake();
-    }).detach();
+    try {
+        std::thread([uri, what] {
+            try {
+                const std::wstring w = se::path_of(uri).native();
+                CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+                const auto r = reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", w.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+                CoUninitialize();
+                std::lock_guard lock(g_mutex);
+                g_view.note = r > 32 ? texts().f("Opened {0}", {what}) : texts().f("No program opened {0}.", {what});
+                g_dirty = true;
+            } catch (const std::exception&) {
+                // A failed allocation: the note stays as it was.
+            }
+            wake();
+        }).detach();
+    } catch (const std::exception&) {
+        anvil::Host{}.warn("the script errors panel: cannot start a thread to open {}", uri);
+    }
 }
 
 void copy_text(const std::string& text) {
@@ -162,33 +171,48 @@ void copy_text(const std::string& text) {
 
 std::string file_line(const std::string& path, int line) { return line > 0 ? path + ":" + std::to_string(line) : path; }
 
-void start_search(std::uint64_t key, std::string token, se::FindIn in) {
-    std::thread([key, token = std::move(token), in] {
-        std::vector<se::Layer> layers;
-        {
-            std::lock_guard lock(g_mutex);
-            layers = layers_locked();
-        }
-        const auto start = std::chrono::steady_clock::now();
-        se::Search found = se::search(layers, token, in);
-        const auto ms = static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
-        anvil::Host{}.info("the script errors panel: '{}' has {} uses in {} files ({} ms)", token, found.total, found.files, ms);
-        {
-            std::lock_guard lock(g_mutex);
-            const std::vector<se::Message*> item = g_model.item(key);
-            if (!item.empty()) {
-                se::Message& m = *item.front();
-                m.hits = std::move(found.hits);
-                m.hit_total = found.total;
-                m.hit_files = found.files;
-                m.search_ms = ms;
-                m.search = 2;
+// False when the thread cannot start; the caller holds g_mutex.
+bool start_search(std::uint64_t key, std::string token, se::FindIn in) {
+    try {
+        std::thread([key, token = std::move(token), in] {
+            try {
+                std::vector<se::Layer> layers;
+                {
+                    std::lock_guard lock(g_mutex);
+                    layers = layers_locked();
+                }
+                const auto start = std::chrono::steady_clock::now();
+                se::Search found = se::search(layers, token, in);
+                const auto ms = static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+                anvil::Host{}.info("the script errors panel: '{}' has {} uses in {} files ({} ms)", token, found.total, found.files, ms);
+                std::lock_guard lock(g_mutex);
+                const std::vector<se::Message*> item = g_model.item(key);
+                if (!item.empty()) {
+                    se::Message& m = *item.front();
+                    m.hits = std::move(found.hits);
+                    m.hit_total = found.total;
+                    m.hit_files = found.files;
+                    m.search_ms = ms;
+                    m.search = 2;
+                }
+                g_dirty = true;
+            } catch (const std::exception&) {
+                // A failed allocation: the search can be started again.
+                try {
+                    std::lock_guard lock(g_mutex);
+                    for (se::Message* m : g_model.item(key)) m->search = 0;
+                    g_dirty = true;
+                } catch (const std::exception&) {
+                }
             }
-            g_dirty = true;
-        }
-        wake();
-    }).detach();
+            wake();
+        }).detach();
+        return true;
+    } catch (const std::exception&) {
+        anvil::Host{}.warn("the script errors panel: cannot start a thread to search for '{}'", token);
+        return false;
+    }
 }
 
 void on_click(void*, std::uint64_t id) {
@@ -218,7 +242,7 @@ void on_click(void*, std::uint64_t id) {
             case se::Action::find:
                 if (m.search == 0 && !m.find.empty()) {
                     m.search = 1;
-                    start_search(g_view.selected, m.find, m.find_in);
+                    if (!start_search(g_view.selected, m.find, m.find_in)) m.search = 0;
                 }
                 break;
             default:
@@ -261,7 +285,13 @@ void run() {
 
 void start_thread() {
     if (g_started.exchange(true)) return;
-    std::thread(run).detach();
+    // Called from a setting's callback too: an exception must not leave it.
+    try {
+        std::thread(run).detach();
+    } catch (const std::exception&) {
+        g_started.store(false);  // the next switch on tries again
+        anvil::Host{}.warn("the script errors panel: cannot start its thread");
+    }
 }
 
 }  // namespace

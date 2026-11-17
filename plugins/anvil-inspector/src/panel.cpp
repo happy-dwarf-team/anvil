@@ -159,7 +159,13 @@ void run() {
 
 void start_thread() {
     if (g_started.exchange(true)) return;
-    std::thread(run).detach();
+    // Called from a setting's callback too: an exception must not leave it.
+    try {
+        std::thread(run).detach();
+    } catch (const std::exception&) {
+        g_started.store(false);  // the next switch on tries again
+        anvil::Host{}.warn("the inspector: cannot start its thread");
+    }
 }
 
 }  // namespace
