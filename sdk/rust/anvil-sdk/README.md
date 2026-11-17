@@ -56,7 +56,8 @@ What it gives over the C ABI:
   `settings.gen.rs`, written by a build script).
 - Typed wrappers for the services Anvil ships: `anvil::game`
   (`anvil-game.game` and its events), `anvil::world` (`anvil-game.world`),
-  `anvil::commands` (`anvil-game.commands`),
+  `anvil::commands` (`anvil-game.commands`), `anvil::camera`
+  (`anvil-game.camera`),
   `anvil::panel` (`anvil-overlay.panel`), `anvil::input`
   (`anvil-overlay.input`), `anvil::benchmark`
   (`anvil.benchmark`), `anvil::map` (`anvil-map.modes` and its events) and

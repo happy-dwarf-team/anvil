@@ -1082,6 +1082,70 @@ typedef struct AnvilGameCommandsService {
 #define ANVIL_GAME_COMMANDS_HAS(service, field) \
     ((service)->size >= offsetof(AnvilGameCommandsService, field) + sizeof((service)->field))
 
+/* --- Since anvil-game 1.25.0: the map camera --------------------------------
+ *
+ * The game's map camera (CEU3Camera): client state, not game state. Only this
+ * client's view moves, as with the player's own keys and mouse; nothing goes
+ * to the game state or to the other players in multiplayer.
+ *
+ * Map units: y is the height above the map's plane, x and z lie on it.
+ * `position` is where the camera is, `look_at` the point it looks at; the
+ * game moves both towards their targets over the next frames after a pan, so
+ * a pan shows in them a frame or more later.
+ * LOCKED: the game holds the camera still (its _bLocked, set while a menu is
+ * open or the graphics cannot draw); the arrow keys and the mouse then do not
+ * move it, and pan() refuses. */
+#define ANVIL_GAME_CAMERA_LOCKED 0x1u
+
+typedef struct AnvilGameCameraView {
+    uint32_t size; /* set to sizeof(AnvilGameCameraView) before the call */
+    float position[3];
+    float look_at[3];
+    uint32_t flags; /* ANVIL_GAME_CAMERA_* */
+} AnvilGameCameraView;
+
+#define ANVIL_GAME_CAMERA_SERVICE "anvil-game.camera"
+#define ANVIL_GAME_CAMERA_SERVICE_VERSION 1
+
+/* NULL from get_service with an older anvil-game, or on a game build whose
+ * symbols for version 1 are declared absent.
+ *
+ * Thread. Call only on the game's main thread, after an outer frame (from a
+ * handler of an anvil-game event or from run_on_main_thread work), while a
+ * session runs, as anvil-game.world's reads do: elsewhere, in the main menu
+ * and during a load a call answers ANVIL_ERROR_WRONG_PHASE and does nothing.
+ *
+ * Results. ANVIL_ERROR_INVALID_ARGUMENT for a bad argument,
+ * ANVIL_ERROR_INTERNAL when the game's memory is not what it should be, which
+ * costs that answer only.
+ *
+ * Within version 1 fields are only appended to the struct and functions to the
+ * end of the service; check with ANVIL_GAME_CAMERA_HAS. */
+typedef struct AnvilGameCameraService {
+    uint32_t size; /* sizeof(AnvilGameCameraService) as known by anvil-game */
+
+    /* The map camera now. The caller sets out->size; a smaller struct gets the
+     * fields its size covers. ANVIL_ERROR_INVALID_ARGUMENT for NULL or a size
+     * below position's end. */
+    AnvilResult (*view)(AnvilGameCameraView *out);
+    /* Pans the map camera for one frame as the arrow keys do: `right` and `up`
+     * from -1 to 1, so (1, 0) is the right arrow held for this frame and
+     * (0.5, 0) half that; a longer vector is shortened to length 1. The speed is
+     * the arrows' own: the player's scroll speed setting, the camera's height
+     * and this frame's time (capped as the game caps it). So a plugin calls it
+     * once a frame for as long as its input lasts, for one while
+     * anvil-overlay.input's held() says its key is down. The game's own keys
+     * and mouse still pan too, and a second call in the same frame pans twice.
+     * ANVIL_ERROR_INVALID_ARGUMENT for a value that is not finite;
+     * ANVIL_ERROR_WRONG_PHASE also while the camera is LOCKED. (0, 0) is
+     * ANVIL_OK and does nothing. */
+    AnvilResult (*pan)(float right, float up);
+} AnvilGameCameraService;
+
+/* Nonzero when `service` provides `field`. */
+#define ANVIL_GAME_CAMERA_HAS(service, field) \
+    ((service)->size >= offsetof(AnvilGameCameraService, field) + sizeof((service)->field))
+
 #ifdef __cplusplus
 }
 #endif

@@ -2510,3 +2510,107 @@ note = "CHasProvinceModifierTrigger::Evaluate: a key that is no static modifier 
 build."eu4-1.37.5-steam-win64" = { rva = 0xC506AB }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0xC4EE5B }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0xC4EE5B }
+
+[symbol.camera_of_session]
+memory = "code"
+values.frame_time = { at = 5, size = 4 }
+values.camera = { at = 29, size = 4 }
+note = "CInGameIdler::ProcessInputQueue before CEU3Camera::UpdateMouseAndKB: the frame time (float) and the map camera (CEU3Camera*) in the in-game session"
+
+[symbol.camera_of_session.build."eu4-1.37.5-steam-win64"]
+rva = 0x831192
+bytes = "F3 41 0F 10 86 58 16 00 00 F3 0F 11 44 24 20 4D 8B CF 4D 8B 46 60 49 8B 56 68 49 8B 8E 00 12 00 00"
+
+[symbol.camera_of_session.build."eu4-1.37.5.2-gog-win64"]
+rva = 0x8304F2
+bytes = "F3 41 0F 10 86 48 16 00 00 F3 0F 11 44 24 20 4D 8B CF 4D 8B 46 58 49 8B 56 60 49 8B 8E F0 11 00 00"
+
+[symbol.camera_of_session.build."eu4-1.37.5.0-gog-win64"]
+rva = 0x8304F2
+bytes = "F3 41 0F 10 86 48 16 00 00 F3 0F 11 44 24 20 4D 8B CF 4D 8B 46 58 49 8B 56 60 49 8B 8E F0 11 00 00"
+
+[symbol.camera_pan]
+memory = "code"
+signature = "void (void* camera, const float* pan, float frame_time, bool keys)"
+values.position = { at = 98, size = 4 }
+values.look_at = { at = 105, size = 4 }
+note = "CEU3Camera::Pan: moves the target position and look-at by pan (x right, y up) times the frame time, within the map's constraints; _CurrentPosition +0x67C, _CurrentLookAt +0x688"
+bytes = """
+48 8B C4 48 89 58 18 48 89 78 20 55 48 8D 68 A1 48 81 EC F0 00 00 00 F3 0F 10 02 48 8B DA F3 0F 10 4A 04
+48 8B F9 0F 29 70 E8 0F 57 F6 F3 0F 59 C9 48 89 55 DF F3 0F 59 C0 44 0F 29 48 B8 44 0F 28 CA F3 0F 58 C8
+F3 0F 51 D1 0F 2F D6 0F 86 B6 02 00 00 48 89 70 08 48 8D 55 D7 4C 89 70 10 48 8D B1 7C 06 00 00 4C 8D B1
+88 06 00 00
+"""
+build."eu4-1.37.5-steam-win64" = { rva = 0x109EF10 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x109D710 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x109D710 }
+
+[symbol.camera_lock]
+memory = "code"
+values.locked = { at = 17, size = 4 }
+note = "CEU3Camera::HandleMouseAndKBInput: a locked camera (_bLocked, +0x758) takes no mouse or keyboard input"
+bytes = "48 8B C4 56 57 41 54 41 56 41 57 48 83 EC 70 80 B9 58 07 00 00 00"
+build."eu4-1.37.5-steam-win64" = { rva = 0x109E750 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x109CF50 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x109CF50 }
+
+[symbol.camera_key_speed]
+memory = "code"
+values.height = { at = 4, size = 4 }
+values.divisor = { at = 12, rip_relative = 16 }
+values.lower = { at = 20, rip_relative = 24 }
+values.upper = { at = 52, rip_relative = 56 }
+values.settings = { at = 63, rip_relative = 67 }
+values.scroll_speed = { at = 71, size = 4 }
+values.factor = { at = 79, rip_relative = 83 }
+note = "CEU3Camera::HandleMouseAndKBInput: the arrow keys' pan speed, CSettings::_pInstance->_ScrollSpeed * factor * clamp(height / divisor, lower, upper)"
+
+[symbol.camera_key_speed.build."eu4-1.37.5-steam-win64"]
+rva = 0x109E941
+bytes = """
+F3 0F 10 96 80 06 00 00 F3 0F 10 3D 8B 2F D2 00 F3 0F 10 0D AB 2C D2 00 8B 46 08 F3 0F 5E D7 89 84 24 A0 00
+00 00 0F 2F CA 76 05 0F 28 C1 EB 0C F3 0F 10 05 A3 2E D2 00 F3 0F 5D C2 48 8B 05 64 D4 38 01 F3 0F 10 B0 C8
+00 00 00 F3 0F 59 35 D0 2D D2 00
+"""
+
+[symbol.camera_key_speed.build."eu4-1.37.5.2-gog-win64"]
+rva = 0x109D141
+bytes = """
+F3 0F 10 96 80 06 00 00 F3 0F 10 3D A3 B0 D0 00 F3 0F 10 0D CB AD D0 00 8B 46 08 F3 0F 5E D7 89 84 24 A0 00
+00 00 0F 2F CA 76 05 0F 28 C1 EB 0C F3 0F 10 05 BB AF D0 00 F3 0F 5D C2 48 8B 05 DC 2A 37 01 F3 0F 10 B0 C8
+00 00 00 F3 0F 59 35 F0 AE D0 00
+"""
+
+[symbol.camera_key_speed.build."eu4-1.37.5.0-gog-win64"]
+rva = 0x109D141
+bytes = """
+F3 0F 10 96 80 06 00 00 F3 0F 10 3D A3 B0 D0 00 F3 0F 10 0D CB AD D0 00 8B 46 08 F3 0F 5E D7 89 84 24 A0 00
+00 00 0F 2F CA 76 05 0F 28 C1 EB 0C F3 0F 10 05 BB AF D0 00 F3 0F 5D C2 48 8B 05 DC 2A 37 01 F3 0F 10 B0 C8
+00 00 00 F3 0F 59 35 F0 AE D0 00
+"""
+
+[symbol.camera_frame_time_cap]
+memory = "code"
+values.cap = { at = 29, rip_relative = 33 }
+note = "CEU3Camera::UpdateMouseAndKB: the frame time it pans with, at most this (0.7 s)"
+
+[symbol.camera_frame_time_cap.build."eu4-1.37.5-steam-win64"]
+rva = 0x109BEE0
+bytes = """
+48 89 5C 24 08 57 48 83 EC 70 33 FF 0F 29 74 24 60 48 8B D9 0F 29 7C 24 50 F3 0F 10 3D A7 56 D2 00 48 8D 4C
+24 30 F3 0F 5D BC 24 A0 00 00 00
+"""
+
+[symbol.camera_frame_time_cap.build."eu4-1.37.5.2-gog-win64"]
+rva = 0x109A6E0
+bytes = """
+48 89 5C 24 08 57 48 83 EC 70 33 FF 0F 29 74 24 60 48 8B D9 0F 29 7C 24 50 F3 0F 10 3D C7 D7 D0 00 48 8D 4C
+24 30 F3 0F 5D BC 24 A0 00 00 00
+"""
+
+[symbol.camera_frame_time_cap.build."eu4-1.37.5.0-gog-win64"]
+rva = 0x109A6E0
+bytes = """
+48 89 5C 24 08 57 48 83 EC 70 33 FF 0F 29 74 24 60 48 8B D9 0F 29 7C 24 50 F3 0F 10 3D C7 D7 D0 00 48 8D 4C
+24 30 F3 0F 5D BC 24 A0 00 00 00
+"""

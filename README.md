@@ -45,7 +45,8 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
   opinions) and, from Anvil 1.17, the unit panel's commands and an event's
   options for gameplay plugins (`anvil-game.commands`; from 1.22 also the game
   speed, exploring and moving units). From Anvil 1.23 it also asks the game
-  for its own restart (`restart`, on the player's request).
+  for its own restart (`restart`, on the player's request), and from Anvil
+  1.25 it reads and pans the map camera (`anvil-game.camera`).
   Plugins that change the simulation need it: in ironman and multiplayer games
   Anvil takes their changes out unless the player allows them in
   `anvil/anvil.toml`.

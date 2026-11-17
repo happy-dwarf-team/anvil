@@ -9,7 +9,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use crate::sys::*;
 use crate::{
-    commands, game, input, log_throttle, map, panel, script, world, Change, ErrorCode,
+    camera, commands, game, input, log_throttle, map, panel, script, world, Change, ErrorCode,
     FunctionHook, Host, Payload, Plugin, Tag,
 };
 
@@ -137,6 +137,7 @@ unsafe extern "C" fn fake_get_service(
         ("anvil-script.effects", 1) => ptr::from_ref(&*FAKE_EFFECTS).cast(),
         ("anvil-game.commands", 1..=3) => ptr::from_ref(&*FAKE_COMMANDS).cast(),
         ("anvil-log-throttle.messages", 1) => ptr::from_ref(&*FAKE_LOG_MESSAGES).cast(),
+        ("anvil-game.camera", 1) => ptr::from_ref(&*FAKE_CAMERA).cast(),
         _ => ptr::null(),
     }
 }
@@ -308,6 +309,34 @@ static FAKE_LOG_MESSAGES: Shared<AnvilLogMessagesService> = Shared(AnvilLogMessa
     keep: Some(log_keep),
     totals: Some(log_totals),
     read: Some(log_read),
+});
+
+// --- a fake camera service ------------------------------------------------------
+
+unsafe extern "C" fn camera_view(out: *mut AnvilGameCameraView) -> AnvilResult {
+    let out = unsafe { &mut *out };
+    assert_eq!(
+        out.size as usize,
+        std::mem::size_of::<AnvilGameCameraView>()
+    );
+    out.position = [10.0, 300.0, 20.0];
+    out.look_at = [10.0, 0.0, 40.0];
+    out.flags = ANVIL_GAME_CAMERA_LOCKED;
+    ANVIL_OK
+}
+
+unsafe extern "C" fn camera_pan(right: f32, up: f32) -> AnvilResult {
+    if right == 1.0 && up == -0.5 {
+        ANVIL_OK
+    } else {
+        ANVIL_ERROR_WRONG_PHASE
+    }
+}
+
+static FAKE_CAMERA: Shared<AnvilGameCameraService> = Shared(AnvilGameCameraService {
+    size: std::mem::size_of::<AnvilGameCameraService>() as u32,
+    view: Some(camera_view),
+    pan: Some(camera_pan),
 });
 
 // --- a fake panel service -------------------------------------------------------
@@ -1811,7 +1840,7 @@ fn milli_tags_and_errors_read_as_people_write_them() {
 
 #[test]
 fn event_and_service_names_are_the_headers() {
-    let pairs: [(&CStr, &[u8]); 12] = [
+    let pairs: [(&CStr, &[u8]); 13] = [
         (crate::PLUGINS_LOADED.name(), ANVIL_EVENT_PLUGINS_LOADED),
         (crate::SUSPENDED.name(), ANVIL_EVENT_SUSPENDED),
         (crate::RESUMED.name(), ANVIL_EVENT_RESUMED),
@@ -1820,6 +1849,7 @@ fn event_and_service_names_are_the_headers() {
         (game::SERVICE, ANVIL_GAME_SERVICE),
         (world::SERVICE, ANVIL_GAME_WORLD_SERVICE),
         (commands::SERVICE, ANVIL_GAME_COMMANDS_SERVICE),
+        (camera::SERVICE, ANVIL_GAME_CAMERA_SERVICE),
         (panel::SERVICE, ANVIL_PANEL_SERVICE),
         (input::SERVICE, ANVIL_INPUT_SERVICE),
         (crate::benchmark::SERVICE, ANVIL_BENCHMARK_SERVICE),
@@ -2199,4 +2229,22 @@ fn game_reads_the_speed_and_the_pause() {
     );
     // In the table's size but not filled in: None.
     assert_eq!(g.out_of_sync(), None);
+}
+
+#[test]
+fn camera_reads_the_view_and_pans() {
+    let (_guard, table) = fake_host();
+    assert_eq!(load::<Quiet>(table), ANVIL_OK);
+    let host = Host::current().unwrap();
+    let c = camera::Camera::get(&host).unwrap();
+    assert_eq!(
+        c.view().unwrap(),
+        camera::View {
+            position: [10.0, 300.0, 20.0],
+            look_at: [10.0, 0.0, 40.0],
+            locked: true,
+        }
+    );
+    assert!(c.pan(1.0, -0.5).is_ok());
+    assert_eq!(c.pan(0.0, 1.0).unwrap_err().code(), ErrorCode::WrongPhase);
 }
