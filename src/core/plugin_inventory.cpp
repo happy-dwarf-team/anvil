@@ -58,6 +58,18 @@ bool PluginInventory::installed(const std::string& id) const {
     return false;
 }
 
+void release_symbols(PluginInventory& inventory) {
+    const auto release = [](PluginCheck& check) {
+        check.symbols.reset();
+        check.verification = SymbolVerification{};
+    };
+    for (InventoryPlugin& p : inventory.local) release(p.check);
+    for (InventoryModPlugin& p : inventory.mods) release(p.check);
+    for (InventoryCopy& c : inventory.copies) {
+        if (c.check) release(*c.check);
+    }
+}
+
 PluginInventory take_inventory(const fs::path& anvil_dir, const fs::path& user_dir, const GameImage& game) {
     PluginInventory inventory;
     inventory.anvil_dir = anvil_dir;

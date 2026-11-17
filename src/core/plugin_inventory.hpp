@@ -74,4 +74,12 @@ struct PluginInventory {
 PluginInventory take_inventory(const std::filesystem::path& anvil_dir, const std::filesystem::path& user_dir,
                                const GameImage& game);
 
+// Frees what only the loading of this start reads: each check's parsed
+// symbols.toml and its verification, which the plugin set has copied by then.
+// The inventory stays for the next start's plan (anvil.control), which reads
+// plugin.toml, the skip and settings.toml of each check, not its symbols
+// (#461: with Bellows, Tongs and Hamweard in the playset these were some
+// 670 KB of the start-up's heap).
+void release_symbols(PluginInventory& inventory);
+
 }  // namespace anvil
