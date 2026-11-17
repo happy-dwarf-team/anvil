@@ -2,6 +2,7 @@
 // for "disable at the next start", reading crash reports back, safe mode's
 // exclusions, the log tail and the service table the overlay calls.
 #include "core/anvil_toml_edit.hpp"
+#include "core/c_api.hpp"
 #include "core/control.hpp"
 #include "core/crash_history.hpp"
 #include "core/discovery.hpp"
@@ -20,6 +21,8 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <new>
+#include <stdexcept>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -150,9 +153,39 @@ bool contains_text(const std::string& text, const std::string& part) { return te
 int g_notified = 0;
 void count_notification(AnvilSetting, void*) { ++g_notified; }
 
+// Functions of the C API's shapes that throw (anvil#457).
+AnvilResult api_out_of_memory(int) { throw std::bad_alloc(); }
+AnvilResult api_other(int) { throw std::runtime_error("broken"); }
+AnvilResult api_answers(int x) { return x == 1 ? ANVIL_OK : ANVIL_ERROR_NOT_FOUND; }
+uint32_t api_count() { throw std::bad_alloc(); }
+int api_found(const char*) { throw std::bad_alloc(); }
+const char* api_text() { throw std::bad_alloc(); }
+const wchar_t* api_path() { throw std::bad_alloc(); }
+const void* api_pointer() { throw std::bad_alloc(); }
+int g_api_void_calls = 0;
+void api_void(int*) {
+    ++g_api_void_calls;
+    throw std::runtime_error("broken");
+}
+
 }  // namespace
 
 void control_tests() {
+    run("C API boundary: no exception leaves a call, each type answers its nothing", [] {
+        static_assert(noexcept(c_api<api_out_of_memory>(0)));
+        CHECK(c_api<api_out_of_memory>(0) == ANVIL_ERROR_OUT_OF_MEMORY);
+        CHECK(c_api<api_other>(0) == ANVIL_ERROR_INTERNAL);
+        CHECK(c_api<api_answers>(1) == ANVIL_OK && c_api<api_answers>(2) == ANVIL_ERROR_NOT_FOUND);
+        CHECK(c_api<api_count>() == 0);
+        CHECK(c_api<api_found>("x") == 0);
+        const char* text = c_api<api_text>();
+        CHECK(text != nullptr && text[0] == '\0');
+        const wchar_t* path = c_api<api_path>();
+        CHECK(path != nullptr && path[0] == L'\0');
+        CHECK(c_api<api_pointer>() == nullptr);
+        c_api<api_void>(nullptr);
+        CHECK(g_api_void_calls == 1);
+    });
     run("anvil.toml edit: the shipped file keeps its comments", [] {
         const std::string shipped = read_file(fs::path(ANVIL_SOURCE_DIR) / "dist" / "anvil.toml");
         CHECK(shipped.find("disabled_plugins = []") != std::string::npos);

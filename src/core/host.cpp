@@ -1,8 +1,11 @@
 #include "host.hpp"
 
+#include "c_api.hpp"
+
 #include "log.hpp"
 #include "plugin_set.hpp"
 
+#include <atomic>
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -346,40 +349,51 @@ const char* result_name(AnvilResult result) {
     return "unknown";
 }
 
+void note_api_exception(bool out_of_memory) noexcept {
+    static std::atomic<bool> noted{false};
+    if (noted.exchange(true)) return;
+    try {
+        Log::instance().try_write(ANVIL_LOG_ERROR, "anvil",
+                                  out_of_memory ? "a plugin API call ran out of memory; it answered OUT_OF_MEMORY (logged once)"
+                                                : "a plugin API call failed with an exception; it answered INTERNAL (logged once)");
+    } catch (...) {
+    }
+}
+
 AnvilHost make_host(const AnvilGameInfo* game) {
     AnvilHost h{};
     h.size = sizeof(AnvilHost);
     h.api_version = ANVIL_API_VERSION;
     h.anvil_version = ANVIL_VERSION;
     h.game = game;
-    h.log = host_log;
-    h.plugin_dir = host_plugin_dir;
-    h.data_dir = host_data_dir;
-    h.hook_function = host_hook_function;
-    h.mid_hook = host_mid_hook;
-    h.replace_block = host_replace_block;
-    h.redirect_call = host_redirect_call;
-    h.patch_bytes = host_patch_bytes;
-    h.swap_pointer = host_swap_pointer;
-    h.replace_import = host_replace_import;
-    h.hook_function_at = host_hook_function_at;
-    h.mid_hook_at = host_mid_hook_at;
-    h.remove = host_remove;
-    h.begin_group = host_begin_group;
-    h.commit_group = host_commit_group;
-    h.abort_group = host_abort_group;
-    h.address_of = host_address_of;
-    h.symbol_value = host_symbol_value;
-    h.setting_bool = host_setting_bool;
-    h.setting_int = host_setting_int;
-    h.setting_float = host_setting_float;
-    h.setting_string = host_setting_string;
-    h.subscribe_setting = host_subscribe_setting;
-    h.register_service = host_register_service;
-    h.get_service = host_get_service;
-    h.subscribe = host_subscribe;
-    h.publish = host_publish;
-    h.module = host_module;
+    h.log = c_api<host_log>;
+    h.plugin_dir = c_api<host_plugin_dir>;
+    h.data_dir = c_api<host_data_dir>;
+    h.hook_function = c_api<host_hook_function>;
+    h.mid_hook = c_api<host_mid_hook>;
+    h.replace_block = c_api<host_replace_block>;
+    h.redirect_call = c_api<host_redirect_call>;
+    h.patch_bytes = c_api<host_patch_bytes>;
+    h.swap_pointer = c_api<host_swap_pointer>;
+    h.replace_import = c_api<host_replace_import>;
+    h.hook_function_at = c_api<host_hook_function_at>;
+    h.mid_hook_at = c_api<host_mid_hook_at>;
+    h.remove = c_api<host_remove>;
+    h.begin_group = c_api<host_begin_group>;
+    h.commit_group = c_api<host_commit_group>;
+    h.abort_group = c_api<host_abort_group>;
+    h.address_of = c_api<host_address_of>;
+    h.symbol_value = c_api<host_symbol_value>;
+    h.setting_bool = c_api<host_setting_bool>;
+    h.setting_int = c_api<host_setting_int>;
+    h.setting_float = c_api<host_setting_float>;
+    h.setting_string = c_api<host_setting_string>;
+    h.subscribe_setting = c_api<host_subscribe_setting>;
+    h.register_service = c_api<host_register_service>;
+    h.get_service = c_api<host_get_service>;
+    h.subscribe = c_api<host_subscribe>;
+    h.publish = c_api<host_publish>;
+    h.module = c_api<host_module>;
     return h;
 }
 
