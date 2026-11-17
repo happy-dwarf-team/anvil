@@ -1,6 +1,7 @@
 #include "crash_report.hpp"
 
 #include "plugin_set.hpp"
+#include "seh_guard.hpp"
 
 #include <anvil/anvil_plugin.h>
 
@@ -199,6 +200,25 @@ void load_context(CONTEXT& ctx, const AnvilCpuContext& cpu) {
 
 }  // namespace
 
+namespace {
+
+struct UnwindStep {
+    DWORD64 image;
+    uintptr_t pc;
+    PRUNTIME_FUNCTION function;
+    CONTEXT& ctx;
+    CONTEXT before = ctx;
+};
+
+void unwind_step(void* argument) {
+    auto& u = *static_cast<UnwindStep*>(argument);
+    void* handler_data = nullptr;
+    DWORD64 establisher = 0;
+    RtlVirtualUnwind(UNW_FLAG_NHANDLER, u.image, u.pc, u.function, &u.ctx, &handler_data, &establisher, nullptr);
+}
+
+}  // namespace
+
 size_t walk_stack(const CONTEXT& start, uintptr_t stack_low, uintptr_t stack_high, const CrashSources& s,
                   Frame* out, size_t max) {
     const auto on_stack = [&](uintptr_t rsp) {
@@ -259,9 +279,15 @@ size_t walk_stack(const CONTEXT& start, uintptr_t stack_low, uintptr_t stack_hig
         PRUNTIME_FUNCTION function = RtlLookupFunctionEntry(pc, &image, nullptr);
         if (function != nullptr) {
             ctx.Rip = pc;
-            void* handler_data = nullptr;
-            DWORD64 establisher = 0;
-            RtlVirtualUnwind(UNW_FLAG_NHANDLER, image, pc, function, &ctx, &handler_data, &establisher, nullptr);
+            // RtlVirtualUnwind reads the frame where the unwind data says it is,
+            // unchecked: a frame pointer a stack overrun overwrote faults there.
+            // That ends the walk (the scan goes on), not the whole report.
+            UnwindStep unwind{image, pc, function, ctx};
+            if (!call_guarded(&unwind_step, &unwind, nullptr)) {
+                ctx = unwind.before;
+                scan_from = rsp;
+                break;
+            }
         } else if (step == 0 || at.module.base != 0) {
             // A leaf function, or a call through a bad pointer: the return
             // address is on top of the stack.

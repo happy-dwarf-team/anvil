@@ -16,4 +16,8 @@ AnvilResult call_plugin_load(PluginLoadFn fn, const AnvilHost* host, AnvilPlugin
 // crashed thread.
 bool call_guarded(void (*fn)(void*), void* argument, unsigned long* code_out);
 
+// True while this thread runs inside call_plugin_load or call_guarded, which
+// catch every structured exception (a stack overflow too).
+bool inside_guard();
+
 }  // namespace anvil
