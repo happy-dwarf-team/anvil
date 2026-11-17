@@ -2527,10 +2527,14 @@ int main(int argc, char** argv) {
         image.put_pointer(kGui, 0);
     });
 
-    run("anvil-game: the map camera, and a pan as the arrow keys make it", [&] {
-        CHECK(ANVIL_GAME_HAS(service, camera) && ANVIL_GAME_HAS(service, camera_pan));
-        if (!ANVIL_GAME_HAS(service, camera_pan)) return;
-        CHECK(contains(log, "anvil-game: map camera: arrows' speed scroll * 2.5 * clamp(height / 150, 1, 10), frame time at most 0.7"));
+    run("anvil-game.camera: the map camera, and a pan as the arrow keys make it", [&] {
+        const auto* cam = static_cast<const AnvilGameCameraService*>(
+            bus.get_service(ANVIL_GAME_CAMERA_SERVICE, ANVIL_GAME_CAMERA_SERVICE_VERSION));
+        CHECK(cam != nullptr && cam->size == sizeof(AnvilGameCameraService) && ANVIL_GAME_CAMERA_HAS(cam, view) &&
+              ANVIL_GAME_CAMERA_HAS(cam, pan));
+        if (cam == nullptr) return;
+        CHECK(contains(log, "anvil-game: service anvil-game.camera v1: arrows' speed scroll * 2.5 * clamp(height / 150, "
+                            "1, 10), frame time at most 0.7"));
         // CEU3Camera::Pan's first bytes jump to a stand-in that records the call.
         using Pan = FakePan;
         uint8_t jump[12] = {0x48, 0xB8};  // mov rax, imm64; jmp rax
@@ -2566,69 +2570,69 @@ int main(int argc, char** argv) {
         CHECK(service->session(nullptr) == 1);
 
         // Off the moment: between frames, and arguments that are wrong anywhere.
-        AnvilGameCamera view{};
+        AnvilGameCameraView view{};
         view.size = sizeof(view);
-        CHECK(service->camera(&view) == ANVIL_ERROR_WRONG_PHASE && service->camera_pan(1, 0) == ANVIL_ERROR_WRONG_PHASE);
-        CHECK(service->camera(nullptr) == ANVIL_ERROR_INVALID_ARGUMENT);
-        AnvilGameCamera tiny{};
+        CHECK(cam->view(&view) == ANVIL_ERROR_WRONG_PHASE && cam->pan(1, 0) == ANVIL_ERROR_WRONG_PHASE);
+        CHECK(cam->view(nullptr) == ANVIL_ERROR_INVALID_ARGUMENT);
+        AnvilGameCameraView tiny{};
         tiny.size = 8;
-        CHECK(service->camera(&tiny) == ANVIL_ERROR_INVALID_ARGUMENT);
-        CHECK(service->camera_pan(std::nanf(""), 0) == ANVIL_ERROR_INVALID_ARGUMENT &&
-              service->camera_pan(0, INFINITY) == ANVIL_ERROR_INVALID_ARGUMENT);
+        CHECK(cam->view(&tiny) == ANVIL_ERROR_INVALID_ARGUMENT);
+        CHECK(cam->pan(std::nanf(""), 0) == ANVIL_ERROR_INVALID_ARGUMENT &&
+              cam->pan(0, INFINITY) == ANVIL_ERROR_INVALID_ARGUMENT);
         CHECK(Pan::calls == 0);
 
         bool ran = false;
         g_in_frame_handler = [&] {
             ran = true;
-            AnvilGameCamera now{};
+            AnvilGameCameraView now{};
             now.size = sizeof(now);
-            CHECK(service->camera(&now) == ANVIL_OK && now.size == sizeof(now) && now.flags == 0);
+            CHECK(cam->view(&now) == ANVIL_OK && now.size == sizeof(now) && now.flags == 0);
             CHECK(now.position[0] == 10.0f && now.position[1] == 300.0f && now.position[2] == 20.0f);
             CHECK(now.look_at[0] == 10.0f && now.look_at[1] == 0.0f && now.look_at[2] == 40.0f);
             // A struct of an older header gets what its size covers.
-            AnvilGameCamera old{};
-            old.size = offsetof(AnvilGameCamera, look_at);
+            AnvilGameCameraView old{};
+            old.size = offsetof(AnvilGameCameraView, look_at);
             old.look_at[0] = -1;
             old.flags = 77;
-            CHECK(service->camera(&old) == ANVIL_OK && old.size == offsetof(AnvilGameCamera, look_at));
+            CHECK(cam->view(&old) == ANVIL_OK && old.size == offsetof(AnvilGameCameraView, look_at));
             CHECK(old.position[1] == 300.0f && old.look_at[0] == -1 && old.flags == 77);
-            std::thread([&] { CHECK(service->camera(&now) == ANVIL_ERROR_WRONG_PHASE); }).join();
-            std::thread([&] { CHECK(service->camera_pan(1, 0) == ANVIL_ERROR_WRONG_PHASE); }).join();
+            std::thread([&] { CHECK(cam->view(&now) == ANVIL_ERROR_WRONG_PHASE); }).join();
+            std::thread([&] { CHECK(cam->pan(1, 0) == ANVIL_ERROR_WRONG_PHASE); }).join();
 
             // (0, 0) does nothing; the right arrow at height 300 is scroll 2 * 2.5 * 300 / 150.
-            CHECK(service->camera_pan(0, 0) == ANVIL_OK && Pan::calls == 0);
-            CHECK(service->camera_pan(1, 0) == ANVIL_OK && Pan::calls == 1);
+            CHECK(cam->pan(0, 0) == ANVIL_OK && Pan::calls == 0);
+            CHECK(cam->pan(1, 0) == ANVIL_OK && Pan::calls == 1);
             CHECK(Pan::camera == camera && Pan::keys && close_to(Pan::vector[0], 10) && Pan::vector[1] == 0 &&
                   close_to(Pan::time, 0.016f));
-            CHECK(service->camera_pan(0.5f, -0.5f) == ANVIL_OK && close_to(Pan::vector[0], 5) && close_to(Pan::vector[1], -5));
+            CHECK(cam->pan(0.5f, -0.5f) == ANVIL_OK && close_to(Pan::vector[0], 5) && close_to(Pan::vector[1], -5));
             // A longer vector is shortened to length 1.
-            CHECK(service->camera_pan(3, 4) == ANVIL_OK && close_to(Pan::vector[0], 6) && close_to(Pan::vector[1], 8));
-            CHECK(service->camera_pan(-1e30f, 0) == ANVIL_OK && close_to(Pan::vector[0], -10) && Pan::vector[1] == 0);
+            CHECK(cam->pan(3, 4) == ANVIL_OK && close_to(Pan::vector[0], 6) && close_to(Pan::vector[1], 8));
+            CHECK(cam->pan(-1e30f, 0) == ANVIL_OK && close_to(Pan::vector[0], -10) && Pan::vector[1] == 0);
             // The height's factor stays within [1, 10].
             put_float(camera + 0x680, 30.0f);
-            CHECK(service->camera_pan(0, 1) == ANVIL_OK && Pan::vector[0] == 0 && close_to(Pan::vector[1], 5));
+            CHECK(cam->pan(0, 1) == ANVIL_OK && Pan::vector[0] == 0 && close_to(Pan::vector[1], 5));
             put_float(camera + 0x680, 3000.0f);
-            CHECK(service->camera_pan(0, 1) == ANVIL_OK && close_to(Pan::vector[1], 50));
+            CHECK(cam->pan(0, 1) == ANVIL_OK && close_to(Pan::vector[1], 50));
             put_float(camera + 0x680, 300.0f);
             // The frame time is capped as the game caps it.
             put_float(game.session + 0x1658, 2.0f);
-            CHECK(service->camera_pan(1, 0) == ANVIL_OK && close_to(Pan::time, 0.7f));
+            CHECK(cam->pan(1, 0) == ANVIL_OK && close_to(Pan::time, 0.7f));
             put_float(game.session + 0x1658, 0.016f);
             CHECK(Pan::calls == 7);
 
             // A locked camera says so and does not pan.
             camera[0x758] = 1;
-            CHECK(service->camera(&now) == ANVIL_OK && now.flags == ANVIL_GAME_CAMERA_LOCKED);
-            CHECK(service->camera_pan(1, 0) == ANVIL_ERROR_WRONG_PHASE && Pan::calls == 7);
+            CHECK(cam->view(&now) == ANVIL_OK && now.flags == ANVIL_GAME_CAMERA_LOCKED);
+            CHECK(cam->pan(1, 0) == ANVIL_ERROR_WRONG_PHASE && Pan::calls == 7);
             camera[0x758] = 0;
             // No camera yet, a camera to nowhere, no settings.
             set_camera(0);
-            CHECK(service->camera(&now) == ANVIL_ERROR_WRONG_PHASE && service->camera_pan(1, 0) == ANVIL_ERROR_WRONG_PHASE);
+            CHECK(cam->view(&now) == ANVIL_ERROR_WRONG_PHASE && cam->pan(1, 0) == ANVIL_ERROR_WRONG_PHASE);
             set_camera(0x10);
-            CHECK(service->camera(&now) == ANVIL_ERROR_INTERNAL && service->camera_pan(1, 0) == ANVIL_ERROR_INTERNAL);
+            CHECK(cam->view(&now) == ANVIL_ERROR_INTERNAL && cam->pan(1, 0) == ANVIL_ERROR_INTERNAL);
             set_camera(reinterpret_cast<uintptr_t>(camera));
             image.put_pointer(kSettings, 0);
-            CHECK(service->camera_pan(1, 0) == ANVIL_ERROR_INTERNAL);
+            CHECK(cam->pan(1, 0) == ANVIL_ERROR_INTERNAL);
             image.put_pointer(kSettings, reinterpret_cast<uintptr_t>(settings));
             CHECK(Pan::calls == 7);
         };

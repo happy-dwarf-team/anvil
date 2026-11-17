@@ -102,7 +102,7 @@ struct Layout {
     bool restart = false;                 // false when these symbols are absent on this build
     std::uint32_t restart_flags = 0;      // app+: word, the exit and restart flags (0x0101 sets both)
     std::uint32_t resign = 0;             // session+: byte, the in-game idler's _bResignGame
-    sym::Types::camera_pan::Pointer camera_pan = nullptr;  // null when the camera symbols are absent
+    sym::Types::camera_pan::Pointer camera_pan = nullptr;  // set only with anvil-game.camera registered
     std::uint32_t camera = 0;             // session+: the map camera, CEU3Camera*
     std::uint32_t frame_time = 0;         // session+: float, the frame time the camera pans with
     std::uint32_t camera_position = 0;    // camera+: float[3], _CurrentPosition
@@ -751,7 +751,7 @@ std::uintptr_t read_camera_unguarded() {
 
 struct CameraRead {
     std::uintptr_t camera = 0;
-    AnvilGameCamera view{};
+    AnvilGameCameraView view{};
     float height = 0;
     float frame_time = 0;
     float scroll_speed = 0;
@@ -783,9 +783,8 @@ int read_camera(CameraRead& out) {
     }
 }
 
-AnvilResult service_camera(AnvilGameCamera* out) {
-    if (out == nullptr || out->size < offsetof(AnvilGameCamera, look_at)) return ANVIL_ERROR_INVALID_ARGUMENT;
-    if (g_layout.camera_pan == nullptr) return ANVIL_ERROR_UNSUPPORTED;
+AnvilResult camera_view(AnvilGameCameraView* out) {
+    if (out == nullptr || out->size < offsetof(AnvilGameCameraView, look_at)) return ANVIL_ERROR_INVALID_ARGUMENT;
     if (!world_open()) return ANVIL_ERROR_WRONG_PHASE;
     CameraRead read;
     const int r = read_camera(read);
@@ -793,7 +792,7 @@ AnvilResult service_camera(AnvilGameCamera* out) {
     if (r < 0) return ANVIL_ERROR_INTERNAL;
     const std::uint32_t size = out->size;
     read.view.size = size;
-    std::memcpy(out, &read.view, std::min<std::size_t>(size, sizeof(AnvilGameCamera)));
+    std::memcpy(out, &read.view, std::min<std::size_t>(size, sizeof(AnvilGameCameraView)));
     return ANVIL_OK;
 }
 
@@ -807,9 +806,8 @@ bool call_camera_pan(std::uintptr_t camera, const float* pan, float frame_time) 
     }
 }
 
-AnvilResult service_camera_pan(float right, float up) {
+AnvilResult camera_pan(float right, float up) {
     if (!std::isfinite(right) || !std::isfinite(up)) return ANVIL_ERROR_INVALID_ARGUMENT;
-    if (g_layout.camera_pan == nullptr) return ANVIL_ERROR_UNSUPPORTED;
     if (!world_open()) return ANVIL_ERROR_WRONG_PHASE;
     CameraRead read;
     const int r = read_camera(read);
@@ -825,11 +823,13 @@ AnvilResult service_camera_pan(float right, float up) {
     return call_camera_pan(read.camera, step.pan, step.frame_time) ? ANVIL_OK : ANVIL_ERROR_INTERNAL;
 }
 
+// anvil-game.camera, registered only when the camera's symbols are present.
+constexpr AnvilGameCameraService kCameraService = {sizeof(AnvilGameCameraService), camera_view, camera_pan};
+
 constexpr AnvilGameService kService = {
-    sizeof(AnvilGameService), service_ready,    service_main_thread_id, service_frame_number, service_run_on_main_thread,
-    service_session,          service_date,     service_main_menu,      service_out_of_sync,  service_keyboard,
-    service_restart,          service_speed,    service_paused,         service_user_dir,     service_camera,
-    service_camera_pan,
+    sizeof(AnvilGameService), service_ready, service_main_thread_id, service_frame_number, service_run_on_main_thread,
+    service_session,          service_date,  service_main_menu,    service_out_of_sync,  service_keyboard,
+    service_restart,          service_speed, service_paused,       service_user_dir,
 };
 
 // ---- the world service ------------------------------------------------------
@@ -2514,6 +2514,39 @@ void load_commands(anvil::Host& host) {
               c.siege_area != nullptr ? "yes" : "absent");
 }
 
+// anvil-game.camera: registered only when a build has all of its symbols.
+void load_camera(anvil::Host& host) {
+    if (!host.present(sym::camera_of_session) || !host.present(sym::camera_pan) || !host.present(sym::camera_lock) ||
+        !host.present(sym::camera_key_speed) || !host.present(sym::camera_frame_time_cap)) {
+        host.info("the map camera's symbols are absent on this build: no service {}", ANVIL_GAME_CAMERA_SERVICE);
+        return;
+    }
+    const std::uintptr_t base = host.game().image_base;
+    const auto constant = [&](const auto& symbol, const char* name) {
+        return *reinterpret_cast<const float*>(base + host.value(symbol, name));
+    };
+    // The idler is 0x10 bytes shorter before the camera and the frame time in the GOG build.
+    g_layout.camera = static_cast<std::uint32_t>(host.value(sym::camera_of_session, "camera"));
+    g_layout.frame_time = static_cast<std::uint32_t>(host.value(sym::camera_of_session, "frame_time"));
+    g_layout.camera_position = static_cast<std::uint32_t>(host.value(sym::camera_pan, "position"));
+    g_layout.camera_look_at = static_cast<std::uint32_t>(host.value(sym::camera_pan, "look_at"));
+    g_layout.camera_locked = static_cast<std::uint32_t>(host.value(sym::camera_lock, "locked"));
+    g_layout.camera_height = static_cast<std::uint32_t>(host.value(sym::camera_key_speed, "height"));
+    g_layout.settings = reinterpret_cast<const std::uintptr_t*>(base + host.value(sym::camera_key_speed, "settings"));
+    g_layout.scroll_speed = static_cast<std::uint32_t>(host.value(sym::camera_key_speed, "scroll_speed"));
+    g_layout.camera_speed.divisor = constant(sym::camera_key_speed, "divisor");
+    g_layout.camera_speed.lower = constant(sym::camera_key_speed, "lower");
+    g_layout.camera_speed.upper = constant(sym::camera_key_speed, "upper");
+    g_layout.camera_speed.factor = constant(sym::camera_key_speed, "factor");
+    g_layout.camera_speed.time_cap = constant(sym::camera_frame_time_cap, "cap");
+    g_layout.camera_pan = host.function(sym::camera_pan);
+    host.register_service(ANVIL_GAME_CAMERA_SERVICE, ANVIL_GAME_CAMERA_SERVICE_VERSION, kCameraService);
+    host.info("service {} v{}: arrows' speed scroll * {} * clamp(height / {}, {}, {}), frame time at most {}",
+              ANVIL_GAME_CAMERA_SERVICE, ANVIL_GAME_CAMERA_SERVICE_VERSION, g_layout.camera_speed.factor,
+              g_layout.camera_speed.divisor, g_layout.camera_speed.lower, g_layout.camera_speed.upper,
+              g_layout.camera_speed.time_cap);
+}
+
 struct AnvilGame : anvil::Plugin {
     void load(anvil::Host& host) override {
         g_layout.frame_counter = sym::frame_counter.counter;
@@ -2578,38 +2611,10 @@ struct AnvilGame : anvil::Plugin {
         } else {
             host.info("the restart symbols are absent on this build: restart() answers unsupported");
         }
-        // And for the map camera: camera() and camera_pan() then answer ANVIL_ERROR_UNSUPPORTED.
-        if (host.present(sym::camera_of_session) && host.present(sym::camera_pan) && host.present(sym::camera_lock) &&
-            host.present(sym::camera_key_speed) && host.present(sym::camera_frame_time_cap)) {
-            const std::uintptr_t base = host.game().image_base;
-            const auto constant = [&](const auto& symbol, const char* name) {
-                return *reinterpret_cast<const float*>(base + host.value(symbol, name));
-            };
-            // The idler is 0x10 bytes shorter before the camera and the frame time in the GOG build.
-            g_layout.camera = static_cast<std::uint32_t>(host.value(sym::camera_of_session, "camera"));
-            g_layout.frame_time = static_cast<std::uint32_t>(host.value(sym::camera_of_session, "frame_time"));
-            g_layout.camera_position = static_cast<std::uint32_t>(host.value(sym::camera_pan, "position"));
-            g_layout.camera_look_at = static_cast<std::uint32_t>(host.value(sym::camera_pan, "look_at"));
-            g_layout.camera_locked = static_cast<std::uint32_t>(host.value(sym::camera_lock, "locked"));
-            g_layout.camera_height = static_cast<std::uint32_t>(host.value(sym::camera_key_speed, "height"));
-            g_layout.settings = reinterpret_cast<const std::uintptr_t*>(base + host.value(sym::camera_key_speed, "settings"));
-            g_layout.scroll_speed = static_cast<std::uint32_t>(host.value(sym::camera_key_speed, "scroll_speed"));
-            g_layout.camera_speed.divisor = constant(sym::camera_key_speed, "divisor");
-            g_layout.camera_speed.lower = constant(sym::camera_key_speed, "lower");
-            g_layout.camera_speed.upper = constant(sym::camera_key_speed, "upper");
-            g_layout.camera_speed.factor = constant(sym::camera_key_speed, "factor");
-            g_layout.camera_speed.time_cap = constant(sym::camera_frame_time_cap, "cap");
-            g_layout.camera_pan = host.function(sym::camera_pan);
-            host.info("map camera: arrows' speed scroll * {} * clamp(height / {}, {}, {}), frame time at most {}",
-                      g_layout.camera_speed.factor, g_layout.camera_speed.divisor, g_layout.camera_speed.lower,
-                      g_layout.camera_speed.upper, g_layout.camera_speed.time_cap);
-        } else {
-            host.info("the map camera's symbols are absent on this build: camera() and camera_pan() answer unsupported");
-        }
-
         host.register_service(ANVIL_GAME_SERVICE, ANVIL_GAME_SERVICE_VERSION, kService);
         load_world(host);
         load_commands(host);
+        load_camera(host);
         host.hook(g_frame, sym::frame, on_frame);
         host.hook(g_set_session, sym::set_session, on_set_session);
         host.info("frame hook staged; events {}, {}, {}, {}; service {} v{}", ANVIL_GAME_EVENT_READY,

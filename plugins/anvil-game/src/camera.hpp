@@ -1,5 +1,5 @@
 // The map camera's pan as the arrow keys make it (include/anvil/anvil_game.h,
-// camera_pan). CEU3Camera::HandleMouseAndKBInput turns the arrows into a
+// anvil-game.camera, pan). CEU3Camera::HandleMouseAndKBInput turns the arrows into a
 // vector of length 1 (x to the right, y up) times a speed, and
 // CEU3Camera::UpdateMouseAndKB pans by it with the frame's time, capped.
 #pragma once
