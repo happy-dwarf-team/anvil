@@ -1255,6 +1255,138 @@ AnvilResult pick_unit(const WorldLayout& l, std::int32_t x, std::int32_t y, Anvi
     return ANVIL_OK;
 }
 
+// ---- regions and exploration (1.25.0) -------------------------------------------------
+
+namespace {
+
+constexpr std::size_t kMaxRegions = 4096;  // a longer region vector is taken as garbage
+
+// A CArray<int>, the game's std::vector<int>: begin, end, capacity end.
+struct GameIntVector {
+    std::int32_t* first = nullptr;
+    std::int32_t* last = nullptr;
+    std::int32_t* end = nullptr;
+};
+
+bool call_explore_regions(void (*regions)(const void*, const void*, void*, void*), std::uintptr_t country,
+                          std::uintptr_t navy, GameIntVector* coast, GameIntVector* sea) {
+    __try {
+        regions(reinterpret_cast<const void*>(country), reinterpret_cast<const void*>(navy), coast, sea);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool call_delete(void (*game_delete)(void*, std::size_t), void* block, std::size_t size) {
+    __try {
+        game_delete(block, size);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// Frees a vector the game filled, as its own callers do: a large block starts
+// at the pointer stored before the data. A vector that does not look like one
+// is left alone (a leak, not a bad free).
+void free_game_vector(const WorldLayout& l, GameIntVector& v) {
+    if (v.first == nullptr) return;
+    const auto first = reinterpret_cast<std::uintptr_t>(v.first);
+    const auto end = reinterpret_cast<std::uintptr_t>(v.end);
+    if (end < first) return;
+    std::size_t size = end - first;
+    void* block = v.first;
+    if (size >= l.large_block) {
+        std::uintptr_t start = 0;
+        if (!read(first - 8, start) || start >= first || first - start < 8 || first - start > 8 + 0x1F) return;
+        block = reinterpret_cast<void*>(start);
+        size += l.large_extra;
+    }
+    call_delete(l.game_delete, block, size);
+    v = GameIntVector{};
+}
+
+// The map's region vector: its begin and count.
+AnvilResult region_range(const WorldLayout& l, std::uintptr_t& begin, std::size_t& count) {
+    if (l.regions == 0) return ANVIL_ERROR_NOT_DECLARED;
+    std::uintptr_t map = 0, end = 0;
+    if (!read(l.game_map, map) || map == 0 || !read(map + l.regions, begin) || !read(map + l.regions_end, end) ||
+        end < begin || (end - begin) % 8 != 0 || (end - begin) / 8 > kMaxRegions) {
+        return ANVIL_ERROR_INTERNAL;
+    }
+    count = (end - begin) / 8;
+    return ANVIL_OK;
+}
+
+// The region listed at `index`, checked by the index it holds itself.
+AnvilResult region_at(const WorldLayout& l, std::int32_t index, std::uintptr_t& region) {
+    std::uintptr_t begin = 0;
+    std::size_t count = 0;
+    if (const AnvilResult r = region_range(l, begin, count); r != ANVIL_OK) return r;
+    if (index < 0 || static_cast<std::size_t>(index) >= count) return ANVIL_ERROR_NOT_FOUND;
+    std::int32_t own = -1;
+    if (!read(begin + static_cast<std::uintptr_t>(index) * 8, region) || region == 0 ||
+        !read(region + l.region_index, own) || own != index) {
+        return ANVIL_ERROR_INTERNAL;
+    }
+    return ANVIL_OK;
+}
+
+}  // namespace
+
+AnvilResult read_exploration_regions(const WorldLayout& l, std::string_view tag, std::uint64_t id, std::int32_t explore,
+                                     std::vector<std::int32_t>& out) {
+    if (l.explore_regions == nullptr || l.game_delete == nullptr || l.regions == 0 || l.kind_slot == 0) {
+        return ANVIL_ERROR_NOT_DECLARED;
+    }
+    std::uintptr_t navy = 0;
+    if (const AnvilResult r = unit_at(l, tag, id, navy); r != ANVIL_OK) return r;
+    std::uint32_t kind = 0;
+    if (!unit_kind(l, navy, kind)) return ANVIL_ERROR_INTERNAL;
+    if (kind != ANVIL_GAME_UNIT_NAVY) return ANVIL_ERROR_INVALID_ARGUMENT;
+    // The owner, as the dialog passes it: the country the unit list belongs to.
+    std::uintptr_t country = 0;
+    std::uint64_t own = 0;
+    if (const AnvilResult r = country_at(l, tag, country, own); r != ANVIL_OK) return r;
+    std::uintptr_t begin = 0;
+    std::size_t count = 0;
+    if (const AnvilResult r = region_range(l, begin, count); r != ANVIL_OK) return r;
+
+    GameIntVector coast, sea;
+    const bool called = call_explore_regions(l.explore_regions, country, navy, &coast, &sea);
+    const GameIntVector& kept = explore == ANVIL_GAME_EXPLORE_COAST ? coast : sea;
+    AnvilResult result = called ? ANVIL_OK : ANVIL_ERROR_INTERNAL;
+    if (called) {
+        const auto first = reinterpret_cast<std::uintptr_t>(kept.first);
+        const auto last = reinterpret_cast<std::uintptr_t>(kept.last);
+        const auto end = reinterpret_cast<std::uintptr_t>(kept.end);
+        if (last < first || end < last || (last - first) % 4 != 0 || (last - first) / 4 > count) {
+            result = ANVIL_ERROR_INTERNAL;
+        } else {
+            std::vector<std::int32_t> list((last - first) / 4);
+            if (!list.empty() && !read_raw(first, list.data(), list.size() * 4)) result = ANVIL_ERROR_INTERNAL;
+            for (const std::int32_t index : list) {
+                if (index < 0 || static_cast<std::size_t>(index) >= count) result = ANVIL_ERROR_INTERNAL;
+            }
+            if (result == ANVIL_OK) out = std::move(list);
+        }
+    }
+    // Freed whatever happened above, so a bad answer costs no game memory.
+    free_game_vector(l, coast);
+    free_game_vector(l, sea);
+    return result;
+}
+
+AnvilResult read_region_text(const WorldLayout& l, std::int32_t index, bool key, std::string& utf8) {
+    std::uintptr_t region = 0;
+    if (const AnvilResult r = region_at(l, index, region); r != ANVIL_OK) return r;
+    std::string text;
+    if (!read_string(region + (key ? l.region_key : l.region_name), text)) return ANVIL_ERROR_INTERNAL;
+    utf8 = game_text_to_utf8(text);
+    return ANVIL_OK;
+}
+
 // ---- diplomacy (1.22.0) -------------------------------------------------------------
 
 namespace {

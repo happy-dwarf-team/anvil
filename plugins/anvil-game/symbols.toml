@@ -2120,6 +2120,110 @@ build."eu4-1.37.5-steam-win64" = { rva = 0x10A46C0 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x10A2EC0 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x10A2EC0 }
 
+# The regions a fleet may explore (exploration_regions(), 1.25.0): the naval
+# exploration dialog asks CExplorationNavalMission::GetSelectableRegions for two
+# lists of region indexes, the coast list for a coast exploration (mission 3)
+# and the sea list for a sea exploration (mission 2), and frees their storage
+# with the game's operator delete. The indexes are places in CMap::_Regions.
+# Found in GOG 1.37.5.2, named by its eu4.pdb, and matched by bytes on Steam
+# 1.37.5 and GOG 1.37.5.0 (EU4 engine lab, docs/naval-exploration-regions.md).
+
+[symbol.exploration_regions]
+# mov [rsp+8],rbx; mov [rsp+18h],rsi; mov [rsp+20h],rdi; push rbp, r12-r15; lea rbp,[rsp-37h]; sub rsp,0A0h;
+# mov r14,r9 (sea); mov r15,r8 (coast); mov rsi,rcx (country); xor r12d,r12d; mov [rbp+6Fh],r12d; test rdx,rdx (navy); je
+bytes = """
+48 89 5C 24 08 48 89 74 24 18 48 89 7C 24 20 55 41 54 41 55 41 56 41 57 48 8D 6C 24 C9 48 81 EC A0 00 00 00
+4D 8B F1 4D 8B F8 48 8B F1 45 33 E4 44 89 65 6F 48 85 D2 74 7A
+"""
+memory = "code"
+signature = "void (const void* country, const void* navy, void* coast, void* sea)"
+note = "CExplorationNavalMission::GetSelectableRegions(country, navy or null, coast, sea): appends the region indexes, each once, to two CArray<int> (std::vector: begin, end, capacity end) with the game's allocator; never clears them"
+build."eu4-1.37.5-steam-win64" = { rva = 0x927C60 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x926E90 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x926E90 }
+
+[symbol.exploration_regions_free]
+memory = "code"
+values.large_block = { at = 3, size = 4 }
+values.large_extra = { at = 12, size = 1 }
+values.free = { at = 34, rip_relative = 38 }
+note = "CExploreMissionDialog::IsValidRegion frees the coast list after GetSelectableRegions: a block of large_block bytes or more starts at the pointer stored 8 bytes before the data and is large_extra bytes longer; then operator delete(block, size)"
+
+[symbol.exploration_regions_free.build."eu4-1.37.5-steam-win64"]
+rva = 0x10C1C9D
+# cmp rdx,1000h; jb; add rdx,27h; mov rbx,[rbx-8]; sub rax,rbx; add rax,-8; cmp rax,1Fh; ja; mov rcx,rbx; call operator delete
+bytes = "48 81 FA 00 10 00 00 72 15 48 83 C2 27 48 8B 5B F8 48 2B C3 48 83 C0 F8 48 83 F8 1F 77 28 48 8B CB E8 2D 78 67 00"
+
+[symbol.exploration_regions_free.build."eu4-1.37.5.2-gog-win64"]
+rva = 0x10C049D
+bytes = "48 81 FA 00 10 00 00 72 15 48 83 C2 27 48 8B 5B F8 48 2B C3 48 83 C0 F8 48 83 F8 1F 77 28 48 8B CB E8 AD 2C 66 00"
+
+[symbol.exploration_regions_free.build."eu4-1.37.5.0-gog-win64"]
+rva = 0x10C049D
+bytes = "48 81 FA 00 10 00 00 72 15 48 83 C2 27 48 8B 5B F8 48 2B C3 48 83 C0 F8 48 83 F8 1F 77 28 48 8B CB E8 AD 2C 66 00"
+
+[symbol.game_map]
+memory = "code"
+values.map = { at = 3, rip_relative = 7 }
+note = "CCountry::FindCoastRegions: the game's CMap, CMap::_pMap, before its walk over the regions"
+
+[symbol.game_map.build."eu4-1.37.5-steam-win64"]
+rva = 0x3E41AD
+bytes = "4C 8B 05 24 BD F5 01 48 8B F9 48 89 5D 68"   # mov r8,[CMap::_pMap]; mov rdi,rcx; mov [rbp+68h],rbx
+
+[symbol.game_map.build."eu4-1.37.5.2-gog-win64"]
+rva = 0x3E407D
+bytes = "4C 8B 05 D4 FC F3 01 48 8B F9 48 89 5D 68"
+
+[symbol.game_map.build."eu4-1.37.5.0-gog-win64"]
+rva = 0x3E407D
+bytes = "4C 8B 05 D4 FC F3 01 48 8B F9 48 89 5D 68"
+
+[symbol.region_at_index]
+# mov r8,[rcx+4F0h]; mov rax,[rcx+4F8h]; sub rax,r8; sar rax,3; cmp edx,eax; jb; xor eax,eax; ret; mov eax,edx; mov rax,[r8+rax*8]; ret
+bytes = "4C 8B 81 F0 04 00 00 48 8B 81 F8 04 00 00 49 2B C0 48 C1 F8 03 3B D0 72 03 33 C0 C3 8B C2 49 8B 04 C0 C3"
+memory = "code"
+values.regions = { at = 3, size = 4 }
+values.regions_end = { at = 10, size = 4 }
+values.pointer_shift = { at = 20, size = 1 }
+note = "CMap::GetRegionAtIndex: _Regions, a vector of CRegion* (+0x4F0, end +0x4F8), indexed by the region's index; null past the end"
+build."eu4-1.37.5-steam-win64" = { rva = 0x887C60 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x886E90 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x886E90 }
+
+[symbol.region_index]
+memory = "code"
+values.index = { at = 3, size = 1 }
+note = "CCountry::FindCoastRegions: a region's _nIndex (+0x7C), the index it is listed by"
+
+[symbol.region_index.build."eu4-1.37.5-steam-win64"]
+rva = 0x3E42FB
+bytes = "49 63 4E 7C 80 3C 31 00 0F 85 DA 00 00 00"   # movsxd rcx,[r14+7Ch]; cmp byte [rcx+rsi],0; jne
+
+[symbol.region_index.build."eu4-1.37.5.2-gog-win64"]
+rva = 0x3E41CB
+bytes = "49 63 4E 7C 80 3C 31 00 0F 85 DA 00 00 00"
+
+[symbol.region_index.build."eu4-1.37.5.0-gog-win64"]
+rva = 0x3E41CB
+bytes = "49 63 4E 7C 80 3C 31 00 0F 85 DA 00 00 00"
+
+[symbol.region_texts]
+# mov [rsp+8],rbx; mov [rsp+10h],rsi; push rdi; sub rsp,20h; ... (strlen of the key) add rcx,10h; call assign;
+# ... (strlen of the translation) mov r8,rbx; lea rcx,[rsi+30h]; mov rdx,rdi
+bytes = """
+48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 83 7A 18 10 49 8B F8 48 8B F1 72 03 48 8B 12
+48 C7 C3 FF FF FF FF 4C 8B C3 0F 1F 80 00 00 00 00 49 FF C0 42 80 3C 02 00 75 F6 48 83 C1 10 E8 ?? ?? ?? ??
+48 83 7F 18 10 72 06 48 8B 3F 0F 1F 00 48 FF C3 80 3C 1F 00 75 F7 4C 8B C3 48 8D 4E 30 48 8B D7
+"""
+memory = "code"
+values.key = { at = 61, size = 1 }
+values.name = { at = 95, size = 1 }
+note = "CRegionBase::SetKeyAndTranslation(key, translation): the key to _Tag (+0x10), the translation to _I14ETag (+0x30), both std::string; CRegionBase::GetName answers the translation"
+build."eu4-1.37.5-steam-win64" = { rva = 0xA58F60 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0xA57F20 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0xA57F20 }
+
 [symbol.dialog_window_part]
 memory = "code"
 values.window_part = { at = 10, size = 1 }

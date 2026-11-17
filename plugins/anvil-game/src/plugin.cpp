@@ -1480,6 +1480,48 @@ AnvilResult world_player_tags(AnvilGamePlayer* out) {
     return r == ANVIL_OK ? give(out, player) : r;
 }
 
+// ---- regions and exploration (1.25.0) ----
+
+AnvilResult world_exploration_regions(const AnvilGameUnitRef* fleet, std::int32_t explore, std::int32_t* regions,
+                                      std::uint32_t capacity, std::uint32_t* count) {
+    if (fleet == nullptr || (capacity != 0 && regions == nullptr) ||
+        (explore != ANVIL_GAME_EXPLORE_SEA && explore != ANVIL_GAME_EXPLORE_COAST)) {
+        return ANVIL_ERROR_INVALID_ARGUMENT;
+    }
+    if (fleet->kind != ANVIL_GAME_UNIT_NAVY) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (!world_open()) return ANVIL_ERROR_WRONG_PHASE;
+    try {
+        const std::string_view tag(fleet->country.text, strnlen(fleet->country.text, sizeof(fleet->country.text)));
+        std::vector<std::int32_t> list;
+        const AnvilResult r = anvil_game::read_exploration_regions(g_world, tag, fleet->id, explore, list);
+        if (r == ANVIL_OK) give_list(list, regions, capacity, count);
+        return r;
+    } catch (const std::bad_alloc&) {
+        return ANVIL_ERROR_OUT_OF_MEMORY;
+    }
+}
+
+AnvilResult world_region_text(std::int32_t region, bool key, char* utf8, std::uint32_t capacity,
+                              std::uint32_t* length) {
+    if (capacity != 0 && utf8 == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (!world_open()) return ANVIL_ERROR_WRONG_PHASE;
+    try {
+        std::string text;
+        const AnvilResult r = anvil_game::read_region_text(g_world, region, key, text);
+        return r == ANVIL_OK ? give_text(text, utf8, capacity, length) : r;
+    } catch (const std::bad_alloc&) {
+        return ANVIL_ERROR_OUT_OF_MEMORY;
+    }
+}
+
+AnvilResult world_region_name(std::int32_t region, char* utf8, std::uint32_t capacity, std::uint32_t* length) {
+    return world_region_text(region, false, utf8, capacity, length);
+}
+
+AnvilResult world_region_key(std::int32_t region, char* utf8, std::uint32_t capacity, std::uint32_t* length) {
+    return world_region_text(region, true, utf8, capacity, length);
+}
+
 constexpr AnvilGameWorldService kWorldService = {
     sizeof(AnvilGameWorldService), world_player,         world_province_limit, world_province,
     world_province_name,           world_province_cores, world_country,        world_country_provinces,
@@ -1498,6 +1540,7 @@ constexpr AnvilGameWorldService kWorldService = {
     world_country_relations,       world_subject_type,     world_diplomacy_status,
     world_country_rivals,          world_country_overlord, world_country_subjects,
     world_player_tags,             world_selected_province, world_province_at, world_unit_at,
+    world_exploration_regions,     world_region_name,       world_region_key,
 };
 
 // A port may declare these symbols absent on a new build (ADR 0004): the game
@@ -1730,6 +1773,25 @@ void load_world(anvil::Host& host) {
         l.map_vtable = reinterpret_cast<std::uintptr_t>(host.address(sym::graphical_map_vtable));
         l.pick = host.function(sym::province_from_point);
         if (host.present(sym::selectable_at_point)) l.pick_object = host.function(sym::selectable_at_point);
+    }
+    if (host.present(sym::game_map) && host.present(sym::region_at_index) && host.present(sym::region_index) &&
+        host.present(sym::region_texts)) {
+        static_assert(sym::region_at_index.regions_end == sym::region_at_index.regions + 8 &&
+                          sym::region_at_index.pointer_shift == 3,
+                      "the region symbols disagree on CMap::_Regions");
+        l.game_map = base + host.value(sym::game_map, "map");
+        l.regions = sym::region_at_index.regions;
+        l.regions_end = sym::region_at_index.regions_end;
+        l.region_index = sym::region_index.index;
+        l.region_key = sym::region_texts.key;
+        l.region_name = sym::region_texts.name;
+        if (host.present(sym::exploration_regions) && host.present(sym::exploration_regions_free)) {
+            l.explore_regions = host.function(sym::exploration_regions);
+            l.game_delete = reinterpret_cast<void (*)(void*, std::size_t)>(
+                base + host.value(sym::exploration_regions_free, "free"));
+            l.large_block = sym::exploration_regions_free.large_block;
+            l.large_extra = sym::exploration_regions_free.large_extra;
+        }
     }
     if (host.present(sym::pending_events) && host.present(sym::pending_entry) && host.present(sym::pending_event) &&
         host.present(sym::event_scope_country) && host.present(sym::event_options) &&

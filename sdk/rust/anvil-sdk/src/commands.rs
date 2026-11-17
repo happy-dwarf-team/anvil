@@ -45,9 +45,8 @@ use crate::sys::{
     ANVIL_GAME_COMMAND_QUEUE, ANVIL_GAME_COMMAND_SIEGE_AREA, ANVIL_GAME_COMMAND_SPEED,
     ANVIL_GAME_COMMAND_SPLIT, ANVIL_GAME_COMMAND_START, ANVIL_GAME_COMMAND_SUPPRESS_AREA,
     ANVIL_GAME_EXPLORE_CIRCUMNAVIGATE, ANVIL_GAME_EXPLORE_LAND, ANVIL_GAME_EXPLORE_STOP,
-    ANVIL_GAME_UNIT_ARMY, ANVIL_GAME_UNIT_NAVY,
 };
-use crate::world::{UnitKind, UnitRef};
+use crate::world::UnitRef;
 
 /// The service's name.
 pub const SERVICE: &std::ffi::CStr = c"anvil-game.commands";
@@ -93,18 +92,7 @@ impl fmt::Debug for Commands {
 }
 
 fn raw_ref(unit: &UnitRef) -> AnvilGameUnitRef {
-    AnvilGameUnitRef {
-        id: unit.id,
-        country: unit
-            .country
-            .map(|tag| tag.to_raw())
-            .unwrap_or(crate::sys::AnvilGameTag { text: [0; 4] }),
-        kind: match unit.kind {
-            UnitKind::Army => ANVIL_GAME_UNIT_ARMY,
-            UnitKind::Navy => ANVIL_GAME_UNIT_NAVY,
-            UnitKind::Other(other) => other,
-        },
-    }
+    unit.to_raw()
 }
 
 impl Commands {

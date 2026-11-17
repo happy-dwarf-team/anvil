@@ -946,6 +946,77 @@ unsafe extern "C" fn world_player_tags(out: *mut AnvilGamePlayer) -> AnvilResult
     ANVIL_OK
 }
 
+// RUS's navy 7 may explore the coast of regions 12 and 4, the sea of region 30.
+unsafe extern "C" fn world_exploration_regions(
+    fleet: *const AnvilGameUnitRef,
+    explore: i32,
+    out: *mut i32,
+    capacity: u32,
+    count: *mut u32,
+) -> AnvilResult {
+    let fleet = unsafe { &*fleet };
+    if fleet.kind != ANVIL_GAME_UNIT_NAVY {
+        return ANVIL_ERROR_INVALID_ARGUMENT;
+    }
+    if fleet.id != 7
+        || Tag::from_raw(&fleet.country).map(|t| t.as_str().to_owned()) != Some("RUS".into())
+    {
+        return ANVIL_ERROR_NOT_FOUND;
+    }
+    let list: &[i32] = match explore as u32 {
+        ANVIL_GAME_EXPLORE_COAST => &[12, 4],
+        ANVIL_GAME_EXPLORE_SEA => &[30],
+        _ => return ANVIL_ERROR_INVALID_ARGUMENT,
+    };
+    unsafe {
+        *count = list.len() as u32;
+        for (i, region) in list.iter().take(capacity as usize).enumerate() {
+            *out.add(i) = *region;
+        }
+    }
+    ANVIL_OK
+}
+
+// Region 12 alone: its translation and its key.
+unsafe fn region_text(
+    region: i32,
+    text: &[u8],
+    utf8: *mut c_char,
+    capacity: u32,
+    length: *mut u32,
+) -> AnvilResult {
+    if region != 12 {
+        return ANVIL_ERROR_NOT_FOUND;
+    }
+    unsafe {
+        *length = text.len() as u32;
+        if capacity > 0 {
+            let fits = text.len().min(capacity as usize - 1);
+            ptr::copy_nonoverlapping(text.as_ptr().cast(), utf8, fits);
+            *utf8.add(fits) = 0;
+        }
+    }
+    ANVIL_OK
+}
+
+unsafe extern "C" fn world_region_name(
+    region: i32,
+    utf8: *mut c_char,
+    capacity: u32,
+    length: *mut u32,
+) -> AnvilResult {
+    unsafe { region_text(region, "Östersjön".as_bytes(), utf8, capacity, length) }
+}
+
+unsafe extern "C" fn world_region_key(
+    region: i32,
+    utf8: *mut c_char,
+    capacity: u32,
+    length: *mut u32,
+) -> AnvilResult {
+    unsafe { region_text(region, b"baltic_sea_region", utf8, capacity, length) }
+}
+
 static FAKE_WORLD_FULL: Shared<AnvilGameWorldService> = Shared({
     let mut table: AnvilGameWorldService = unsafe { std::mem::zeroed() };
     table.size = std::mem::size_of::<AnvilGameWorldService>() as u32;
@@ -967,6 +1038,9 @@ static FAKE_WORLD_FULL: Shared<AnvilGameWorldService> = Shared({
     table.selected_province = Some(world_selected_province);
     table.province_at = Some(world_province_at);
     table.unit_at = Some(world_unit_at);
+    table.exploration_regions = Some(world_exploration_regions);
+    table.region_name = Some(world_region_name);
+    table.region_key = Some(world_region_key);
     table
 });
 
@@ -1307,6 +1381,22 @@ fn world_reads_rulers_flags_and_variable_names() {
         (7, "RUS", world::UnitKind::Navy)
     );
     assert_eq!(w.unit_at(5, 9).unwrap_err().code(), ErrorCode::NotFound);
+    use world::ExplorationList::{Coast, Sea};
+    assert_eq!(w.exploration_regions(&unit, Coast).unwrap(), vec![12, 4]);
+    assert_eq!(w.exploration_regions(&unit, Sea).unwrap(), vec![30]);
+    let army = world::UnitRef {
+        kind: world::UnitKind::Army,
+        ..unit
+    };
+    assert_eq!(
+        w.exploration_regions(&army, Sea).unwrap_err().code(),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        (w.region_name(12).unwrap(), w.region_key(12).unwrap()),
+        ("Östersjön".to_owned(), "baltic_sea_region".to_owned())
+    );
+    assert_eq!(w.region_name(13).unwrap_err().code(), ErrorCode::NotFound);
     assert_eq!(
         w.province_timed_modifiers(295).unwrap_err().code(),
         ErrorCode::Unsupported
