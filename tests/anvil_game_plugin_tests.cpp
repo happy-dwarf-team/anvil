@@ -550,11 +550,12 @@ struct FakeWorld {
     void install_timed(uint8_t* session, FakeEu4& image) {
         image.commit(kNever & ~0xFFFu, PAGE_READWRITE);
         std::memcpy(image.base + kNever, &kNeverHours, sizeof kNeverHours);
-        for (int i = 0; i < 3; ++i) {
+        // Two static modifiers for three timed ones: the third gets the first's below.
+        for (int i = 0; i < 2; ++i) {
             set_key(static_modifiers[i] + 0x158, timed_texts[i]);
             set(timed[i], 0x30, reinterpret_cast<uintptr_t>(static_modifiers[i]));
-            set(timed_nodes[i], 0, reinterpret_cast<uintptr_t>(timed[i]));
         }
+        for (int i = 0; i < 3; ++i) set(timed_nodes[i], 0, reinterpret_cast<uintptr_t>(timed[i]));
         set(timed[0], 0x40, hours_of(1715, 1, 1));
         set(timed[0], 0x44, hours_of(1725, 1, 1));
         timed[0][0x4B] = 1;
