@@ -41,6 +41,7 @@ use crate::host::Host;
 use crate::sys::{
     AnvilLogMessage, AnvilLogMessagesService, AnvilLogTotals, ANVIL_LOG_MESSAGES_SERVICE_VERSION,
 };
+use crate::table::Table;
 
 /// The service's name.
 pub const SERVICE: &CStr = c"anvil-log-throttle.messages";
@@ -105,13 +106,13 @@ fn owned(p: *const c_char) -> String {
 /// The `anvil-log-throttle.messages` service.
 #[derive(Clone, Copy)]
 pub struct Messages {
-    table: &'static AnvilLogMessagesService,
+    table: Table<AnvilLogMessagesService>,
 }
 
 impl fmt::Debug for Messages {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Messages")
-            .field("size", &self.table.size)
+            .field("size", &self.table.size())
             .finish()
     }
 }
@@ -125,7 +126,7 @@ impl Messages {
     }
 
     /// The C table, for what this crate does not wrap.
-    pub fn c_api(&self) -> &'static AnvilLogMessagesService {
+    pub fn c_api(&self) -> Table<AnvilLogMessagesService> {
         self.table
     }
 

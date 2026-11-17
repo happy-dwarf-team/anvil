@@ -59,6 +59,7 @@ use crate::sys::{
     AnvilScriptEffectsService, ANVIL_SCRIPT_DAY_END_SERVICE_VERSION, ANVIL_SCRIPT_DAY_NEW_MONTH,
     ANVIL_SCRIPT_DAY_NEW_YEAR, ANVIL_SCRIPT_EFFECTS_SERVICE_VERSION,
 };
+use crate::table::Table;
 use crate::Tag;
 
 /// The Day end service's name.
@@ -124,13 +125,13 @@ impl<'a> Call<'a> {
 /// The `anvil-script.effects` service.
 #[derive(Clone, Copy)]
 pub struct Effects {
-    table: &'static AnvilScriptEffectsService,
+    table: Table<AnvilScriptEffectsService>,
 }
 
 impl fmt::Debug for Effects {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Effects")
-            .field("size", &self.table.size)
+            .field("size", &self.table.size())
             .finish()
     }
 }
@@ -227,7 +228,7 @@ impl Effects {
     }
 
     /// The C table, for what this crate does not wrap.
-    pub fn c_api(&self) -> &'static AnvilScriptEffectsService {
+    pub fn c_api(&self) -> Table<AnvilScriptEffectsService> {
         self.table
     }
 
@@ -344,13 +345,13 @@ impl Day {
 /// The `anvil-script.day_end` service.
 #[derive(Clone, Copy)]
 pub struct DayEnd {
-    table: &'static AnvilScriptDayEndService,
+    table: Table<AnvilScriptDayEndService>,
 }
 
 impl fmt::Debug for DayEnd {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DayEnd")
-            .field("size", &self.table.size)
+            .field("size", &self.table.size())
             .finish()
     }
 }
@@ -384,7 +385,7 @@ impl DayEnd {
     }
 
     /// The C table, for what this crate does not wrap.
-    pub fn c_api(&self) -> &'static AnvilScriptDayEndService {
+    pub fn c_api(&self) -> Table<AnvilScriptDayEndService> {
         self.table
     }
 

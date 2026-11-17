@@ -49,6 +49,7 @@ use crate::sys::{
     ANVIL_GAME_VALUE_STABILITY, ANVIL_GAME_VALUE_TREASURY, ANVIL_GAME_WAR_ATTACKERS,
     ANVIL_GAME_WAR_DEFENDERS, ANVIL_GAME_WORLD_SERVICE_VERSION,
 };
+use crate::table::Table;
 use crate::text::{read_list, read_text, Tag};
 
 /// The service's name.
@@ -477,13 +478,13 @@ pub struct DiplomacyStatus {
 /// The `anvil-game.world` service.
 #[derive(Clone, Copy)]
 pub struct World {
-    table: &'static AnvilGameWorldService,
+    table: Table<AnvilGameWorldService>,
 }
 
 impl fmt::Debug for World {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("World")
-            .field("size", &self.table.size)
+            .field("size", &self.table.size())
             .finish()
     }
 }
@@ -513,7 +514,7 @@ impl World {
     }
 
     /// The C table, for what this crate does not wrap.
-    pub fn c_api(&self) -> &'static AnvilGameWorldService {
+    pub fn c_api(&self) -> Table<AnvilGameWorldService> {
         self.table
     }
 

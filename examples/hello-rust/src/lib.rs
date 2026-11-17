@@ -2,9 +2,11 @@
 //! event subscription, with the safe `anvil` crate (`anvil-sdk`) and the
 //! symbols that `anvil gen --lang rust` writes from `symbols.toml`.
 //!
-//! Host calls are safe. What stays `unsafe` is what reaches the game's code:
-//! the detour is a plain function the game calls, and calling the rest of
-//! its chain (`next`) is an `unsafe` call of the game's function.
+//! Host calls are safe but one: `hook` takes the symbol as a plain id, so the
+//! call says (in its `unsafe` block) that the hook's type is that symbol's.
+//! What else stays `unsafe` is what reaches the game's code: the detour is a
+//! plain function the game calls, and calling the rest of its chain (`next`)
+//! is an `unsafe` call of the game's function.
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use std::ffi::c_void;
@@ -57,7 +59,9 @@ impl Plugin for Hello {
         ));
         // Staged now, enabled with the rest when load returns Ok; an error
         // returned here rolls back everything staged so far.
-        host.hook(&SPEED_OBJECT, sym::SPEED_OBJECT, on_speed_object)?;
+        // SAFETY: SpeedObjectFn is the type anvil gen wrote for speed_object's
+        // declared signature, and SPEED_OBJECT and the detour have it.
+        unsafe { host.hook(&SPEED_OBJECT, sym::SPEED_OBJECT, on_speed_object) }?;
         let log = *host;
         let idle_exit = host.mid_hook(sym::IDLE_EXIT, move |cpu| {
             log.info(format_args!("returning to the menu (rcx={:#x})", cpu.rcx));

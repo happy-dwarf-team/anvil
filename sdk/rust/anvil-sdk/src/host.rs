@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 use crate::change::{Change, FunctionHook, PointerSwap};
 use crate::cpu::Cpu;
-use crate::error::{check, need, Result};
+use crate::error::{check, Result};
 use crate::event::{Event, Payload};
 use crate::fnptr::FnPtr;
 use crate::panic::{catch_raw, run_callback};
@@ -16,22 +16,23 @@ use crate::sys::{
     AnvilResult, AnvilSetting, AnvilSymbol, ANVIL_LOG_DEBUG, ANVIL_LOG_ERROR, ANVIL_LOG_INFO,
     ANVIL_LOG_WARNING,
 };
+use crate::table::Table;
 use crate::text::{c_string, owned_string, static_str};
 
 static TABLE: AtomicPtr<AnvilHost> = AtomicPtr::new(ptr::null_mut());
 static PLUGIN: AtomicPtr<AnvilPlugin> = AtomicPtr::new(ptr::null_mut());
 
 /// Whether the table has every function of API 2.0 (up to `publish`).
-pub(crate) fn covers_api_2_0(table: &AnvilHost) -> bool {
-    table.size as usize
+pub(crate) fn covers_api_2_0(table: Table<AnvilHost>) -> bool {
+    table.size() as usize
         >= offset_of!(AnvilHost, publish) + size_of::<Option<unsafe extern "C" fn()>>()
 }
 
 /// Keeps the host table and the plugin's handle for every later call; Anvil
 /// keeps both for the process.
-pub(crate) fn install(table: &'static AnvilHost, plugin: *mut AnvilPlugin) {
+pub(crate) fn install(table: Table<AnvilHost>, plugin: *mut AnvilPlugin) {
     PLUGIN.store(plugin, Ordering::Release);
-    TABLE.store(ptr::from_ref(table).cast_mut(), Ordering::Release);
+    TABLE.store(table.as_ptr().cast_mut(), Ordering::Release);
 }
 
 /// A log level of `anvil.log`.
@@ -115,7 +116,7 @@ impl Key {
 /// Anvil answered with.
 #[derive(Clone, Copy)]
 pub struct Host {
-    table: &'static AnvilHost,
+    table: Table<AnvilHost>,
     plugin: *mut AnvilPlugin,
 }
 
@@ -213,8 +214,13 @@ unsafe extern "C" fn setting_adapter<F: Fn() + Send + Sync + 'static>(
 }
 
 /// Writes one log line through the host; never fails.
-fn write_log(table: &AnvilHost, plugin: *mut AnvilPlugin, level: LogLevel, message: &dyn Display) {
-    let Some(log) = table.log else {
+fn write_log(
+    table: Table<AnvilHost>,
+    plugin: *mut AnvilPlugin,
+    level: LogLevel,
+    message: &dyn Display,
+) {
+    let Some(log) = field!(table, AnvilHost, log).flatten() else {
         return;
     };
     let mut text = String::new();
@@ -250,7 +256,7 @@ pub(crate) fn wide_path(text: *const u16) -> PathBuf {
 }
 
 impl Host {
-    pub(crate) fn from_parts(table: &'static AnvilHost, plugin: *mut AnvilPlugin) -> Self {
+    pub(crate) fn from_parts(table: Table<AnvilHost>, plugin: *mut AnvilPlugin) -> Self {
         Self { table, plugin }
     }
 
@@ -259,11 +265,11 @@ impl Host {
         let table = TABLE.load(Ordering::Acquire);
         let plugin = PLUGIN.load(Ordering::Acquire);
         // SAFETY: install() stored Anvil's table, which lives for the process.
-        unsafe { table.as_ref() }.map(|table| Self { table, plugin })
+        unsafe { Table::from_raw(table) }.map(|table| Self { table, plugin })
     }
 
     /// Anvil's C table, for what this crate does not wrap.
-    pub fn c_api(&self) -> &'static AnvilHost {
+    pub fn c_api(&self) -> Table<AnvilHost> {
         self.table
     }
 
@@ -287,9 +293,7 @@ impl Host {
     /// [`ErrorCode::Unsupported`](crate::ErrorCode::Unsupported) from an Anvil
     /// without modules.
     pub fn module(&self, name: &str) -> Result<Host> {
-        let provided = self.table.size as usize
-            >= offset_of!(AnvilHost, module) + size_of::<Option<unsafe extern "C" fn()>>();
-        let module = need(if provided { self.table.module } else { None }, "module")?;
+        let module = function!(self.table, AnvilHost, module)?;
         let text = c_string(name);
         let mut out: *mut AnvilPlugin = ptr::null_mut();
         // SAFETY: the host's function with this plugin, a NUL-terminated name
@@ -304,13 +308,14 @@ impl Host {
 
     /// Anvil's version (SemVer).
     pub fn anvil_version(&self) -> &'static str {
+        let version = field!(self.table, AnvilHost, anvil_version).unwrap_or(ptr::null());
         // SAFETY: the host fills it for the process.
-        unsafe { static_str(self.table.anvil_version) }.unwrap_or("")
+        unsafe { static_str(version) }.unwrap_or("")
     }
 
     /// The running game executable.
     pub fn game(&self) -> GameInfo {
-        let game = self.table.game;
+        let game = field!(self.table, AnvilHost, game).unwrap_or(ptr::null());
         if game.is_null() {
             return GameInfo {
                 build_id: None,
@@ -347,16 +352,16 @@ impl Host {
     /// The plugin's folder (read-only).
     pub fn plugin_dir(&self) -> PathBuf {
         // SAFETY: the host's function with this plugin.
-        self.table
-            .plugin_dir
+        field!(self.table, AnvilHost, plugin_dir)
+            .flatten()
             .map_or_else(PathBuf::new, |f| wide_path(unsafe { f(self.plugin) }))
     }
 
     /// The plugin's writable `anvil/data/<id>/`, created on the first call.
     pub fn data_dir(&self) -> PathBuf {
         // SAFETY: the host's function with this plugin.
-        self.table
-            .data_dir
+        field!(self.table, AnvilHost, data_dir)
+            .flatten()
             .map_or_else(PathBuf::new, |f| wide_path(unsafe { f(self.plugin) }))
     }
 
@@ -391,21 +396,30 @@ impl Host {
     // --- changes on declared symbols ------------------------------------------------
 
     /// Hooks a function symbol: the game calls `detour`, which passes on
-    /// through `hook.next()`. `F` is the symbol's generated type
-    /// (`sym::<Name>Fn`), so a detour of another shape does not compile.
+    /// through `hook.next()`. With `hook` and `detour` of the symbol's
+    /// generated type (`sym::<Name>Fn`), a detour of another shape does not
+    /// compile; but the symbol id is a plain `u32`, so nothing ties `F` to
+    /// `symbol` but the caller.
     ///
     /// During `load` the change is staged and enabled with the others when
     /// load returns; later it is enabled at once (or with its group).
-    pub fn hook<F: FnPtr>(
+    ///
+    /// # Safety
+    /// `symbol` is a function symbol whose declared signature `F` is: the
+    /// `sym::<Name>Fn` that `anvil gen --lang rust` writes for the same
+    /// symbol as `sym::<NAME>`. The game calls `detour` with the arguments
+    /// of that signature, and the hook's `next` is the game's function of it.
+    pub unsafe fn hook<F: FnPtr>(
         &self,
         hook: &'static FunctionHook<F>,
         symbol: AnvilSymbol,
         detour: F,
     ) -> Result<()> {
         hook.claim("hook_function")?;
-        let call = need(self.table.hook_function, "hook_function")?;
+        let call = function!(self.table, AnvilHost, hook_function)?;
         let mut change: *mut AnvilChange = ptr::null_mut();
-        // SAFETY: a declared symbol; `next` lives in a static; the detour has the declared type.
+        // SAFETY: `next` lives in a static; the caller vouches that the
+        // detour has the symbol's declared type.
         let result = unsafe {
             call(
                 self.plugin,
@@ -428,7 +442,7 @@ impl Host {
     where
         F: Fn(&mut Cpu) + Send + Sync + 'static,
     {
-        let call = need(self.table.mid_hook, "mid_hook")?;
+        let call = function!(self.table, AnvilHost, mid_hook)?;
         let what = format!("mid_hook symbol {site}");
         self.cpu_change(what, callback, |function, user, out| {
             // SAFETY: a declared symbol; the adapter is never freed and never unwinds.
@@ -443,7 +457,7 @@ impl Host {
     where
         F: Fn(&mut Cpu) + Send + Sync + 'static,
     {
-        let call = need(self.table.replace_block, "replace_block")?;
+        let call = function!(self.table, AnvilHost, replace_block)?;
         let what = format!("replace_block symbol {block}");
         self.cpu_change(what, callback, |function, user, out| {
             // SAFETY: as in mid_hook.
@@ -464,7 +478,7 @@ impl Host {
         target: F,
     ) -> Result<()> {
         hook.claim("redirect_call")?;
-        let call = need(self.table.redirect_call, "redirect_call")?;
+        let call = function!(self.table, AnvilHost, redirect_call)?;
         let mut change: *mut AnvilChange = ptr::null_mut();
         // SAFETY: a declared symbol; the caller vouches for the type.
         let result = unsafe {
@@ -487,7 +501,7 @@ impl Host {
     /// The bytes become the game's code or data at the site: they must be
     /// what the game can run or read there.
     pub unsafe fn patch_bytes(&self, site: AnvilSymbol, bytes: &[u8]) -> Result<Change> {
-        let call = need(self.table.patch_bytes, "patch_bytes")?;
+        let call = function!(self.table, AnvilHost, patch_bytes)?;
         let mut change: *mut AnvilChange = ptr::null_mut();
         // SAFETY: Anvil copies the bytes during the call; the caller vouches for them.
         let result = unsafe {
@@ -517,7 +531,7 @@ impl Host {
         value: *mut c_void,
     ) -> Result<()> {
         swap.claim()?;
-        let call = need(self.table.swap_pointer, "swap_pointer")?;
+        let call = function!(self.table, AnvilHost, swap_pointer)?;
         let mut change: *mut AnvilChange = ptr::null_mut();
         // SAFETY: `previous` lives in a static and is 8-byte aligned; the caller vouches for `value`.
         let result = unsafe { call(self.plugin, slot, value, swap.previous_slot(), &mut change) };
@@ -539,7 +553,7 @@ impl Host {
         replacement: F,
     ) -> Result<()> {
         hook.claim("replace_import")?;
-        let call = need(self.table.replace_import, "replace_import")?;
+        let call = function!(self.table, AnvilHost, replace_import)?;
         let (module_c, function_c) = (c_string(module), c_string(function));
         let mut change: *mut AnvilChange = ptr::null_mut();
         // SAFETY: NUL-terminated names; the caller vouches for the type.
@@ -572,7 +586,7 @@ impl Host {
         detour: F,
     ) -> Result<()> {
         hook.claim("hook_function_at")?;
-        let call = need(self.table.hook_function_at, "hook_function_at")?;
+        let call = function!(self.table, AnvilHost, hook_function_at)?;
         let mut change: *mut AnvilChange = ptr::null_mut();
         // SAFETY: the caller's contract; the bytes are read during the call.
         let result = unsafe {
@@ -607,7 +621,7 @@ impl Host {
     where
         F: Fn(&mut Cpu) + Send + Sync + 'static,
     {
-        let call = need(self.table.mid_hook_at, "mid_hook_at")?;
+        let call = function!(self.table, AnvilHost, mid_hook_at)?;
         let what = format!("mid_hook_at {:p}", address.as_ptr());
         self.cpu_change(what, callback, |function, user, out| {
             // SAFETY: the caller's contract; the adapter never unwinds.
@@ -629,9 +643,9 @@ impl Host {
     /// when it returns an error or panics (the panic goes on). Inside `load`
     /// the load itself is the group: `WrongPhase`.
     pub fn group<R>(&self, body: impl FnOnce() -> Result<R>) -> Result<R> {
-        let begin = need(self.table.begin_group, "begin_group")?;
-        let commit = need(self.table.commit_group, "commit_group")?;
-        let abort = need(self.table.abort_group, "abort_group")?;
+        let begin = function!(self.table, AnvilHost, begin_group)?;
+        let commit = function!(self.table, AnvilHost, commit_group)?;
+        let abort = function!(self.table, AnvilHost, abort_group)?;
         // SAFETY: the host's functions with this plugin.
         check(unsafe { begin(self.plugin) }, || "begin_group")?;
         match catch_raw(body) {
@@ -683,8 +697,8 @@ impl Host {
     /// symbols.toml declares `absent` on the running game build.
     pub fn address(&self, symbol: AnvilSymbol) -> Option<NonNull<c_void>> {
         // SAFETY: the host's function with this plugin.
-        self.table
-            .address_of
+        field!(self.table, AnvilHost, address_of)
+            .flatten()
             .and_then(|f| NonNull::new(unsafe { f(self.plugin, symbol) }))
     }
 
@@ -718,7 +732,7 @@ impl Host {
 
     /// A value of symbols.toml `values` (a `rip_relative` value is an RVA).
     pub fn value(&self, symbol: AnvilSymbol, name: &str) -> Result<u64> {
-        let call = need(self.table.symbol_value, "symbol_value")?;
+        let call = function!(self.table, AnvilHost, symbol_value)?;
         let name_c = c_string(name);
         let mut out = 0u64;
         // SAFETY: the host's function with a NUL-terminated name.
@@ -732,32 +746,32 @@ impl Host {
     /// A bool setting (false for an unknown one or one of another type).
     pub fn setting_bool(&self, setting: AnvilSetting) -> bool {
         // SAFETY: the host's function with this plugin.
-        self.table
-            .setting_bool
+        field!(self.table, AnvilHost, setting_bool)
+            .flatten()
             .is_some_and(|f| unsafe { f(self.plugin, setting) } != 0)
     }
 
     /// An int, bool, enum index (`<NAME>_<OPTION>`) or key code.
     pub fn setting_int(&self, setting: AnvilSetting) -> i64 {
         // SAFETY: as above.
-        self.table
-            .setting_int
+        field!(self.table, AnvilHost, setting_int)
+            .flatten()
             .map_or(0, |f| unsafe { f(self.plugin, setting) })
     }
 
     /// A float or int setting.
     pub fn setting_float(&self, setting: AnvilSetting) -> f64 {
         // SAFETY: as above.
-        self.table
-            .setting_float
+        field!(self.table, AnvilHost, setting_float)
+            .flatten()
             .map_or(0.0, |f| unsafe { f(self.plugin, setting) })
     }
 
     /// A string, an enum option's name or a key ("Ctrl+F12").
     pub fn setting_string(&self, setting: AnvilSetting) -> String {
         // SAFETY: valid until the next change of the setting; copied at once.
-        self.table
-            .setting_string
+        field!(self.table, AnvilHost, setting_string)
+            .flatten()
             .map_or_else(String::new, |f| unsafe {
                 owned_string(f(self.plugin, setting))
             })
@@ -774,7 +788,7 @@ impl Host {
     where
         F: Fn() + Send + Sync + 'static,
     {
-        let call = need(self.table.subscribe_setting, "subscribe_setting")?;
+        let call = function!(self.table, AnvilHost, subscribe_setting)?;
         let what = format!("setting {setting} handler");
         let adapter: &'static SettingAdapter<F> = Box::leak(Box::new(SettingAdapter {
             handler,
@@ -802,7 +816,7 @@ impl Host {
         P: Payload,
         F: Fn(&P) + Send + Sync + 'static,
     {
-        let call = need(self.table.subscribe, "subscribe")?;
+        let call = function!(self.table, AnvilHost, subscribe)?;
         let name = event.name();
         let what = format!("{} handler", name.to_string_lossy());
         let adapter: &'static EventAdapter<P, F> = Box::leak(Box::new(EventAdapter {
@@ -829,7 +843,7 @@ impl Host {
     where
         F: Fn(&str, *const c_void) + Send + Sync + 'static,
     {
-        let call = need(self.table.subscribe, "subscribe")?;
+        let call = function!(self.table, AnvilHost, subscribe)?;
         let name = c_string(event);
         let what = format!("{event} handler");
         let adapter: &'static RawEventAdapter<F> = Box::leak(Box::new(RawEventAdapter {
@@ -849,19 +863,27 @@ impl Host {
         check(result, || format!("subscribe {event}"))
     }
 
-    /// Publishes `<plugin-id>.<name>` with no payload.
+    /// Publishes `<plugin-id>.<name>` with no payload (NULL), which every
+    /// [`Payload::read`](crate::Payload::read) answers without reading.
     pub fn publish(&self, event: &str) -> Result<()> {
-        self.publish_raw(event, ptr::null())
+        // SAFETY: a NULL payload, which no subscriber reads.
+        unsafe { self.publish_raw(event, ptr::null()) }
     }
 
     /// Publishes `<plugin-id>.<name>` with a payload its subscribers read
-    /// during the call.
-    // The pointer is only handed on; reading it is the subscribers' business.
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    pub fn publish_raw(&self, event: &str, payload: *const c_void) -> Result<()> {
-        let call = need(self.table.publish, "publish")?;
+    /// during the call: synchronously, on this thread, before it returns.
+    ///
+    /// # Safety
+    /// `payload` is null or points to a value of the layout this event's
+    /// subscribers read it as: the payload type its documentation (or C
+    /// header) names, which every [`Event`] of that name declares with
+    /// [`Event::new`]. For a type that starts with `uint32_t size`, the
+    /// `size` is the value's own and at least that many bytes are readable.
+    /// It stays valid and unchanged until the call returns.
+    pub unsafe fn publish_raw(&self, event: &str, payload: *const c_void) -> Result<()> {
+        let call = function!(self.table, AnvilHost, publish)?;
         let name = c_string(event);
-        // SAFETY: a NUL-terminated name; the payload is the subscribers' business.
+        // SAFETY: a NUL-terminated name; the caller vouches for the payload.
         check(unsafe { call(self.plugin, name.as_ptr(), payload) }, || {
             format!("publish {event}")
         })
@@ -881,7 +903,7 @@ impl Host {
         version: u32,
         service: &'static T,
     ) -> Result<()> {
-        let call = need(self.table.register_service, "register_service")?;
+        let call = function!(self.table, AnvilHost, register_service)?;
         let name_c = c_string(name);
         // SAFETY: the service lives for the process; the caller vouches for its layout.
         let result = unsafe {
@@ -895,22 +917,24 @@ impl Host {
         check(result, || format!("register_service {name} v{version}"))
     }
 
-    /// A service by name and major version, as raw table; the typed wrappers
-    /// ([`game::Game`](crate::game::Game), [`world::World`](crate::world::World),
+    /// A service by name and major version, as a [`Table`]; the typed
+    /// wrappers ([`game::Game`](crate::game::Game),
+    /// [`world::World`](crate::world::World),
     /// [`panel::Panels`](crate::panel::Panels),
-    /// [`benchmark::Benchmark`](crate::benchmark::Benchmark)) use it.
+    /// [`benchmark::Benchmark`](crate::benchmark::Benchmark)) use it. Only the
+    /// table's `size` is read here: a provider older than `T` has a shorter
+    /// table, and [`Table`] reads a field only when that size covers it.
     ///
     /// # Safety
-    /// `T` is the service's table type for that version. Check its `size`
-    /// before using a function appended after the first release of the version.
-    pub unsafe fn service<T>(&self, name: &CStr, version: u32) -> Option<&'static T> {
-        let call = self.table.get_service?;
-        // SAFETY: a NUL-terminated name; a service lives for the process.
-        unsafe {
-            call(self.plugin, name.as_ptr(), version)
-                .cast::<T>()
-                .as_ref()
-        }
+    /// `T` is the service's table type for that version (or a newer
+    /// release of the same version): a `#[repr(C)]` struct whose first field
+    /// is `u32 size`.
+    pub unsafe fn service<T>(&self, name: &CStr, version: u32) -> Option<Table<T>> {
+        let call = field!(self.table, AnvilHost, get_service).flatten()?;
+        // SAFETY: a NUL-terminated name; a service's table starts with its
+        // size, has that many bytes and lives for the process (ADR 0001);
+        // the caller vouches for T.
+        unsafe { Table::from_raw(call(self.plugin, name.as_ptr(), version).cast::<T>()) }
     }
 }
 

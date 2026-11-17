@@ -23,6 +23,7 @@ use crate::sys::{
     ANVIL_BENCHMARK_UNIT_MB, ANVIL_BENCHMARK_UNIT_MS, ANVIL_BENCHMARK_UNIT_NONE,
     ANVIL_BENCHMARK_UNIT_PERCENT,
 };
+use crate::table::Table;
 use crate::text::c_string;
 
 /// The service's name.
@@ -92,7 +93,7 @@ pub struct Field<'a> {
 /// The `anvil.benchmark` service.
 #[derive(Clone, Copy)]
 pub struct Benchmark {
-    table: &'static AnvilBenchmarkService,
+    table: Table<AnvilBenchmarkService>,
     plugin: *mut AnvilPlugin,
 }
 
@@ -121,7 +122,7 @@ impl Benchmark {
     }
 
     /// The C table, for what this crate does not wrap.
-    pub fn c_api(&self) -> &'static AnvilBenchmarkService {
+    pub fn c_api(&self) -> Table<AnvilBenchmarkService> {
         self.table
     }
 

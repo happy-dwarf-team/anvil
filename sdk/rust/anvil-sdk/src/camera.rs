@@ -20,6 +20,7 @@ use crate::sys::{
     AnvilGameCameraService, AnvilGameCameraView, ANVIL_GAME_CAMERA_LOCKED,
     ANVIL_GAME_CAMERA_SERVICE_VERSION,
 };
+use crate::table::Table;
 
 /// The service's name.
 pub const SERVICE: &std::ffi::CStr = c"anvil-game.camera";
@@ -43,13 +44,13 @@ pub struct View {
 /// The `anvil-game.camera` service.
 #[derive(Clone, Copy)]
 pub struct Camera {
-    table: &'static AnvilGameCameraService,
+    table: Table<AnvilGameCameraService>,
 }
 
 impl fmt::Debug for Camera {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Camera")
-            .field("size", &self.table.size)
+            .field("size", &self.table.size())
             .finish()
     }
 }
@@ -64,7 +65,7 @@ impl Camera {
     }
 
     /// The C table, for what this crate does not wrap.
-    pub fn c_api(&self) -> &'static AnvilGameCameraService {
+    pub fn c_api(&self) -> Table<AnvilGameCameraService> {
         self.table
     }
 

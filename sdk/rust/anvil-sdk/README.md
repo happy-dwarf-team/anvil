@@ -11,7 +11,7 @@ nothing else.
 crate-type = ["cdylib"]
 
 [dependencies]
-anvil-sdk = "0.1"
+anvil-sdk = "0.2"
 ```
 
 ```rust
@@ -68,9 +68,11 @@ What it gives over the C ABI:
 Host and service calls are safe. What reaches the game's memory by address, or
 puts raw bytes and pointers into it, stays an `unsafe fn` with its contract:
 calling a hook's `next` (the generated function types are `unsafe extern "C"
-fn`), `Host::function`, `Host::data`, writing the mid-hook context
+fn`), `Host::hook` (the symbol id is a plain `u32`: the caller ties it to its
+`sym::<Name>Fn`), `Host::function`, `Host::data`, writing the mid-hook context
 (`Cpu::regs_mut`), byte patches, pointer swaps, call redirects, import
-replacements and changes at raw addresses.
+replacements, changes at raw addresses and `Host::publish_raw`. Service tables
+are `anvil::Table`s, read only as far as the provider's `size` says.
 
 Examples in the Anvil repository: `examples/hello-rust` (a function hook, a
 mid hook and an event on declared symbols) and `examples/panel-rust` (the
