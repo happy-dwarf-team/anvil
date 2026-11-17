@@ -8,7 +8,7 @@ void WorkQueue::push(AnvilGameWork work, void* context) {
     pending_.store(queued_.size(), std::memory_order_release);
 }
 
-std::size_t WorkQueue::run() {
+std::size_t WorkQueue::run(std::size_t* failed) {
     // Most frames have nothing queued: no lock then.
     if (pending_.load(std::memory_order_acquire) == 0) return 0;
     {
@@ -16,9 +16,17 @@ std::size_t WorkQueue::run() {
         running_.swap(queued_);
         pending_.store(0, std::memory_order_release);
     }
-    for (const Item& item : running_) item.work(item.context);
+    std::size_t errors = 0;
+    for (const Item& item : running_) {
+        try {
+            item.work(item.context);
+        } catch (...) {
+            ++errors;
+        }
+    }
     const std::size_t ran = running_.size();
     running_.clear();
+    if (failed != nullptr) *failed = errors;
     return ran;
 }
 

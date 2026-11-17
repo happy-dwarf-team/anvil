@@ -136,16 +136,32 @@ void Tally::add(std::string_view log, std::string_view source, int line, std::st
             ++totals_.untracked;
             return;
         }
-        TallyMessage& m = messages_.emplace_back();
+        // Built whole before either list grows: an allocation that fails
+        // here leaves both lists as they were, and one that fails as they
+        // grow takes the new entry back, so message i always has counts i.
+        TallyMessage m;
         m.log = std::string(log);
         m.source = std::string(source);
         m.source_line = line;
         m.text = utf8_text(text);
-        Counts& fresh = counts_.emplace_back();
+        Counts fresh;
         // The game's bytes, when they differ from the UTF-8 text, for the
         // comparison of a later line without a conversion.
         if (m.text != text) fresh.raw = std::string(text);
-        it = index_.emplace(key, static_cast<std::uint32_t>(messages_.size() - 1)).first;
+        const auto at = static_cast<std::uint32_t>(messages_.size());
+        messages_.push_back(std::move(m));
+        try {
+            counts_.push_back(std::move(fresh));
+            try {
+                it = index_.emplace(key, at).first;
+            } catch (...) {
+                counts_.pop_back();
+                throw;
+            }
+        } catch (...) {
+            messages_.pop_back();
+            throw;
+        }
         ++totals_.messages;
     } else {
         const TallyMessage& m = messages_[it->second];
