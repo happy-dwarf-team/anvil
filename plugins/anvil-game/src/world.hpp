@@ -198,6 +198,10 @@ struct WorldLayout {
     std::uint32_t timed_hidden = 0;
     std::int32_t unset_hours = 0;           // the date the game writes for none
     std::uintptr_t timed_never = 0;         // the address of the global date of a modifier given for good
+    // Province triggered modifiers (a CPdxArray of CProvinceTriggeredModifier
+    // const*, each a CStaticModifier with its key at `timed_key`): 0 when absent.
+    std::uint32_t province_triggered = 0;   // province: the array's data pointer
+    std::uint32_t province_triggered_count = 0;  // province: its int32 count
 
     // The province view: `view_holder` 0 when absent on this build.
     std::uint32_t view_holder = 0;          // session: the selection object
@@ -350,6 +354,8 @@ AnvilResult read_statistics(const WorldLayout& l, std::string_view tag, std::uin
 
 AnvilResult read_country_timed(const WorldLayout& l, std::string_view tag, std::vector<TimedEntry>& out);
 AnvilResult read_province_timed(const WorldLayout& l, std::int32_t province, std::vector<TimedEntry>& out);
+// The province's triggered modifiers; each entry has only its `key`.
+AnvilResult read_province_triggered(const WorldLayout& l, std::int32_t province, std::vector<TimedEntry>& out);
 // NOT_FOUND while no province view is shown.
 AnvilResult read_province_view(const WorldLayout& l, std::int32_t& province);
 // 0 while none has been selected.

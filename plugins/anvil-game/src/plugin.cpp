@@ -1359,6 +1359,12 @@ AnvilResult world_province_timed_modifier_keys(std::int32_t province, char* keys
                            capacity, length);
 }
 
+AnvilResult world_province_triggered_modifier_keys(std::int32_t province, char* keys, std::uint32_t capacity,
+                                                   std::uint32_t* length) {
+    return give_timed_keys([&](auto& e) { return anvil_game::read_province_triggered(g_world, province, e); }, keys,
+                           capacity, length);
+}
+
 AnvilResult world_province_view(std::int32_t* province) {
     if (province == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
     if (!world_open()) return ANVIL_ERROR_WRONG_PHASE;
@@ -1541,6 +1547,7 @@ constexpr AnvilGameWorldService kWorldService = {
     world_country_rivals,          world_country_overlord, world_country_subjects,
     world_player_tags,             world_selected_province, world_province_at, world_unit_at,
     world_exploration_regions,     world_region_name,       world_region_key,
+    world_province_triggered_modifier_keys,
 };
 
 // A port may declare these symbols absent on a new build (ADR 0004): the game
@@ -1748,6 +1755,12 @@ void load_world(anvil::Host& host) {
         l.timed_hidden = sym::timed_modifier_hidden.hidden;
         l.unset_hours = static_cast<std::int32_t>(sym::timed_modifier_dates.unset);
         l.timed_never = base + host.value(sym::timed_modifier_never, "never");
+        if (host.present(sym::province_triggered_modifiers)) {
+            static_assert(sym::province_triggered_modifiers.count == sym::province_triggered_modifiers.data + 0xC,
+                          "the triggered modifiers are not a CPdxArray");
+            l.province_triggered = sym::province_triggered_modifiers.data;
+            l.province_triggered_count = sym::province_triggered_modifiers.count;
+        }
     }
     if (host.present(sym::selection_holder) && host.present(sym::selection_view) && host.present(sym::view_window) &&
         host.present(sym::province_view_province) && host.present(sym::dialog_window_part) &&

@@ -2493,3 +2493,20 @@ note = "CCountry::GetSubjects: _Subjects (+0x1A18), a vector of tags (begin, end
 build."eu4-1.37.5-steam-win64" = { rva = 0x363860 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x363730 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x363730 }
+
+# --- province triggered modifiers (anvil-game.world, 1.25.0) ----------------------
+# Read only; named by the GOG 1.37.5.2 PDB (CProvince::_TriggeredModifiers at
+# +0x308, a CPdxArray<CProvinceTriggeredModifier const*, int>: data +8, count
+# +0x14), the site unique in the .text of all three builds. Each entry is a
+# CStaticModifier, so its key is timed_modifier_key's.
+
+[symbol.province_triggered_modifiers]
+# movsxd rax,[rdi+31Ch]; test eax,eax; jle; mov r8,rax; mov ecx,ebx; mov rax,[rdi+310h]; cmp [rax],rdx
+bytes = "48 63 87 1C 03 00 00 85 C0 7E ?? 4C 8B C0 8B CB 48 8B 87 10 03 00 00 48 39 10"
+memory = "code"
+values.count = { at = 3, size = 4 }
+values.data = { at = 19, size = 4 }
+note = "CHasProvinceModifierTrigger::Evaluate: a key that is no static modifier is looked for in the province's _TriggeredModifiers, count +0x31C, data +0x310"
+build."eu4-1.37.5-steam-win64" = { rva = 0xC506AB }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0xC4EE5B }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0xC4EE5B }

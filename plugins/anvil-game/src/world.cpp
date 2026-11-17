@@ -1144,6 +1144,28 @@ AnvilResult read_province_timed(const WorldLayout& l, std::int32_t province, std
     return ANVIL_OK;
 }
 
+AnvilResult read_province_triggered(const WorldLayout& l, std::int32_t province, std::vector<TimedEntry>& out) {
+    if (l.timed_key == 0 || l.province_triggered == 0) return ANVIL_ERROR_NOT_DECLARED;
+    std::uintptr_t p = 0, data = 0;
+    std::int32_t count = 0;
+    if (const AnvilResult r = province_at(l, province, p); r != ANVIL_OK) return r;
+    if (!read(p + l.province_triggered, data) || !read(p + l.province_triggered_count, count) || count < 0 ||
+        static_cast<std::size_t>(count) > kMaxTimed || (count != 0 && data == 0)) {
+        return ANVIL_ERROR_INTERNAL;
+    }
+    out.clear();
+    for (std::int32_t i = 0; i < count; ++i) {
+        std::uintptr_t modifier = 0;
+        TimedEntry e;
+        if (!read(data + static_cast<std::uintptr_t>(i) * 8, modifier) || modifier == 0 ||
+            !read_string(modifier + l.timed_key, e.key)) {
+            return ANVIL_ERROR_INTERNAL;
+        }
+        out.push_back(std::move(e));
+    }
+    return ANVIL_OK;
+}
+
 AnvilResult read_province_view(const WorldLayout& l, std::int32_t& province) {
     if (l.view_holder == 0) return ANVIL_ERROR_NOT_DECLARED;
     std::uintptr_t root = 0, session = 0, holder = 0, view = 0, shown = 0, window = 0;
