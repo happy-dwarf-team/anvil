@@ -274,13 +274,32 @@ std::string hex(uintptr_t value) {
     return s.str();
 }
 
+// How many bytes SafetyHook's E9 trampoline adds to a stolen instruction: a
+// short (rel8) jcc becomes a 6-byte near one, a short jmp a 5-byte one.
+size_t widening(const ZydisDecodedInstruction& instruction) {
+    if (instruction.meta.branch_type != ZYDIS_BRANCH_TYPE_SHORT) return 0;
+    if (instruction.meta.category == ZYDIS_CATEGORY_COND_BR) return 4;
+    if (instruction.meta.category == ZYDIS_CATEGORY_UNCOND_BR) return 3;
+    return 0;
+}
+
 // The bytes SafetyHook will steal at a function start (whole instructions
-// covering 5 bytes), refusing JRCXZ / LOOP*, which it mis-relocates (§8.3).
+// covering 5 bytes), refusing what it mis-relocates (§8.3): JRCXZ / LOOP*,
+// and a short branch to an instruction of the stolen bytes that does not keep
+// its distance in the trampoline. SafetyHook widens short branches and keeps
+// the old rel8 for a target inside the stolen bytes, which is right only for
+// a forward target with no other widened branch between: a loop head (dec
+// ecx; jnz back) would jump into the middle of an instruction there.
 ChangeStatus stolen_length(const uint8_t* code, size_t available, size_t& length, std::string& detail) {
     ZydisDecoder decoder;
     if (!ZYAN_SUCCESS(ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_STACK_WIDTH_64))) {
         return ChangeStatus::Internal;
     }
+    struct Short {
+        size_t at;
+        int64_t target;
+    };
+    std::vector<Short> shorts;
     size_t at = 0;
     while (at < 5) {
         ZydisDecodedInstruction instruction;
@@ -299,10 +318,51 @@ ChangeStatus stolen_length(const uint8_t* code, size_t available, size_t& length
             return ChangeStatus::UnsafeSite;
         default: break;
         }
+        if (widening(instruction) != 0) {
+            const int64_t end = static_cast<int64_t>(at + instruction.length);
+            shorts.push_back({at, end + static_cast<int64_t>(instruction.raw.imm[0].value.s)});
+        }
         at += instruction.length;
+    }
+    for (const Short& s : shorts) {
+        if (s.target < 0 || s.target >= static_cast<int64_t>(at)) continue;  // relocated by its address
+        const bool backward = s.target <= static_cast<int64_t>(s.at);
+        const bool across = std::any_of(shorts.begin(), shorts.end(), [&](const Short& other) {
+            return other.at > s.at && static_cast<int64_t>(other.at) < s.target;
+        });
+        if (backward || across) {
+            detail = "the stolen bytes hold a short branch at +" + hex(s.at) + " to +" +
+                     hex(static_cast<uintptr_t>(s.target)) + " inside them";
+            return ChangeStatus::UnsafeSite;
+        }
     }
     length = at;
     return ChangeStatus::Ok;
+}
+
+// The offset in the stolen bytes `original` of offset `copied` in the E9
+// trampoline that holds their copy: past a widened short branch the copy
+// runs longer. Inside a widened branch, the branch's own offset.
+bool original_offset(const std::vector<uint8_t>& original, size_t copied, size_t& out) {
+    ZydisDecoder decoder;
+    if (!ZYAN_SUCCESS(ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_STACK_WIDTH_64))) return false;
+    size_t at = 0, in_copy = 0;
+    while (at < original.size()) {
+        ZydisDecodedInstruction instruction;
+        if (!ZYAN_SUCCESS(
+                ZydisDecoderDecodeInstruction(&decoder, nullptr, original.data() + at, original.size() - at, &instruction))) {
+            return false;
+        }
+        const size_t grown = widening(instruction);
+        const size_t copy_length = instruction.length + grown;
+        if (copied < in_copy + copy_length) {
+            out = grown != 0 ? at : at + (copied - in_copy);
+            return true;
+        }
+        at += instruction.length;
+        in_copy += copy_length;
+    }
+    return false;  // past the copy: the jump back
 }
 
 // A replaced block must be whole instructions: the game resumes at its end.
@@ -1680,10 +1740,12 @@ bool ChangeRegistry::attribute(uintptr_t address, AddressAttribution& out) const
             const auto& trampoline = s.hook->trampoline();
             if (inside(reinterpret_cast<const void*>(trampoline.address()), trampoline.size())) {
                 out.role = AddressRole::Trampoline;
-                // The stolen instructions are copied one to one (SafetyHook
-                // refuses what it would have to widen); past them is its jump back.
-                const size_t offset = address - trampoline.address();
-                if (offset < s.hook->original_bytes().size()) out.original = s.address + offset;
+                // The stolen instructions, a widened short branch longer
+                // than its original; past them is its jump back.
+                size_t offset = 0;
+                if (original_offset(s.hook->original_bytes(), address - trampoline.address(), offset)) {
+                    out.original = s.address + offset;
+                }
                 add_site(s);
                 return true;
             }

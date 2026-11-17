@@ -225,6 +225,26 @@ void change_tests() {
         CHECK(reg.hook_function(a, in_image(s.at(0xC0)), reinterpret_cast<void*>(&detour_a), slot(next)) ==
               ChangeStatus::UnsafeSite);
         CHECK(refusals.back().find("JRCXZ/LOOP") != std::string::npos);
+        // Short branches SafetyHook widens and gives their old rel8 inside the stolen bytes:
+        // dec ecx; jnz back to it (a loop head), and jz over another short jz.
+        s.put(0x100, {0xFF, 0xC9, 0x75, 0xFC, 0x90, 0x90, 0xC3});
+        s.put(0x140, {0x74, 0x02, 0x74, 0x00, 0x90, 0x90, 0xC3});
+        CHECK(reg.hook_function(a, in_image(s.at(0x100)), reinterpret_cast<void*>(&detour_a), slot(next)) ==
+              ChangeStatus::UnsafeSite);
+        CHECK(refusals.back().find("short branch at +0x2 to +0x0") != std::string::npos);
+        CHECK(reg.hook_function(a, in_image(s.at(0x140)), reinterpret_cast<void*>(&detour_a), slot(next)) ==
+              ChangeStatus::UnsafeSite);
+        CHECK(refusals.back().find("short branch at +0x0 to +0x4") != std::string::npos);
+        // A forward one with nothing widened between keeps its distance, and one past the
+        // stolen bytes is relocated by its address: both are hooked.
+        s.put(0x180, {0x74, 0x01, 0x90, 0x90, 0x90, 0x90, 0xC3});
+        s.put(0x1C0, {0x90, 0x90, 0x90, 0x74, 0x01, 0x90, 0xC3});
+        CHECK(reg.hook_function(a, in_image(s.at(0x180)), reinterpret_cast<void*>(&detour_a), slot(next)) ==
+              ChangeStatus::Ok);
+        Fn next2 = nullptr;
+        CHECK(reg.hook_function(a, in_image(s.at(0x1C0)), reinterpret_cast<void*>(&detour_a), slot(next2)) ==
+              ChangeStatus::Ok);
+        CHECK(reg.rollback(a) == 2);
         CHECK(reg.hook_function(a, in_image(s.at(0xFFE)), reinterpret_cast<void*>(&detour_a), slot(next)) ==
               ChangeStatus::InvalidArgument);  // 5 bytes run past the image end
         CHECK(reg.hook_function(a, in_image(s.at(0x40)), nullptr, slot(next)) == ChangeStatus::InvalidArgument);
