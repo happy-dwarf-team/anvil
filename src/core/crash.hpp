@@ -90,6 +90,8 @@ bool reported();
 // seconds (one the game's own handler caught before exiting). The start
 // marker uses it at exit: such an exit is not clean.
 bool crashed();
+// The helper thread has finished its own start (tests wait for it).
+bool helper_ready();
 
 // Whether Anvil's filter is still the process's top-level filter. When another
 // module replaced it, the replacement stays (it was installed later and

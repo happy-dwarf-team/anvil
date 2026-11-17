@@ -740,6 +740,7 @@ CrashVerdict build_report(const ReportInput& in, TextBuffer& j, TextBuffer& t) {
         }
     }
     if (in.minidump != nullptr) t.putf("\r\nMinidump: %s\r\n", in.minidump);
+    else if (in.no_minidump != nullptr) t.putf("\r\nMinidump: none, %s\r\n", in.no_minidump);
     if (!in.log_tail.empty()) {
         t.put("\r\nEnd of anvil.log:\r\n");
         t.put(in.log_tail);

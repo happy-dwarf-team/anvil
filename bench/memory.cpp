@@ -169,7 +169,7 @@ struct Module {
 
 struct Core {
     Snapshot delta;
-    double threads_added = 0;   // threads Anvil started and that still run (the crash helper)
+    double threads_added = 0;   // threads Anvil started and that still run (the crash helper and its heap probe)
     double other_threads = 0;   // threads the system started meanwhile (a thread-pool worker)
     double threads_exited = 0;  // threads of the process before start-up that ended meanwhile
     double wait_ms = 0;         // from startup() until the main-phase thread had ended
@@ -191,6 +191,8 @@ Module module_info(HMODULE m) {
     }
     return info;
 }
+
+constexpr size_t kAnvilThreads = 2;  // the threads Anvil's start-up leaves running
 
 // The child: anvil::startup() on game_dir, then the result into result_file.
 int core_child(const std::filesystem::path& game_dir, const std::filesystem::path& result_file) {
@@ -229,7 +231,9 @@ int core_child(const std::filesystem::path& game_dir, const std::filesystem::pat
             if (!known) ++(now_threads[a].ours ? added : others);
         }
         exited = before_count + added + others - n;
-        done = added <= 1 && file_contains(log.c_str(), "status: ");
+        // Crash capture keeps two threads: the helper and the heap probe it
+        // asks before the minidump (anvil#458).
+        done = added <= kAnvilThreads && file_contains(log.c_str(), "status: ");
         if (!done) Sleep(1);
     }
     QueryPerformanceCounter(&t1);

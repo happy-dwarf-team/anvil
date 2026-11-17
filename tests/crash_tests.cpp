@@ -383,6 +383,15 @@ int child(const std::string& mode, const fs::path& dir) {
         body = [](LPVOID p) -> DWORD {
             return static_cast<DWORD>(call_scratch(reinterpret_cast<Fn>(p), 1));
         };
+    } else if (mode == "heap-locked") {
+        body = [](LPVOID) -> DWORD {
+            // As a crash inside HeapAlloc on a corrupted heap: this thread
+            // holds the process heap's lock (anvil#458).
+            for (int i = 0; i < 500 && !crash::helper_ready(); ++i) Sleep(10);
+            HeapLock(GetProcessHeap());
+            crash_here();
+            return 0;
+        };
     } else if (mode == "handled-overflow") {
         body = [](LPVOID) -> DWORD {
             crash::guard_thread(crash::thread_guarantee());
@@ -1030,6 +1039,22 @@ int main(int argc, char** argv) {
         CHECK(n >= 2 && frames[1].source == FrameSource::Scan);
         RtlDeleteFunctionTable(function);
         VirtualFree(page, 0, MEM_RELEASE);
+    });
+
+    run("crash capture: a crash with the process heap locked still writes the report (child process)", [&] {
+        const ULONGLONG start = GetTickCount64();
+        const ChildResult r = run_child("heap-locked", root / "heap-locked");
+        const ULONGLONG ms = GetTickCount64() - start;
+        CHECK(r.exit == 0xC0DE);
+        CHECK(Json::valid(r.json));
+        CHECK(contains(r.json, "\"code\": \"0xC0000005\""));
+        CHECK(contains(r.json, "\"level\": \"in_plugin_code\""));
+        CHECK(contains(r.text, "Minidump: none, the process heap was locked at the crash"));
+        CHECK(!r.dump);
+        // The helper gives up on what needs the heap at once, not after the
+        // crashed thread's 30 s wait.
+        CHECK(ms < 15000);
+        explain(r);
     });
 
     run("crash capture: an access violation in a plugin's code (child process)", [&] {
