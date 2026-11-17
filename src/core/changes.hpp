@@ -203,6 +203,11 @@ public:
     // Removes every change of `owner` (staged or enabled) and closes its group.
     // Returns the number of changes that were enabled (suspended ones too).
     size_t rollback(OwnerId owner);
+    // rollback, and from then on every request of `owner` (a change, a group)
+    // is refused with WrongPhase: its plugin failed to load, but a thread it
+    // started may still ask, and its changes would act outside the gameplay
+    // policy, which forgets a failed plugin.
+    size_t retire(OwnerId owner);
 
     // --- suspension (design §8.4, §13): the game runs as if the owner's
     // enabled changes were removed. Its links are skipped (their own next still
@@ -267,6 +272,7 @@ private:
 
     ChangeStatus refuse(OwnerId owner, ChangeStatus status, const std::string& message);
     ChangeStatus check_owner(OwnerId owner) const;
+    ChangeStatus check_requester(OwnerId owner) const;  // check_owner, and not retired
     ChangeStatus check_target(OwnerId owner, const ChangeTarget& target, size_t size, const char* what);
     ChangeStatus check_overlap(OwnerId owner, const Site* joining, uintptr_t address, size_t size, ChangeKind kind,
                                const std::string& what, const Site* partner = nullptr);
