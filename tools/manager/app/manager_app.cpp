@@ -246,6 +246,9 @@ void ManagerApp::choose_game(const fs::path& dir) {
     crash_selected_.clear();
     crash_summaries_.clear();
     crash_text_.clear();
+    // A catalog download asked for in the folder before ends unused: its zip is
+    // not offered for this one (downloaded() needs download_).
+    download_.reset();
     set_log_text({});
     running_checked_ = {};
     running_started_ = 0;
@@ -1049,6 +1052,11 @@ void ManagerApp::draw_crashes_tab() {
         const bool named = !crash.summary.empty() || !crash.plugins.empty();
         return named ? i18n::text(i18n::crash_message(crash.level, crash.plugins, crash.summary)) : std::string(tr("a crash"));
     };
+    // A selected report that is gone from the folder (a newer crash rotated it
+    // out, or it was deleted) gives way to the newest one.
+    if (std::find(snapshot_->crashes.begin(), snapshot_->crashes.end(), crash_selected_) == snapshot_->crashes.end()) {
+        crash_selected_.clear();
+    }
     if (crash_selected_.empty()) {
         crash_selected_ = snapshot_->crashes.front();
         crash_text_ = read_text_file(folder / widen(crash_selected_ + ".txt"), 1 << 20).value_or(tr("(the report's text cannot be read)"));

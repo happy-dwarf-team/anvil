@@ -489,7 +489,12 @@ void ManagerApp::apply_edits(const std::vector<mui::Edit>& edits, mui::OnRefusal
             ok = set_plugin_listed(toml, "disabled_plugins", e.plugin, !e.on, error);
         } else {
             switches = true;
-            const mui::ModuleSnap* mod = mui::find_module(plugins_->model.plugins[i], e.module);
+            // Two mods with one plugin id (a conflict) are two entries, and only one of
+            // them may declare the module: its default is the one that counts.
+            const mui::ModuleSnap* mod = nullptr;
+            for (size_t k = i; k < plugins_->model.plugins.size() && mod == nullptr; ++k) {
+                if (plugins_->model.plugins[k].id == e.plugin) mod = mui::find_module(plugins_->model.plugins[k], e.module);
+            }
             const bool by_default = mod == nullptr || mod->default_on;
             // On: out of disabled_modules, and into enabled_modules when it is off by default. Off: the reverse.
             if (e.on) {
