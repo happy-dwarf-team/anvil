@@ -2,6 +2,7 @@
 
 #include "cli/check.hpp"
 #include "cli/port_match.hpp"
+#include "core/files.hpp"
 #include "core/game_build.hpp"
 #include "core/instructions.hpp"
 #include "core/pe_image.hpp"
@@ -577,10 +578,9 @@ PortReport port_symbols(const PortOptions& options) {
             if (!verified.ok()) return cannot("the rewritten symbols.toml fails on " + build + ": " + verified.problems[0]);
         }
     }
-    std::ofstream out(options.out, std::ios::binary | std::ios::trunc);
-    out << *written;
-    out.close();
-    if (!out) return cannot("cannot write " + shown(options.out));
+    // --out may be the input: a failed write must leave it as it was.
+    std::string write_error;
+    if (!write_file_atomic(options.out, *written, write_error)) return cannot("cannot write " + shown(options.out));
     report.written = true;
     return report;
 }

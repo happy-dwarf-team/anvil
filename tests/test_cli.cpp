@@ -237,6 +237,21 @@ int main(int argc, char** argv) {
         CHECK(contains(e.c, "SYMVAL_E_P: an rva resolved when the game loads"));
         CHECK(contains(e.cpp, "// p: an rva resolved when the game loads"));
         CHECK(contains(e.cpp, "inline constexpr ::anvil::Data<T> p{0, \"p\"};"));
+
+        // Comments end where they began: a note ending in a backslash, an export name with */ or a newline.
+        const auto odd = parse_symbols_text(
+            symbol("n", "rva = 0x1010\nbytes = \"48 8B 05 F1 1F 00 00\"\nmemory = \"code\"\nnote =\"see \\\\\"\n"
+                        "values.p = { at = 3, rip_relative = 7, type = \"T\" }\n") +
+            "\n[symbol.x]\nexport = \"a*/b\\nc\"\nsignature = \"void ()\"\n");
+        CHECK(odd.file.has_value());
+        if (!odd.file) std::printf("  parse: %s\n", odd.error.c_str());
+        if (odd.file) {
+            const GeneratedHeaders o = generate_headers(*odd.file, "symbols.toml", true, true);
+            CHECK(o.error.empty());
+            CHECK(contains(o.cpp, "// see \\.\n"));
+            CHECK(!contains(o.c, "a*/b") && contains(o.c, "export a* /b c"));
+            CHECK(contains(o.cpp, "// function, export a*/b c\n"));
+        }
     });
 
     run("gen refuses names the headers cannot hold", [] {
@@ -255,6 +270,16 @@ int main(int argc, char** argv) {
         CHECK(contains(error(symbol("s", "rva = 0x10\nbytes = \"48\"\nmemory = \"code\"\nvalues.symbol_name = { at = 0, size = 1 }\n"),
                              false, true),
                        "would hide the symbol's 'symbol_name' member"));
+        // A symbol named as a member, and a value named as its symbol: neither compiles in C++.
+        for (const char* name : {"id", "value", "symbol_name"}) {
+            CHECK(contains(error(symbol(name, "rva = 0x10\nbytes = \"48\"\nmemory = \"code\"\n"), false, true),
+                           "would hide the symbol's '" + std::string(name) + "' member"));
+        }
+        CHECK(contains(error(symbol("count", "rva = 0x10\nbytes = \"48\"\nmemory = \"code\"\nvalues.count = { at = 0, size = 1 }\n"),
+                             false, true),
+                       "a value cannot have its symbol's name"));
+        CHECK(error(symbol("count", "rva = 0x10\nbytes = \"48\"\nmemory = \"code\"\nvalues.count = { at = 0, size = 1 }\n"),
+                    true, false) == "@0");  // C only
         CHECK(contains(error(symbol("s", "rva = 0x10\nbytes = \"48 8B 05 F1 1F 00 00\"\nmemory = \"code\"\n"
                                          "values.s = { at = 3, rip_relative = 7, type = \"T\" }\n"),
                              false, true),
@@ -557,6 +582,13 @@ int main(int argc, char** argv) {
         CHECK(error(keyword, true, false) == "@0");  // C only
         CHECK(contains(error(with_options("m", "{ name = \"a\" }, { name = \"get\" }"), false, true),
                        "would hide the setting's 'get' member"));
+        // A setting named as a member, and an option named as its setting.
+        for (const char* name : {"get", "restart", "minimum", "setting_name"}) {
+            CHECK(contains(error(with_options(name, "{ name = \"a\" }"), false, true),
+                           "would hide the setting's '" + std::string(name) + "' member"));
+        }
+        CHECK(contains(error(with_options("mode", "{ name = \"a\" }, { name = \"mode\" }"), false, true),
+                       "an option cannot have its setting's name"));
         CHECK(contains(error(with_options("m", "{ name = \"a\" }") + with_options("m_value", "{ name = \"a\" }"), false, true),
                        "the options of setting m: cfg::Types::m_value is already setting m_value"));
         CHECK(contains(error(with_options("m", "{ name = \"a\" }, { name = \"b\" }") + with_options("m_b", "{ name = \"a\" }"),
@@ -910,6 +942,13 @@ int main(int argc, char** argv) {
         CHECK(sdk.exit_code == 0 && contains(sdk.out, "symbols.gen.rs: written"));
         CHECK(contains(read(rust_only / "symbols.gen.rs"), "pub mod typed {") && !fs::exists(rust_only / "symbols.gen.h"));
         CHECK(run_anvil(anvil, "gen --lang go " + quoted(good / "symbols.toml") + " " + quoted(out)).exit_code == 2);
+        // --lang more than once: each adds its language.
+        const fs::path c_cpp = fx.root / "gen-both";
+        CHECK(run_anvil(anvil, "gen --lang c --lang cpp " + quoted(good / "symbols.toml") + " " + quoted(c_cpp)).exit_code == 0);
+        CHECK(fs::exists(c_cpp / "symbols.gen.h") && fs::exists(c_cpp / "symbols.gen.hpp") && !fs::exists(c_cpp / "symbols.gen.rs"));
+        const fs::path c_rust = fx.root / "gen-c-rust";
+        CHECK(run_anvil(anvil, "gen --lang rust --lang=c " + quoted(good / "symbols.toml") + " " + quoted(c_rust)).exit_code == 0);
+        CHECK(fs::exists(c_rust / "symbols.gen.h") && fs::exists(c_rust / "symbols.gen.rs") && !fs::exists(c_rust / "symbols.gen.hpp"));
         write(fx.root / "warn" / "symbols.toml",
               "build = \"b\"\n[symbol.f]\nexport = \"F\"\nsignature = \"Root ()\"\n");
         const Run warned =

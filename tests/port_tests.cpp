@@ -422,6 +422,34 @@ void port_tests() {
         CHECK(port_build_problem(options).empty());
     });
 
+    run("port reads a malformed new build only within its bytes", [&] {
+        const auto port_to = [&](const std::vector<uint8_t>& bytes, const char* name) {
+            const fs::path exe = fx.root / name / "eu4.exe";
+            write(exe, std::string(bytes.begin(), bytes.end()));
+            write(fx.symbols, placeable());
+            PortOptions options;
+            options.symbols = fx.symbols;
+            options.from = fx.old_exe;
+            options.to = exe;
+            options.build = "new";
+            options.from_build = "old";
+            return port_symbols(options);
+        };
+        // An exception directory whose end wraps around 32 bits.
+        TestImage wrapping;
+        IMAGE_NT_HEADERS64 nt{};
+        std::memcpy(&nt, &wrapping.mapped[0x80], sizeof(nt));
+        nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION] = {0x2000, 0xFFFFF000u};
+        wrapping.put_value(0x80, nt);
+        CHECK(port_to(wrapping.file(), "wrapping").exit_code != kExitOk);
+        // No code at all: .text is all int3.
+        TestImage empty;
+        std::fill(empty.mapped.begin() + 0x1000, empty.mapped.begin() + 0x1100, uint8_t{0xCC});
+        const PortReport none = port_to(empty.file(), "no-code");
+        CHECK(none.exit_code != kExitOk);
+        CHECK(none.ported.empty());
+    });
+
     run("port without --out writes nothing", [&] {
         const PortReport report = fx.port(placeable(), false);
         CHECK(report.exit_code == kExitOk && !report.written);
