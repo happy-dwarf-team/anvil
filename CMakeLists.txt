@@ -227,7 +227,7 @@ endif()
 # with Anvil in anvil/plugins/anvil-game/.
 # The plugins that come with Anvil: the overlay lists them apart (ADR 0013).
 set(ANVIL_STANDARD_PLUGINS anvil-game anvil-overlay anvil-log-throttle anvil-map anvil-script anvil-inspector
-    anvil-script-profiler)
+    anvil-script-profiler anvil-model-reload)
 set(CMAKE_COMPILE_WARNING_AS_ERROR ON)
 add_subdirectory(plugins/anvil-game)
 # anvil-overlay, the standard plugin of design §15 (notifications and the
@@ -248,6 +248,9 @@ add_subdirectory(plugins/anvil-inspector)
 # anvil-script-profiler, the standard plugin that times the game's triggers and
 # effects by their owner, hooked only while it measures (docs/script-profiler.md).
 add_subdirectory(plugins/anvil-script-profiler)
+# anvil-model-reload, the standard plugin that reloads a model modder's saved
+# meshes, textures, animations, entities and .gfx mesh entries (docs/model-reload.md).
+add_subdirectory(plugins/anvil-model-reload)
 unset(CMAKE_COMPILE_WARNING_AS_ERROR)
 # The standard plugins ship only inside the package, so their version is
 # Anvil's: release-please bumps their manifests with version.txt.
@@ -505,6 +508,14 @@ if(ANVIL_BUILD_TESTS)
     add_test(NAME anvil_script_profiler_tests COMMAND anvil_script_profiler_tests ${CMAKE_BINARY_DIR}/plugin
         -userdir=${CMAKE_BINARY_DIR}/script-profiler-user)
 
+    # anvil-model-reload's .gfx reader, file list, steps, run against a stand-in
+    # of the game, rows and texts (tests/model_reload_tests.cpp).
+    add_executable(anvil_model_reload_tests tests/model_reload_tests.cpp plugins/anvil-model-reload/src/files.cpp
+        plugins/anvil-model-reload/src/gfx_file.cpp plugins/anvil-model-reload/src/reload.cpp
+        plugins/anvil-model-reload/src/report.cpp plugins/anvil-model-reload/src/texts.cpp)
+    target_compile_definitions(anvil_model_reload_tests PRIVATE ANVIL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME anvil_model_reload_tests COMMAND anvil_model_reload_tests)
+
     # anvil-map's registry, colour buffers and text rules on their own
     # (tests/map_modes_tests.cpp).
     add_executable(anvil_map_tests tests/map_modes_tests.cpp plugins/anvil-map/src/modes.cpp
@@ -531,6 +542,7 @@ if(ANVIL_BUILD_TESTS)
     add_test(NAME anvil_script_symbols_lock COMMAND anvil check ${CMAKE_CURRENT_SOURCE_DIR}/plugins/anvil-script --complete-translations)
     add_test(NAME anvil_inspector_manifest COMMAND anvil check ${CMAKE_CURRENT_SOURCE_DIR}/plugins/anvil-inspector --complete-translations)
     add_test(NAME anvil_script_profiler_symbols_lock COMMAND anvil check ${CMAKE_CURRENT_SOURCE_DIR}/plugins/anvil-script-profiler --complete-translations)
+    add_test(NAME anvil_model_reload_symbols_lock COMMAND anvil check ${CMAKE_CURRENT_SOURCE_DIR}/plugins/anvil-model-reload --complete-translations)
     foreach(example hello-c hello-cpp hello-rust)
         add_test(NAME anvil_${example}_symbols_lock COMMAND anvil check ${CMAKE_CURRENT_SOURCE_DIR}/examples/${example})
     endforeach()
@@ -589,6 +601,9 @@ install(FILES $<TARGET_FILE:anvil_inspector> plugins/anvil-inspector/plugin.toml
 install(FILES $<TARGET_FILE:anvil_script_profiler> plugins/anvil-script-profiler/plugin.toml
     plugins/anvil-script-profiler/symbols.toml plugins/anvil-script-profiler/settings.toml
     DESTINATION anvil/plugins/anvil-script-profiler COMPONENT anvil)
+install(FILES $<TARGET_FILE:anvil_model_reload> plugins/anvil-model-reload/plugin.toml
+    plugins/anvil-model-reload/symbols.toml plugins/anvil-model-reload/settings.toml
+    DESTINATION anvil/plugins/anvil-model-reload COMPONENT anvil)
 # Their plugin translations (design §5.4).
 foreach(_standard ${ANVIL_STANDARD_PLUGINS})
     install(DIRECTORY plugins/${_standard}/translations DESTINATION anvil/plugins/${_standard} COMPONENT anvil)

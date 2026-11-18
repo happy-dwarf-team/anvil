@@ -1,0 +1,106 @@
+# What anvil-model-reload reads, writes and calls in EU4 1.37.5 (Steam and GOG
+# 1.37.5.2 and 1.37.5.0, win64). Source: EU4 engine lab,
+# docs/anvil-470-gfx-reload-2026-11-18.md (anvil#470). GOG's names come from
+# its eu4.pdb; Steam's addresses are GOG's functions found in Steam's eu4.exe.
+# The two GOG builds have these bytes at the same addresses.
+#
+# Field offsets the plugin uses (PDB layouts, the same in every build):
+# CPdx3DType::_Key +0x10 (CString), _vScale +0x30 (float), _vCullSqDistance
+# +0x34 (float, the square); CPdxMeshType::_Filename +0xA0 (CString), _Lookup
+# +0xC0 (CArray<SAnimationLookup>, begin/end/capacity), entries of 0x40 bytes
+# with _nHash +0x10 and _Name +0x20.
+builds = ["eu4-1.37.5-steam-win64", "eu4-1.37.5.2-gog-win64", "eu4-1.37.5.0-gog-win64"]
+
+# --- The gfx type table ------------------------------------------------------
+
+[symbol.graphics_types]
+memory = "code"
+values.graphics = { at = 3, rip_relative = 7, type = "uintptr_t" }
+values.bucket_count = { at = 15, size = 4 }
+values.buckets = { at = 26, size = 4 }
+note = "CMeshReloader::Reload(const CArray<CString>&): mov r13,[CGraphics*]; mov ecx,[r13+0x554]; ...; mov rdx,[r13+0x558]: the hash table of 3D types (CGraphics' CHashTable<CString,CPdx3DType>), buckets of nodes {type, next}"
+
+[symbol.graphics_types.build."eu4-1.37.5-steam-win64"]
+rva = 0x14D705F
+bytes = "4C 8B 2D 52 24 E7 00 8B DF 4C 8B FF 41 8B 8D 54 05 00 00 85 C9 74 18 49 8B 95 58 05 00 00"
+
+[symbol.graphics_types.build."eu4-1.37.5.2-gog-win64"]
+rva = 0x14D0BCF   # CMeshReloader::Reload+0x7F
+bytes = "4C 8B 2D 62 C7 E5 00 8B DF 4C 8B FF 41 8B 8D 54 05 00 00 85 C9 74 18 49 8B 95 58 05 00 00"
+
+[symbol.graphics_types.build."eu4-1.37.5.0-gog-win64"]
+rva = 0x14D0BCF
+bytes = "4C 8B 2D 62 C7 E5 00 8B DF 4C 8B FF 41 8B 8D 54 05 00 00 85 C9 74 18 49 8B 95 58 05 00 00"
+
+[symbol.mesh_type_id]
+bytes = "41 81 7E 08 80 01 00 00"
+memory = "code"
+values.type_id = { at = 4, size = 4 }
+note = "CMeshReloader::Reload: cmp dword [r14+8], 0x180: the token id of a pdxmesh type (CPersistent +8)"
+build."eu4-1.37.5-steam-win64" = { rva = 0x14D70BC }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x14D0C2C }   # CMeshReloader::Reload+0xDC
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x14D0C2C }
+
+[symbol.mesh_type_vtable]
+memory = "read"
+build."eu4-1.37.5-steam-win64" = { rva = 0x1D975D8, points_to = 0x1588950 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x1D7F920, points_to = 0x157F470 }   # CPdxMeshType::`vftable'
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x1D7F920, points_to = 0x157F470 }
+note = "CPdxMeshType: slot 0 the deleting destructor, slot 8 (+0x40) InitForDevice, which ReloadType calls"
+
+# --- Calls --------------------------------------------------------------------
+
+[symbol.mesh_type_reload]
+bytes = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 54 41 56 41 57 48 83 EC 40"
+memory = "code"
+signature = "void (void* type)"
+build."eu4-1.37.5-steam-win64" = { rva = 0x1588B40 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x157F660 }   # CPdxMeshType::ReloadType()
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x157F660 }
+note = "CPdxMeshType::ReloadType, 557 B: frees the skeleton, buffers and locators, looks each _Lookup animation up by _Name, calls InitForDevice (loads _Filename, scaled by _vScale) and the reload callbacks; what `reload mesh` calls"
+
+[symbol.string_assign]
+bytes = "48 89 5C 24 10 48 89 6C 24 18 56 57 41 57 48 83 EC 20 48 8B 69 18 49 8B F0 4C 8B FA 48 8B D9 4C 3B C5 77 21"
+memory = "code"
+signature = "void* (void* text, const char* chars, uint64_t count)"
+build."eu4-1.37.5-steam-win64" = { rva = 0x95110 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x95140 }   # std::basic_string<char>::assign(const char*, size_t)
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x95140 }
+note = "the game's std::string::assign(chars, count), with the game's allocator; InitForDevice calls it to set _Filename to its fallback mesh"
+
+# --- The console (as Tongs' game calls) ---------------------------------------
+
+[symbol.console_dispatch]
+bytes = "48 89 5C 24 10 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 D0 48 81 EC 30 01 00 00 49 8B F0 48 8B FA 4C 8B E1"
+memory = "code"
+signature = "void* (void* manager, void* result, void* tokens)"
+note = "the console dispatcher: (manager, result, tokens) -> result; runs one tokenised line"
+build."eu4-1.37.5-steam-win64" = { rva = 0x1721320 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x170AFA0 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x170AFA0 }
+
+[symbol.console_manager_get]
+memory = "code"
+values.manager = { at = 7, rip_relative = 11, type = "uintptr_t" }
+note = "the console manager's getter: the singleton pointer"
+
+[symbol.console_manager_get.build."eu4-1.37.5-steam-win64"]
+rva = 0x6E74C0
+bytes = "48 83 EC 28 48 8B 05 8D 06 C7 01 48 85 C0 75 3D"
+
+[symbol.console_manager_get.build."eu4-1.37.5.2-gog-win64"]
+rva = 0x6E6F50
+bytes = "48 83 EC 28 48 8B 05 75 4A C5 01 48 85 C0 75 3D"
+
+[symbol.console_manager_get.build."eu4-1.37.5.0-gog-win64"]
+rva = 0x6E6F50
+bytes = "48 83 EC 28 48 8B 05 75 4A C5 01 48 85 C0 75 3D"
+
+[symbol.string_free]
+bytes = "40 53 48 83 EC 20 48 8B 51 18 48 8B D9 48 83 FA 10 72 2C 48 8B 09"
+memory = "code"
+signature = "void (void* text)"
+note = "the game's std::string destructor, to free the console's answer"
+build."eu4-1.37.5-steam-win64" = { rva = 0x95660 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x95690 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x95690 }

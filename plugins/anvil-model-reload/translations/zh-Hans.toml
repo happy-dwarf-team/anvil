@@ -1,0 +1,8 @@
+# anvil-model-reload's texts in Simplified Chinese (design §5.4), looked up by their English
+# words in plugin.toml and settings.toml. Machine-drafted by the agent; a native speaker has not checked it yet.
+status = "draft"
+
+[text]
+"Standard plugin for modders: a window of the overlay that reloads the meshes, model textures, animations, entities and .gfx mesh entries of your mod that you saved, while the game runs. Not in ironman or multiplayer, and off until you turn it on." = "面向模组作者的标准插件：叠加层的一个窗口，在游戏运行时重新载入你保存的模组网格、模型纹理、动画、实体和 .gfx 网格条目。不能用于铁人或多人游戏，在你开启之前处于关闭状态。"
+"Model reload window" = "模型重载窗口"
+"For model modders: a window of the overlay that lists the files of your enabled mods saved since the last reload and reloads them in the running game. On: the window opens, at every start too; once closed, it is in the Status tab of the Anvil panel. Off: the plugin does nothing." = "面向模型模组作者：叠加层的一个窗口，列出自上次重载以来你已启用模组中保存过的文件，并在运行中的游戏里重新载入它们。开启：窗口会打开，每次启动时也会打开；关闭窗口后，它在 Anvil 面板的状态标签页中。关闭：插件什么也不做。"

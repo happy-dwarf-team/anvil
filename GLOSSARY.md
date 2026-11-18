@@ -174,6 +174,16 @@ _Avoid_: source, parent object, definition
 The game time between the start and the end of one measurement of `anvil-script-profiler`: its hooks exist only then. A load, leaving to the menu or quitting interrupts it.
 _Avoid_: session (a game session is another thing), recording, run
 
+### Model reload
+
+**Mesh type**:
+What one `pdxmesh = { ... }` entry of an `interface/**/*.gfx` file becomes in the game: a name, a `.mesh` file, a scale, a cull distance and the animations by id. Entities and units draw mesh types by name. `anvil-model-reload` reloads a mesh type in place; it cannot add one.
+_Avoid_: model (a model is what the player sees), mesh (the file), pdxmesh
+
+**Entity**:
+An `entity = { ... }` of a `.asset` file: which mesh type a unit or a map object draws, with its states and attachments. `reload assets` reads the entities again, but a unit keeps the entity it was created with until a save load.
+_Avoid_: asset (the file), unit graphics
+
 ### When the game crashes
 
 **Crash report**:
