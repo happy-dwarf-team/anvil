@@ -1,11 +1,11 @@
 //! Hello in Rust: a function hook and a mid hook on declared symbols and an
 //! event subscription, with the safe `anvil` crate (`anvil-sdk`) and the
-//! symbols that `anvil gen --lang rust` writes from `symbols.toml`.
+//! symbols that `anvil gen --lang rust-sdk` writes from `symbols.toml`.
 //!
-//! Host calls are safe but one: `hook` takes the symbol as a plain id, so the
-//! call says (in its `unsafe` block) that the hook's type is that symbol's.
-//! What else stays `unsafe` is what reaches the game's code: the detour is a
-//! plain function the game calls, and calling the rest of its chain (`next`)
+//! Host calls are safe: the hook takes `sym::typed::SPEED_OBJECT`, the symbol
+//! with its declared type, so a hook or detour of another type does not
+//! compile. What stays `unsafe` is what reaches the game's code: the detour is
+//! a plain function the game calls, and calling the rest of its chain (`next`)
 //! is an `unsafe` call of the game's function.
 #![deny(unsafe_op_in_unsafe_fn)]
 
@@ -15,7 +15,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use anvil::{Change, FunctionHook, Host, Plugin};
 
-/// Symbol ids and function types from `symbols.toml` (`anvil gen --lang rust`, see build.rs).
+/// Symbol ids, function types and typed function symbols from `symbols.toml`
+/// (`anvil gen --lang rust-sdk`, see build.rs).
 #[allow(dead_code)]
 mod sym {
     include!(concat!(env!("OUT_DIR"), "/symbols.gen.rs"));
@@ -59,9 +60,7 @@ impl Plugin for Hello {
         ));
         // Staged now, enabled with the rest when load returns Ok; an error
         // returned here rolls back everything staged so far.
-        // SAFETY: SpeedObjectFn is the type anvil gen wrote for speed_object's
-        // declared signature, and SPEED_OBJECT and the detour have it.
-        unsafe { host.hook(&SPEED_OBJECT, sym::SPEED_OBJECT, on_speed_object) }?;
+        host.hook_symbol(&SPEED_OBJECT, sym::typed::SPEED_OBJECT, on_speed_object)?;
         let log = *host;
         let idle_exit = host.mid_hook(sym::IDLE_EXIT, move |cpu| {
             log.info(format_args!("returning to the menu (rcx={:#x})", cpu.rcx));
@@ -92,5 +91,6 @@ mod tests {
     fn symbol_ids_follow_symbols_toml() {
         assert_eq!(sym::SPEED_OBJECT, 0);
         assert_eq!(sym::IDLE_EXIT, 1);
+        assert_eq!(sym::typed::SPEED_OBJECT.id(), sym::SPEED_OBJECT);
     }
 }

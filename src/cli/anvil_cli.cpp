@@ -33,11 +33,12 @@ void print_usage(std::FILE* out) {
                "Tools for Anvil plugin authors.\n"
                "\n"
                "Commands:\n"
-               "  gen [--lang c|cpp|rust] [--settings <settings.toml>] <symbols.toml|settings.toml>... <out-dir>\n"
+               "  gen [--lang c|cpp|rust|rust-sdk] [--settings <settings.toml>] <symbols.toml|settings.toml>... <out-dir>\n"
                "      write symbols.gen.h (C) and symbols.gen.hpp (C++) from symbols.toml, and\n"
                "      settings.gen.h and settings.gen.hpp from settings.toml (--settings, a file named\n"
                "      *settings.toml or one with [setting.<name>] tables); both languages without --lang.\n"
-               "      --lang rust writes symbols.gen.rs and settings.gen.rs only.\n"
+               "      --lang rust writes symbols.gen.rs and settings.gen.rs only; --lang rust-sdk the same\n"
+               "      with sym::typed, the function symbols with their types for Host::hook_symbol (anvil-sdk).\n"
                "      A file whose content would not change is not rewritten.\n"
                "  check <plugin-dir> [--exe <eu4.exe>] [--format text|json|github] [--complete-translations]\n"
                "      check plugin.toml, symbols.toml, settings.toml and translations/<code>.toml against\n"
@@ -141,7 +142,7 @@ bool is_settings_file(const std::filesystem::path& file) {
 }
 
 int run_gen(const std::vector<std::wstring>& args) {
-    bool c = true, cpp = true, rust = false;
+    bool c = true, cpp = true, rust = false, rust_sdk = false;
     std::vector<std::wstring> positional;
     std::vector<std::wstring> settings_files;  // --settings: whatever the name or content
     for (size_t i = 2; i < args.size(); ++i) {
@@ -150,7 +151,8 @@ int run_gen(const std::vector<std::wstring>& args) {
             if (lang == L"c") cpp = false;
             else if (lang == L"cpp") c = false;
             else if (lang == L"rust") c = cpp = false, rust = true;
-            else return usage_error("gen: --lang must be c, cpp or rust");
+            else if (lang == L"rust-sdk") c = cpp = false, rust = rust_sdk = true;
+            else return usage_error("gen: --lang must be c, cpp, rust or rust-sdk");
         } else if (is_option(args[i], L"--settings")) {
             const auto file = option_value(args, i, L"--settings");
             if (!file || file->empty()) return usage_error("gen: --settings needs the path of settings.toml");
@@ -199,7 +201,7 @@ int run_gen(const std::vector<std::wstring>& args) {
         } else {
             const anvil::SymbolFileResult parsed = anvil::load_symbols(source);
             if (!parsed.file) return report(parsed.error, parsed.line);
-            out.headers = generate_headers(*parsed.file, name, c, cpp, rust);
+            out.headers = generate_headers(*parsed.file, name, c, cpp, rust, rust_sdk);
         }
         if (!out.headers.error.empty()) return report(out.headers.error, out.headers.line);
         for (const auto& warning : out.headers.warnings) {

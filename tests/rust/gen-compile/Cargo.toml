@@ -13,3 +13,5 @@ doctest = false
 
 [dependencies]
 anvil-sys = { path = "../../../sdk/rust/anvil-sys" }
+# For the typed symbols of --lang rust-sdk (anvil::FnSymbol).
+anvil-sdk = { path = "../../../sdk/rust/anvil-sdk" }

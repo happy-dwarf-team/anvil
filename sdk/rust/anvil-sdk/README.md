@@ -53,7 +53,9 @@ What it gives over the C ABI:
   `FunctionHook<sym::NameFn>` lives in a `static`, where Anvil writes the rest
   of the chain.
 - Typed symbols and settings from `anvil gen --lang rust` (`symbols.gen.rs`,
-  `settings.gen.rs`, written by a build script).
+  `settings.gen.rs`, written by a build script). `--lang rust-sdk` adds
+  `sym::typed`, each function symbol with its type, for the safe
+  `Host::hook_symbol(&HOOK, sym::typed::NAME, detour)`.
 - Typed wrappers for the services Anvil ships: `anvil::game`
   (`anvil-game.game` and its events), `anvil::world` (`anvil-game.world`),
   `anvil::commands` (`anvil-game.commands`), `anvil::camera`
@@ -69,7 +71,8 @@ Host and service calls are safe. What reaches the game's memory by address, or
 puts raw bytes and pointers into it, stays an `unsafe fn` with its contract:
 calling a hook's `next` (the generated function types are `unsafe extern "C"
 fn`), `Host::hook` (the symbol id is a plain `u32`: the caller ties it to its
-`sym::<Name>Fn`), `Host::function`, `Host::data`, writing the mid-hook context
+`sym::<Name>Fn`; `Host::hook_symbol` with a typed symbol is the safe form),
+`Host::function`, `Host::data`, writing the mid-hook context
 (`Cpu::regs_mut`), byte patches, pointer swaps, call redirects, import
 replacements, changes at raw addresses and `Host::publish_raw`. Service tables
 are `anvil::Table`s, read only as far as the provider's `size` says.

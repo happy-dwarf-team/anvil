@@ -8,6 +8,12 @@ mod sym {
     include!(concat!(env!("OUT_DIR"), "/symbols.gen.rs"));
 }
 
+/// The same symbols.toml with `--lang rust-sdk`: `sym::typed` on top.
+#[allow(dead_code)]
+mod sym_sdk {
+    include!(concat!(env!("OUT_DIR"), "/sdk/symbols.gen.rs"));
+}
+
 #[allow(dead_code)]
 mod cfg {
     include!(concat!(env!("OUT_DIR"), "/settings.gen.rs"));
@@ -127,3 +133,21 @@ const _: () = {
     assert!(cfg::KEY_ALT == 0x400);
     assert!(cfg::KEY_VK_MASK == 0xFF);
 };
+
+// --lang rust-sdk: a typed symbol of each function whose Rust type is exactly
+// its signature, with the type of the same file's alias. Scalars and
+// fixed_width (13 parameters), unknown_value and callback (a guessed type) and
+// variadic have none: an FnSymbol of their types would not compile (no FnPtr)
+// or would not be sound.
+const _: anvil::FnSymbol<sym_sdk::PointersFn> = sym_sdk::typed::POINTERS;
+const _: anvil::FnSymbol<sym_sdk::NoArgsFn> = sym_sdk::typed::NO_ARGS;
+const _: anvil::FnSymbol<sym_sdk::VoidArgsFn> = sym_sdk::typed::VOID_ARGS;
+const _: anvil::FnSymbol<sym_sdk::UnnamedFn> = sym_sdk::typed::UNNAMED;
+const _: anvil::FnSymbol<sym_sdk::KeywordsFn> = sym_sdk::typed::KEYWORDS;
+const _: () = {
+    assert!(sym_sdk::typed::POINTERS.id() == sym::POINTERS);
+    assert!(sym_sdk::typed::KEYWORDS.id() == sym::KEYWORDS);
+};
+// The rest of the file is the --lang rust output, alias for alias.
+const _: sym_sdk::PointersFn = pointers;
+const _: () = assert!(sym_sdk::ROOT_AND_DATE_ROOT == sym::ROOT_AND_DATE_ROOT);

@@ -611,8 +611,9 @@ std::string camel_case(std::string_view name) {
     return out;
 }
 
-// `unsafe extern "C" fn(a: T, ...) -> R` for a symbol's signature.
-std::string rust_fn_type(const Symbol& s, std::vector<GenWarning>& warnings) {
+// `unsafe extern "C" fn(a: T, ...) -> R` for a symbol's signature; `count`
+// gets the number of parameters and `variadic` whether it has `...`.
+std::string rust_fn_type(const Symbol& s, std::vector<GenWarning>& warnings, size_t& count, bool& variadic) {
     const Signature sig = split_signature(s.signature);
     std::vector<std::string> parameters;
     int depth = 0;
@@ -630,7 +631,8 @@ std::string rust_fn_type(const Symbol& s, std::vector<GenWarning>& warnings) {
     if (!trim(current).empty() || !parameters.empty()) parameters.push_back(current);
 
     std::string list;
-    bool variadic = false;
+    count = 0;
+    variadic = false;
     const std::string symbol = "symbol " + s.name;
     if (!(parameters.size() == 1 && trim(parameters[0]) == "void")) {
         for (size_t i = 0; i < parameters.size(); ++i) {
@@ -644,6 +646,7 @@ std::string rust_fn_type(const Symbol& s, std::vector<GenWarning>& warnings) {
             if (name.empty()) name = "arg" + std::to_string(i);
             else if (kRustKeywords.contains(name)) name += "_";
             if (!list.empty()) list += ", ";
+            ++count;
             list += name + ": " + rust_type_of(t, symbol + ": parameter " + std::to_string(i + 1), written, s.line, warnings);
         }
     }
@@ -653,7 +656,11 @@ std::string rust_fn_type(const Symbol& s, std::vector<GenWarning>& warnings) {
     return "unsafe extern \"C\" fn(" + list + ")" + (result.empty() ? "" : " -> " + result);
 }
 
-std::string generate_rust(const SymbolFile& file, const std::string& source, std::vector<GenWarning>& warnings) {
+// The most parameters anvil::FnPtr has an implementation for (anvil-sdk's fnptr.rs).
+constexpr size_t kSdkMaxParameters = 12;
+
+std::string generate_rust(const SymbolFile& file, const std::string& source, std::vector<GenWarning>& warnings,
+                          bool sdk) {
     // Ids, function types and values share the module's namespace.
     std::map<std::string, std::string> names;
     auto claim = [&](const std::string& name, const std::string& owner, uint32_t line) {
@@ -671,7 +678,9 @@ std::string generate_rust(const SymbolFile& file, const std::string& source, std
     }
 
     std::string out = "// " + header_comment(file, source) + "\n";
-    out += "// Include it in a module: #[allow(dead_code)] mod sym { include!(\"symbols.gen.rs\"); }\n\n";
+    out += "// Include it in a module: #[allow(dead_code)] mod sym { include!(\"symbols.gen.rs\"); }\n";
+    if (sdk) out += "// Written with --lang rust-sdk: sym::typed needs the anvil-sdk crate (anvil::FnSymbol).\n";
+    out += "\n";
     out += "#[allow(unused_imports)]\nuse ::core::ffi::{\n    c_char, c_int, c_long, c_longlong, c_schar, c_short, c_uchar, c_uint, c_ulong, c_ulonglong,\n    c_ushort, c_void,\n};\n\n";
     // Plain u32 (the type anvil_sys::AnvilSymbol names), so the file needs no
     // crate: a plugin on anvil-sdk alone includes it as one on anvil-sys does.
@@ -682,15 +691,39 @@ std::string generate_rust(const SymbolFile& file, const std::string& source, std
     }
 
     std::string types;
+    std::string typed;  // --lang rust-sdk: sym::typed
     for (const auto& s : file.symbols) {
         if (s.kind != SymbolKind::Function) continue;
         const size_t before = warnings.size();
-        const std::string fn = rust_fn_type(s, warnings);
+        size_t count = 0;
+        bool variadic = false;
+        const std::string fn = rust_fn_type(s, warnings, count, variadic);
+        const std::string type = camel_case(s.name) + "Fn";
         types += "/// `" + comment_text(s.signature, false) + "`\n";
         for (size_t w = before; w < warnings.size(); ++w) types += "// warning: " + comment_text(warnings[w].message, false) + "\n";
-        types += "pub type " + camel_case(s.name) + "Fn = " + fn + ";\n";
+        types += "pub type " + type + " = " + fn + ";\n";
+        if (!sdk) continue;
+        // Only a type that is exactly the signature: a guessed parameter would
+        // make a safe hook call the game with the wrong arguments.
+        const std::string none = warnings.size() != before ? "a type in it is a guess (the warning at " + type + ")"
+                                 : variadic                ? std::string("a variadic function cannot be a Rust detour")
+                                 : count > kSdkMaxParameters ? std::string("more parameters than anvil::FnPtr covers (12)")
+                                                             : std::string();
+        if (!none.empty()) {
+            typed += "    // " + upper(s.name) + ": none, " + none + "; hook it with the unsafe host.hook.\n";
+            continue;
+        }
+        typed += "    /// `super::" + upper(s.name) + "` as a [`super::" + type + "`].\n";
+        typed += "    // SAFETY: anvil gen wrote " + type + " from this symbol's signature in symbols.toml.\n";
+        typed += "    pub const " + upper(s.name) + ": ::anvil::FnSymbol<super::" + type + "> =\n        unsafe { ::anvil::FnSymbol::new(super::" +
+                 upper(s.name) + ") };\n";
     }
     if (!types.empty()) out += "\n// Function types (signature).\n" + types;
+    if (sdk) {
+        out += "\n// Function symbols with their types, for host.hook_symbol(&HOOK, sym::typed::NAME, detour)\n"
+               "// with a static HOOK: FunctionHook<sym::NameFn>. A detour of another type does not compile.\n";
+        out += "pub mod typed {\n" + (typed.empty() ? std::string("    // symbols.toml declares no function symbol.\n") : typed) + "}\n";
+    }
 
     std::string values;
     for (const auto& s : file.symbols) {
@@ -772,12 +805,13 @@ GeneratedHeaders generate_settings_headers(const SettingsFile& file, const std::
     return out;
 }
 
-GeneratedHeaders generate_headers(const SymbolFile& file, const std::string& source, bool c, bool cpp, bool rust) {
+GeneratedHeaders generate_headers(const SymbolFile& file, const std::string& source, bool c, bool cpp, bool rust,
+                                  bool rust_sdk) {
     GeneratedHeaders out;
     try {
         if (c) out.c = generate_c(file, source);
         if (cpp) out.cpp = generate_cpp(file, source);
-        if (rust) out.rust = generate_rust(file, source, out.warnings);
+        if (rust || rust_sdk) out.rust = generate_rust(file, source, out.warnings, rust_sdk);
     } catch (const Fail& f) {
         out = {};
         out.error = "symbols.toml: " + f.message;

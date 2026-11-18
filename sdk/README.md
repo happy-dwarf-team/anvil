@@ -81,7 +81,8 @@ wraps the services Anvil ships (`anvil::game`, `anvil::world`, `anvil::panel`,
 `anvil::benchmark`). The raw API, the same version as the release, is
 [`anvil-sys`](https://crates.io/crates/anvil-sys). `bin/anvil.exe gen --lang rust
 symbols.toml <out-dir>` writes `symbols.gen.rs`: symbol ids, a function type per
-`signature` and the values. `examples/hello-rust` (hooks on declared symbols, with
+`signature` and the values; `--lang rust-sdk` adds `sym::typed` for anvil-sdk's
+safe `Host::hook_symbol`. `examples/hello-rust` (hooks on declared symbols, with
 a `build.rs`) and `examples/panel-rust` (the world service and an overlay panel,
 no game addresses) are in the repository and in the release package, under
 `anvil/docs/examples`; link the C runtime statically

@@ -37,8 +37,14 @@ struct GeneratedHeaders {
 // `pub const <SYMBOL>_<VALUE>: u64`. Pointers, integers, floating point and
 // bool translate; any other type passed by value becomes `*mut c_void` with a
 // warning (a pointer to a type gen does not know is an opaque pointer, quietly).
+// `rust_sdk` (--lang rust-sdk) writes the same symbols.gen.rs with a module
+// `typed` that needs the anvil-sdk crate: per function symbol a
+// `pub const <NAME>: anvil::FnSymbol<super::<Name>Fn>` for the safe
+// Host::hook_symbol, left out (with a comment why) for a variadic signature,
+// more than 12 parameters or a type gen had to guess.
 // `source` names symbols.toml in the header comment.
-GeneratedHeaders generate_headers(const SymbolFile& file, const std::string& source, bool c, bool cpp, bool rust = false);
+GeneratedHeaders generate_headers(const SymbolFile& file, const std::string& source, bool c, bool cpp, bool rust = false,
+                                  bool rust_sdk = false);
 
 // The headers for one settings.toml (design §16): `c` is settings.gen.h,
 // `cpp` settings.gen.hpp, `line` a line of settings.toml.

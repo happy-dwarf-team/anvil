@@ -324,6 +324,47 @@ int main(int argc, char** argv) {
         CHECK(c.rust.empty() && c.warnings.empty());
     });
 
+    run("gen rust-sdk: the --lang rust file with typed function symbols for Host::hook_symbol", [] {
+        const auto file = parse_symbols_text(kGoodSymbols);
+        const GeneratedHeaders plain = generate_headers(*file.file, "symbols.toml", false, false, true);
+        const GeneratedHeaders h = generate_headers(*file.file, "symbols.toml", false, false, false, true);
+        CHECK(h.error.empty() && h.c.empty() && h.cpp.empty() && h.warnings.empty());
+        CHECK(!contains(plain.rust, "anvil::FnSymbol") && !contains(plain.rust, "pub mod typed"));
+        // Everything of --lang rust, in the same words.
+        CHECK(contains(h.rust, "pub const SPEED_OBJECT: u32 = 0;"));
+        CHECK(contains(h.rust, "pub type SpeedObjectFn = unsafe extern \"C\" fn(session: *mut c_void) -> *mut c_void;"));
+        CHECK(contains(h.rust, "pub const ROOT_AND_DATE_ROOT: u64 = 0x3008;"));
+        CHECK(contains(h.rust, "sym::typed needs the anvil-sdk crate"));
+        CHECK(contains(h.rust, "pub mod typed {\n"));
+        CHECK(contains(h.rust, "    pub const SPEED_OBJECT: ::anvil::FnSymbol<super::SpeedObjectFn> =\n"
+                               "        unsafe { ::anvil::FnSymbol::new(super::SPEED_OBJECT) };\n"));
+        CHECK(contains(h.rust, "    pub const EXPORTED: ::anvil::FnSymbol<super::ExportedFn> ="));
+        CHECK(!contains(h.rust, "FnSymbol<super::TickSlotFn>") && !contains(h.rust, "pub const TICK_SLOT: ::anvil"));
+
+        // None where the Rust type is not exactly the signature.
+        auto typed_of = [](const std::string& signature) {
+            const auto parsed =
+                parse_symbols_text("build = \"b\"\n[symbol.f]\nexport = \"F\"\nsignature = \"" + signature + "\"\n");
+            if (!parsed.file) return "parse: " + parsed.error;
+            const GeneratedHeaders g = generate_headers(*parsed.file, "symbols.toml", false, false, false, true);
+            const auto at = g.rust.find("pub mod typed {\n");
+            if (at == std::string::npos) return "none: " + g.error;
+            return g.rust.substr(at + 16, g.rust.find("\n}", at) - at - 16);
+        };
+        CHECK(contains(typed_of("int (int a)"), "pub const F: ::anvil::FnSymbol<super::FFn> ="));
+        CHECK(typed_of("int (const char* format, ...)") ==
+              "    // F: none, a variadic function cannot be a Rust detour; hook it with the unsafe host.hook.");
+        CHECK(typed_of("Root (int a)") ==
+              "    // F: none, a type in it is a guess (the warning at FFn); hook it with the unsafe host.hook.");
+        CHECK(contains(typed_of("void (int a, int b, int c, int d, int e, int f, int g, int h, int i, int j, int k, int l)"),
+                       "pub const F: ::anvil::FnSymbol<super::FFn>"));
+        CHECK(contains(typed_of("void (int a, int b, int c, int d, int e, int f, int g, int h, int i, int j, int k, int l, int m)"),
+                       "F: none, more parameters than anvil::FnPtr covers (12)"));
+        const auto data = parse_symbols_text("build = \"b\"\n[symbol.d]\nrva = 0x10\nbytes = \"48\"\nmemory = \"code\"\n");
+        CHECK(data.file && contains(generate_headers(*data.file, "symbols.toml", false, false, false, true).rust,
+                                    "pub mod typed {\n    // symbols.toml declares no function symbol.\n}\n"));
+    });
+
     run("check without symbols, and the files it needs", [&] {
         const auto report = fx.check(fx.plugin("plain", ""), false);
         CHECK(report.exit_code == kExitOk && report.problems.empty() && report.plugin == "plain");
@@ -864,6 +905,10 @@ int main(int argc, char** argv) {
         CHECK(!fs::exists(out / "symbols.gen.rs"));  // without --lang: C and C++ only
         CHECK(contains(run_anvil(anvil, "gen --lang rust " + quoted(good / "symbols.toml") + " " + quoted(rust_only)).out,
                        "symbols.gen.rs: unchanged"));
+        // --lang rust-sdk: the same file name, now with sym::typed.
+        const Run sdk = run_anvil(anvil, "gen --lang rust-sdk " + quoted(good / "symbols.toml") + " " + quoted(rust_only));
+        CHECK(sdk.exit_code == 0 && contains(sdk.out, "symbols.gen.rs: written"));
+        CHECK(contains(read(rust_only / "symbols.gen.rs"), "pub mod typed {") && !fs::exists(rust_only / "symbols.gen.h"));
         CHECK(run_anvil(anvil, "gen --lang go " + quoted(good / "symbols.toml") + " " + quoted(out)).exit_code == 2);
         write(fx.root / "warn" / "symbols.toml",
               "build = \"b\"\n[symbol.f]\nexport = \"F\"\nsignature = \"Root ()\"\n");
