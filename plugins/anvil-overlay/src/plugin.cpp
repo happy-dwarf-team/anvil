@@ -207,6 +207,14 @@ bool is_button_down(UINT m) {
            m == WM_MBUTTONDOWN || m == WM_MBUTTONDBLCLK || m == WM_XBUTTONDOWN || m == WM_XBUTTONDBLCLK;
 }
 
+// The buttons (bit 1 << button_of) whose press ImGui got and whose release it
+// has not. ImGui's Win32 backend takes the mouse capture on a press and gives it
+// back on the release. A release that never reached it (the overlay hid in
+// between: the panel's key, a loading screen) would leave the capture with the
+// game window; ImGui's own state of the button is cleared when the overlay
+// shows again (ui_frame). The window's thread only.
+unsigned g_imgui_buttons = 0;
+
 // The keys and buttons held down, from every message the window gets.
 void track_input(UINT message, WPARAM wparam) {
     switch (message) {
@@ -310,11 +318,25 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
         if (paste && s.want_text.load()) overlay::ui_capture_clipboard();
     }
     if (route_input(window, message, wparam, lparam)) return 0;
-    if (s.visible.load(std::memory_order_acquire)) {
-        if (is_mouse_message(message) || is_key_message(message) || message == WM_SETFOCUS ||
-            message == WM_KILLFOCUS || message == WM_INPUTLANGCHANGE) {
+    const bool visible = s.visible.load(std::memory_order_acquire);
+    const unsigned button = 1u << button_of(message, wparam);
+    const bool release = is_button_up(message) && (g_imgui_buttons & button) != 0;
+    if (release) g_imgui_buttons &= ~button;
+    // The release of a press ImGui saw, and the WM_MOUSELEAVE its backend asked
+    // for (TrackMouseEvent; outside WM_MOUSEFIRST..WM_MOUSELAST), reach the
+    // backend also when the overlay hid in between; below when it is visible.
+    // Without the leave ImGui kept the last cursor position, and a hover, while
+    // the cursor was outside the window.
+    if (!visible && (release || message == WM_MOUSELEAVE)) {
+        std::lock_guard lock(s.mutex);
+        overlay::ui_message(window, message, wparam, lparam);
+    }
+    if (visible) {
+        if (is_mouse_message(message) || message == WM_MOUSELEAVE || is_key_message(message) ||
+            message == WM_SETFOCUS || message == WM_KILLFOCUS || message == WM_INPUTLANGCHANGE) {
             std::lock_guard lock(s.mutex);
             overlay::ui_message(window, message, wparam, lparam);
+            if (is_button_down(message)) g_imgui_buttons |= button;
         }
         const bool mouse = s.want_mouse.load(std::memory_order_acquire);
         const bool keyboard = s.want_keyboard.load(std::memory_order_acquire);

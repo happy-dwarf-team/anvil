@@ -346,6 +346,43 @@ int main(int argc, char** argv) {
         CHECK(frame(device, top_right) == 0);
     });
 
+    run("overlay: a press on the panel released after the panel closed gives the mouse capture back", [&] {
+        AnvilControlResult result{};
+        CHECK(control.service()->setting_set_text("anvil-overlay", 0, "F11", &result) == ANVIL_OK && result.applied == 1);
+        CHECK(release_modifiers());
+        SendMessageW(window, WM_KEYDOWN, VK_F11, 1);
+        for (int i = 0; i < 3; ++i) frame(device, middle);
+        RECT client{};
+        GetClientRect(window, &client);
+        const LPARAM on_panel = point(client.right / 2, client.bottom / 2);
+        SendMessageW(window, WM_MOUSEMOVE, 0, on_panel);
+        frame(device, middle);
+        SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, on_panel);
+        frame(device, middle);
+        CHECK(GetCapture() == window);  // ImGui's Win32 backend took it for the press
+        // The panel's key closes it while the button is held; the release comes after.
+        SendMessageW(window, WM_KEYDOWN, VK_F11, 1);
+        frame(device, middle);
+        CHECK(frame(device, middle) == 0);
+        SendMessageW(window, WM_LBUTTONUP, 0, on_panel);
+        frame(device, middle);
+        CHECK(GetCapture() != window);
+        if (GetCapture() == window) ReleaseCapture();
+        // Shown again, the panel stays where it was when the mouse moves: ImGui
+        // has the button released, not a drag of the panel.
+        SendMessageW(window, WM_KEYDOWN, VK_F11, 1);
+        for (int i = 0; i < 3; ++i) frame(device, middle);
+        SendMessageW(window, WM_MOUSEMOVE, 0, point(20, 20));
+        for (int i = 0; i < 3; ++i) frame(device, middle);
+        const size_t again = frame(device, middle);
+        CHECK(again > 1000);
+        if (again <= 1000) std::printf("    drawn %zu in the middle\n", again);
+        SendMessageW(window, WM_KEYDOWN, VK_F11, 1);
+        frame(device, middle);
+        CHECK(frame(device, middle) == 0);
+        CHECK(control.service()->setting_reset("anvil-overlay", 0, &result) == ANVIL_OK);
+    });
+
     run("overlay: the badge in the main menu; a click on it opens the panel, one beside it reaches the game", [&] {
         const RECT badge{0, static_cast<LONG>(kHeight) / 2 - 30, 160, static_cast<LONG>(kHeight) / 2 + 30};
         CHECK(frame(device, badge) == 0);  // not in the menu yet

@@ -1498,9 +1498,11 @@ void ui_frame(IDirect3DDevice9* device) {
     }
     if (!ensure_imgui(device) || !targets_back_buffer(device)) return;
     if (!u.was_visible) {
-        // Input from while nothing was shown is stale.
+        // Input from while nothing was shown is stale, and so is a button held
+        // when the overlay hid: its release went to the queue cleared here.
         ImGui::GetIO().ClearEventsQueue();
         ImGui::GetIO().ClearInputKeys();
+        ImGui::GetIO().ClearInputMouse();
         u.was_visible = true;
     }
     merge_system_fonts();
