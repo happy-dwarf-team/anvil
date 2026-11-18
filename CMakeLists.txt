@@ -485,6 +485,13 @@ if(ANVIL_BUILD_TESTS)
     add_dependencies(anvil_log_throttle_tests anvil_log_throttle)
     add_test(NAME anvil_log_throttle_tests COMMAND anvil_log_throttle_tests ${CMAKE_BINARY_DIR}/plugin)
 
+    # anvil_net's cancel_all against a silent local listener on 127.0.0.1:443;
+    # no request leaves the machine (tests/net_tests.cpp).
+    add_executable(anvil_net_tests tests/net_tests.cpp)
+    target_link_libraries(anvil_net_tests PRIVATE anvil_net ws2_32)
+    target_compile_definitions(anvil_net_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    add_test(NAME anvil_net_tests COMMAND anvil_net_tests)
+
     # anvil-inspector's reads through a stand-in of anvil-game.world, its rows
     # and its texts (tests/inspector_tests.cpp).
     add_executable(anvil_inspector_tests tests/inspector_tests.cpp plugins/anvil-inspector/src/snapshot.cpp

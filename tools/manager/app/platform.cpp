@@ -305,31 +305,32 @@ SendOutcome post_report(std::string body) {
                                  WINHTTP_NO_PROXY_BYPASS, 0)};
     Internet connection{session.handle != nullptr ? WinHttpConnect(session.handle, kReceiverHost, INTERNET_DEFAULT_HTTPS_PORT, 0)
                                                   : nullptr};
-    Internet request{connection.handle != nullptr
-                         ? WinHttpOpenRequest(connection.handle, L"POST", kReceiverPath, nullptr, WINHTTP_NO_REFERER,
-                                              WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)
-                         : nullptr};
+    const net::Request request{connection.handle != nullptr
+                                   ? WinHttpOpenRequest(connection.handle, L"POST", kReceiverPath, nullptr,
+                                                        WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)
+                                   : nullptr};
+    const HINTERNET handle = request.handle();
     const wchar_t* headers = L"Content-Type: application/json\r\n";
-    if (request.handle == nullptr ||
-        !WinHttpSendRequest(request.handle, headers, static_cast<DWORD>(-1L), body.data(), static_cast<DWORD>(body.size()),
+    if (handle == nullptr ||
+        !WinHttpSendRequest(handle, headers, static_cast<DWORD>(-1L), body.data(), static_cast<DWORD>(body.size()),
                             static_cast<DWORD>(body.size()), 0) ||
-        !WinHttpReceiveResponse(request.handle, nullptr)) {
+        !WinHttpReceiveResponse(handle, nullptr)) {
         out.error = i18n::trf("cannot reach bench.happydwarf.dev (error {0})", {std::to_string(GetLastError())});
         return out;
     }
     DWORD status = 0;
     DWORD size = sizeof(status);
-    WinHttpQueryHeaders(request.handle, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
+    WinHttpQueryHeaders(handle, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
                         &status, &size, WINHTTP_NO_HEADER_INDEX);
     out.status = static_cast<int>(status);
     for (;;) {
         DWORD available = 0;
-        if (!WinHttpQueryDataAvailable(request.handle, &available) || available == 0) break;
+        if (!WinHttpQueryDataAvailable(handle, &available) || available == 0) break;
         const size_t at = out.body.size();
         if (at + available > (64u << 10)) break;
         out.body.resize(at + available);
         DWORD read = 0;
-        if (!WinHttpReadData(request.handle, out.body.data() + at, available, &read)) break;
+        if (!WinHttpReadData(handle, out.body.data() + at, available, &read)) break;
         out.body.resize(at + read);
     }
     return out;
