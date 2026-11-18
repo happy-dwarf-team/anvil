@@ -121,7 +121,57 @@ bool call_free(std::uintptr_t fn, RawString* text) {
     }
 }
 
+using DestroyFn = void (*)(void* instance);
+
+bool call_destroy(std::uintptr_t fn, std::uintptr_t instance) {
+    __try {
+        reinterpret_cast<DestroyFn>(fn)(reinterpret_cast<void*>(instance));
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// CProvinceGraphics' size (PDB layout; the game's code multiplies by 5 << 10).
+constexpr std::uintptr_t kProvinceGraphicsSize = 0x1400;
+constexpr std::int32_t kMaxProvinces = 1 << 16;
+constexpr std::uint32_t kMaxUnitSlots = 64;
+
 }  // namespace
+
+UnitRefresh GameMemory::refresh_units() {
+    UnitRefresh out;
+    std::uintptr_t state = 0, owner = 0, app = 0, map = 0, data = 0;
+    std::int32_t count = 0;
+    if (!read(a_.game_state, state) || state == 0 || !read(state + a_.graphics_owner, owner) || owner == 0 ||
+        !read(owner + a_.application, app) || app == 0 || !read(app + a_.map, map) || map == 0 ||
+        !read(map + a_.provinces, data) || data == 0 || !read(map + a_.province_count, count) || count < 0 ||
+        count > kMaxProvinces || a_.unit_slots == 0 || a_.unit_slots > kMaxUnitSlots) {
+        return out;
+    }
+    out.available = true;
+    // From 1, as UpdateProvinceGraphics: province 0 is never drawn.
+    for (std::int32_t p = 1; p < count; ++p) {
+        const std::uintptr_t slots = data + kProvinceGraphicsSize * static_cast<std::uintptr_t>(p) + a_.units;
+        for (std::uint32_t s = 0; s < a_.unit_slots; ++s) {
+            const std::uintptr_t slot = slots + 8ull * s;
+            std::uintptr_t instance = 0;
+            if (!read(slot, instance)) {
+                out.faulted = true;
+                return out;
+            }
+            if (instance == 0) continue;
+            // Empty the slot first: the game never sees a freed instance in it.
+            const std::uintptr_t zero = 0;
+            if (!write_raw(slot, &zero, sizeof zero) || !call_destroy(a_.instance_destroy, instance)) {
+                out.faulted = true;
+                return out;
+            }
+            ++out.instances;
+        }
+    }
+    return out;
+}
 
 bool GameMemory::mesh_types(std::vector<MeshType>& out) {
     out.clear();

@@ -468,6 +468,16 @@ struct ModelReload : anvil::Plugin {
             g_addresses.console_manager = reinterpret_cast<std::uintptr_t>(host.data(sym::manager));
             g_addresses.console_dispatch = addr(sym::console_dispatch);
             g_addresses.string_free = addr(sym::string_free);
+            g_addresses.game_state = reinterpret_cast<std::uintptr_t>(host.data(sym::game_state));
+            g_addresses.graphics_owner = static_cast<std::uint32_t>(host.value(sym::province_units, "graphics_owner"));
+            g_addresses.application = static_cast<std::uint32_t>(host.value(sym::province_units, "application"));
+            g_addresses.map = static_cast<std::uint32_t>(host.value(sym::province_units, "map"));
+            g_addresses.units = static_cast<std::uint32_t>(host.value(sym::province_units, "units"));
+            g_addresses.unit_slots = static_cast<std::uint32_t>(host.value(sym::province_units, "unit_slots"));
+            g_addresses.provinces = static_cast<std::uint32_t>(host.value(sym::province_graphics, "provinces"));
+            g_addresses.province_count =
+                static_cast<std::uint32_t>(host.value(sym::province_graphics_count, "province_count"));
+            g_addresses.instance_destroy = addr(sym::entity_instance_destroy);
             g_has_addresses = true;
         } catch (const std::exception& e) {
             host.warn("not available on this game build: {}", e.what());

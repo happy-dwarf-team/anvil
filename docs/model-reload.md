@@ -81,8 +81,13 @@ the earlier mod's entries.
 
 ### Entities
 
-`reload assets` reads every `.asset` again, but the units already on the map keep the entity they were
-created with: the window says to load a save to see the change. The plugin does not load one by itself.
+`reload assets` reads every `.asset` again, but a unit already on the map keeps the 3D instance it was
+created with, and with it the entity's old `scale` and attachments. So, once the steps above are done,
+the plugin deletes the instances of the units on the map, as the game does when a unit leaves a
+province, and the game creates them again from the reloaded entities the next time it draws them. The
+window says how many models that was. When the map cannot be read, it says to load a save instead; the
+plugin does not load one by itself. Other map objects, such as cities and forts, are not created
+again.
 
 ### What it never runs
 
