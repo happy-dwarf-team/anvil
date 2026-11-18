@@ -10,7 +10,7 @@ use crate::cpu::Cpu;
 use crate::error::{check, Result};
 use crate::event::{Event, Payload};
 use crate::fnptr::FnPtr;
-use crate::panic::{catch_raw, run_callback};
+use crate::panic::{catch_raw, resume, run_callback};
 use crate::sys::{
     AnvilChange, AnvilCpuCallback, AnvilCpuContext, AnvilHost, AnvilLogLevel, AnvilPlugin,
     AnvilResult, AnvilSetting, AnvilSymbol, ANVIL_LOG_DEBUG, ANVIL_LOG_ERROR, ANVIL_LOG_INFO,
@@ -640,7 +640,9 @@ impl Host {
     }
 
     /// After load: the changes `body` requests are enabled together, or none
-    /// when it returns an error or panics (the panic goes on). Inside `load`
+    /// when it returns an error or panics (the panic goes on, logged as
+    /// `panic: …` unless an adapter of this crate catches it further out,
+    /// which logs it itself). Inside `load`
     /// the load itself is the group: `WrongPhase`.
     pub fn group<R>(&self, body: impl FnOnce() -> Result<R>) -> Result<R> {
         let begin = function!(self.table, AnvilHost, begin_group)?;
@@ -662,7 +664,8 @@ impl Host {
             Err(panic) => {
                 // SAFETY: as above.
                 unsafe { abort(self.plugin) };
-                std::panic::resume_unwind(panic)
+                // Logged here when no adapter of this thread catches it further out.
+                resume(panic)
             }
         }
     }

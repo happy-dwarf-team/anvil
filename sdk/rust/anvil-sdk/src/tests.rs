@@ -1261,6 +1261,59 @@ fn a_panic_in_a_mid_hook_is_logged_once_and_the_game_carries_on() {
 }
 
 #[test]
+fn a_panic_out_of_a_group_is_logged_once_where_it_is_caught() {
+    static ABORTS: AtomicU32 = AtomicU32::new(0);
+    unsafe extern "C" fn begin(_: *mut AnvilPlugin) -> AnvilResult {
+        ANVIL_OK
+    }
+    unsafe extern "C" fn commit(_: *mut AnvilPlugin) -> AnvilResult {
+        ANVIL_OK
+    }
+    unsafe extern "C" fn abort(_: *mut AnvilPlugin) {
+        ABORTS.fetch_add(1, Ordering::Relaxed);
+    }
+    let (_guard, table) = fake_host();
+    let mut with_groups = *table;
+    with_groups.begin_group = Some(begin);
+    with_groups.commit_group = Some(commit);
+    with_groups.abort_group = Some(abort);
+    assert_eq!(load::<Quiet>(Box::leak(Box::new(with_groups))), ANVIL_OK);
+    let host = Host::current().unwrap();
+    ABORTS.store(0, Ordering::Relaxed);
+
+    // Outside any adapter (a plugin's own thread, say): the group aborts,
+    // logs the panic with its place, and the panic goes on.
+    let result =
+        std::panic::catch_unwind(|| host.group(|| -> crate::Result<()> { panic!("in a group") }));
+    assert!(result.is_err());
+    assert_eq!(ABORTS.load(Ordering::Relaxed), 1);
+    let log = logged();
+    assert_eq!(log.len(), 1, "{log:?}");
+    assert!(log[0].starts_with("panic: in a group at "), "{log:?}");
+    assert!(log[0].contains("tests.rs"), "{log:?}");
+
+    // Inside an adapter: the adapter's line only, with the group's message.
+    host.mid_hook(5, move |_| {
+        let _ = host.group(|| -> crate::Result<()> { panic!("again") });
+    })
+    .unwrap()
+    .keep();
+    let (callback, user) = with(|r| r.mid_hooks[0]);
+    let callback: unsafe extern "C" fn(*mut AnvilCpuContext, *mut c_void) =
+        unsafe { std::mem::transmute(callback) };
+    let mut cpu: AnvilCpuContext = unsafe { std::mem::zeroed() };
+    unsafe { callback(&mut cpu, user as *mut c_void) };
+    assert_eq!(ABORTS.load(Ordering::Relaxed), 2);
+    let log = logged();
+    assert_eq!(log.len(), 2, "{log:?}");
+    assert!(
+        log[1].starts_with("mid_hook symbol 5: the callback panicked (again at "),
+        "{log:?}"
+    );
+    assert_eq!(host.group(|| Ok(7)).unwrap(), 7);
+}
+
+#[test]
 fn an_event_reads_only_the_size_its_publisher_knows() {
     let (_guard, table) = fake_host();
     assert_eq!(load::<Quiet>(table), ANVIL_OK);
