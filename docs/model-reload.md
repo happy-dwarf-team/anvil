@@ -81,13 +81,14 @@ the earlier mod's entries.
 
 ### Entities
 
-`reload assets` reads every `.asset` again, but a unit already on the map keeps the 3D instance it was
-created with, and with it the entity's old `scale` and attachments. So, once the steps above are done,
-the plugin deletes the instances of the units on the map, as the game does when a unit leaves a
-province, and the game creates them again from the reloaded entities the next time it draws them. The
-window says how many models that was. When the map cannot be read, it says to load a save instead; the
-plugin does not load one by itself. Other map objects, such as cities and forts, are not created
-again.
+`reload assets` reads every `.asset` again, but an object already on the map (a unit, a city, a port, a
+flag, the buildings of a city) keeps the 3D instance it was created with, and with it the entity's old
+`scale` and attachments. So, once the steps above are done, the plugin clears every province's map
+objects with the game's own `CProvinceGraphics::Clear` and `CreateProvinceSprites`, as the game does
+for a province it rebuilds, and the game creates them again from the reloaded entities the next time it
+draws each province. `anvil.log` says how many provinces and unit models that was. When the map cannot
+be read, the window says to load a save instead; the plugin does not load one by itself. Trade route
+and ambient objects (not tied to a province) are not created again.
 
 ### What it never runs
 

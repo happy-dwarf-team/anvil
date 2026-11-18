@@ -107,9 +107,9 @@ struct FakeGame : mr::Game {
         if (const auto it = answers.find(line); it != answers.end()) return it->second;
         return mr::ConsoleAnswer{true, true, false, tokens[0] == "reloadtexture" ? tokens[1] + " reloaded" : "ok"};
     }
-    mr::UnitRefresh units{true, false, 7};
-    mr::UnitRefresh refresh_units() override {
-        calls.push_back("refresh units");
+    mr::MapRefresh units{true, false, 7, 4940};
+    mr::MapRefresh refresh_map_objects() override {
+        calls.push_back("refresh map");
         return units;
     }
 };
@@ -428,24 +428,24 @@ int main() {
         CHECK((g.calls == std::vector<std::string>{"console reloadtexture gfx/models/Units/RUS_01_diffuse.dds",
                                                     "console reloadtexture gfx/models/Other/x.dds", "console reload anim",
                                                     "console reload particle", "console reload assets",
-                                                    "refresh units"}));
+                                                    "refresh map"}));
         CHECK(r.steps[0].status == mr::Status::ok && r.steps[0].texture == "gfx/models/Units/RUS_01_diffuse.dds" &&
               r.steps[0].answer == "gfx/models/Units/RUS_01_diffuse.dds reloaded");
         CHECK(r.steps[3].status == mr::Status::failed && r.steps[3].answer == "no");
-        CHECK(r.units_refreshed && r.unit_instances == 7 && !r.load_a_save && !r.faulted);
-        g.units = mr::UnitRefresh{false, false, 0};  // no map: a save load shows them
+        CHECK(r.map_refreshed && r.unit_instances == 7 && r.provinces == 4940 && !r.load_a_save && !r.faulted);
+        g.units = mr::MapRefresh{false, false, 0};  // no map: a save load shows them
         const mr::RunResult no_map = mr::run(g, in);
-        CHECK(!no_map.units_refreshed && no_map.load_a_save && !no_map.faulted);
-        g.units = mr::UnitRefresh{true, true, 3};
+        CHECK(!no_map.map_refreshed && no_map.load_a_save && !no_map.faulted);
+        g.units = mr::MapRefresh{true, true, 3, 120};
         const mr::RunResult fault = mr::run(g, in);
-        CHECK(fault.faulted && !fault.units_refreshed && fault.load_a_save);
+        CHECK(fault.faulted && !fault.map_refreshed && fault.load_a_save);
         CHECK(fault.steps[4].status == mr::Status::faulted && fault.steps[0].status == mr::Status::ok);
-        g.units = mr::UnitRefresh{true, false, 7};
+        g.units = mr::MapRefresh{true, false, 7, 4940};
         g.console_present = false;
         g.calls.clear();
         const mr::RunResult none = mr::run(g, in);
-        CHECK(none.steps[2].status == mr::Status::no_console && !none.load_a_save && !none.units_refreshed);
-        CHECK(std::find(g.calls.begin(), g.calls.end(), "refresh units") == g.calls.end());
+        CHECK(none.steps[2].status == mr::Status::no_console && !none.load_a_save && !none.map_refreshed);
+        CHECK(std::find(g.calls.begin(), g.calls.end(), "refresh map") == g.calls.end());
     });
 
     run("run: an exception in the game's code stops the rest", [] {
@@ -501,10 +501,10 @@ int main() {
         CHECK(find_row(rows, "reload assets") != nullptr && find_row(rows, "reload assets")->value == "ok");
         CHECK(find_row(rows, "    NEW_TYPE") != nullptr && find_row(rows, "    NEW_TYPE")->value == "A new mesh type: it needs a restart.");
         CHECK(find_row(rows, "    pdxmesh") != nullptr && find_row(rows, "    pdxmesh")->value == "Not reloaded: meshsettings");
-        CHECK(find_row(rows, "Units on the map are drawn again with the reloaded entities (7 models).") != nullptr);
-        CHECK(find_row(rows, "Units already on the map keep their old entity: load a save to see the change.") == nullptr);
+        CHECK(find_row(rows, "Units, cities, ports and flags on the map are drawn again with the reloaded entities.") != nullptr);
+        CHECK(find_row(rows, "Objects already on the map keep their old entity: load a save to see the change.") == nullptr);
         const std::vector<std::string> log = mr::log_lines(s.last);
-        CHECK(log.size() == 4 && log[3] == "entities reloaded: 7 unit instances on the map deleted, the game creates them again");
+        CHECK(log.size() == 4 && log[3] == "entities reloaded: map objects of 4940 provinces deleted (7 unit instances), the game creates them again");
         CHECK(log.size() == 4 && log[0] == "mesh gfx/models/Units/RUS_01.mesh: ok, 2 mesh types reloaded");
         CHECK(log.size() == 4 && log[2] == "pdxmesh interface/assets/eastern.gfx: ok, 1 updated, 1 unchanged; NEW_TYPE not in "
                                            "the game (restart); not reloaded: meshsettings");
@@ -512,11 +512,11 @@ int main() {
         for (const mr::Row& r : rows) CHECK(r.label.size() < 4096 && r.value.size() < 4096);
         const std::vector<mr::Row> pl = mr::rows(s, mr::Texts{mr::Lang::pl});
         CHECK(find_row(pl, "Ostatnie przeładowanie") != nullptr);
-        s.last.units_refreshed = false;
+        s.last.map_refreshed = false;
         s.last.load_a_save = true;
         rows = mr::rows(s, t);
-        CHECK(find_row(rows, "Units already on the map keep their old entity: load a save to see the change.") != nullptr);
-        CHECK(mr::log_lines(s.last).back() == "entities reloaded: units on the map show them after a save load");
+        CHECK(find_row(rows, "Objects already on the map keep their old entity: load a save to see the change.") != nullptr);
+        CHECK(mr::log_lines(s.last).back() == "entities reloaded: objects on the map show them after a save load");
     });
 
     run("texts: every text the window uses has every language, with its placeholders", [] {

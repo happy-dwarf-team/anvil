@@ -170,10 +170,10 @@ RunResult run(Game& game, const RunInput& in) {
         out.faulted |= r.status == Status::faulted;
         out.steps.push_back(std::move(r));
     }
-    // Once, after every step: the units are created from the entities as the
-    // run left them.
+    // Once, after every step: the map objects are created from the entities as
+    // the run left them.
     if (assets && !out.faulted) {
-        const UnitRefresh u = game.refresh_units();
+        const MapRefresh u = game.refresh_map_objects();
         out.faulted = u.faulted;
         if (u.faulted) {
             // Shown on the assets step, whose follow-up it is: save and restart.
@@ -181,9 +181,10 @@ RunResult run(Game& game, const RunInput& in) {
                 if (r.step.what == Step::What::reload_assets) r.status = Status::faulted;
             }
         }
-        out.units_refreshed = u.available && !u.faulted;
+        out.map_refreshed = u.available && !u.faulted;
         out.unit_instances = u.instances;
-        out.load_a_save = !out.units_refreshed;
+        out.provinces = u.provinces;
+        out.load_a_save = !out.map_refreshed;
     } else if (assets) {
         out.load_a_save = true;
     }

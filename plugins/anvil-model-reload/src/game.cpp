@@ -121,11 +121,17 @@ bool call_free(std::uintptr_t fn, RawString* text) {
     }
 }
 
-using DestroyFn = void (*)(void* instance);
+using ClearFn = void (*)(void* province_graphics);
+using SpritesFn = void (*)(void* province_graphics, void* province, void* map, bool remove_only);
 
-bool call_destroy(std::uintptr_t fn, std::uintptr_t instance) {
+// CProvinceGraphics::Clear, then CreateProvinceSprites with remove_only: with
+// it, the function does not read the province (null here) and returns after
+// deleting the city and port and zeroing the key that makes Update create them.
+bool call_clear(std::uintptr_t clear, std::uintptr_t sprites, std::uintptr_t graphics, std::uintptr_t map) {
     __try {
-        reinterpret_cast<DestroyFn>(fn)(reinterpret_cast<void*>(instance));
+        reinterpret_cast<ClearFn>(clear)(reinterpret_cast<void*>(graphics));
+        reinterpret_cast<SpritesFn>(sprites)(reinterpret_cast<void*>(graphics), nullptr,
+                                             reinterpret_cast<void*>(map), true);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -139,36 +145,34 @@ constexpr std::uint32_t kMaxUnitSlots = 64;
 
 }  // namespace
 
-UnitRefresh GameMemory::refresh_units() {
-    UnitRefresh out;
+MapRefresh GameMemory::refresh_map_objects() {
+    MapRefresh out;
     std::uintptr_t state = 0, owner = 0, app = 0, map = 0, data = 0;
     std::int32_t count = 0;
     if (!read(a_.game_state, state) || state == 0 || !read(state + a_.graphics_owner, owner) || owner == 0 ||
         !read(owner + a_.application, app) || app == 0 || !read(app + a_.map, map) || map == 0 ||
         !read(map + a_.provinces, data) || data == 0 || !read(map + a_.province_count, count) || count < 0 ||
-        count > kMaxProvinces || a_.unit_slots == 0 || a_.unit_slots > kMaxUnitSlots) {
+        count > kMaxProvinces || a_.unit_slots == 0 || a_.unit_slots > kMaxUnitSlots || a_.province_clear == 0 ||
+        a_.province_sprites == 0) {
         return out;
     }
     out.available = true;
     // From 1, as UpdateProvinceGraphics: province 0 is never drawn.
     for (std::int32_t p = 1; p < count; ++p) {
-        const std::uintptr_t slots = data + kProvinceGraphicsSize * static_cast<std::uintptr_t>(p) + a_.units;
+        const std::uintptr_t graphics = data + kProvinceGraphicsSize * static_cast<std::uintptr_t>(p);
         for (std::uint32_t s = 0; s < a_.unit_slots; ++s) {
-            const std::uintptr_t slot = slots + 8ull * s;
             std::uintptr_t instance = 0;
-            if (!read(slot, instance)) {
+            if (!read(graphics + a_.units + 8ull * s, instance)) {
                 out.faulted = true;
                 return out;
             }
-            if (instance == 0) continue;
-            // Empty the slot first: the game never sees a freed instance in it.
-            const std::uintptr_t zero = 0;
-            if (!write_raw(slot, &zero, sizeof zero) || !call_destroy(a_.instance_destroy, instance)) {
-                out.faulted = true;
-                return out;
-            }
-            ++out.instances;
+            if (instance != 0) ++out.instances;
         }
+        if (!call_clear(a_.province_clear, a_.province_sprites, graphics, map)) {
+            out.faulted = true;
+            return out;
+        }
+        ++out.provinces;
     }
     return out;
 }
