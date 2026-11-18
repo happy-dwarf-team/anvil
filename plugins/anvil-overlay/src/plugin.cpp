@@ -305,7 +305,9 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
             s.mark_dirty();
             return 0;
         }
-        if (vk == 'V' && held(VK_CONTROL) && s.want_text.load()) overlay::ui_capture_clipboard();
+        // Both of ImGui's paste keys read the clipboard copy taken here.
+        const bool paste = (vk == 'V' && held(VK_CONTROL)) || (vk == VK_INSERT && held(VK_SHIFT));
+        if (paste && s.want_text.load()) overlay::ui_capture_clipboard();
     }
     if (route_input(window, message, wparam, lparam)) return 0;
     if (s.visible.load(std::memory_order_acquire)) {
@@ -319,7 +321,9 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
         // A button or key release always reaches the game, so it never sees
         // one held down.
         if (mouse && is_mouse_message(message) && !is_button_up(message)) return 0;
-        if (keyboard && is_key_message(message) && message != WM_KEYUP && message != WM_SYSKEYUP) return 0;
+        // Alt+F4 closes the game as in any window, also while a text field has the keyboard.
+        const bool alt_f4 = message == WM_SYSKEYDOWN && wparam == VK_F4;
+        if (keyboard && is_key_message(message) && message != WM_KEYUP && message != WM_SYSKEYUP && !alt_f4) return 0;
         if (message == WM_INPUT && (mouse || keyboard)) {
             RAWINPUTHEADER header{};
             UINT size = sizeof(header);
