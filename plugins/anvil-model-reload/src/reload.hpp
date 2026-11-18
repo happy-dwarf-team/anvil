@@ -38,6 +38,12 @@ struct ConsoleAnswer {
     std::string text;
 };
 
+struct UnitRefresh {
+    bool available = false;  // false: no map now (the menu) or the province graphics cannot be read
+    bool faulted = false;    // an exception in the game's code: stop
+    int instances = 0;       // unit instances deleted, for the game to create again
+};
+
 class Game {
 public:
     virtual ~Game() = default;
@@ -52,6 +58,10 @@ public:
     virtual bool set_lookup_name(std::uintptr_t type, std::size_t index, std::string_view name) = 0;
     virtual bool reload_type(std::uintptr_t type) = 0;
     virtual ConsoleAnswer console(const std::vector<std::string>& tokens) = 0;
+    // Deletes the 3D instances of the units on the map, as the game does for a
+    // slot whose unit is gone; the game creates them again from the reloaded
+    // entities when it next draws their provinces.
+    virtual UnitRefresh refresh_units() = 0;
 };
 
 enum class Status {
@@ -94,7 +104,12 @@ struct StepResult {
 struct RunResult {
     std::vector<StepResult> steps;
     bool faulted = false;
-    bool load_a_save = false;  // an .asset changed: units on the map keep the old entity until they are created again
+    // After a `reload assets` that succeeded: the units on the map were created
+    // again (units_refreshed, with the number of instances), or that was not
+    // possible and they keep the old entity until a save load (load_a_save).
+    bool units_refreshed = false;
+    int unit_instances = 0;
+    bool load_a_save = false;
 };
 
 struct RunInput {

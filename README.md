@@ -124,8 +124,8 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
   `.gfx` mesh entries of your enabled mods that you saved since the last
   reload, and reloads them in the running game with one click
   ([docs/model-reload.md](docs/model-reload.md)). A new `scale` or `file` of a
-  mesh shows at once on the units already on the map; a changed entity shows
-  after a save load. Not in ironman or multiplayer games.
+  mesh or a changed entity shows at once on the units already on the map.
+  Not in ironman or multiplayer games.
 - Each start writes `anvil/anvil.log`: what was loaded, what was skipped and why.
 - A crash writes a report to `anvil/crashes/` (the last 10 are kept): where it
   happened and which plugins were involved, with each plugin's `issues` link.

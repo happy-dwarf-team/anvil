@@ -104,3 +104,61 @@ note = "the game's std::string destructor, to free the console's answer"
 build."eu4-1.37.5-steam-win64" = { rva = 0x95660 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x95690 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x95690 }
+
+# --- Units on the map (after `reload assets`) ---------------------------------
+#
+# CProvinceGraphics (0x1400 bytes in every build) keeps the 3D instances of the
+# units shown in a province in _Units (EntityInstanceENTITY*[21], +0x1E0).
+# CProvinceGraphics::UpdateProvinceUnits creates a slot's instance when it is
+# empty and deletes it with EntityInstanceDestroy when its unit is gone, so a
+# slot emptied between frames is created again, from the reloaded entity, the
+# next time the province's units are drawn.
+
+[symbol.province_units]
+memory = "code"
+values.game_state = { at = 3, rip_relative = 7, type = "uintptr_t" }
+values.graphics_owner = { at = 21, size = 4 }
+values.application = { at = 28, size = 4 }
+values.map = { at = 35, size = 4 }
+values.units = { at = 42, size = 4 }
+values.unit_slots = { at = 47, size = 4 }
+note = "CProvinceGraphics::Clear+0x24: mov rax,[CGameState*]; ...; mov rax,[rax+0x1E00] (_pGraphicsOwner, CEU3Idler*); mov rdx,[rax+0x330] (Steam) or [rax+0x328] (GOG), the CEU4Application; mov r12,[rdx+0x360] (_pMap, CEU3GraphicalMap*); lea rbx,[r14+0x1E0] (_Units); mov esi,21"
+
+[symbol.province_units.build."eu4-1.37.5-steam-win64"]
+rva = 0x1329BC4
+bytes = "48 8B 05 AD 62 01 01 45 33 ED 45 8B E5 48 85 C0 74 15 48 8B 80 00 1E 00 00 48 8B 90 30 03 00 00 4C 8B A2 60 03 00 00 49 8D 9E E0 01 00 00 BE 15 00 00 00"
+
+[symbol.province_units.build."eu4-1.37.5.2-gog-win64"]
+rva = 0x1323D24   # CProvinceGraphics::Clear+0x24
+bytes = "48 8B 05 CD FF FF 00 45 33 ED 45 8B E5 48 85 C0 74 15 48 8B 80 00 1E 00 00 48 8B 90 28 03 00 00 4C 8B A2 60 03 00 00 49 8D 9E E0 01 00 00 BE 15 00 00 00"
+
+[symbol.province_units.build."eu4-1.37.5.0-gog-win64"]
+rva = 0x1323D24
+bytes = "48 8B 05 CD FF FF 00 45 33 ED 45 8B E5 48 85 C0 74 15 48 8B 80 00 1E 00 00 48 8B 90 28 03 00 00 4C 8B A2 60 03 00 00 49 8D 9E E0 01 00 00 BE 15 00 00 00"
+
+[symbol.province_graphics]
+bytes = "48 8B 86 80 00 00 00 48 63 04 B8 48 8D 0C 80 48 C1 E1 0A 48 03 4E 70"
+memory = "code"
+values.provinces = { at = 22, size = 1 }
+note = "CEU3GraphicalMap::UpdateProvinceGraphics, its clear queue: movsxd rax,[_ProvinceGraphicsToClear + i*4]; lea rcx,[rax+rax*4]; shl rcx,10 (0x1400 per province); add rcx,[rsi+0x70] (_ProvinceGraphics' data); call CProvinceGraphics::Clear"
+build."eu4-1.37.5-steam-win64" = { rva = 0x10A7B20 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x10A6320 }   # CEU3GraphicalMap::UpdateProvinceGraphics+0x90
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x10A6320 }
+
+[symbol.province_graphics_count]
+bytes = "48 63 46 7C"
+memory = "code"
+values.province_count = { at = 3, size = 1 }
+note = "CEU3GraphicalMap::UpdateProvinceGraphics, its province loop: movsxd rax,[rsi+0x7C], the size of _ProvinceGraphics (CPdxArray<CProvinceGraphics,int>)"
+build."eu4-1.37.5-steam-win64" = { rva = 0x10A7DFB }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x10A65FB }   # CEU3GraphicalMap::UpdateProvinceGraphics+0x36B
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x10A65FB }
+
+[symbol.entity_instance_destroy]
+bytes = "48 85 C9 74 1F 53 48 83 EC 20 48 8B D9"
+memory = "code"
+signature = "void (void* instance)"
+note = "EntityInstanceDestroy(EntityInstanceENTITY*), 37 B: nothing for NULL, else ~CEntityInstance and the free of its 0x118 bytes; what UpdateProvinceUnits calls for a slot whose unit is gone"
+build."eu4-1.37.5-steam-win64" = { rva = 0x14FB1D0 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x14F4D40 }   # EntityInstanceDestroy
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x14F4D40 }

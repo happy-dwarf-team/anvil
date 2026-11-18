@@ -139,6 +139,7 @@ std::string texture_name(std::string_view relative, const std::vector<MeshType>&
 
 RunResult run(Game& game, const RunInput& in) {
     RunResult out;
+    bool assets = false;
     for (const Step& step : in.steps) {
         if (out.faulted) {
             StepResult skipped;
@@ -162,12 +163,23 @@ RunResult run(Game& game, const RunInput& in) {
         case Step::What::reload_particle: r = console_step(game, step, {"reload", "particle"}); break;
         case Step::What::reload_assets:
             r = console_step(game, step, {"reload", "assets"});
-            out.load_a_save |= r.status == Status::ok;
+            assets |= r.status == Status::ok;
             break;
         case Step::What::reload_gfx: r = gfx_step(game, step, in); break;
         }
         out.faulted |= r.status == Status::faulted;
         out.steps.push_back(std::move(r));
+    }
+    // Once, after every step: the units are created from the entities as the
+    // run left them.
+    if (assets && !out.faulted) {
+        const UnitRefresh u = game.refresh_units();
+        out.faulted = u.faulted;
+        out.units_refreshed = u.available && !u.faulted;
+        out.unit_instances = u.instances;
+        out.load_a_save = !out.units_refreshed;
+    } else if (assets) {
+        out.load_a_save = true;
     }
     return out;
 }
