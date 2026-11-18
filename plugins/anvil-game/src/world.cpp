@@ -5,6 +5,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <bitset>
 #include <cstring>
 
 namespace anvil_game {
@@ -758,9 +759,16 @@ bool append_flags(const WorldLayout& l, std::uintptr_t flags, std::vector<FlagEn
     std::vector<std::int16_t> ids(n);
     std::vector<std::int32_t> hours(n);
     if (n > 0 && (!read_raw(begin, ids.data(), n * 2) || !read_raw(dates, hours.data(), n * 4))) return false;
+    // The ids already in `out` (a province's own flags before its permanent
+    // ones) and those added here: an id is an int16, so a bitmap of 4 KB.
+    std::bitset<kMaxFlags> seen;
+    for (const FlagEntry& e : out) {
+        if (e.id >= 0) seen.set(static_cast<std::size_t>(e.id));
+    }
     for (std::size_t i = 0; i < n; ++i) {
-        const bool seen = std::any_of(out.begin(), out.end(), [&](const FlagEntry& e) { return e.id == ids[i]; });
-        if (!seen && ids[i] >= 0) out.push_back(FlagEntry{ids[i], hours[i]});
+        if (ids[i] < 0 || seen.test(static_cast<std::size_t>(ids[i]))) continue;
+        seen.set(static_cast<std::size_t>(ids[i]));
+        out.push_back(FlagEntry{ids[i], hours[i]});
     }
     return true;
 }

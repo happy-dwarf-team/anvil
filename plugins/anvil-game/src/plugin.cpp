@@ -845,6 +845,7 @@ bool world_open() {
 template <class T>
 AnvilResult give(T* out, T& value) {
     const std::uint32_t size = out->size;
+    if (size < sizeof(value.size)) return ANVIL_ERROR_INVALID_ARGUMENT;
     value.size = size;
     std::memcpy(out, &value, std::min<std::size_t>(size, sizeof(T)));
     return ANVIL_OK;
@@ -1030,7 +1031,7 @@ AnvilResult world_country_units(const char* tag, std::uint64_t* ids, std::uint32
 }
 
 AnvilResult world_unit(const char* tag, std::uint64_t id, AnvilGameUnit* out) {
-    if (tag == nullptr || out == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (tag == nullptr || out == nullptr || out->size < sizeof(out->size)) return ANVIL_ERROR_INVALID_ARGUMENT;
     if (!world_open()) return ANVIL_ERROR_WRONG_PHASE;
     try {
         AnvilGameUnit unit{};
@@ -1889,6 +1890,9 @@ void load_world(anvil::Host& host) {
     }
     if (host.present(sym::map_of_session) && host.present(sym::graphical_map_vtable) &&
         host.present(sym::province_from_point)) {
+        // The map is reached through the session too, also when the unit and
+        // view branches above are left out.
+        l.session = sym::session_of_root.session;
         l.graphical_map = static_cast<std::uint32_t>(host.value(sym::map_of_session, "graphical_map"));
         l.map = static_cast<std::uint32_t>(host.value(sym::map_of_session, "map"));
         l.map_vtable = reinterpret_cast<std::uintptr_t>(host.address(sym::graphical_map_vtable));
