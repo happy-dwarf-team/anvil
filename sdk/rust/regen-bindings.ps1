@@ -113,7 +113,7 @@ folder that holds libclang.dll if bindgen does not find it there
             Copy-Item $out $generated -Force
             Push-Location $root
             try {
-                git diff --no-index --no-color --ignore-cr-at-eol -- sdk/rust/anvil-sys/src/bindings.rs bindings.generated.rs |
+                git -c core.safecrlf=false diff --no-index --no-color --ignore-cr-at-eol -- sdk/rust/anvil-sys/src/bindings.rs bindings.generated.rs |
                     Set-Content -Encoding utf8NoBOM $diff
             } finally {
                 Pop-Location
