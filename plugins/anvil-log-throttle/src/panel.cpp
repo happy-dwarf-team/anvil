@@ -162,9 +162,13 @@ void copy_text(const std::string& text) {
     if (!OpenClipboard(nullptr)) return;
     EmptyClipboard();
     if (HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, (w.size() + 1) * sizeof(wchar_t)); mem != nullptr) {
-        std::memcpy(GlobalLock(mem), w.c_str(), (w.size() + 1) * sizeof(wchar_t));
-        GlobalUnlock(mem);
-        if (SetClipboardData(CF_UNICODETEXT, mem) == nullptr) GlobalFree(mem);
+        if (void* locked = GlobalLock(mem)) {
+            std::memcpy(locked, w.c_str(), (w.size() + 1) * sizeof(wchar_t));
+            GlobalUnlock(mem);
+            if (SetClipboardData(CF_UNICODETEXT, mem) == nullptr) GlobalFree(mem);
+        } else {
+            GlobalFree(mem);
+        }
     }
     CloseClipboard();
 }
