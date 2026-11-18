@@ -2930,6 +2930,10 @@ int main(int argc, char** argv) {
                   std::strcmp(army.country.text, "RUS") == 0 && army.location == 1 &&
                   army.mission == ANVIL_GAME_MISSION_DRILL && army.subunits == 3 && army.strength == 2500 &&
                   army.leader == FakeWorld::kLeaderId);
+            // A struct whose size does not cover its own size field is refused,
+            // as the other reads refuse it, instead of an ANVIL_OK with nothing in it.
+            AnvilGameUnit unsized{};
+            CHECK(world->unit("RUS", FakeWorld::kArmyId, &unsized) == ANVIL_ERROR_INVALID_ARGUMENT && unsized.id == 0);
             AnvilGameUnit navy{};
             navy.size = sizeof(navy);
             CHECK(world->unit("RUS", FakeWorld::kNavyId, &navy) == ANVIL_OK && navy.kind == ANVIL_GAME_UNIT_NAVY &&
