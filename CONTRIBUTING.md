@@ -83,6 +83,50 @@ everything a plugin can see:
   `anvil_map.h`, `anvil_script.h` and `anvil_log_throttle.h` (`sdk/rust/bindings.h`), and committed. After a change to one of them run
   `sdk/rust/regen-bindings.ps1` (bindgen and libclang, see the script) and
   commit the result; CI fails when the file differs from what the headers give.
+  Without libclang, see [Rust bindings](#rust-bindings).
+
+## Rust bindings
+
+`sdk/rust/regen-bindings.ps1` needs bindgen-cli at the version the script pins
+and libclang from LLVM (`winget install LLVM.LLVM`; set `LIBCLANG_PATH` to the
+folder with `libclang.dll` when bindgen does not find it). bindgen writes to a
+temporary file, and `bindings.rs` is replaced only when it succeeds; without
+bindgen or libclang the script says what is missing, leaves `bindings.rs` as
+it is and exits 2.
+
+Without libclang, the build workflow's step "Rust bindings match the header"
+is the judge. Push the header change; when the step fails, it uploads
+bindgen's file and the difference as the artifact `anvil-sys-bindings`, and
+its log prints the command that fetches it. From the repository root:
+
+```powershell
+gh run download <run-id> -R happy-dwarf-team/anvil -n anvil-sys-bindings
+Move-Item -Force bindings.generated.rs sdk/rust/anvil-sys/src/bindings.rs
+```
+
+Prefer that file to editing `bindings.rs` by hand. A header change applied by
+hand passes the check only if it copies bindgen's form exactly:
+
+- the `#define` constants (`pub const`) in header order at the top of the
+  file; an enum's values instead stand where the enum is, followed by its
+  `pub type`;
+- the new struct right after the struct that precedes it in the headers,
+  followed by its `const _: () = { … }` block of layout asserts (size,
+  alignment, then the offset of each field);
+- prettyplease keeps an assert on one line when the joined line, with its
+  four spaces of indent, is 89 characters or fewer:
+
+  ```rust
+      ["Size of X"][::core::mem::size_of::<X>() - 20usize];
+  ```
+
+  and otherwise splits it into `[`, the message, and `][…];`:
+
+  ```rust
+      [
+          "Offset of field: AnvilGameInfo::size",
+      ][::core::mem::offset_of!(AnvilGameInfo, size) - 0usize];
+  ```
 
 ## The plugin catalog
 

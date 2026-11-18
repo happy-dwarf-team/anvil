@@ -10,8 +10,16 @@
   found). The output does not depend on the host: the target is fixed and the
   formatter is bindgen's own.
 
-  -Check writes nothing: it exits 1 when the committed file differs from what
-  the header gives (CI runs this).
+  bindgen writes to a temporary file, and bindings.rs is replaced only when it
+  succeeds; without bindgen or libclang the script stops with exit 2 and leaves
+  bindings.rs as it is. Without libclang, the build workflow's check is the
+  judge: when it fails, it uploads the file bindgen generated (CONTRIBUTING.md,
+  "Rust bindings").
+
+  -Check writes nothing under sdk/: it exits 1 when the committed file differs
+  from what the headers give (CI runs this), and leaves the generated file and
+  the difference in bindings.generated.rs and bindings.generated.diff at the
+  repository root.
 #>
 param(
     [switch]$Check
@@ -25,15 +33,31 @@ $header = Join-Path $root 'sdk/rust/bindings.h'
 $include = Join-Path $root 'include'
 $target = Join-Path $root 'sdk/rust/anvil-sys/src/bindings.rs'
 
+$withoutLibclang = @"
+Without libclang, CI is the judge: push the header change, and when the build
+workflow's step "Rust bindings match the header" fails, take the file bindgen
+generated from the run's artifact instead of editing bindings.rs by hand:
+  gh run download <run-id> -R happy-dwarf-team/anvil -n anvil-sys-bindings
+(the step's log prints the exact command; CONTRIBUTING.md, "Rust bindings").
+"@
+
+function Stop-Regen([string]$Message) {
+    Write-Host $Message
+    Write-Host 'sdk/rust/anvil-sys/src/bindings.rs is unchanged.'
+    Write-Host ''
+    Write-Host $withoutLibclang
+    exit 2
+}
+
 if (-not (Get-Command bindgen -ErrorAction SilentlyContinue)) {
-    throw "bindgen not found: cargo install bindgen-cli --version $BindgenVersion --locked"
+    Stop-Regen "bindgen not found. Install it: cargo install bindgen-cli --version $BindgenVersion --locked"
 }
 $found = (bindgen --version) -replace '^bindgen\s+', ''
 if ($found -ne $BindgenVersion) {
-    throw "bindgen $found found, $BindgenVersion needed: cargo install bindgen-cli --version $BindgenVersion --locked --force"
+    Stop-Regen "bindgen $found found, $BindgenVersion needed: cargo install bindgen-cli --version $BindgenVersion --locked --force"
 }
 
-$out = if ($Check) { Join-Path ([IO.Path]::GetTempPath()) "anvil-bindings-$PID.rs" } else { $target }
+$out = Join-Path ([IO.Path]::GetTempPath()) "anvil-bindings-$PID.rs"
 
 # C enums stay integers (a value the host sends is never an invalid Rust enum);
 # anvil_plugin_load is what a plugin exports, so there is nothing to import.
@@ -52,21 +76,60 @@ $arguments = @(
     '--target=x86_64-pc-windows-msvc'
     "-I$include"
 )
-& bindgen @arguments
-if ($LASTEXITCODE -ne 0) { throw "bindgen failed ($LASTEXITCODE)" }
 
-if ($Check) {
-    # Line endings follow the checkout (autocrlf); the content must be equal.
-    $want = (Get-Content -Raw $out) -replace "`r`n", "`n"
-    $have = (Get-Content -Raw $target) -replace "`r`n", "`n"
-    if ($want -ne $have) {
-        Write-Host "sdk/rust/anvil-sys/src/bindings.rs differs from the headers in include/anvil; run sdk/rust/regen-bindings.ps1 and commit."
-        Copy-Item $out (Join-Path $root 'bindings.generated.rs') -Force
-        Remove-Item $out
-        exit 1
+try {
+    # bindgen's stderr (warnings, or the panic without libclang) is kept as text.
+    $log = & {
+        $ErrorActionPreference = 'Continue'
+        & bindgen @arguments 2>&1 | ForEach-Object { "$_" }
     }
-    Remove-Item $out
-    Write-Host 'bindings.rs matches the headers'
-} else {
-    Write-Host "wrote $target"
+    $code = $LASTEXITCODE
+    if ($code -ne 0) {
+        $log | Write-Host
+        if ($log -match 'Unable to find libclang') {
+            Stop-Regen @"
+
+libclang not found: bindgen needs LLVM's libclang.dll to read the headers.
+Install LLVM (winget install LLVM.LLVM, or the LLVM-*-win64.exe installer from
+https://github.com/llvm/llvm-project/releases), then set LIBCLANG_PATH to the
+folder that holds libclang.dll if bindgen does not find it there
+(CI uses C:\Program Files\LLVM\bin).
+"@
+        }
+        Stop-Regen "bindgen failed (exit $code)."
+    }
+    $log | Write-Host
+    if (-not (Test-Path $out) -or (Get-Item $out).Length -eq 0) {
+        Stop-Regen 'bindgen reported success but wrote no output.'
+    }
+
+    if ($Check) {
+        # Line endings follow the checkout (autocrlf); the content must be equal.
+        $want = (Get-Content -Raw $out) -replace "`r`n", "`n"
+        $have = (Get-Content -Raw $target) -replace "`r`n", "`n"
+        if ($want -ne $have) {
+            $generated = Join-Path $root 'bindings.generated.rs'
+            $diff = Join-Path $root 'bindings.generated.diff'
+            Copy-Item $out $generated -Force
+            Push-Location $root
+            try {
+                git -c core.safecrlf=false diff --no-index --no-color --ignore-cr-at-eol -- sdk/rust/anvil-sys/src/bindings.rs bindings.generated.rs |
+                    Set-Content -Encoding utf8NoBOM $diff
+            } finally {
+                Pop-Location
+            }
+            Write-Host 'sdk/rust/anvil-sys/src/bindings.rs differs from what bindgen gives for the headers in include/anvil.'
+            Write-Host 'bindgen''s output is in bindings.generated.rs and the difference in bindings.generated.diff'
+            Write-Host '(repository root): copy bindings.generated.rs over sdk/rust/anvil-sys/src/bindings.rs and commit it.'
+            Write-Host ''
+            Get-Content $diff | Select-Object -First 200 | Write-Host
+            exit 1
+        }
+        Write-Host 'bindings.rs matches the headers'
+    } else {
+        Copy-Item $out $target -Force
+        Write-Host "wrote $target"
+    }
+} finally {
+    if (Test-Path $out) { Remove-Item $out }
 }
