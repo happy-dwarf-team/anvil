@@ -193,7 +193,7 @@ pub struct AnvilGameInfo {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AnvilGameInfo"][::core::mem::size_of::<AnvilGameInfo>() - 40usize];
+    ["Size of AnvilGameInfo"][::core::mem::size_of::<AnvilGameInfo>() - 48usize];
     ["Alignment of AnvilGameInfo"][::core::mem::align_of::<AnvilGameInfo>() - 8usize];
     [
         "Offset of field: AnvilGameInfo::size",
