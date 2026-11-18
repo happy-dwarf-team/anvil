@@ -1424,7 +1424,8 @@ void ManagerApp::draw_plan_modal() {
                               : same             ? trf("Repair Anvil {0}", {package_->version})
                                                  : trf("Install Anvil {0}", {package_->version});
     if (!begin_dialog("###plan", title)) return;
-    if (!shown) {
+    if (!shown) {  // no plan, or the folder read again has no installation to plan for
+        plan_.reset();
         ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
         return;
