@@ -415,22 +415,23 @@ impl Host {
         symbol: AnvilSymbol,
         detour: F,
     ) -> Result<()> {
-        hook.claim("hook_function")?;
+        let claim = hook.claim("hook_function")?;
         let call = function!(self.table, AnvilHost, hook_function)?;
         let mut change: *mut AnvilChange = ptr::null_mut();
-        // SAFETY: `next` lives in a static; the caller vouches that the
+        let mut next: *mut c_void = ptr::null_mut();
+        // SAFETY: Anvil writes `next` (a local) during the call only; the caller vouches that the
         // detour has the symbol's declared type.
         let result = unsafe {
             call(
                 self.plugin,
                 symbol,
                 detour.into_raw(),
-                hook.next_slot(),
+                &mut next,
                 &mut change,
             )
         };
         check(result, || format!("hook_function symbol {symbol}"))?;
-        hook.set_change(change);
+        hook.finish(claim, next, change);
         Ok(())
     }
 
@@ -477,21 +478,22 @@ impl Host {
         call_site: AnvilSymbol,
         target: F,
     ) -> Result<()> {
-        hook.claim("redirect_call")?;
+        let claim = hook.claim("redirect_call")?;
         let call = function!(self.table, AnvilHost, redirect_call)?;
         let mut change: *mut AnvilChange = ptr::null_mut();
+        let mut next: *mut c_void = ptr::null_mut();
         // SAFETY: a declared symbol; the caller vouches for the type.
         let result = unsafe {
             call(
                 self.plugin,
                 call_site,
                 target.into_raw(),
-                hook.next_slot(),
+                &mut next,
                 &mut change,
             )
         };
         check(result, || format!("redirect_call symbol {call_site}"))?;
-        hook.set_change(change);
+        hook.finish(claim, next, change);
         Ok(())
     }
 
@@ -530,13 +532,13 @@ impl Host {
         slot: AnvilSymbol,
         value: *mut c_void,
     ) -> Result<()> {
-        swap.claim()?;
+        let claim = swap.claim()?;
         let call = function!(self.table, AnvilHost, swap_pointer)?;
         let mut change: *mut AnvilChange = ptr::null_mut();
         // SAFETY: `previous` lives in a static and is 8-byte aligned; the caller vouches for `value`.
         let result = unsafe { call(self.plugin, slot, value, swap.previous_slot(), &mut change) };
         check(result, || format!("swap_pointer symbol {slot}"))?;
-        swap.set_change(change);
+        claim.finish(change);
         Ok(())
     }
 
@@ -552,10 +554,11 @@ impl Host {
         function: &str,
         replacement: F,
     ) -> Result<()> {
-        hook.claim("replace_import")?;
+        let claim = hook.claim("replace_import")?;
         let call = function!(self.table, AnvilHost, replace_import)?;
         let (module_c, function_c) = (c_string(module), c_string(function));
         let mut change: *mut AnvilChange = ptr::null_mut();
+        let mut next: *mut c_void = ptr::null_mut();
         // SAFETY: NUL-terminated names; the caller vouches for the type.
         let result = unsafe {
             call(
@@ -563,12 +566,12 @@ impl Host {
                 module_c.as_ptr(),
                 function_c.as_ptr(),
                 replacement.into_raw(),
-                hook.next_slot(),
+                &mut next,
                 &mut change,
             )
         };
         check(result, || format!("replace_import {module}!{function}"))?;
-        hook.set_change(change);
+        hook.finish(claim, next, change);
         Ok(())
     }
 
@@ -585,9 +588,10 @@ impl Host {
         expected_prologue: &[u8],
         detour: F,
     ) -> Result<()> {
-        hook.claim("hook_function_at")?;
+        let claim = hook.claim("hook_function_at")?;
         let call = function!(self.table, AnvilHost, hook_function_at)?;
         let mut change: *mut AnvilChange = ptr::null_mut();
+        let mut next: *mut c_void = ptr::null_mut();
         // SAFETY: the caller's contract; the bytes are read during the call.
         let result = unsafe {
             call(
@@ -596,14 +600,14 @@ impl Host {
                 bytes_or_null(expected_prologue),
                 expected_prologue.len(),
                 detour.into_raw(),
-                hook.next_slot(),
+                &mut next,
                 &mut change,
             )
         };
         check(result, || {
             format!("hook_function_at {:p}", address.as_ptr())
         })?;
-        hook.set_change(change);
+        hook.finish(claim, next, change);
         Ok(())
     }
 
