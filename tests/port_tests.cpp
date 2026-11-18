@@ -377,6 +377,14 @@ void port_tests() {
         CHECK(fx.port("build = \"old\"\n[symbol.a]\nrva = 0x1000\nmemroy = \"code\"\n").exit_code == kExitCannotCheck);
         CHECK(contains(fx.port("build = \"new\"\n").cannot_port, "already declares new"));
         CHECK(contains(fx.port("build = \"third\"\n").cannot_port, "does not declare old"));
+        // Only [symbol.<name>] tables: an inline table or dotted keys would lose lines or land under [symbol].
+        for (const std::string& written :
+             {"far_fn = { rva = 0x1000, bytes = \"" + hex_bytes(kFar) + "\", memory = \"code\" }\n",
+              "far_fn.rva = 0x1000\nfar_fn.bytes = \"" + hex_bytes(kFar) + "\"\nfar_fn.memory = \"code\"\n"}) {
+            const PortReport refused = fx.port("build = \"old\"\n[symbol]\n" + written);
+            CHECK(contains(refused.cannot_port, "not written as a [symbol.far_fn] table"));
+            CHECK(!refused.written && !fs::exists(fx.out));
+        }
         // Bytes that do not hold on the old build are not carried over.
         const PortReport wrong = fx.port("build = \"old\"\n[symbol.a]\nrva = 0x1000\nbytes = \"90 90 90\"\nmemory = \"code\"\n");
         CHECK(wrong.exit_code == kExitProblems);

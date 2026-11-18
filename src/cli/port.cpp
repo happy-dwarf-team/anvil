@@ -225,6 +225,22 @@ std::optional<std::string> with_new_build(const std::string& text, const SymbolF
         return std::nullopt;
     }
     TextEdit edit(text);
+    // The edits below work on [symbol.<name>] tables: a symbol written as an inline
+    // table or with dotted keys under [symbol] would lose its line or get its
+    // build table under the wrong header.
+    if (const toml::table* all = root["symbol"].as_table()) {
+        for (const auto& [name, node] : *all) {
+            const toml::table* table = node.as_table();
+            if (table == nullptr) continue;
+            std::string header = edit.line(static_cast<uint32_t>(table->source().begin.line));
+            std::erase_if(header, [](char c) { return c == ' ' || c == '\t'; });
+            if (table->is_inline() || !header.starts_with("[symbol.")) {
+                error = "symbol " + std::string(name.str()) + " is not written as a [symbol." + std::string(name.str()) +
+                        "] table, which anvil port needs; write it as one";
+                return std::nullopt;
+            }
+        }
+    }
     if (const auto* builds = root.get("builds")) {
         const auto last = static_cast<uint32_t>(builds->source().end.line);
         std::string& line = edit.line(last);
@@ -660,7 +676,10 @@ std::string format_port_report(const PortReport& report, const std::filesystem::
         out += report.build_known ? "Next: anvil check <plugin-dir> --exe <the new eu4.exe>.\n"
                                   : "Next: anvil check <plugin-dir> --exe <the new eu4.exe>, once this Anvil knows the build.\n";
     }
-    if (report.written && !report.manual.empty()) out += "The file does not parse until each symbol marked 'anvil port:' is placed by hand or declared absent.\n";
+    if (report.written && !report.manual.empty()) {
+        out += "Place each symbol marked 'anvil port:' by hand or declare it absent: until then a symbol at an rva makes the "
+               "file fail to parse, and an export fails anvil check --exe on the new build.\n";
+    }
     return out;
 }
 
