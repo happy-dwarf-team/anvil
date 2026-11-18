@@ -16,6 +16,7 @@
 #include "i18n/message.hpp"
 #include "i18n/translate.hpp"
 #include "manager_app.hpp"
+#include "net/https.hpp"
 #include "platform.hpp"
 #include "ui.hpp"
 #include "ui/imgui_colors.hpp"
@@ -595,6 +596,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     }
 
     g_app = nullptr;
+    // A catalog or release check, a plugin download or a report upload may still
+    // run on a worker thread, and the app's futures wait for it: end them, so the
+    // process does not stay on without a window until a slow transfer is done.
+    anvil::net::cancel_all();
     app.reset();
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
