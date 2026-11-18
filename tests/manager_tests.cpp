@@ -731,7 +731,10 @@ int main(int argc, char** argv) {
         CHECK(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED) >= 0);
         // Wine stores a link's target in the ANSI code page, so a non-ASCII folder comes back folded
         // ("\u0105\u0107" becomes "ac"); Windows keeps it.
-        const fs::path folder = fs::temp_directory_path() / (under_wine() ? L"anvil-start-menu-test" : L"anvil-start-menu-test \u0105\u0107");
+        // One folder per process, as TempDir: runs of this test side by side do not share it.
+        const fs::path folder = fs::temp_directory_path() /
+                                ((under_wine() ? L"anvil-start-menu-test " : L"anvil-start-menu-test \u0105\u0107 ") +
+                                 std::to_wstring(GetCurrentProcessId()));
         std::error_code ec;
         fs::remove_all(folder, ec);
         fs::create_directories(folder, ec);
