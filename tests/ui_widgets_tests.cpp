@@ -3,9 +3,11 @@
 // drawn in a Dear ImGui context without a window or renderer: the mouse is
 // posted and the frame's windows are read back. This test's Dear ImGui is
 // built with the test engine's hooks (CMakeLists.txt), which report every
-// item's rectangle and label as it is drawn.
+// item's rectangle and label as it is drawn. It also ends a frame an
+// exception left half drawn (src/ui/frame_recovery.hpp).
 #include "i18n/translate.hpp"
 #include "ui/forge_widgets.hpp"
+#include "ui/frame_recovery.hpp"
 #include "ui/plugin_widgets.hpp"
 #include "ui/plugins_view.hpp"
 
@@ -19,6 +21,7 @@
 #include <cstring>
 #include <functional>
 #include <map>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -227,6 +230,49 @@ int main() {
             }
         }
         anvil::i18n::set_language(anvil::i18n::Language::English);
+    });
+
+    run("end_failed_frame: a frame an exception left half drawn pops what it pushed and reports no user error", [] {
+        ImGuiContext& g = *ImGui::GetCurrentContext();
+        ImGuiStyle& style = ImGui::GetStyle();
+        const ImVec4 text = style.Colors[ImGuiCol_Text];
+        const float alpha = style.Alpha;
+        const ImVec2 padding = style.WindowPadding;
+        ImGui::GetIO().DeltaTime = 1.0f / 60.0f;
+        ImGui::NewFrame();
+        try {
+            ImGui::Begin("thrown", nullptr, ImGuiWindowFlags_NoSavedSettings);
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 0, 0, 1));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(1, 1));
+            ImGui::BeginDisabled();
+            ImGui::PushID("row");
+            ImGui::BeginChild("child", ImVec2(100, 50));
+            throw std::bad_alloc();
+        } catch (const std::bad_alloc&) {
+            anvil::ui::end_failed_frame();
+        }
+        CHECK(g.FrameCountEnded == g.FrameCount);
+        CHECK(!g.WithinFrameScope);
+        CHECK(g.ColorStack.Size == 0);
+        CHECK(g.StyleVarStack.Size == 0);
+        CHECK(g.DisabledStackSize == 0);
+        CHECK(style.Colors[ImGuiCol_Text].x == text.x && style.Colors[ImGuiCol_Text].y == text.y);
+        CHECK(style.Alpha == alpha);
+        CHECK(style.WindowPadding.x == padding.x && style.WindowPadding.y == padding.y);
+        // Not reported as the code's mismatched Begin/End (a plain EndFrame() logs "Missing End()").
+        CHECK(std::strstr(g.DebugLogBuf.c_str(), "[imgui-error]") == nullptr);
+        // ImGui's own recovery settings are back as they were.
+        CHECK(g.IO.ConfigErrorRecovery && g.IO.ConfigErrorRecoveryEnableAssert &&
+              g.IO.ConfigErrorRecoveryEnableDebugLog && g.IO.ConfigErrorRecoveryEnableTooltip);
+        // The next frame starts from the default style and shows no "Missing End()" tooltip.
+        frame(ImVec2(10, 10), [] { ImGui::TextUnformatted("after"); });
+        CHECK(shown_tooltip().empty());
+        CHECK(g.ColorStack.Size == 0 && g.DisabledStackSize == 0);
+        CHECK(style.Alpha == alpha);
+        // Outside a frame it does nothing.
+        const int ended = g.FrameCountEnded;
+        anvil::ui::end_failed_frame();
+        CHECK(g.FrameCountEnded == ended);
     });
 
     ImGui::DestroyContext();

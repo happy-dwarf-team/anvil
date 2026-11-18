@@ -9,6 +9,7 @@
 #include "plugins_model.hpp"
 #include "release.hpp"
 #include "ui/forge_widgets.hpp"
+#include "ui/frame_recovery.hpp"
 #include "ui/imgui_colors.hpp"
 #include "ui/log_view.hpp"
 #include "ui/plugin_widgets.hpp"
@@ -1497,10 +1498,18 @@ void ui_frame(IDirect3DDevice9* device) {
     ImGui_ImplDX9_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
-    draw_notices(now);
-    if (badge) draw_badge(now);
-    draw_plugin_panels();
-    if (s.panel_open.load()) draw_panel();
+    try {
+        draw_notices(now);
+        if (badge) draw_badge(now);
+        draw_plugin_panels();
+        if (s.panel_open.load()) draw_panel();
+    } catch (...) {
+        // A failed allocation in the drawing (the caller catches it): end the
+        // frame here, or a colour, font or BeginDisabled() it left pushed stays
+        // in force for every later frame (src/ui/frame_recovery.hpp).
+        anvil::ui::end_failed_frame();
+        throw;
+    }
     ImGui::EndFrame();
     ImGui::Render();
     ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
