@@ -113,6 +113,24 @@ bool in_image(const CrashSources& s, uintptr_t address) {
     return s.image_size != 0 && address >= s.image_base && address - s.image_base < s.image_size;
 }
 
+// The start of the function that holds `address`, from the image's unwind data:
+// a chained entry (UNW_FLAG_CHAININFO, a function's later part) leads to the
+// entry of the function's start. 0 without unwind data.
+uintptr_t function_start(uintptr_t address) {
+    DWORD64 base = 0;
+    const RUNTIME_FUNCTION* entry = RtlLookupFunctionEntry(address, &base, nullptr);
+    if (entry == nullptr) return 0;
+    RUNTIME_FUNCTION current = *entry;
+    for (int depth = 0; depth < 32; ++depth) {
+        uint8_t info[4] = {};  // version and flags, prologue size, code count, frame register
+        if (!read_memory(static_cast<uintptr_t>(base) + current.UnwindData, info, sizeof(info))) break;
+        if ((info[0] >> 3 & UNW_FLAG_CHAININFO) == 0) break;
+        const uintptr_t chained = static_cast<uintptr_t>(base) + current.UnwindData + 4 + ((info[2] + 1u) & ~1u) * 2u;
+        if (!read_memory(chained, &current, sizeof(current))) break;
+    }
+    return static_cast<uintptr_t>(base) + current.BeginAddress;
+}
+
 }  // namespace
 
 void locate(uintptr_t address, const CrashSources& s, Located& out) {
@@ -128,8 +146,11 @@ void locate(uintptr_t address, const CrashSources& s, Located& out) {
             if (!asked) Sleep(2);
         }
         out.registry_busy = !asked;
+        if (asked && out.change.role == AddressRole::Trampoline) out.function = out.change.site;
     }
-    if (!in_image(s, address) || s.plugins == nullptr) return;
+    if (!in_image(s, address)) return;
+    out.function = function_start(address);
+    if (s.plugins == nullptr) return;
     const NearestSymbol nearest = s.plugins->nearest_symbol(address);
     out.symbol = nearest.symbol;
     out.symbol_plugin = nearest.plugin;
@@ -342,6 +363,41 @@ void add_owners(CrashVerdict& v, const AddressAttribution& a, const CrashSources
     for (size_t i = 0; i < a.count; ++i) add_handle(v, s.plugins->handle_of(a.changes[i].owner));
 }
 
+// Whether `plugin` has a function hook on the function that starts at `function`.
+bool hooks(const CrashSources& s, const PluginRecord* plugin, uintptr_t function) {
+    AddressAttribution at;
+    if (function == 0 || s.changes == nullptr || !s.changes->attribute(function, at)) return false;
+    if (at.role != AddressRole::ChangedBytes || at.site != function) return false;
+    for (size_t i = 0; i < at.count; ++i) {
+        const AnvilPlugin* handle = s.plugins->handle_of(at.changes[i].owner);
+        if (at.changes[i].kind == ChangeKind::FunctionHook && handle != nullptr && handle->record == plugin) return true;
+    }
+    return false;
+}
+
+// The game function that the plugin frame `i` passed its call on to, or 0: the
+// frames inward from it are plugin frames down to a frame in the game image,
+// and the plugin of each of them hooks the function that frame is in.
+uintptr_t passes_on_to(const Frame* frames, size_t i, const CrashSources& s) {
+    if (s.changes == nullptr || s.plugins == nullptr) return 0;
+    size_t game = i;
+    while (game > 0 && frames[game - 1].where.plugin != nullptr) --game;
+    if (game == 0) return 0;  // the crash itself is in a plugin's DLL
+    const Located& callee = frames[game - 1].where;
+    if (!in_image(s, callee.address) && callee.change.role != AddressRole::Trampoline) return 0;
+    for (size_t k = game; k <= i; ++k) {
+        if (!hooks(s, frames[k].where.plugin, callee.function)) return 0;
+    }
+    return callee.function;
+}
+
+bool involves(const CrashVerdict& v, const PluginRecord* plugin) {
+    for (size_t i = 0; i < v.count; ++i) {
+        if (v.handles[i]->record == plugin) return true;
+    }
+    return false;
+}
+
 }  // namespace
 
 CrashVerdict assess(const Frame* frames, size_t count, const CrashSources& sources) {
@@ -358,11 +414,32 @@ CrashVerdict assess(const Frame* frames, size_t count, const CrashSources& sourc
         v.level = CrashLevel::InChange;
         return v;
     }
+    const PluginRecord* passed[CrashVerdict::kMax] = {};
+    uintptr_t passed_at[CrashVerdict::kMax] = {};
+    size_t passed_count = 0;
     for (size_t i = 1; i < count; ++i) {
-        add_plugin(v, frames[i].where.plugin);
+        const PluginRecord* plugin = frames[i].where.plugin;
+        if (plugin != nullptr) {
+            if (const uintptr_t function = passes_on_to(frames, i, sources); function != 0) {
+                bool listed = false;
+                for (size_t k = 0; k < passed_count; ++k) listed = listed || passed[k] == plugin;
+                if (!listed && passed_count < CrashVerdict::kMax) {
+                    passed[passed_count] = plugin;
+                    passed_at[passed_count++] = function;
+                }
+                continue;
+            }
+        }
+        add_plugin(v, plugin);
         add_owners(v, frames[i].where.change, sources);
     }
     if (v.count > 0) v.level = CrashLevel::OnStack;
+    // A plugin involved through another frame is not listed as passing on.
+    for (size_t k = 0; k < passed_count; ++k) {
+        if (involves(v, passed[k])) continue;
+        v.passed_on[v.passed_on_count] = passed[k];
+        v.passed_on_at[v.passed_on_count++] = passed_at[k];
+    }
     return v;
 }
 
@@ -666,6 +743,14 @@ CrashVerdict build_report(const ReportInput& in, TextBuffer& j, TextBuffer& t) {
             t.putf("  %s has no issues link in its plugin.toml.\r\n", p.id().c_str());
         }
     });
+    for (size_t i = 0; i < verdict.passed_on_count; ++i) {
+        t.putf("  On the stack but not involved: plugin %s's function hook of ", verdict.passed_on[i]->id().c_str());
+        Located at;
+        locate(verdict.passed_on_at[i], s, at);
+        put_where(t, at);
+        if (at.symbol != nullptr && at.symbol_offset == 0) t.putf(" [%s]", at.symbol->declaration.name.c_str());
+        t.put(" had passed the call on to the game.\r\n");
+    }
 
     t.put("\r\nStack (innermost first; \"scan\" frames are return addresses found on the stack and may be stale):\r\n");
     for (size_t i = 0; i < frames; ++i) {
@@ -788,6 +873,11 @@ CrashVerdict build_report(const ReportInput& in, TextBuffer& j, TextBuffer& t) {
         if (!first_module) j.put(", ");
         first_module = false;
         j.json(verdict.handles[i]->name);
+    }
+    j.put("],\n  \"plugins_passed_on\": [");
+    for (size_t i = 0; i < verdict.passed_on_count; ++i) {
+        if (i > 0) j.put(", ");
+        j.json(verdict.passed_on[i]->id());
     }
     j.put("],\n  \"issues\": [");
     bool first_issue = true;

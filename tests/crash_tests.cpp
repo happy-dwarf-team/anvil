@@ -735,6 +735,84 @@ int main(int argc, char** argv) {
         CHECK(out.view() == "no plugin involved");
     });
 
+    run("crash: a plugin whose detour only passed the call on to the game is not involved", [] {
+        Scratch image(0x10000);
+        image.put(0x100, kAddOne);
+        TestStart start(image.at(0), 0x10000);
+        for (const char* id : {"outer", "inner", "other"}) add_plugin(start, id);
+        start.make();
+        ChangeRegistry& r = start.changes;
+        Fn next_outer = nullptr, next_inner = nullptr;
+        CHECK(r.hook_function(start.handle("outer")->owner, in_image(image.at(0x100)), reinterpret_cast<void*>(&detour_a),
+                              slot(next_outer)) == ChangeStatus::Ok);
+        CrashSources sources;
+        sources.changes = &r;
+        sources.plugins = &start.set();
+        sources.image_base = image.at(0);
+        sources.image_size = 0x10000;
+        const PluginRecord* outer = &start.plugin("outer");
+        const PluginRecord* inner = &start.plugin("inner");
+        const PluginRecord* other = &start.plugin("other");
+        // The crash deep in the game; inside the hooked function (add_one, whose start the
+        // unwind data would give: the scratch image has none); the detour; the game's caller.
+        Frame frames[5];
+        frames[0].where.address = image.at(0x500);
+        frames[1].where.address = image.at(0x104);
+        frames[1].where.function = image.at(0x100);
+        frames[2].where.plugin = outer;
+        frames[3].where.address = image.at(0x600);
+        CrashVerdict v = assess(frames, 4, sources);
+        CHECK(v.level == CrashLevel::NoPlugin && v.count == 0);
+        CHECK(v.passed_on_count == 1 && v.passed_on[0] == outer && v.passed_on_at[0] == image.at(0x100));
+
+        // Two plugins' detours of one function, the later one inner: both passed it on.
+        CHECK(r.hook_function(start.handle("inner")->owner, in_image(image.at(0x100)), reinterpret_cast<void*>(&detour_b),
+                              slot(next_inner)) == ChangeStatus::Ok);
+        frames[2].where.plugin = inner;
+        frames[3].where = Located{};
+        frames[3].where.plugin = outer;
+        frames[4].where.address = image.at(0x600);
+        v = assess(frames, 5, sources);
+        CHECK(v.level == CrashLevel::NoPlugin && v.passed_on_count == 2);
+        CHECK(v.passed_on[0] == inner && v.passed_on[1] == outer);
+
+        // A plugin that does not hook the function is on the stack, and so is the
+        // detour that called into it.
+        frames[2].where.plugin = other;
+        v = assess(frames, 5, sources);
+        CHECK(v.level == CrashLevel::OnStack && v.count == 2 && v.passed_on_count == 0);
+        CHECK(v.handles[0] == start.handle("other") && v.handles[1] == start.handle("outer"));
+
+        // Without the function's start (no unwind data) nothing passes on.
+        frames[2].where.plugin = outer;
+        frames[3].where = Located{};
+        frames[3].where.address = image.at(0x600);
+        frames[1].where.function = 0;
+        v = assess(frames, 4, sources);
+        CHECK(v.level == CrashLevel::OnStack && v.count == 1 && v.handles[0] == start.handle("outer"));
+        frames[1].where.function = image.at(0x100);
+
+        // A plugin that passed one call on but is involved through another frame counts.
+        frames[4].where = Located{};
+        frames[4].where.plugin = outer;
+        v = assess(frames, 5, sources);
+        CHECK(v.level == CrashLevel::OnStack && v.count == 1 && v.handles[0] == start.handle("outer"));
+        CHECK(v.passed_on_count == 0);
+
+        // The start of a function from the unwind data of this executable.
+        CrashSources exe;
+        const auto base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+        exe.image_base = base;
+        exe.image_size = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
+                             base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew)
+                             ->OptionalHeader.SizeOfImage;
+        Located at;
+        locate(reinterpret_cast<uintptr_t>(&call_scratch) + 4, exe, at);
+        CHECK(at.function == reinterpret_cast<uintptr_t>(&call_scratch));
+        locate(image.at(0x104), sources, at);
+        CHECK(at.function == 0);  // no unwind data
+    });
+
     run("crash: the report in JSON and text, with issues, plugins, registers and the log", [] {
         Scratch image(0x10000);
         image.put(0x100, kAddOne);
@@ -800,6 +878,7 @@ int main(int argc, char** argv) {
         CHECK(contains(t, "changed bytes of patcher's byte patch rva 0x103 (2 B)"));
         CHECK(contains(t, "  quiet 1.0.0, loaded, main phase"));
         CHECK(contains(j, "\"modules_involved\": []") && !contains(t, "Through module"));
+        CHECK(contains(j, "\"plugins_passed_on\": [],") && !contains(t, "not involved"));
         CHECK(contains(t, "End of anvil.log:"));
         CHECK(contains(j, "\"notes\": [],") && !contains(t, "Notes from plugins"));
 
