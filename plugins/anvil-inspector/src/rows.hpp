@@ -18,6 +18,10 @@ inline constexpr std::uint32_t kText = 1;       // ANVIL_PANEL_TEXT
 inline constexpr std::uint32_t kButton = 2;     // ANVIL_PANEL_BUTTON
 inline constexpr std::uint32_t kSeparator = 3;  // ANVIL_PANEL_SEPARATOR
 inline constexpr std::size_t kMaxRows = 1024;
+// A row's label or value at most this many bytes, cut with "...": the panel takes
+// 4096 and refuses the whole set for one longer text (a name the game holds can be
+// up to 64 KB long).
+inline constexpr std::size_t kMaxRowText = 1000;
 inline constexpr std::size_t kItemsShown = 60;  // per list; the rest is "N more"
 
 struct Row {
