@@ -69,7 +69,10 @@ typedef struct AnvilScriptScope {
     char country[4];  /* the scope's country tag, "RUS"; "" when it has none */
 } AnvilScriptScope;
 
-/* One execution or description of one effect. Valid only during the call. */
+/* One execution or description of one effect. Valid only during the call.
+ * `size` is anvil-script's: a plugin built with a newer header reads only that
+ * many bytes (a field past it is not there), as anvil-sdk does. The same holds
+ * for AnvilScriptScope and AnvilScriptDay. */
 typedef struct AnvilScriptCall {
     uint32_t size; /* set by the service */
     uint32_t reserved;
