@@ -320,18 +320,20 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
     if (route_input(window, message, wparam, lparam)) return 0;
     const bool visible = s.visible.load(std::memory_order_acquire);
     const unsigned button = 1u << button_of(message, wparam);
-    if (is_button_up(message) && (g_imgui_buttons & button) != 0) {
-        g_imgui_buttons &= ~button;
-        // ImGui saw this button's press: its release reaches the backend also
-        // when the overlay hid in between (below when it is still visible).
-        if (!visible) {
-            std::lock_guard lock(s.mutex);
-            overlay::ui_message(window, message, wparam, lparam);
-        }
+    const bool release = is_button_up(message) && (g_imgui_buttons & button) != 0;
+    if (release) g_imgui_buttons &= ~button;
+    // The release of a press ImGui saw, and the WM_MOUSELEAVE its backend asked
+    // for (TrackMouseEvent; outside WM_MOUSEFIRST..WM_MOUSELAST), reach the
+    // backend also when the overlay hid in between; below when it is visible.
+    // Without the leave ImGui kept the last cursor position, and a hover, while
+    // the cursor was outside the window.
+    if (!visible && (release || message == WM_MOUSELEAVE)) {
+        std::lock_guard lock(s.mutex);
+        overlay::ui_message(window, message, wparam, lparam);
     }
     if (visible) {
-        if (is_mouse_message(message) || is_key_message(message) || message == WM_SETFOCUS ||
-            message == WM_KILLFOCUS || message == WM_INPUTLANGCHANGE) {
+        if (is_mouse_message(message) || message == WM_MOUSELEAVE || is_key_message(message) ||
+            message == WM_SETFOCUS || message == WM_KILLFOCUS || message == WM_INPUTLANGCHANGE) {
             std::lock_guard lock(s.mutex);
             overlay::ui_message(window, message, wparam, lparam);
             if (is_button_down(message)) g_imgui_buttons |= button;
