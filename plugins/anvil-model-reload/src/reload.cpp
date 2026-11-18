@@ -175,6 +175,12 @@ RunResult run(Game& game, const RunInput& in) {
     if (assets && !out.faulted) {
         const UnitRefresh u = game.refresh_units();
         out.faulted = u.faulted;
+        if (u.faulted) {
+            // Shown on the assets step, whose follow-up it is: save and restart.
+            for (StepResult& r : out.steps) {
+                if (r.step.what == Step::What::reload_assets) r.status = Status::faulted;
+            }
+        }
         out.units_refreshed = u.available && !u.faulted;
         out.unit_instances = u.instances;
         out.load_a_save = !out.units_refreshed;

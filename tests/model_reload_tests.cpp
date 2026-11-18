@@ -439,6 +439,7 @@ int main() {
         g.units = mr::UnitRefresh{true, true, 3};
         const mr::RunResult fault = mr::run(g, in);
         CHECK(fault.faulted && !fault.units_refreshed && fault.load_a_save);
+        CHECK(fault.steps[4].status == mr::Status::faulted && fault.steps[0].status == mr::Status::ok);
         g.units = mr::UnitRefresh{true, false, 7};
         g.console_present = false;
         g.calls.clear();
