@@ -80,7 +80,8 @@ std::optional<std::string> json_string(std::string_view text, size_t& at) {
 }
 
 // Where the value of a top-level key starts. The core writes every top-level
-// key on its own line with two spaces of indentation.
+// key on its own line with two spaces of indentation. A report cut off right
+// after a key gives json.size(): callers compare with the size, not npos.
 size_t top_level_value(std::string_view json, std::string_view key) {
     const std::string pattern = "\n  \"" + std::string(key) + "\": ";
     const size_t at = json.find(pattern);
@@ -132,7 +133,7 @@ CrashSummary parse_crash_summary(std::string_view json) {
     if (size_t at = top_level_value(json, "before_game_ready"); at != std::string_view::npos) {
         s.before_game_ready = json.substr(at, 4) == "true";
     }
-    if (size_t at = top_level_value(json, "plugins_involved"); at != std::string_view::npos && json[at] == '[') {
+    if (size_t at = top_level_value(json, "plugins_involved"); at < json.size() && json[at] == '[') {
         ++at;
         for (;;) {
             skip_space(json, at);
@@ -145,7 +146,7 @@ CrashSummary parse_crash_summary(std::string_view json) {
         }
     }
     // "issues": [{"plugin": "x", "url": "..."}, ...]: the first url.
-    if (size_t at = top_level_value(json, "issues"); at != std::string_view::npos && json[at] == '[') {
+    if (size_t at = top_level_value(json, "issues"); at < json.size() && json[at] == '[') {
         const size_t end = json.find(']', at);
         const size_t url = json.find("\"url\": ", at);
         if (url != std::string_view::npos && url < end) {
