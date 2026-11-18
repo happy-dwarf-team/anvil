@@ -50,3 +50,10 @@ jobs:
           subjectPatternError: >
             Start the subject "{subject}" with a lowercase letter and do not end it
             with a period, e.g. "feat(api): add expect_bytes".
+
+  # The description shows what the pull request changes in its Evidence section
+  # (CONTRIBUTING.md of happy-dwarf-team/.github, "Evidence").
+  pr-evidence:
+    permissions:
+      pull-requests: read
+    uses: happy-dwarf-team/.github/.github/workflows/pr-evidence.yml@839b9c5c6dcef263d2232c1e22c3f7e9b0caa324 # main
