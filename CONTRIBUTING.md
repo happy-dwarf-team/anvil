@@ -107,7 +107,9 @@ Move-Item -Force bindings.generated.rs sdk/rust/anvil-sys/src/bindings.rs
 Prefer that file to editing `bindings.rs` by hand. A header change applied by
 hand passes the check only if it copies bindgen's form exactly:
 
-- the constants (`pub const`) in header order at the top of the file;
+- the `#define` constants (`pub const`) in header order at the top of the
+  file; an enum's values instead stand where the enum is, followed by its
+  `pub type`;
 - the new struct right after the struct that precedes it in the headers,
   followed by its `const _: () = { … }` block of layout asserts (size,
   alignment, then the offset of each field);
