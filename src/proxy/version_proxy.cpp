@@ -41,14 +41,32 @@ Fn Real(const char* name) noexcept {
     return module ? reinterpret_cast<Fn>(GetProcAddress(module, name)) : nullptr;
 }
 
+// The real function of one export, looked up on its first call. The slot is a
+// constant-initialized atomic, not a function-local static with a dynamic
+// initializer: such a static's init guard would be held across LoadLibraryExW,
+// and a thread inside some DLL's DllMain (holding the loader lock) that called
+// the same export for the first time would wait on that guard while the guard's
+// holder waits for the loader lock. Two threads may both look it up; both get
+// the same address.
+template <typename Fn>
+Fn Cached(std::atomic<Fn>& slot, const char* name) noexcept {
+    Fn fn = slot.load(std::memory_order_acquire);
+    if (fn == nullptr) {
+        fn = Real<Fn>(name);
+        if (fn != nullptr) slot.store(fn, std::memory_order_release);
+    }
+    return fn;
+}
+
 }  // namespace
 
-#define ANVIL_FORWARD(name, failure, ...)                         \
-    static const auto fn = Real<decltype(&::name)>(#name);       \
-    if (fn == nullptr) {                                          \
-        SetLastError(ERROR_PROC_NOT_FOUND);                       \
-        return failure;                                           \
-    }                                                             \
+#define ANVIL_FORWARD(name, failure, ...)                                  \
+    static constinit std::atomic<decltype(&::name)> slot{nullptr};        \
+    const auto fn = Cached(slot, #name);                                   \
+    if (fn == nullptr) {                                                   \
+        SetLastError(ERROR_PROC_NOT_FOUND);                                \
+        return failure;                                                    \
+    }                                                                      \
     return fn(__VA_ARGS__)
 
 extern "C" {
@@ -60,7 +78,8 @@ BOOL WINAPI AnvilProxy_GetFileVersionInfoA(LPCSTR file, DWORD handle, DWORD leng
 // Undocumented in the SDK headers: BOOL (DWORD flags, HANDLE file, DWORD length, LPVOID data).
 BOOL WINAPI AnvilProxy_GetFileVersionInfoByHandle(DWORD flags, HANDLE file, DWORD length, LPVOID data) {
     using Fn = BOOL(WINAPI*)(DWORD, HANDLE, DWORD, LPVOID);
-    static const auto fn = Real<Fn>("GetFileVersionInfoByHandle");
+    static constinit std::atomic<Fn> slot{nullptr};
+    const auto fn = Cached(slot, "GetFileVersionInfoByHandle");
     if (fn == nullptr) {
         SetLastError(ERROR_PROC_NOT_FOUND);
         return FALSE;
