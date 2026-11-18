@@ -125,7 +125,11 @@ std::uint64_t fnv(std::string_view s) {
     return h;
 }
 
-std::string file_line(const Message& m) { return m.line > 0 ? m.file + ":" + std::to_string(m.line) : m.file; }
+// For a row: the file at most 600 bytes, since the panel takes 4096 bytes per row.
+std::string file_line(const Message& m) {
+    const std::string file = cut(m.file, 600);
+    return m.line > 0 ? file + ":" + std::to_string(m.line) : file;
+}
 
 }  // namespace
 
@@ -396,7 +400,7 @@ void Model::details(std::vector<Row>& out, const Item& item, const Texts& t) con
     if (m.kind == Kind::target) {
         std::uint64_t script = 0, tooltip = 0;
         for (const std::uint32_t i : item.messages) (messages_[i].tooltip ? tooltip : script) += messages_[i].count();
-        text(in + t("Event target"), m.token);
+        text(in + t("Event target"), cut(m.token, 300));
         text(in + t("Count"), t.f("{0} in script, {1} in tooltips", {grouped(script), grouped(tooltip)}));
     } else {
         text(in + t("Message"), cut(m.text, kMaxText));
@@ -406,12 +410,12 @@ void Model::details(std::vector<Row>& out, const Item& item, const Texts& t) con
                                               : grouped(m.count()));
     }
     text(in + t("Game code"),
-         t.f("[{0}:{1}], the game's C++ code, not a mod's file", {m.source, std::to_string(m.source_line)}));
+         t.f("[{0}:{1}], the game's C++ code, not a mod's file", {cut(m.source, 200), std::to_string(m.source_line)}));
     if (m.kind != Kind::target) {
         if (m.file.empty()) {
             text(in + t("File"), t("The game names no file or line."));
         } else if (!m.resolved.empty()) {
-            text(in + t("File"), t.f("{0} in {1}", {file_line(m), m.layer}));
+            text(in + t("File"), t.f("{0} in {1}", {file_line(m), cut(m.layer, 200)}));
             button(in + t("Open in VS Code"), make_id(Action::open, 0));
             button(in + t("Copy the path and line"), make_id(Action::copy, 0));
         } else {

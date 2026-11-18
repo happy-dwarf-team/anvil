@@ -422,6 +422,29 @@ void panel_tests(const fs::path& source_dir) {
         CHECK(defined && used);
     });
 
+    run("panel: a very long token, file or game file keeps every row within the panel's 4096 bytes", [] {
+        // The overlay refuses a whole set of rows when one text is longer than 4096 bytes.
+        se::Model model;
+        const std::string target(5000, 't');
+        const std::string path = "interface/" + std::string(5000, 'p') + ".gui";
+        model.update(0, "gamestate.cpp", 7653, "Undefined event target: " + target, 1, 0);
+        model.update(1, std::string(5000, 's') + ".cpp", 9, "bad, near line: 12 file: " + path, 1, 0);
+        se::View view;
+        view.open = {static_cast<int>(se::Kind::target), static_cast<int>(se::Kind::located)};
+        const se::Texts en;
+        for (std::uint64_t i = 0; i < 2; ++i) {
+            view.selected = se::item_key(*model.message(i));
+            const std::vector<se::Row> rows = model.rows(view, {}, en);
+            bool fits = true, cut = false;
+            for (const se::Row& r : rows) {
+                if (r.label.size() > 4096 || r.value.size() > 4096) fits = false;
+                if ((r.label.ends_with("Event target") || r.label.ends_with("File")) && r.value.find("...") != std::string::npos)
+                    cut = true;
+            }
+            CHECK(fits && cut);
+        }
+    });
+
     run("panel: a heading per kind, file and line first, missing files folded and last", [] {
         se::Model model;
         model.update(0, "a.cpp", 1, "Could not open file: history/a.txt", 1, 0);
