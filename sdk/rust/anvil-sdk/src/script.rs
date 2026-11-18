@@ -52,6 +52,7 @@ use std::ptr;
 use std::sync::atomic::AtomicBool;
 
 use crate::error::{check, Error, ErrorCode, Result};
+use crate::event::read_sized;
 use crate::host::Host;
 use crate::panic::run_callback;
 use crate::sys::{
@@ -96,8 +97,10 @@ impl<'a> Call<'a> {
     /// `raw` is NULL or points to a call whose strings are NUL-terminated and
     /// outlive `'a`.
     unsafe fn from_raw(raw: *const AnvilScriptCall) -> Option<Self> {
-        // SAFETY: the caller's pointer, NULL or valid for the call.
-        let raw = unsafe { raw.as_ref() }?;
+        // SAFETY: the caller's pointer, NULL or valid for the call, starts with
+        // the size anvil-script knows: a call of an older anvil-script is read
+        // only that far, the rest zero (no strings, no scope).
+        let raw = unsafe { read_sized::<AnvilScriptCall>(raw.cast()) }?;
         if raw.key.is_null() {
             return None;
         }
@@ -367,11 +370,12 @@ where
 {
     // SAFETY: the adapter subscribe leaked, never freed.
     let adapter = unsafe { &*context.cast::<Adapter<F>>() };
-    // SAFETY: anvil-script passes its day for the call (or NULL, never seen).
-    let Some(raw) = (unsafe { day.as_ref() }) else {
+    // SAFETY: anvil-script passes its day for the call (or NULL, never seen),
+    // read only as far as its size.
+    let Some(raw) = (unsafe { read_sized::<AnvilScriptDay>(day.cast()) }) else {
         return;
     };
-    let day = Day::from_raw(raw);
+    let day = Day::from_raw(&raw);
     run_callback("day end", &adapter.panicked, (), || (adapter.handler)(&day));
 }
 

@@ -60,6 +60,11 @@ typedef enum AnvilGameSessionChange {
     ANVIL_GAME_SESSION_ENDED = 2
 } AnvilGameSessionChange;
 
+/* session() and date() below write their struct whole, whatever its `size`
+ * holds (a caller need not set it): AnvilGameSession and AnvilGameDate do not
+ * grow within version 1 of the service, and a new field comes in a new struct
+ * with a function of its own. A reader of the events' payloads reads only
+ * `size` bytes, as for every payload. */
 typedef struct AnvilGameSession {
     uint32_t size;        /* sizeof(AnvilGameSession) as known by anvil-game */
     uint32_t change;      /* AnvilGameSessionChange; ENDED carries the flags the session had */

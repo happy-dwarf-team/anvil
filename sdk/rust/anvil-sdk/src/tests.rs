@@ -2002,6 +2002,23 @@ fn day_end_subscribes_with_the_plugin_and_passes_the_day() {
             new_year: false
         }
     );
+    // A day of a publisher that knows only `size` and `flags`: nothing past
+    // them is read, the date is zero.
+    let short = AnvilScriptDay {
+        size: std::mem::offset_of!(AnvilScriptDay, year) as u32,
+        ..new_year
+    };
+    call(0, &short);
+    assert_eq!(
+        *SEEN.lock().unwrap().last().unwrap(),
+        script::Day {
+            year: 0,
+            month: 0,
+            day: 0,
+            new_month: true,
+            new_year: true
+        }
+    );
 }
 
 fn raw_call(key: &CStr, value: &CStr, province: i32, country: &[u8; 4]) -> AnvilScriptCall {
@@ -2131,6 +2148,21 @@ fn effects_register_with_the_plugin_and_pass_the_call() {
                 Tag::new("RUS")
             ),
         ]
+    );
+    // A call of an anvil-script that knows no scope: the scope is not read.
+    let unscoped = AnvilScriptCall {
+        size: std::mem::offset_of!(AnvilScriptCall, scope) as u32,
+        ..raw_call(c"chisel_set_terrain", c"steppe", 295, b"RUS\0")
+    };
+    execute(0, &unscoped);
+    assert_eq!(
+        SEEN.lock().unwrap().last().unwrap(),
+        &(
+            "chisel_set_terrain".to_owned(),
+            "steppe".to_owned(),
+            None,
+            None
+        )
     );
 
     // The first line only, its whole length, cut at a whole character.
