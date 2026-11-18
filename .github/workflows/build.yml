@@ -132,6 +132,7 @@ jobs:
         run: cargo install bindgen-cli --version 0.73.2 --locked
 
       - name: Rust bindings match the header
+        id: bindings
         shell: pwsh
         env:
           LIBCLANG_PATH: C:\Program Files\LLVM\bin
@@ -139,12 +140,47 @@ jobs:
           sdk/rust/regen-bindings.ps1 -Check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      # On a mismatch, bindgen's own file and the difference: someone without
+      # libclang takes this file rather than formatting bindings.rs by hand
+      # (CONTRIBUTING.md, "Rust bindings").
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ failure() }}
+        id: bindings-artifact
+        if: ${{ failure() && steps.bindings.outcome == 'failure' }}
         with:
           name: anvil-sys-bindings
-          path: bindings.generated.rs
+          path: |
+            bindings.generated.rs
+            bindings.generated.diff
           if-no-files-found: ignore
+
+      - name: How to fetch the generated bindings
+        if: ${{ failure() && steps.bindings-artifact.outputs.artifact-id != '' }}
+        shell: pwsh
+        env:
+          ARTIFACT_URL: ${{ steps.bindings-artifact.outputs.artifact-url }}
+        run: |
+          $fetch = "gh run download $env:GITHUB_RUN_ID -R $env:GITHUB_REPOSITORY -n anvil-sys-bindings"
+          $lines = @(
+            'sdk/rust/anvil-sys/src/bindings.rs differs from what bindgen gives for the headers.'
+            'Take bindgen''s file instead of editing bindings.rs by hand. From the repository root:'
+            "  $fetch"
+            '  Move-Item -Force bindings.generated.rs sdk/rust/anvil-sys/src/bindings.rs'
+            'bindings.generated.diff in the same artifact shows the difference.'
+            "Artifact: $env:ARTIFACT_URL"
+          )
+          $lines | Write-Host
+          Write-Host "::error title=Rust bindings differ from bindgen::Fetch bindgen's file with: $fetch"
+          $fence = '```'
+          @(
+            '## Rust bindings differ from bindgen'
+            ''
+            "${fence}powershell"
+            $fetch
+            'Move-Item -Force bindings.generated.rs sdk/rust/anvil-sys/src/bindings.rs'
+            $fence
+            ''
+            "[Artifact]($env:ARTIFACT_URL), with bindings.generated.diff."
+          ) | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Rust checks
         shell: bash
