@@ -75,6 +75,9 @@ struct Located {
     int also_declared = 0;        // further plugins declaring the same address
     uintptr_t symbol_offset = 0;
     bool inside_symbol = false;   // within the symbol's declared bytes
+    // In the game image: the start of the function that holds the address, from
+    // its unwind data (a trampoline's: its site); 0 when not known.
+    uintptr_t function = 0;
 };
 
 void locate(uintptr_t address, const CrashSources& sources, Located& out);
@@ -115,11 +118,22 @@ enum class CrashLevel { NoPlugin, OnStack, InChange, InCode };
 // its own handle, for one in a change the handle that requested it (a
 // module's, ADR 0011). The report names their plugins, and the modules among
 // them.
+//
+// A plugin whose frames on the stack only pass a call on is not involved: its
+// detour of a game function, in a function hook of its own, called the hooked
+// function (the next frame inward, through other plugins' detours of the same
+// function), and the crash came later inside the game. anvil-game's hook of the
+// game's frame function is on the main thread's stack during every frame. Such
+// plugins are listed in `passed_on` (with the hooked function in `passed_on_at`)
+// unless a frame of theirs counts otherwise.
 struct CrashVerdict {
     static constexpr size_t kMax = 8;
     CrashLevel level = CrashLevel::NoPlugin;
     const AnvilPlugin* handles[kMax] = {};
     size_t count = 0;
+    const PluginRecord* passed_on[kMax] = {};
+    uintptr_t passed_on_at[kMax] = {};
+    size_t passed_on_count = 0;
 };
 
 CrashVerdict assess(const Frame* frames, size_t count, const CrashSources& sources);
