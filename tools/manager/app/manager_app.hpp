@@ -163,6 +163,7 @@ private:
     std::filesystem::path steam_elsewhere_;  // a Steam game_ that Steam does not start: the folder Play would start instead
     bool launcher_opened_ = false;  // Play opened the Paradox launcher in a GOG install and the game has not started yet
     std::optional<Snapshot> snapshot_;
+    uint64_t snapshot_generation_ = 0;  // +1 at every new snapshot
     std::future<Snapshot> pending_;
     bool running_ = false;
     std::chrono::steady_clock::time_point running_checked_{};

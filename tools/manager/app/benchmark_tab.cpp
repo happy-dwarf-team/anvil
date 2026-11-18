@@ -136,6 +136,15 @@ void dot_strip(const Json& warm, const std::string& without, const std::string& 
     ImGui::Dummy(ImVec2(width, row_h * 2 + ImGui::GetTextLineHeight() + 10));
 }
 
+// The start at a 1-based position of the report, or a null value: a kept
+// report is read from a file, and its positions are not checked on reading.
+const Json& start_at(const Json& report, int64_t position) {
+    static const Json none;
+    const std::vector<Json>& starts = report["starts"].items();
+    if (position < 1 || static_cast<uint64_t>(position) > starts.size()) return none;
+    return starts[static_cast<size_t>(position - 1)];
+}
+
 }  // namespace
 
 BenchmarkTab::BenchmarkTab(HWND window, ManagerSettings& settings) : window_(window), settings_(settings) {}
@@ -176,6 +185,7 @@ void BenchmarkTab::draw(const BenchmarkContext& context) {
 
 void BenchmarkTab::check(const BenchmarkContext& context) {
     checked_report_ = context.report;
+    checked_generation_ = context.generation;
     checked_plugin_ = plugin_;
     checks_ = setup_checks(read_setup_facts(context.game, *context.report, context.installed_anvil, plugin_));
 }
@@ -201,7 +211,11 @@ void BenchmarkTab::draw_setup(const BenchmarkContext& context) {
         const auto bellows = std::find_if(plugins.begin(), plugins.end(), [](const ComparablePlugin& p) { return p.id == "bellows"; });
         plugin_ = bellows != plugins.end() ? bellows->id : plugins.front().id;
     }
-    if (checked_report_ != context.report || checked_plugin_ != plugin_) check(context);
+    // The report's address stays the same from one snapshot to the next: the
+    // generation tells a folder read again (EU4 started, Steam closed).
+    if (checked_report_ != context.report || checked_generation_ != context.generation || checked_plugin_ != plugin_) {
+        check(context);
+    }
 
     // The series' two choices as facts: the plugin compared and the warm starts it needs with and without it.
     if (begin_facts("series")) {
@@ -325,6 +339,9 @@ void BenchmarkTab::start(const BenchmarkContext& context) {
     const std::vector<ComparablePlugin> plugins = comparable_plugins(*context.report);
     const auto compared = std::find_if(plugins.begin(), plugins.end(), [&](const ComparablePlugin& p) { return p.id == plugin_; });
     if (compared == plugins.end()) return;
+    // The checks again, as they are now: EU4 may have started since they were shown.
+    check(context);
+    if (checks_.empty() || !checks_pass(checks_)) return;
     // The first arm alternates between series; only this computer remembers it.
     const Arm first = settings_.benchmark_first_arm == "without" ? Arm::With : Arm::Without;
     settings_.benchmark_first_arm = arm_name(first);
@@ -621,7 +638,7 @@ void BenchmarkTab::draw_result() {
     for (const Json& n : result["not_counted"].items()) {
         const int64_t position = n["position"].as_integer();
         std::string line = "#" + std::to_string(position) + ": " + not_counted_text(n["reason"].as_string());
-        const Json& cost = r["starts"].items()[static_cast<size_t>(position - 1)]["cold_start"]["open_cost"];
+        const Json& cost = start_at(r, position)["cold_start"]["open_cost"];
         if (n["reason"].as_string() == "unclear" && cost.is_object() && cost["files"].as_integer() > 0) {
             char per_file[64];
             std::snprintf(per_file, sizeof(per_file), "%.3f", cost["ms"].as_number() / cost["files"].as_number());
@@ -790,7 +807,7 @@ void BenchmarkTab::draw_preview() {
             }
             ImGui::EndCombo();
         }
-        const Json& entry = r["starts"].items()[static_cast<size_t>(shown - 1)]["plugins"][plugin];
+        const Json& entry = start_at(r, shown)["plugins"][plugin];
         if (!entry["done"].as_bool()) {
             state_row(::anvil::ui::Glyph::Attention,
                       trf("In this start {0} had not finished when the game quit: values it set later are missing.", {plugin}));

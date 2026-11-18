@@ -304,8 +304,10 @@ bool keep_report(const fs::path& dir, const std::string& stamp, const std::strin
     if (!write_file_atomic(file, text, error)) return false;
     // The stamps sort by time: everything before the newest kKeptReports goes.
     std::vector<fs::path> reports;
-    for (const auto& entry : fs::directory_iterator(dir, ec)) {
-        if (entry.is_regular_file(ec) && entry.path().extension() == ".json") reports.push_back(entry.path());
+    // increment(ec): the range-for's operator++ throws when the listing fails half way.
+    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        std::error_code type;
+        if (it->is_regular_file(type) && it->path().extension() == ".json") reports.push_back(it->path());
     }
     std::sort(reports.begin(), reports.end(), [](const fs::path& a, const fs::path& b) { return a.filename() > b.filename(); });
     for (size_t i = kKeptReports; i < reports.size(); ++i) {
@@ -331,13 +333,15 @@ bool mark_sent(const fs::path& file, std::string& error) {
 std::vector<KeptReport> kept_reports(const fs::path& dir) {
     std::vector<KeptReport> out;
     std::error_code ec;
-    for (const auto& entry : fs::directory_iterator(dir, ec)) {
-        if (!entry.is_regular_file(ec) || entry.path().extension() != ".json") continue;
+    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        const fs::directory_entry& entry = *it;
+        std::error_code type;
+        if (!entry.is_regular_file(type) || entry.path().extension() != ".json") continue;
         KeptReport k;
         k.file = entry.path();
         const auto name = entry.path().stem().u8string();
         k.name.assign(name.begin(), name.end());
-        k.sent = fs::exists(sent_marker(entry.path()), ec);
+        k.sent = fs::exists(sent_marker(entry.path()), type);
         std::string parse_error;
         const auto text = read_text_file(entry.path(), 1 << 20);
         const auto doc = text ? parse_json(*text, parse_error) : std::nullopt;
