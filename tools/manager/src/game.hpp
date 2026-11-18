@@ -79,8 +79,9 @@ GameFolder inspect_game_folder(const std::filesystem::path& dir);
 bool same_file(const std::filesystem::path& a, const std::filesystem::path& b);
 
 // True when an eu4.exe process runs from `game_dir`, or when an eu4.exe
-// runs whose path cannot be read (it may be this one). While the game runs,
-// the Manager changes nothing in its folder (design §5.3).
+// runs whose path cannot be read (it may be this one). One that has ended,
+// though still listed, runs nowhere. While the game runs, the Manager changes
+// nothing in its folder (design §5.3).
 bool game_running(const std::filesystem::path& game_dir);
 
 // The eu4.exe processes as seen from `game_dir` (issue #253).

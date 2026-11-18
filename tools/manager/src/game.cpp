@@ -299,7 +299,9 @@ GameProcesses game_processes(const fs::path& game_dir) {
         if (_wcsicmp(entry.szExeFile, L"eu4.exe") != 0) continue;
         const HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID);
         if (process == nullptr) {
-            out.here = true;  // cannot tell which game it is
+            // A game that ended after the snapshot is gone (ERROR_INVALID_PARAMETER): it runs
+            // nowhere. Any other refusal: cannot tell which game it is.
+            if (GetLastError() != ERROR_INVALID_PARAMETER) out.here = true;
             continue;
         }
         wchar_t path[MAX_PATH * 4] = {};
@@ -309,7 +311,12 @@ GameProcesses game_processes(const fs::path& game_dir) {
         const uint64_t started = GetProcessTimes(process, &created, &exited, &kernel, &user) != 0
                                      ? (static_cast<uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime
                                      : 0;
+        // A game that has ended but is not gone yet (a handle to it still open, or its exit
+        // still under way) runs nowhere either; its image name may already be unreadable.
+        DWORD code = 0;
+        const bool ended = GetExitCodeProcess(process, &code) != 0 && code != STILL_ACTIVE;
         CloseHandle(process);
+        if (ended) continue;
         if (!known) {
             out.here = true;
         } else if (same_file(path, exe)) {
