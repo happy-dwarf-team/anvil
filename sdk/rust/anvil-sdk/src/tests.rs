@@ -67,6 +67,14 @@ unsafe extern "C" fn fake_hook_function(
         return ANVIL_ERROR_NOT_DECLARED;
     }
     let original: unsafe extern "C" fn(i32) -> i32 = fake_original;
+    if symbol == 98 {
+        // As the core does when enabling fails: `next` was written, then cleared.
+        unsafe {
+            *next = original as *mut c_void;
+            *next = ptr::null_mut();
+        }
+        return ANVIL_ERROR_CONFLICT;
+    }
     unsafe {
         *next = original as *mut c_void;
         *out = NEXT_CHANGE.fetch_add(1, Ordering::Relaxed) as *mut AnvilChange;
@@ -1211,6 +1219,58 @@ fn a_function_hook_gets_next_and_holds_one_change() {
     assert_eq!(again.code(), ErrorCode::InvalidArgument);
     HOOK.remove().unwrap();
     assert!(!HOOK.is_active());
+    assert_eq!(with(|r| r.removed.len()), 1);
+}
+
+#[test]
+fn a_failed_request_on_a_reused_hook_leaves_next_to_a_thread_still_in_the_old_detour() {
+    static HOOK: FunctionHook<unsafe extern "C" fn(i32) -> i32> = FunctionHook::new();
+    unsafe extern "C" fn detour(x: i32) -> i32 {
+        unsafe { HOOK.next().unwrap()(x) * 10 }
+    }
+    let (_guard, table) = fake_host();
+    assert_eq!(load::<Quiet>(table), ANVIL_OK);
+    let host = Host::current().unwrap();
+    unsafe { host.hook(&HOOK, 1, detour) }.unwrap();
+    HOOK.remove().unwrap();
+    // The hook is reused and Anvil refuses the new change, after it wrote `next`.
+    let refused = unsafe { host.hook(&HOOK, 98, detour) }.unwrap_err();
+    assert_eq!(refused.code(), ErrorCode::Conflict);
+    assert!(!HOOK.is_active());
+    // A thread still inside the removed change's detour passes on as before.
+    assert_eq!(unsafe { detour(4) }, 50);
+    // The hook takes a change again.
+    unsafe { host.hook(&HOOK, 1, detour) }.unwrap();
+    assert!(HOOK.is_active());
+    HOOK.remove().unwrap();
+}
+
+#[test]
+fn a_hook_object_is_claimed_by_one_request_at_a_time() {
+    static HOOK: FunctionHook<unsafe extern "C" fn(i32) -> i32> = FunctionHook::new();
+    let (_guard, table) = fake_host();
+    assert_eq!(load::<Quiet>(table), ANVIL_OK);
+    let host = Host::current().unwrap();
+    // A request on another thread holds the hook while Anvil answers it.
+    let claim = HOOK.claim("hook_function").unwrap();
+    assert!(HOOK.is_active());
+    let second = unsafe { host.hook(&HOOK, 1, fake_original) }.unwrap_err();
+    assert_eq!(second.code(), ErrorCode::InvalidArgument);
+    assert!(
+        second.to_string().contains("already holds a change"),
+        "{second}"
+    );
+    let removed = HOOK.remove().unwrap_err();
+    assert!(
+        removed.to_string().contains("another thread is installing"),
+        "{removed}"
+    );
+    assert!(with(|r| r.removed.is_empty()));
+    // That request fails: the hook is free again.
+    drop(claim);
+    assert!(!HOOK.is_active());
+    unsafe { host.hook(&HOOK, 1, fake_original) }.unwrap();
+    HOOK.remove().unwrap();
     assert_eq!(with(|r| r.removed.len()), 1);
 }
 

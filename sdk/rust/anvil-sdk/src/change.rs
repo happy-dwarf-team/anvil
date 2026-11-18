@@ -76,9 +76,73 @@ fn remove_handle(handle: Option<NonNull<AnvilChange>>) -> Result<()> {
     }
 }
 
-/// Takes the change out of `slot` and removes it.
-fn remove_slot(slot: &AtomicPtr<AnvilChange>) -> Result<()> {
-    remove_handle(NonNull::new(slot.swap(ptr::null_mut(), Ordering::AcqRel)))
+/// Takes the change out of `slot` and removes it. A slot another thread is
+/// filling (a request on it still runs) is left to that thread.
+fn remove_slot(slot: &AtomicPtr<AnvilChange>, what: &str) -> Result<()> {
+    loop {
+        let current = slot.load(Ordering::Acquire);
+        if current == claiming() {
+            return Err(Error::new(
+                ErrorCode::InvalidArgument,
+                format!("{what}: another thread is installing a change on it; remove() after that returns"),
+            ));
+        }
+        if slot
+            .compare_exchange_weak(
+                current,
+                ptr::null_mut(),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+        {
+            return remove_handle(NonNull::new(current));
+        }
+    }
+}
+
+/// What a hook's or swap's `change` holds while a request on it runs.
+fn claiming() -> *mut AnvilChange {
+    NonNull::<AnvilChange>::dangling().as_ptr()
+}
+
+/// The `change` slot of a hook or swap, taken for one request with a
+/// compare-exchange: two threads requesting a change on one static cannot both
+/// get through (the later handle would overwrite the earlier one, which could
+/// then never be removed). Dropped without [`finish`](Claim::finish) (the
+/// request failed), the slot is empty again.
+pub(crate) struct Claim<'a> {
+    slot: &'a AtomicPtr<AnvilChange>,
+}
+
+impl<'a> Claim<'a> {
+    fn take(slot: &'a AtomicPtr<AnvilChange>, what: &str) -> Result<Self> {
+        slot.compare_exchange(
+            ptr::null_mut(),
+            claiming(),
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        )
+        .map(|_| Self { slot })
+        .map_err(|_| {
+            Error::new(
+                ErrorCode::InvalidArgument,
+                format!("{what} already holds a change; remove() it first"),
+            )
+        })
+    }
+
+    /// The request succeeded: the slot holds its handle.
+    pub(crate) fn finish(self, change: *mut AnvilChange) {
+        self.slot.store(change, Ordering::Release);
+        std::mem::forget(self);
+    }
+}
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        self.slot.store(ptr::null_mut(), Ordering::Release);
+    }
 }
 
 /// A function hook, call redirect or import replacement, and the rest of its
@@ -124,32 +188,30 @@ impl<F: FnPtr> FunctionHook<F> {
         (!raw.is_null()).then(|| unsafe { F::from_raw(raw) })
     }
 
-    /// Whether the hook holds a change.
+    /// Whether the hook holds a change (or another thread is installing one).
     pub fn is_active(&self) -> bool {
         !self.change.load(Ordering::Acquire).is_null()
     }
 
-    /// Removes the change; nothing when there is none.
+    /// Removes the change; nothing when there is none. The hook can then take
+    /// a new change; until it does, `next` keeps the removed change's chain
+    /// for a thread still inside the detour.
     pub fn remove(&self) -> Result<()> {
-        remove_slot(&self.change)
+        remove_slot(&self.change, "the hook object")
     }
 
-    pub(crate) fn claim(&self, call: &'static str) -> Result<()> {
-        if self.is_active() {
-            return Err(Error::new(
-                ErrorCode::InvalidArgument,
-                format!("{call}: the hook object already holds a change; remove() it first"),
-            ));
-        }
-        Ok(())
+    pub(crate) fn claim(&self, call: &'static str) -> Result<Claim<'_>> {
+        Claim::take(&self.change, &format!("{call}: the hook object"))
     }
 
-    pub(crate) fn next_slot(&self) -> *mut *mut c_void {
-        self.next.as_ptr()
-    }
-
-    pub(crate) fn set_change(&self, change: *mut AnvilChange) {
-        self.change.store(change, Ordering::Release);
+    /// A request that succeeded: Anvil wrote `next` into the caller's slot
+    /// during the call (and never changes it afterwards), and only now does
+    /// it replace the hook's. A request that fails leaves `next` as it was, so
+    /// a thread still inside the detour of a removed change never reads a
+    /// NULL that a failed request on the reused hook wrote.
+    pub(crate) fn finish(&self, claim: Claim<'_>, next: *mut c_void, change: *mut AnvilChange) {
+        self.next.store(next, Ordering::Release);
+        claim.finish(change);
     }
 }
 
@@ -198,25 +260,15 @@ impl PointerSwap {
 
     /// Removes the change; nothing when there is none.
     pub fn remove(&self) -> Result<()> {
-        remove_slot(&self.change)
+        remove_slot(&self.change, "the swap object")
     }
 
-    pub(crate) fn claim(&self) -> Result<()> {
-        if self.is_active() {
-            return Err(Error::new(
-                ErrorCode::InvalidArgument,
-                "swap_pointer: the swap object already holds a change; remove() it first",
-            ));
-        }
-        Ok(())
+    pub(crate) fn claim(&self) -> Result<Claim<'_>> {
+        Claim::take(&self.change, "swap_pointer: the swap object")
     }
 
     pub(crate) fn previous_slot(&self) -> *mut *mut c_void {
         self.previous.as_ptr()
-    }
-
-    pub(crate) fn set_change(&self, change: *mut AnvilChange) {
-        self.change.store(change, Ordering::Release);
     }
 }
 
