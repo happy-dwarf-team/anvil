@@ -9,7 +9,7 @@ use crate::change::{Change, FunctionHook, PointerSwap};
 use crate::cpu::Cpu;
 use crate::error::{check, Result};
 use crate::event::{Event, Payload};
-use crate::fnptr::FnPtr;
+use crate::fnptr::{FnPtr, FnSymbol};
 use crate::panic::{catch_raw, resume, run_callback};
 use crate::sys::{
     AnvilChange, AnvilCpuCallback, AnvilCpuContext, AnvilHost, AnvilLogLevel, AnvilPlugin,
@@ -399,7 +399,8 @@ impl Host {
     /// through `hook.next()`. With `hook` and `detour` of the symbol's
     /// generated type (`sym::<Name>Fn`), a detour of another shape does not
     /// compile; but the symbol id is a plain `u32`, so nothing ties `F` to
-    /// `symbol` but the caller.
+    /// `symbol` but the caller. [`hook_symbol`](Self::hook_symbol) is the safe
+    /// form, with the typed symbols of `anvil gen --lang rust-sdk`.
     ///
     /// During `load` the change is staged and enabled with the others when
     /// load returns; later it is enabled at once (or with its group).
@@ -433,6 +434,26 @@ impl Host {
         check(result, || format!("hook_function symbol {symbol}"))?;
         hook.finish(claim, next, change);
         Ok(())
+    }
+
+    /// [`hook`](Self::hook) without `unsafe`: the symbol comes with its type,
+    /// `sym::typed::<NAME>` from `anvil gen --lang rust-sdk`, so `hook` and
+    /// `detour` must be of the symbol's own `sym::<Name>Fn` and a detour of
+    /// another shape does not compile.
+    ///
+    /// ```ignore
+    /// static SPEED_OBJECT: FunctionHook<sym::SpeedObjectFn> = FunctionHook::new();
+    /// host.hook_symbol(&SPEED_OBJECT, sym::typed::SPEED_OBJECT, on_speed_object)?;
+    /// ```
+    pub fn hook_symbol<F: FnPtr>(
+        &self,
+        hook: &'static FunctionHook<F>,
+        symbol: FnSymbol<F>,
+        detour: F,
+    ) -> Result<()> {
+        // SAFETY: FnSymbol::new's contract ties `F` to the symbol's declared
+        // signature, which is what `hook` asks of its caller.
+        unsafe { self.hook(hook, symbol.id(), detour) }
     }
 
     /// A mid hook: `callback` runs when the game reaches the site (a function

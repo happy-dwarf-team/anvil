@@ -1,5 +1,6 @@
 //! Writes symbols.gen.rs (and settings.gen.rs, when there is a settings.toml)
-//! into OUT_DIR with `anvil gen --lang rust`.
+//! into OUT_DIR with `anvil gen --lang rust`, and symbols.gen.rs of
+//! `--lang rust-sdk` into OUT_DIR/sdk.
 //! `ANVIL` names the anvil executable (default: `anvil` on the PATH).
 use std::env;
 use std::path::{Path, PathBuf};
@@ -20,4 +21,15 @@ fn main() {
         panic!("cannot run {anvil:?}: {error}; put anvil on the PATH or set ANVIL to its path")
     });
     assert!(status.success(), "anvil gen failed: {status}");
+
+    let sdk = out.join("sdk");
+    let status = Command::new(&anvil)
+        .args(["gen", "--lang", "rust-sdk", "symbols.toml"])
+        .arg(&sdk)
+        .status()
+        .unwrap_or_else(|error| panic!("cannot run {anvil:?}: {error}"));
+    assert!(
+        status.success(),
+        "anvil gen --lang rust-sdk failed: {status}"
+    );
 }

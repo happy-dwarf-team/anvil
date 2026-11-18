@@ -1,5 +1,6 @@
 //! Writes symbols.gen.rs (and settings.gen.rs, when there is a settings.toml)
-//! into OUT_DIR with `anvil gen --lang rust`.
+//! into OUT_DIR with `anvil gen --lang rust-sdk`: `--lang rust` and the
+//! typed function symbols of `sym::typed`, which need the anvil-sdk crate.
 //! `ANVIL` names the anvil executable (default: `anvil` on the PATH).
 use std::env;
 use std::path::{Path, PathBuf};
@@ -12,7 +13,7 @@ fn main() {
     let anvil = env::var_os("ANVIL").unwrap_or_else(|| "anvil".into());
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("cargo sets OUT_DIR"));
     let mut command = Command::new(&anvil);
-    command.args(["gen", "--lang", "rust", "symbols.toml"]);
+    command.args(["gen", "--lang", "rust-sdk", "symbols.toml"]);
     if Path::new("settings.toml").exists() {
         command.args(["--settings", "settings.toml"]);
     }

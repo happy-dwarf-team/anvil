@@ -25,7 +25,9 @@
 //! or puts raw bytes and pointers into it stays an `unsafe fn` with its
 //! contract: calling a hook's [`next`](FunctionHook::next) (the generated
 //! function types are `unsafe extern "C" fn`), [`Host::hook`] (a symbol id is
-//! a plain `u32`, so the caller ties it to its `sym::<Name>Fn`),
+//! a plain `u32`, so the caller ties it to its `sym::<Name>Fn`; with the
+//! [`FnSymbol`]s of `anvil gen --lang rust-sdk`, [`Host::hook_symbol`] is the
+//! safe form),
 //! [`Host::function`], [`Host::data`], writing the mid-hook context
 //! ([`Cpu::regs_mut`]), byte patches, pointer swaps, call redirects, import
 //! replacements, changes at raw addresses, and publishing a raw payload
@@ -124,7 +126,7 @@ pub use change::{Change, FunctionHook, PointerSwap};
 pub use cpu::Cpu;
 pub use error::{Error, ErrorCode, Result};
 pub use event::{Event, Payload, PLUGINS_LOADED, RESUMED, SUSPENDED};
-pub use fnptr::FnPtr;
+pub use fnptr::{FnPtr, FnSymbol};
 pub use host::{GameInfo, Host, Key, LogLevel};
 pub use panic::catch_panic;
 pub use table::Table;
