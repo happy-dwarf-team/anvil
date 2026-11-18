@@ -118,6 +118,14 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
   Anbennar in the lab (eu4-engine-lab#164, #165, within the run-to-run spread
   of a few percent). On Anbennar it names the owner of 70% of the trigger time
   (vanilla 77%).
+- And `anvil-model-reload` (`anvil/plugins/anvil-model-reload/`, from Anvil
+  1.25): for model modders, its `window` setting (off by default) opens a
+  window that lists the meshes, model textures, animations, entities and
+  `.gfx` mesh entries of your enabled mods that you saved since the last
+  reload, and reloads them in the running game with one click
+  ([docs/model-reload.md](docs/model-reload.md)). A new `scale` or `file` of a
+  mesh shows at once on the units already on the map; a changed entity shows
+  after a save load. Not in ironman or multiplayer games.
 - Each start writes `anvil/anvil.log`: what was loaded, what was skipped and why.
 - A crash writes a report to `anvil/crashes/` (the last 10 are kept): where it
   happened and which plugins were involved, with each plugin's `issues` link.

@@ -1,0 +1,27 @@
+id = "anvil-model-reload"
+name = "Anvil model reload"
+version = "1.24.0"
+authors = ["Happy Dwarf Team"]
+description = "Standard plugin for modders: a window of the overlay that reloads the meshes, model textures, animations, entities and .gfx mesh entries of your mod that you saved, while the game runs. Not in ironman or multiplayer, and off until you turn it on."
+api = 2
+entry = "anvil_model_reload.dll"
+symbols = "symbols.toml"
+settings = "settings.toml"
+# It changes only what the game draws: mesh types, textures, animations and the
+# entity definitions of units, buildings and particles. The simulation reads
+# none of them, so it cannot change a game's result. It still refuses to run
+# in ironman and multiplayer, as the game's console does.
+affects_gameplay = false
+issues = "https://github.com/happy-dwarf-team/anvil/issues"
+repository = "https://github.com/happy-dwarf-team/anvil"
+
+# The session, the user folder and work on the game's main thread.
+[[dependencies]]
+id = "anvil-game"
+version = "^1"
+
+# The window. Without it the plugin answers only the lab's control file.
+[[dependencies]]
+id = "anvil-overlay"
+version = "^1"
+optional = true

@@ -1,0 +1,8 @@
+# anvil-model-reload's texts in Spanish (design §5.4), looked up by their English
+# words in plugin.toml and settings.toml. Machine-drafted by the agent; a native speaker has not checked it yet.
+status = "draft"
+
+[text]
+"Standard plugin for modders: a window of the overlay that reloads the meshes, model textures, animations, entities and .gfx mesh entries of your mod that you saved, while the game runs. Not in ironman or multiplayer, and off until you turn it on." = "Plugin estándar para modders: una ventana de la superposición que recarga, mientras el juego corre, las mallas, texturas de modelos, animaciones, entidades y entradas de malla .gfx de tu mod que guardaste. No en ironman ni en multijugador, y apagado hasta que lo enciendas."
+"Model reload window" = "Ventana de recarga de modelos"
+"For model modders: a window of the overlay that lists the files of your enabled mods saved since the last reload and reloads them in the running game. On: the window opens, at every start too; once closed, it is in the Status tab of the Anvil panel. Off: the plugin does nothing." = "Para modders de modelos: una ventana de la superposición que lista los archivos de tus mods activados guardados desde la última recarga y los recarga en la partida en curso. Encendido: la ventana se abre, también en cada inicio; una vez cerrada, está en la pestaña Estado del panel de Anvil. Apagado: el plugin no hace nada."

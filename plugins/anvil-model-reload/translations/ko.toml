@@ -1,0 +1,8 @@
+# anvil-model-reload's texts in Korean (design §5.4), looked up by their English
+# words in plugin.toml and settings.toml. Machine-drafted by the agent; a native speaker has not checked it yet.
+status = "draft"
+
+[text]
+"Standard plugin for modders: a window of the overlay that reloads the meshes, model textures, animations, entities and .gfx mesh entries of your mod that you saved, while the game runs. Not in ironman or multiplayer, and off until you turn it on." = "모더용 표준 플러그인: 게임이 실행되는 동안 저장한 모드의 메시, 모델 텍스처, 애니메이션, 엔티티, .gfx 메시 항목을 다시 불러오는 오버레이 창입니다. 아이언맨과 멀티플레이에서는 쓸 수 없으며, 켜기 전까지는 꺼져 있습니다."
+"Model reload window" = "모델 다시 불러오기 창"
+"For model modders: a window of the overlay that lists the files of your enabled mods saved since the last reload and reloads them in the running game. On: the window opens, at every start too; once closed, it is in the Status tab of the Anvil panel. Off: the plugin does nothing." = "모델 모더용: 마지막으로 다시 불러온 뒤 저장된, 활성화된 모드의 파일을 나열하고 실행 중인 게임에서 다시 불러오는 오버레이 창입니다. 켜짐: 창이 열리며, 시작할 때마다 열립니다. 닫으면 Anvil 패널의 상태 탭에 있습니다. 꺼짐: 플러그인이 아무것도 하지 않습니다."
