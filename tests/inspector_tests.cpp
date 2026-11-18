@@ -361,6 +361,33 @@ int main(int argc, char** argv) {
         CHECK(find(ai::rows(s, view, en), "        moskva_burnt") != nullptr);
     });
 
+    run("rows: a name longer than a row takes is cut, so the panel takes the set", [&] {
+        ai::Snapshot s;
+        s.session = true;
+        s.view = ANVIL_ERROR_NOT_FOUND;
+        ai::Scope c;
+        c.role = ai::Role::player;
+        c.tag = "SWE";
+        c.flags.result = ANVIL_OK;
+        // 5000 bytes of a two-byte character: the cut lands on a whole one.
+        std::string name;
+        for (int i = 0; i < 2500; ++i) name += "\xC3\xA9";
+        c.flags.items.push_back(ai::Flag{name, date(1444, 11, 11)});
+        c.variables.result = ANVIL_OK;
+        c.variables.items.push_back(ai::Variable{std::string(5000, 'v'), 1000});
+        c.modifiers.result = ANVIL_ERROR_INTERNAL;
+        for (int k = 0; k < 3; ++k) c.monarchs[k].result = ANVIL_ERROR_NOT_DECLARED;
+        s.scopes = {c};
+        const std::vector<ai::Row> rows = ai::rows(s, ai::View{}, en);
+        bool flag = false, variable = false, fits = true;
+        for (const ai::Row& r : rows) {
+            if (r.label.size() > ai::kMaxRowText || r.value.size() > ai::kMaxRowText) fits = false;
+            if (r.label.starts_with("        \xC3\xA9") && r.label.ends_with("\xC3\xA9...")) flag = true;
+            if (r.label.starts_with("        vvv") && r.label.ends_with("v...") && r.value == "1") variable = true;
+        }
+        CHECK(fits && flag && variable);
+    });
+
     run("rows: a long list stops at its limit; no session; no view", [&] {
         ai::Snapshot s;
         s.session = true;

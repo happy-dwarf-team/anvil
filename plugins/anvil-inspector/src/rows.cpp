@@ -42,6 +42,15 @@ std::string date_text(const AnvilGameDate& d) {
 
 namespace {
 
+// At most kMaxRowText bytes, cut at a whole UTF-8 character.
+std::string fit(std::string text) {
+    if (text.size() <= kMaxRowText) return text;
+    std::size_t end = kMaxRowText - 3;
+    while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0) == 0x80) --end;
+    text.resize(end);
+    return text + "...";
+}
+
 class Builder {
 public:
     Builder(const View& view, const Texts& t) : view_(view), t_(t) {}
@@ -49,11 +58,11 @@ public:
     void text(std::string label, std::string value = {}) {
         if (out_.size() >= kMaxRows) return;
         const bool has = !value.empty();
-        out_.push_back({kText, std::move(label), std::move(value), has, 0});
+        out_.push_back({kText, fit(std::move(label)), fit(std::move(value)), has, 0});
     }
     void button(std::string label, std::uint64_t id) {
         if (out_.size() >= kMaxRows) return;
-        out_.push_back({kButton, std::move(label), {}, false, id});
+        out_.push_back({kButton, fit(std::move(label)), {}, false, id});
     }
     void separator() {
         if (out_.size() >= kMaxRows) return;
