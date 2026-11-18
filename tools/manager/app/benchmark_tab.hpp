@@ -27,6 +27,7 @@ struct BenchmarkContext {
     std::string installed_anvil;              // the installed version.dll's version; "" when it is not Anvil's
     std::string exe_build;                    // a build Anvil knows, or ""
     std::string exe_sha256;
+    uint64_t generation = 0;                  // +1 whenever the folder was read again
 };
 
 // The Benchmark tab (docs/spec/benchmark-v1.md §8, anvil#133 variant A): four
@@ -78,6 +79,7 @@ private:
     int target_ = kDefaultTarget;
     std::vector<SetupCheck> checks_;
     const cli::GameReport* checked_report_ = nullptr;  // the report checks_ were made from
+    uint64_t checked_generation_ = 0;                   // and the snapshot it is part of
     std::string checked_plugin_;
     std::optional<std::vector<KeptReport>> kept_;
 

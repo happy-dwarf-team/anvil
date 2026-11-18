@@ -296,6 +296,7 @@ void ManagerApp::poll() {
     using namespace std::chrono;
     if (pending_.valid() && pending_.wait_for(0s) == std::future_status::ready) {
         snapshot_ = pending_.get();
+        ++snapshot_generation_;
         crash_summaries_.folder_refreshed();  // a report the game was still writing is read again
         translations_.clear();   // a plugin installed or updated may bring other translations
         follow_language(game_);  // the overlay's setting may be new: the folder was installed or changed
@@ -984,7 +985,20 @@ void ManagerApp::draw_approve_modal() {
         banner("skip", Tone::Bad, trf("Anvil would still skip it: {0}", {i18n::text(offered.skip_why)}));
     }
     dialog_buttons({tr("Approve"), tr("Cancel")});
-    if (primary_button(tr("Approve"))) {
+    // Approving copies the plugin and removes its other approved copies: not
+    // under a running game, which may have loaded one of them.
+    ImGui::BeginDisabled(read_only());
+    const bool approve = primary_button(tr("Approve"));
+    ImGui::EndDisabled();
+    if (approve && game_running(game_)) {
+        running_ = true;
+        ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+        approve_.reset();
+        show_message(tr("Nothing changed"), tr("EU4 is running from this folder. Close it first."));
+        return;
+    }
+    if (approve) {
         std::string error;
         if (!approve_shown_plugin(game_, eu4_user_dir(game_), *snapshot_->report, p, error)) {
             ImGui::CloseCurrentPopup();
@@ -1016,6 +1030,7 @@ void ManagerApp::draw_benchmark_tab() {
     }
     context.exe_build = snapshot_->folder.build;
     context.exe_sha256 = snapshot_->folder.exe_sha256;
+    context.generation = snapshot_generation_;
     benchmark_.draw(context);
 }
 
@@ -1400,12 +1415,16 @@ void ManagerApp::draw_modals() {
 
 void ManagerApp::draw_plan_modal() {
     next_modal(40);
-    const bool same = snapshot_->installation->installed() && snapshot_->installation->dll_version == package_->version;
-    const std::string title = plan_ && plan_->uninstall ? std::string(tr("Uninstall Anvil"))
-                              : same                    ? trf("Repair Anvil {0}", {package_->version})
-                                                        : trf("Install Anvil {0}", {package_->version});
+    // Drawn every frame, also before the first snapshot, on the first-run screen
+    // and without a package: the title reads them only while a plan is shown.
+    const bool shown = plan_ && package_ && snapshot_ && snapshot_->installation;
+    const bool same = shown && snapshot_->installation->installed() && snapshot_->installation->dll_version == package_->version;
+    const std::string title = !shown            ? std::string()
+                              : plan_->uninstall ? std::string(tr("Uninstall Anvil"))
+                              : same             ? trf("Repair Anvil {0}", {package_->version})
+                                                 : trf("Install Anvil {0}", {package_->version});
     if (!begin_dialog("###plan", title)) return;
-    if (!plan_) {
+    if (!shown) {
         ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
         return;
