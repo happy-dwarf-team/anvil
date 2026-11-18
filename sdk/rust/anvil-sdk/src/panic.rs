@@ -76,6 +76,26 @@ pub(crate) fn catch_raw<R>(body: impl FnOnce() -> R) -> std::thread::Result<R> {
     result
 }
 
+/// Goes on with a panic that [`catch_raw`] caught. `resume_unwind` does not
+/// call the hook again, so the message the hook kept stays for an adapter of
+/// this thread that catches it further out; with none, it is logged now, as
+/// the hook logs a panic no adapter catches.
+pub(crate) fn resume(payload: Box<dyn Any + Send>) -> ! {
+    if CATCHING.try_with(Cell::get).unwrap_or(0) == 0 {
+        let text = MESSAGE
+            .try_with(|message| message.borrow_mut().take())
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| payload_text(&*payload));
+        let _ = catch(|| {
+            if let Some(host) = Host::current() {
+                host.log(LogLevel::Error, format_args!("panic: {text}"));
+            }
+        });
+    }
+    std_panic::resume_unwind(payload)
+}
+
 /// The adapters' rule: a panic is logged once per callback (`logged` is the
 /// callback's flag), and `fallback` is answered instead of unwinding.
 pub(crate) fn run_callback<R>(
