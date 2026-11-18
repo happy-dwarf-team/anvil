@@ -16,7 +16,10 @@
 
 #include <windows.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -25,6 +28,7 @@
 #include <stdexcept>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -552,6 +556,78 @@ void control_tests() {
         write_file(anvil / "anvil.toml", "broken = = 1\n");
         CHECK(svc.disable_next_start("broken", &result) == ANVIL_ERROR_INTERNAL &&
               std::string(result.error).find("does not parse") != std::string::npos);
+        fs::remove_all(dir);
+    });
+
+    // anvil_control.h: "Every function may be called from any thread." Readers on
+    // several threads while loading ends and settings and the next start change.
+    run("control: calls from several threads at once", [] {
+        const fs::path dir = fresh_dir("anvil-control-threads");
+        const fs::path anvil = dir / "anvil";
+        TestStart start;
+        add_plugin(start, "anvil-overlay", true, "", anvil / "data", kOverlaySchema, "early");
+        add_plugin(start, "gameplay", true, "", anvil / "data").manifest.affects_gameplay = true;
+        add_plugin(start, "broken", false, "", anvil / "data");
+        start.skip({"off", "disabled in anvil.toml", anvil / "plugins" / "off", true});
+        start.make();
+        for (const char* id : {"anvil-overlay", "gameplay", "broken"}) start.load(id);
+        write_file(anvil / "anvil.log", "[1] a\r\n[2] b\r\n");
+        ControlSources sources;
+        sources.anvil_dir = anvil;
+        sources.anvil_version = "1.1.0";
+        sources.game_build = "eu4-1.37.5-steam-win64";
+        sources.plugins = &start.set();
+        sources.disabled = {"off"};
+        Control control(sources);
+        const AnvilControlService& svc = *control.service();
+
+        std::atomic<bool> stop{false};
+        std::atomic<int> bad{0};
+        std::atomic<long> calls{0};
+        std::vector<std::thread> readers;
+        for (int r = 0; r < 6; ++r) {
+            readers.emplace_back([&] {
+                while (!stop.load()) {
+                    AnvilControlStatus status{};
+                    svc.status(&status);
+                    if (status.plugins != 4) ++bad;
+                    for (uint32_t i = 0; i < 5; ++i) {
+                        AnvilControlPlugin p{};
+                        p.size = sizeof(p);
+                        if (svc.plugin(i, &p) != (i < 4 ? 1 : 0)) ++bad;
+                        if (i < 4 && (p.id == nullptr || p.state == nullptr || p.reason_message == nullptr)) ++bad;
+                    }
+                    Text text;
+                    if (svc.setting_value("anvil-overlay", 1, ANVIL_CONTROL_VALUE_CURRENT, Text::sink, &text) != 1) ++bad;
+                    if (svc.log_tail(1, Text::sink, &text) != 1) ++bad;
+                    AnvilControlCrash crash{};
+                    if (svc.previous_crash(&crash) != 0) ++bad;
+                    ++calls;
+                }
+            });
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        control.loading_done();
+        AnvilControlResult result{};
+        for (int i = 0; i < 200; ++i) {
+            AnvilControlValue value{0, i % 2 == 0 ? 1.5 : 1.0, nullptr};
+            if (svc.setting_set("anvil-overlay", 1, &value, &result) != ANVIL_OK) ++bad;
+        }
+        if (svc.disable_next_start("gameplay", &result) != ANVIL_OK) ++bad;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        stop = true;
+        for (auto& t : readers) t.join();
+        CHECK(bad.load() == 0);
+        CHECK(calls.load() > 6);
+        std::printf("    %ld rounds of reads on 6 threads\n", calls.load());
+        AnvilControlStatus status{};
+        svc.status(&status);
+        CHECK(status.loading_done == 1 && status.loaded == 2 && status.failed == 1);
+        AnvilControlPlugin p{};
+        p.size = sizeof(p);
+        CHECK(svc.plugin(1, &p) == 1 && p.disabled_next_start == 1);
+        Text text;
+        CHECK(svc.setting_value("anvil-overlay", 1, ANVIL_CONTROL_VALUE_CURRENT, Text::sink, &text) == 1 && text.value == "1");
         fs::remove_all(dir);
     });
 
