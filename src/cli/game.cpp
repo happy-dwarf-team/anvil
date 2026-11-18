@@ -66,7 +66,7 @@ std::vector<OverlapWarning> find_overlaps(const std::vector<const CheckReport*>&
             OverlapWarning w;
             w.plugin = a.plugin;
             w.other = b.plugin;
-            w.file = shown(a.manifest->folder / a.manifest->symbols);
+            w.file = shown(a.manifest->folder / std::filesystem::path(std::u8string(a.manifest->symbols.begin(), a.manifest->symbols.end())));
             w.line = first_a->line;
             w.message = "code range of symbol " + first_a->symbol + " (rva " + hex(first_a->rva) + ", " +
                         std::to_string(first_a->size) + " byte(s)) overlaps symbol " + first_b->symbol + " of plugin " +

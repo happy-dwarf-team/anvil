@@ -122,7 +122,7 @@ std::optional<BuildImage> BuildImage::load(const std::filesystem::path& exe, std
     // .pdata names every function with a frame; leaf functions lie in the gaps.
     const IMAGE_DATA_DIRECTORY unwind = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
     std::vector<std::pair<uint32_t, uint32_t>> entries;
-    if (unwind.VirtualAddress != 0 && unwind.VirtualAddress + unwind.Size <= image.bytes_.size()) {
+    if (unwind.VirtualAddress != 0 && uint64_t{unwind.VirtualAddress} + unwind.Size <= image.bytes_.size()) {
         const uint8_t* table = image.bytes_.data() + unwind.VirtualAddress;
         for (size_t i = 0; i + sizeof(IMAGE_RUNTIME_FUNCTION_ENTRY) <= unwind.Size; i += sizeof(IMAGE_RUNTIME_FUNCTION_ENTRY)) {
             IMAGE_RUNTIME_FUNCTION_ENTRY entry{};
@@ -556,6 +556,11 @@ PortMatch BuildMatcher::code(uint32_t rva, uint32_t size) const {
             inside.reason = "its function is at " + hex(changed->second) + " but changed: " + inside.reason;
             return inside;
         }
+    }
+    if (to_.code().empty()) {  // from_ has code: code_at found this rva in it
+        PortMatch none;
+        none.reason = "the new build has no code to search";
+        return none;
     }
     const Range old_code{from_.code().front().start, from_.code().back().end};
     const Range new_code{to_.code().front().start, to_.code().back().end};

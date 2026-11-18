@@ -377,6 +377,14 @@ void port_tests() {
         CHECK(fx.port("build = \"old\"\n[symbol.a]\nrva = 0x1000\nmemroy = \"code\"\n").exit_code == kExitCannotCheck);
         CHECK(contains(fx.port("build = \"new\"\n").cannot_port, "already declares new"));
         CHECK(contains(fx.port("build = \"third\"\n").cannot_port, "does not declare old"));
+        // Only [symbol.<name>] tables: an inline table or dotted keys would lose lines or land under [symbol].
+        for (const std::string& written :
+             {"far_fn = { rva = 0x1000, bytes = \"" + hex_bytes(kFar) + "\", memory = \"code\" }\n",
+              "far_fn.rva = 0x1000\nfar_fn.bytes = \"" + hex_bytes(kFar) + "\"\nfar_fn.memory = \"code\"\n"}) {
+            const PortReport refused = fx.port("build = \"old\"\n[symbol]\n" + written);
+            CHECK(contains(refused.cannot_port, "not written as a [symbol.far_fn] table"));
+            CHECK(!refused.written && !fs::exists(fx.out));
+        }
         // Bytes that do not hold on the old build are not carried over.
         const PortReport wrong = fx.port("build = \"old\"\n[symbol.a]\nrva = 0x1000\nbytes = \"90 90 90\"\nmemory = \"code\"\n");
         CHECK(wrong.exit_code == kExitProblems);
@@ -420,6 +428,34 @@ void port_tests() {
         options.to = fx.root / "nothing.exe";
         options.unknown_build = false;
         CHECK(port_build_problem(options).empty());
+    });
+
+    run("port reads a malformed new build only within its bytes", [&] {
+        const auto port_to = [&](const std::vector<uint8_t>& bytes, const char* name) {
+            const fs::path exe = fx.root / name / "eu4.exe";
+            write(exe, std::string(bytes.begin(), bytes.end()));
+            write(fx.symbols, placeable());
+            PortOptions options;
+            options.symbols = fx.symbols;
+            options.from = fx.old_exe;
+            options.to = exe;
+            options.build = "new";
+            options.from_build = "old";
+            return port_symbols(options);
+        };
+        // An exception directory whose end wraps around 32 bits.
+        TestImage wrapping;
+        IMAGE_NT_HEADERS64 nt{};
+        std::memcpy(&nt, &wrapping.mapped[0x80], sizeof(nt));
+        nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION] = {0x2000, 0xFFFFF000u};
+        wrapping.put_value(0x80, nt);
+        CHECK(port_to(wrapping.file(), "wrapping").exit_code != kExitOk);
+        // No code at all: .text is all int3.
+        TestImage empty;
+        std::fill(empty.mapped.begin() + 0x1000, empty.mapped.begin() + 0x1100, uint8_t{0xCC});
+        const PortReport none = port_to(empty.file(), "no-code");
+        CHECK(none.exit_code != kExitOk);
+        CHECK(none.ported.empty());
     });
 
     run("port without --out writes nothing", [&] {

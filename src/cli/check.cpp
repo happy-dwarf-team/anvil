@@ -1,6 +1,7 @@
 #include "cli/check.hpp"
 
 #include "cli/gen.hpp"
+#include "core/files.hpp"
 #include "core/game_build.hpp"
 #include "core/instructions.hpp"
 #include "core/manifest.hpp"
@@ -211,10 +212,8 @@ void exe_checks(const CheckOptions& options, const SymbolFile& file, const Plugi
         report.lock = "unchanged";
         return;
     }
-    std::ofstream out(lock_path, std::ios::binary | std::ios::trunc);
-    out << text;
-    out.close();
-    if (!out) {
+    std::string write_error;
+    if (!write_file_atomic(lock_path, text, write_error)) {  // a failed write keeps the old lock
         report.exit_code = kExitCannotCheck;
         report.cannot_check = "cannot write " + shown_path(options.plugin_dir, kLockFile);
         return;

@@ -429,7 +429,9 @@ Control::Control(ControlSources sources) : sources_(std::move(sources)) {
                 v.issues = m.issues;
                 for (const Module& mod : m.modules) v.module_keys.push_back(module_key(m, mod));
                 if (!m.symbols.empty()) {
-                    const SymbolFileResult symbols = load_symbols(p.folder / m.symbols);
+                    // plugin.toml is UTF-8: not through the ANSI code page
+                    const SymbolFileResult symbols =
+                        load_symbols(p.folder / std::filesystem::path(std::u8string(m.symbols.begin(), m.symbols.end())));
                     if (symbols.file) v.symbols = static_cast<uint32_t>(symbols.file->symbols.size());
                 }
             }

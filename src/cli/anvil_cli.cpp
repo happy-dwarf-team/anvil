@@ -7,6 +7,7 @@
 #include "cli/game.hpp"
 #include "cli/gen.hpp"
 #include "cli/port.hpp"
+#include "core/files.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -39,6 +40,7 @@ void print_usage(std::FILE* out) {
                "      *settings.toml or one with [setting.<name>] tables); both languages without --lang.\n"
                "      --lang rust writes symbols.gen.rs and settings.gen.rs only; --lang rust-sdk the same\n"
                "      with sym::typed, the function symbols with their types for Host::hook_symbol (anvil-sdk).\n"
+               "      --lang given more than once writes each language named.\n"
                "      A file whose content would not change is not rewritten.\n"
                "  check <plugin-dir> [--exe <eu4.exe>] [--format text|json|github] [--complete-translations]\n"
                "      check plugin.toml, symbols.toml, settings.toml and translations/<code>.toml against\n"
@@ -119,11 +121,11 @@ bool write_if_changed(const std::filesystem::path& path, const std::string& cont
         }
     }
     in.close();
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    out << content;
-    out.close();
+    // Through a temporary file: a failed write leaves the old file as it was.
+    std::string error;
+    if (!anvil::write_file_atomic(path, content, error)) return false;
     written = true;
-    return static_cast<bool>(out);
+    return true;
 }
 
 // A settings.toml for gen: its name ends in "settings.toml", or its top level
@@ -143,16 +145,21 @@ bool is_settings_file(const std::filesystem::path& file) {
 
 int run_gen(const std::vector<std::wstring>& args) {
     bool c = true, cpp = true, rust = false, rust_sdk = false;
+    bool lang_given = false;  // the first --lang replaces the default C and C++; later ones add
     std::vector<std::wstring> positional;
     std::vector<std::wstring> settings_files;  // --settings: whatever the name or content
     for (size_t i = 2; i < args.size(); ++i) {
         if (is_option(args[i], L"--lang")) {
             const auto lang = option_value(args, i, L"--lang");
-            if (lang == L"c") cpp = false;
-            else if (lang == L"cpp") c = false;
-            else if (lang == L"rust") c = cpp = false, rust = true;
-            else if (lang == L"rust-sdk") c = cpp = false, rust = rust_sdk = true;
-            else return usage_error("gen: --lang must be c, cpp, rust or rust-sdk");
+            if (lang != L"c" && lang != L"cpp" && lang != L"rust" && lang != L"rust-sdk") {
+                return usage_error("gen: --lang must be c, cpp, rust or rust-sdk");
+            }
+            if (!lang_given) c = cpp = false;
+            lang_given = true;
+            if (lang == L"c") c = true;
+            else if (lang == L"cpp") cpp = true;
+            else if (lang == L"rust") rust = true;
+            else rust = rust_sdk = true;
         } else if (is_option(args[i], L"--settings")) {
             const auto file = option_value(args, i, L"--settings");
             if (!file || file->empty()) return usage_error("gen: --settings needs the path of settings.toml");

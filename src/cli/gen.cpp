@@ -59,7 +59,10 @@ std::string_view trim(std::string_view s) {
 std::string comment_text(std::string_view text, bool block = true) {
     std::string out;
     for (char c : text) out.push_back(static_cast<unsigned char>(c) < 0x20 ? ' ' : c);
-    if (!block) return out;
+    if (!block) {
+        if (out.ends_with('\\')) out += '.';  // a backslash at the end continues a // comment
+        return out;
+    }
     for (size_t at = out.find("*/"); at != std::string::npos; at = out.find("*/", at)) out.replace(at, 2, "* /");
     return out;
 }
@@ -156,7 +159,7 @@ std::string generate_c(const SymbolFile& file, const std::string& source) {
     out += "#include <stdbool.h>\n#include <stddef.h>\n#include <stdint.h>\n\n";
     out += "/* Symbol ids (AnvilSymbol): the declaration order in symbols.toml. */\nenum {\n";
     for (const auto& s : file.symbols) {
-        out += "    SYM_" + upper(s.name) + " = " + std::to_string(s.id) + ",  /* " + where_of(s) + " */\n";
+        out += "    SYM_" + upper(s.name) + " = " + std::to_string(s.id) + ",  /* " + comment_text(where_of(s)) + " */\n";
     }
     out += "};\n";
 
@@ -213,7 +216,14 @@ std::string generate_cpp(const SymbolFile& file, const std::string& source) {
         const auto [it, added] = names.emplace(name, owner);
         if (!added) throw Fail{owner + ": sym::" + name + " is already " + it->second, line};
     };
-    for (const auto& s : file.symbols) claim(s.name, "symbol " + s.name, s.line);
+    for (const auto& s : file.symbols) {
+        claim(s.name, "symbol " + s.name, s.line);
+        // The type sym::Types::<name> hides a base member of the same name
+        // (its injected class name), which the wrappers in anvil.hpp use.
+        if (kReservedMembers.contains(s.name)) {
+            throw Fail{"symbol " + s.name + ": the name would hide the symbol's '" + s.name + "' member; rename it", s.line};
+        }
+    }
     for (const auto& s : file.symbols) {
         for (const auto& v : s.values) {
             const std::string owner = "symbol " + s.name + ": value " + v.name;
@@ -222,6 +232,8 @@ std::string generate_cpp(const SymbolFile& file, const std::string& source) {
                 throw Fail{owner + ": the name would hide the symbol's '" + v.name + "' member; rename it", s.line};
             }
             if (!v.type.empty() && v.rip_relative != 0) claim(v.name, owner, s.line);
+            // A member with its class's name: not C++.
+            if (v.name == s.name) throw Fail{owner + ": a value cannot have its symbol's name in C++; rename it", s.line};
         }
     }
 
@@ -232,7 +244,7 @@ std::string generate_cpp(const SymbolFile& file, const std::string& source) {
     for (const auto& s : file.symbols) {
         const std::string type = cpp_type(s);
         const std::string note = s.note.empty() ? "" : "  // " + comment_text(s.note, false);
-        out += "\n// " + where_of(s) + "\n";
+        out += "\n// " + comment_text(where_of(s), false) + "\n";
         // Each symbol has a type of its own, so that a compiler error about it
         // (the wrapper's static_asserts) names it. Values become static
         // constexpr members: sym::<symbol>.<value>.
@@ -391,7 +403,13 @@ std::string generate_settings_cpp(const SettingsFile& file, const std::string& s
         const auto [it, added] = names.emplace(name, owner);
         if (!added) throw Fail{owner + ": cfg::Types::" + name + " is already " + it->second, line};
     };
-    for (const auto& s : file.settings) claim(s.name, "setting " + s.name, s.line);
+    for (const auto& s : file.settings) {
+        claim(s.name, "setting " + s.name, s.line);
+        // As for symbols: cfg::Types::<name> would hide its base's or its own member.
+        if (kReservedSettingMembers.contains(s.name)) {
+            throw Fail{"setting " + s.name + ": the name would hide the setting's '" + s.name + "' member; rename it", s.line};
+        }
+    }
     for (const auto& s : file.settings) {
         if (s.type != SettingType::Enum) continue;
         claim(s.name + "_value", "the options of setting " + s.name, s.line);
@@ -401,6 +419,7 @@ std::string generate_settings_cpp(const SettingsFile& file, const std::string& s
             if (kReservedSettingMembers.contains(o.name)) {
                 throw Fail{owner + ": the name would hide the setting's '" + o.name + "' member; rename it", s.line};
             }
+            if (o.name == s.name) throw Fail{owner + ": an option cannot have its setting's name in C++; rename it", s.line};
         }
     }
 
@@ -686,7 +705,7 @@ std::string generate_rust(const SymbolFile& file, const std::string& source, std
     // crate: a plugin on anvil-sdk alone includes it as one on anvil-sys does.
     out += "// Symbol ids (u32, anvil_sys::AnvilSymbol): the declaration order in symbols.toml.\n";
     for (const auto& s : file.symbols) {
-        out += "/// " + where_of(s) + (s.note.empty() ? "" : ": " + comment_text(s.note, false)) + "\n";
+        out += "/// " + comment_text(where_of(s), false) + (s.note.empty() ? "" : ": " + comment_text(s.note, false)) + "\n";
         out += "pub const " + upper(s.name) + ": u32 = " + std::to_string(s.id) + ";\n";
     }
 
