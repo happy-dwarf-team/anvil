@@ -163,12 +163,11 @@ std::vector<Row> rows(const PanelState& s, const Texts& t) {
             out.push_back(pair("    pdxmesh", t.f("Not reloaded: {0}", {join(r.ignored_keys, ", ")})));
         }
     }
-    if (s.last.units_refreshed) {
-        out.push_back(text(t.f("Units on the map are drawn again with the reloaded entities ({0} models).",
-                               {std::to_string(s.last.unit_instances)})));
+    if (s.last.map_refreshed) {
+        out.push_back(text(t("Units, cities, ports and flags on the map are drawn again with the reloaded entities.")));
     }
     if (s.last.load_a_save) {
-        out.push_back(text(t("Units already on the map keep their old entity: load a save to see the change.")));
+        out.push_back(text(t("Objects already on the map keep their old entity: load a save to see the change.")));
     }
     return out;
 }
@@ -198,11 +197,11 @@ std::vector<std::string> log_lines(const RunResult& result) {
         if (!r.answer.empty()) line += " (console: " + r.answer + ")";
         out.push_back(std::move(line));
     }
-    if (result.units_refreshed) {
-        out.push_back("entities reloaded: " + std::to_string(result.unit_instances) +
-                      " unit instances on the map deleted, the game creates them again");
+    if (result.map_refreshed) {
+        out.push_back("entities reloaded: map objects of " + std::to_string(result.provinces) + " provinces deleted (" +
+                      std::to_string(result.unit_instances) + " unit instances), the game creates them again");
     }
-    if (result.load_a_save) out.push_back("entities reloaded: units on the map show them after a save load");
+    if (result.load_a_save) out.push_back("entities reloaded: objects on the map show them after a save load");
     return out;
 }
 

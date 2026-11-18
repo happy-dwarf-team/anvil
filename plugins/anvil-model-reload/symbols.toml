@@ -154,11 +154,20 @@ build."eu4-1.37.5-steam-win64" = { rva = 0x10A7DFB }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x10A65FB }   # CEU3GraphicalMap::UpdateProvinceGraphics+0x36B
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x10A65FB }
 
-[symbol.entity_instance_destroy]
-bytes = "48 85 C9 74 1F 53 48 83 EC 20 48 8B D9"
+[symbol.province_graphics_clear]
+bytes = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 54 41 55 41 56 41 57 48 83 EC 20 4C 8B F1 E8 CC 45 00 00"
 memory = "code"
-signature = "void (void* instance)"
-note = "EntityInstanceDestroy(EntityInstanceENTITY*), 37 B: nothing for NULL, else ~CEntityInstance and the free of its 0x118 bytes; what UpdateProvinceUnits calls for a slot whose unit is gone"
-build."eu4-1.37.5-steam-win64" = { rva = 0x14FB1D0 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x14F4D40 }   # EntityInstanceDestroy
-build."eu4-1.37.5.0-gog-win64" = { rva = 0x14F4D40 }
+signature = "void (void* province_graphics)"
+note = "CProvinceGraphics::Clear: destroys the province's 21 unit instances, its city sprawl lists (+0x728, count +0x718 to 0), its flag (+0x8, +0x2B8 to -1) and the instance at +0xD0, removes its 59 map icon windows and marks it for an update; what UpdateProvinceGraphics calls for each province of _ProvinceGraphicsToClear and CNudgeIdler::RefreshMapItems for one province"
+build."eu4-1.37.5-steam-win64" = { rva = 0x1329BA0 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x1323D00 }   # CProvinceGraphics::Clear
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x1323D00 }
+
+[symbol.create_province_sprites]
+bytes = "48 8B C4 4C 89 40 18 55 53 56 57 41 54 41 56 41 57 48 8D 68 A8 48 81 EC 20 01 00 00 0F 29 70 B8 0F 29 78 A8 45 0F B6 F1 48 8B FA 48 8B F1 48 8B 59 10"
+memory = "code"
+signature = "void (void* province_graphics, void* province, void* map, bool remove_only)"
+note = "CProvinceGraphics::CreateProvinceSprites: destroys the city (+0x10) and port (+0xB8) instances; with remove_only it then zeroes the culture key (+0xA20) and returns without reading the province, so CProvinceGraphics::Update calls it again with false (creating both) when it next draws the province; CProvinceGraphics::Update calls it with true for a province it does not draw"
+build."eu4-1.37.5-steam-win64" = { rva = 0x13238B0 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x131DA10 }   # CProvinceGraphics::CreateProvinceSprites
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x131DA10 }

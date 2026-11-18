@@ -38,10 +38,11 @@ struct ConsoleAnswer {
     std::string text;
 };
 
-struct UnitRefresh {
+struct MapRefresh {
     bool available = false;  // false: no map now (the menu) or the province graphics cannot be read
     bool faulted = false;    // an exception in the game's code: stop
-    int instances = 0;       // unit instances deleted, for the game to create again
+    int instances = 0;       // unit instances among the objects deleted
+    int provinces = 0;       // provinces whose map objects were deleted
 };
 
 class Game {
@@ -58,10 +59,11 @@ public:
     virtual bool set_lookup_name(std::uintptr_t type, std::size_t index, std::string_view name) = 0;
     virtual bool reload_type(std::uintptr_t type) = 0;
     virtual ConsoleAnswer console(const std::vector<std::string>& tokens) = 0;
-    // Deletes the 3D instances of the units on the map, as the game does for a
-    // slot whose unit is gone; the game creates them again from the reloaded
-    // entities when it next draws their provinces.
-    virtual UnitRefresh refresh_units() = 0;
+    // Deletes the 3D instances on the map (units, cities, ports, flags, city
+    // sprawl) and the map icons of every province, as the game does for a
+    // province it clears; the game creates them again from the reloaded
+    // entities when it next draws each province.
+    virtual MapRefresh refresh_map_objects() = 0;
 };
 
 enum class Status {
@@ -104,10 +106,12 @@ struct StepResult {
 struct RunResult {
     std::vector<StepResult> steps;
     bool faulted = false;
-    // After a `reload assets` that succeeded: the units on the map were created
-    // again (units_refreshed, with the number of instances), or that was not
-    // possible and they keep the old entity until a save load (load_a_save).
-    bool units_refreshed = false;
+    // After a `reload assets` that succeeded: the objects on the map (units,
+    // cities, ports, flags) are created again (map_refreshed, with the number of
+    // provinces and of the unit instances among them), or that was not possible
+    // and they keep the old entity until a save load (load_a_save).
+    bool map_refreshed = false;
+    int provinces = 0;
     int unit_instances = 0;
     bool load_a_save = false;
 };

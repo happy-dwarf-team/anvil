@@ -181,7 +181,7 @@ What one `pdxmesh = { ... }` entry of an `interface/**/*.gfx` file becomes in th
 _Avoid_: model (a model is what the player sees), mesh (the file), pdxmesh
 
 **Entity**:
-An `entity = { ... }` of a `.asset` file: which mesh type a unit or a map object draws, with its states and attachments. `reload assets` reads the entities again, but a unit keeps the 3D instance it was created with; `anvil-model-reload` deletes the units' instances afterwards, so the game creates them again from the new entities.
+An `entity = { ... }` of a `.asset` file: which mesh type a unit or a map object draws, with its states and attachments. `reload assets` reads the entities again, but a unit or a map object keeps the 3D instance it was created with; `anvil-model-reload` clears every province's map objects afterwards with the game's own functions, so the game creates them again from the new entities.
 _Avoid_: asset (the file), unit graphics
 
 ### When the game crashes
