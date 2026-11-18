@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <mutex>
@@ -95,6 +96,72 @@ void Log::open(const std::filesystem::path& file) {
 
 namespace {
 
+// The length of the UTF-8 sequence at `at`, 0 when it is not one (overlong
+// forms, surrogates and values past Unicode included).
+size_t utf8_length(std::string_view text, size_t at) {
+    const auto c = static_cast<unsigned char>(text[at]);
+    if (c < 0x80) return 1;
+    size_t length = 0;
+    uint32_t code = 0;
+    uint32_t least = 0;
+    if ((c & 0xE0) == 0xC0) {
+        length = 2, code = c & 0x1F, least = 0x80;
+    } else if ((c & 0xF0) == 0xE0) {
+        length = 3, code = c & 0x0F, least = 0x800;
+    } else if ((c & 0xF8) == 0xF0) {
+        length = 4, code = c & 0x07, least = 0x10000;
+    } else {
+        return 0;
+    }
+    if (at + length > text.size()) return 0;
+    for (size_t i = 1; i < length; ++i) {
+        const auto next = static_cast<unsigned char>(text[at + i]);
+        if ((next & 0xC0) != 0x80) return 0;
+        code = (code << 6) | (next & 0x3F);
+    }
+    if (code < least || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)) return 0;
+    return length;
+}
+
+void append_utf8(std::string& out, uint32_t code) {
+    if (code < 0x80) {
+        out += static_cast<char>(code);
+    } else if (code < 0x800) {
+        out += static_cast<char>(0xC0 | (code >> 6));
+        out += static_cast<char>(0x80 | (code & 0x3F));
+    } else {
+        out += static_cast<char>(0xE0 | (code >> 12));
+        out += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+        out += static_cast<char>(0x80 | (code & 0x3F));
+    }
+}
+
+}  // namespace
+
+std::string log_text(std::string_view text) {
+    size_t valid = 0;
+    while (valid < text.size()) {
+        const size_t length = utf8_length(text, valid);
+        if (length == 0) break;
+        valid += length;
+    }
+    if (valid == text.size()) return std::string(text);
+    // 0x80-0x9F of Windows-1252; its five unassigned bytes stay C1 controls.
+    static constexpr uint16_t kHigh[32] = {0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+                                           0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
+                                           0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+                                           0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178};
+    std::string out(text.substr(0, valid));
+    out.reserve(text.size() + text.size() / 2);
+    for (size_t i = valid; i < text.size(); ++i) {
+        const auto c = static_cast<unsigned char>(text[i]);
+        append_utf8(out, c < 0x80 ? c : c < 0xA0 ? kHigh[c - 0x80] : c);
+    }
+    return out;
+}
+
+namespace {
+
 std::string format_line(AnvilLogLevel level, std::string_view source, std::string_view message) {
     LogState& s = state();
     LARGE_INTEGER now{};
@@ -105,9 +172,9 @@ std::string format_line(AnvilLogLevel level, std::string_view source, std::strin
     std::snprintf(prefix, sizeof(prefix), "[%9.1f ms] %s ", ms, level_name(level));
     std::string line = prefix;
     line += '[';
-    line.append(source.data(), source.size());
+    line += log_text(source);
     line += "] ";
-    line.append(message.data(), message.size());
+    line += log_text(message);
     line += "\r\n";
     return line;
 }
@@ -116,9 +183,9 @@ std::string format_line(AnvilLogLevel level, std::string_view source, std::strin
 void keep_warning(LogState& s, AnvilLogLevel level, std::string_view source, std::string_view message) {
     if (level < ANVIL_LOG_WARNING || s.warnings.size() >= Log::kMaxWarnings) return;
     std::string line = "[";
-    line.append(source.data(), source.size());
+    line += log_text(source);
     line += "] ";
-    line.append(message.data(), message.size());
+    line += log_text(message);
     s.warnings.push_back(std::move(line));
 }
 

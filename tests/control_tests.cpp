@@ -324,6 +324,14 @@ void control_tests() {
         const auto partial = load_crash_summary(dir, "2026-10-20_18-05-11-2");
         CHECK(partial && partial->level.empty() && partial->plugins.empty() && !partial->before_game_ready);
         CHECK(!load_crash_summary(dir, "missing").has_value());
+        // Cut off right after a list's key: nothing is read at or past the end
+        // (the byte after the view is a '[' here, as it would be in a longer file).
+        for (const char* key : {"plugins_involved", "issues"}) {
+            const std::string text = std::string("{\n  \"") + key + "\": [\"x\"]";
+            const std::string_view cut = std::string_view(text).substr(0, text.find('['));
+            const CrashSummary s = parse_crash_summary(cut);
+            CHECK(s.plugins.empty() && s.issues.empty());
+        }
         CrashSummary on_stack = *crash;
         on_stack.level = "plugin_on_stack";
         CHECK(!crash_in_plugin(on_stack, "anvil-overlay"));
@@ -376,6 +384,22 @@ void control_tests() {
         if (lines.size() >= 2 && before + 2 <= Log::kMaxWarnings) {
             CHECK(lines[lines.size() - 2] == "[control-test] a warning" && lines.back() == "[control-test] an error");
         }
+    });
+
+    run("log: a message that is not UTF-8 is written as Windows-1252 read into UTF-8", [] {
+        CHECK(log_text("caf\xC3\xA9 \xF0\x9F\x98\x80") == "caf\xC3\xA9 \xF0\x9F\x98\x80");  // UTF-8 stays
+        CHECK(log_text("") == "");
+        // The game's own text: Windows-1252 "Kraków" and "€".
+        CHECK(log_text("Krak\xF3w \x80") == "Krak\xC3\xB3w \xE2\x82\xAC");
+        // A valid start is kept; from the first bad byte on, every byte is one character.
+        CHECK(log_text("\xC3\xA9 \xC3") == "\xC3\xA9 \xC3\x83");
+        CHECK(log_text("\xED\xA0\x80") == "\xC3\xAD\xC2\xA0\xE2\x82\xAC");  // a surrogate is not UTF-8
+        CHECK(log_text("\xC0\xAF") == "\xC3\x80\xC2\xAF");                  // nor an overlong form
+        CHECK(log_text("\x81\x8D\x8F\x90\x9D") == "\xC2\x81\xC2\x8D\xC2\x8F\xC2\x90\xC2\x9D");  // unassigned
+        const size_t before = Log::instance().warning_count();
+        Log::instance().write(ANVIL_LOG_WARNING, "control-test", "Krak\xF3w");
+        const auto lines = Log::instance().warnings();
+        if (before < Log::kMaxWarnings) CHECK(lines.back() == "[control-test] Krak\xC3\xB3w");
     });
 
     run("control: setting text and the plugin-set hash", [] {

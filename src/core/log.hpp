@@ -41,6 +41,12 @@ void log_warning(std::string_view message);
 void log_error(std::string_view message);
 void log_debug(std::string_view message);
 
+// A log message as it is written: UTF-8 as it came, and text that is not
+// UTF-8 (the host's log asks for it, but a plugin may pass the game's own
+// Windows-1252 text) read as Windows-1252, so that anvil.log and what the
+// overlay and the Manager show of it are always UTF-8.
+std::string log_text(std::string_view text);
+
 std::string narrow(const std::wstring& text);
 std::wstring widen(std::string_view text);
 
