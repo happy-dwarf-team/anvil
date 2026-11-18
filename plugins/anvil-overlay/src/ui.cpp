@@ -191,7 +191,9 @@ void refresh(bool force) {
     }
 }
 
-void disable_plugin(const std::string& id) {
+// `id` by value: a notice's button passes its own action's plugin, and that
+// action is erased from the notice below.
+void disable_plugin(const std::string id) {
     const std::string error = shared().control.disable_next_start(id);
     if (error.empty()) {
         say(trf("{0} is disabled from the next start (disabled_plugins in anvil.toml).", {id}), false);
@@ -1478,13 +1480,20 @@ void ui_frame(IDirect3DDevice9* device) {
         }
         u.record_plugin.clear();
     }
+    // Recording a key ends with the panel (closed by its X or the badge): the
+    // window procedure would take the next key pressed in the game for it.
+    if (!s.panel_open.load() && s.recording_key.exchange(false)) u.record_plugin.clear();
     update_visible(now);
     // The badge is drawn over the menu itself, not over a loading screen that
     // a frame drawn from inside a save load shows (anvil-game says which).
     const bool badge = badge_wanted() && s.game->main_menu() != 0;
     if (!s.visible.load() || (!badge && !content_visible(now))) {
         u.was_visible = false;
+        // Nothing drawn: the window procedure passes every input to the game
+        // (a panel closed just before a loading screen left want_keyboard set).
         s.want_mouse.store(false);
+        s.want_keyboard.store(false);
+        s.want_text.store(false);
         return;
     }
     if (!ensure_imgui(device) || !targets_back_buffer(device)) return;
