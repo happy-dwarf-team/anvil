@@ -624,6 +624,34 @@ void change_tests() {
         CHECK(reg.rollback(a) == 1 && call(1) == 2 && g_trace.empty());
     });
 
+    run("pointer swap: a request whose slot cannot be written leaves previous as it was", [] {
+        // A read-only view of a section: the slot reads, but no protection
+        // change makes it writable, so enabling the swap fails.
+        HANDLE section = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 0x1000, nullptr);
+        CHECK(section != nullptr);
+        auto* const writer = static_cast<uint8_t*>(MapViewOfFile(section, FILE_MAP_WRITE, 0, 0, 0x1000));
+        auto* const reader = static_cast<uint8_t*>(MapViewOfFile(section, FILE_MAP_READ, 0, 0, 0x1000));
+        CHECK(writer != nullptr && reader != nullptr);
+        void* const shipped_value = value(0);
+        std::memcpy(writer + 0x100, &shipped_value, sizeof(shipped_value));
+        const uintptr_t slot = reinterpret_cast<uintptr_t>(reader) + 0x100;
+        ChangeRegistry reg(reinterpret_cast<uintptr_t>(reader), 0x1000);
+        const OwnerId a = reg.add_owner("a");
+        // The cell an earlier, removed swap of the plugin left pointing on: a
+        // thread inside that value's code may still read it.
+        g_prev_a = value(2);
+        ChangeId ha = 7;
+        CHECK(reg.swap_pointer(a, in_image(slot), reinterpret_cast<uintptr_t>(value(0)), value(1), &g_prev_a, &ha) ==
+              ChangeStatus::Internal);
+        CHECK(g_prev_a == value(2) && ha == 0);
+        CHECK(*reinterpret_cast<void**>(slot) == value(0));
+        CHECK(reg.chain_at(slot).empty());
+        UnmapViewOfFile(reader);
+        UnmapViewOfFile(writer);
+        CloseHandle(section);
+        g_prev_a = nullptr;
+    });
+
     run("mid hooks: registers written in the callback are loaded on the way out", [] {
         Scratch s(0x1000);
         s.put(0x40, kSteps);
