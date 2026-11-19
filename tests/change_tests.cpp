@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <vector>
 
@@ -565,6 +566,37 @@ void change_tests() {
               ChangeStatus::Ok);
         CHECK(now() == value(1) && g_prev_a == value(2));
         CHECK(reg.remove(a, ha) == ChangeStatus::Ok && now() == value(2));
+    });
+
+    run("changes: a bad pointer of the plugin fails its request and leaves the registry free", [] {
+        // Touched under the lock, it was an access violation that left the lock held
+        // (no destructor runs for a structured exception under /EHsc).
+        Scratch s(0x2000);
+        auto* const slot_ptr = reinterpret_cast<void**>(s.base + 0x200);
+        *slot_ptr = value(0);
+        const uintptr_t slot = s.at(0x200);
+        ChangeRegistry reg(s.at(0), 0x2000);
+        const OwnerId a = reg.add_owner("a");
+        auto* const bad_cell = reinterpret_cast<void**>(0x10);
+        const auto* const bad_bytes = reinterpret_cast<const uint8_t*>(0x10);
+        void* previous = nullptr;
+        ChangeId h = 0;
+        CHECK(reg.swap_pointer(a, in_image(slot), 0, value(1), bad_cell, &h) == ChangeStatus::InvalidArgument);
+        CHECK(reg.swap_pointer(a, in_image(slot), 0, value(1), &previous, reinterpret_cast<ChangeId*>(0x10)) ==
+              ChangeStatus::InvalidArgument);
+        ChangeTarget expecting = in_image(slot);
+        expecting.expected = bad_bytes;
+        expecting.expected_size = sizeof(void*);
+        CHECK(reg.swap_pointer(a, expecting, 0, value(1), &previous, &h) == ChangeStatus::InvalidArgument);
+        CHECK(reg.patch_bytes(a, in_image(s.at(0x100)), bad_bytes, 4, &h) == ChangeStatus::InvalidArgument);
+        CHECK(reg.replace_import(a, GetModuleHandleW(nullptr), reinterpret_cast<const char*>(0x10), "x", value(1),
+                                 &previous, &h) == ChangeStatus::InvalidArgument);
+        CHECK(*slot_ptr == value(0) && previous == nullptr && h == 0);
+        // Another thread still gets the registry.
+        ChangeStatus other = ChangeStatus::NotFound;
+        std::thread([&] { other = reg.swap_pointer(a, in_image(slot), 0, value(1), &previous, &h); }).join();
+        CHECK(other == ChangeStatus::Ok && *slot_ptr == value(1) && previous == value(0));
+        CHECK(reg.remove(a, h) == ChangeStatus::Ok && *slot_ptr == value(0));
     });
 
     run("pointer swap: refusals, conflicts, executable and outside memory", [] {

@@ -212,6 +212,69 @@ bool readable(uintptr_t address, size_t size) {
     return true;
 }
 
+// The plugin's own memory a request reads or writes (its expected bytes and
+// mask, its patch, its strings, its next or previous cell and its handle),
+// touched before the registry's lock is taken. Anvil is built with /EHsc, so a
+// structured exception under the lock runs no destructor: the lock would stay
+// held for every thread, for good. A bad pointer fails the request instead.
+// No objects with destructors: these bodies run under __try.
+bool plugin_bytes_readable(const void* data, size_t size) {
+    if (size == 0) return true;
+    if (data == nullptr) return false;
+    __try {
+        const auto* bytes = static_cast<const volatile uint8_t*>(data);
+        uint8_t sum = 0;
+        for (size_t i = 0; i < size; ++i) sum ^= bytes[i];
+        (void)sum;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool plugin_string_readable(const char* text) {
+    if (text == nullptr) return false;
+    __try {
+        for (size_t i = 0; i < 4096; ++i) {
+            if (static_cast<const volatile char*>(text)[i] == 0) return true;
+        }
+        return false;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// Written back with its own value, atomically: a detour may read the cell now.
+bool plugin_cell_writable(void** cell) {
+    if (cell == nullptr) return true;
+    __try {
+        auto* volatile_cell = reinterpret_cast<void* volatile*>(cell);
+        void* const held = *volatile_cell;
+        InterlockedCompareExchangePointer(volatile_cell, held, held);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool plugin_handle_writable(ChangeId* out) {
+    if (out == nullptr) return true;
+    __try {
+        auto* volatile_out = reinterpret_cast<volatile LONG64*>(out);
+        const LONG64 held = *volatile_out;
+        InterlockedCompareExchange64(volatile_out, held, held);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool plugin_target_readable(const ChangeTarget& target) {
+    if (target.expected_size == 0) return true;
+    return plugin_bytes_readable(target.expected, target.expected_size) &&
+           (target.mask == nullptr || plugin_bytes_readable(target.mask, target.expected_size));
+}
+
 bool executable(uintptr_t address) {
     MEMORY_BASIC_INFORMATION mbi{};
     if (VirtualQuery(reinterpret_cast<const void*>(address), &mbi, sizeof(mbi)) == 0) return false;
@@ -1187,6 +1250,9 @@ uint8_t* ChangeRegistry::context_stub(const uint8_t* from) {
 ChangeStatus ChangeRegistry::hook_function(OwnerId owner, const ChangeTarget& target, void* detour, void** next,
                                            ChangeId* out) {
     if (detour == nullptr || next == nullptr) return ChangeStatus::InvalidArgument;
+    if (!plugin_target_readable(target) || !plugin_cell_writable(next) || !plugin_handle_writable(out)) {
+        return ChangeStatus::InvalidArgument;
+    }
     std::lock_guard lock(mutex_);
     if (const ChangeStatus s = check_requester(owner); s != ChangeStatus::Ok) return s;
     const std::string label = "function hook " + where(target.address);
@@ -1203,6 +1269,7 @@ ChangeStatus ChangeRegistry::hook_function(OwnerId owner, const ChangeTarget& ta
 ChangeStatus ChangeRegistry::mid_hook(OwnerId owner, const ChangeTarget& target, AnvilCpuCallback callback,
                                       void* user, ChangeId* out) {
     if (callback == nullptr) return ChangeStatus::InvalidArgument;
+    if (!plugin_target_readable(target) || !plugin_handle_writable(out)) return ChangeStatus::InvalidArgument;
     std::lock_guard lock(mutex_);
     if (const ChangeStatus s = check_requester(owner); s != ChangeStatus::Ok) return s;
     const std::string label = "mid hook " + where(target.address);
@@ -1218,6 +1285,7 @@ ChangeStatus ChangeRegistry::mid_hook(OwnerId owner, const ChangeTarget& target,
 ChangeStatus ChangeRegistry::replace_block(OwnerId owner, const ChangeTarget& target, size_t size, uintptr_t resume,
                                            AnvilCpuCallback callback, void* user, ChangeId* out) {
     if (callback == nullptr || size > 4096) return ChangeStatus::InvalidArgument;
+    if (!plugin_target_readable(target) || !plugin_handle_writable(out)) return ChangeStatus::InvalidArgument;
     std::lock_guard lock(mutex_);
     if (const ChangeStatus s = check_requester(owner); s != ChangeStatus::Ok) return s;
     const std::string label = "block replacement " + where(target.address) + " (" + std::to_string(size) + " B)";
@@ -1250,6 +1318,9 @@ ChangeStatus ChangeRegistry::replace_block(OwnerId owner, const ChangeTarget& ta
 ChangeStatus ChangeRegistry::redirect_call(OwnerId owner, const ChangeTarget& target, uintptr_t expected_callee,
                                            void* new_target, void** next, ChangeId* out) {
     if (new_target == nullptr || next == nullptr) return ChangeStatus::InvalidArgument;
+    if (!plugin_target_readable(target) || !plugin_cell_writable(next) || !plugin_handle_writable(out)) {
+        return ChangeStatus::InvalidArgument;
+    }
     std::lock_guard lock(mutex_);
     if (const ChangeStatus s = check_requester(owner); s != ChangeStatus::Ok) return s;
     const std::string label = "call redirect " + where(target.address);
@@ -1310,6 +1381,9 @@ ChangeStatus ChangeRegistry::redirect_call(OwnerId owner, const ChangeTarget& ta
 ChangeStatus ChangeRegistry::patch_bytes(OwnerId owner, const ChangeTarget& target, const void* bytes, size_t size,
                                          ChangeId* out) {
     if (bytes == nullptr || size == 0 || size > 4096) return ChangeStatus::InvalidArgument;
+    if (!plugin_target_readable(target) || !plugin_bytes_readable(bytes, size) || !plugin_handle_writable(out)) {
+        return ChangeStatus::InvalidArgument;
+    }
     std::lock_guard lock(mutex_);
     if (const ChangeStatus s = check_requester(owner); s != ChangeStatus::Ok) return s;
     const std::string label = "byte patch " + where(target.address) + " (" + std::to_string(size) + " B)";
@@ -1342,6 +1416,9 @@ ChangeStatus ChangeRegistry::swap_pointer(OwnerId owner, const ChangeTarget& tar
                                           void* value, void** previous, ChangeId* out) {
     if (previous != nullptr && reinterpret_cast<uintptr_t>(previous) % alignof(void*) != 0) {
         return ChangeStatus::InvalidArgument;  // stored atomically like the slot
+    }
+    if (!plugin_target_readable(target) || !plugin_cell_writable(previous) || !plugin_handle_writable(out)) {
+        return ChangeStatus::InvalidArgument;
     }
     std::lock_guard lock(mutex_);
     if (const ChangeStatus s = check_requester(owner); s != ChangeStatus::Ok) return s;
@@ -1386,6 +1463,10 @@ ChangeStatus ChangeRegistry::swap_pointer(OwnerId owner, const ChangeTarget& tar
 ChangeStatus ChangeRegistry::replace_import(OwnerId owner, HMODULE image, const char* module, const char* function,
                                             void* replacement, void** next, ChangeId* out) {
     if (image == nullptr || module == nullptr || function == nullptr || replacement == nullptr || next == nullptr) {
+        return ChangeStatus::InvalidArgument;
+    }
+    if (!plugin_string_readable(module) || !plugin_string_readable(function) || !plugin_cell_writable(next) ||
+        !plugin_handle_writable(out)) {
         return ChangeStatus::InvalidArgument;
     }
     auto* base = reinterpret_cast<uint8_t*>(image);
