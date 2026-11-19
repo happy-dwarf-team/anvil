@@ -16,7 +16,7 @@ namespace log_throttle {
 
 struct Config {
     std::uint64_t repeats = 10;        // lines of a message written before its repeats are counted
-    std::uint64_t report_ms = 60'000;  // a count is reported once it is this old, at the next line of any log
+    std::uint64_t report_ms = 60'000;  // a count is reported once it is this old, at the next line of its log
     bool full_log = false;             // every line is written; counts so far are still reported
 };
 
@@ -47,8 +47,10 @@ struct SinkStats {
 // A message is the sink, the channel, the source file and line, and the text.
 // The first `repeats` lines of a message are written; the next one is
 // replaced by a notice, and from then on its lines are counted. A count is
-// reported when it is `report_ms` old, at the next line of any sink, and when
-// its sink closes. At most `max_messages` messages are tracked: when the table
+// reported when it is `report_ms` old, at the next line of its own sink, and
+// when that sink closes: a report is written only from inside its own sink's
+// write or destructor, where the game serialises that sink's lines, never from
+// another log's thread. At most `max_messages` messages are tracked: when the table
 // is full, the messages that are not counted yet are forgotten (they start
 // again from 0), and when every tracked message is counted, new ones are
 // written untracked. A line is never counted under a message whose text
@@ -57,9 +59,9 @@ class Throttle {
 public:
     explicit Throttle(std::size_t max_messages = 16384) : max_messages_(max_messages) {}
 
-    // A line of a sink. The lines to write first (reports that are due, and
-    // the notice of a message that is counted from this line on) are appended
-    // to `out`, in order; the caller writes them, then the game's line when
+    // A line of a sink. The lines to write first, all to this sink (its
+    // reports that are due, and the notice of a message that is counted from
+    // this line on), are appended to `out`, in order; the caller writes them, then the game's line when
     // the verdict is `write`.
     Verdict record(const void* sink, int channel, std::string_view file, int line, std::string_view text,
                    std::uint64_t now_ms, const Config& config, std::vector<Line>& out);
@@ -84,15 +86,18 @@ private:
         std::unique_ptr<Counted> counted;
     };
 
-    void report_due(std::uint64_t now_ms, std::uint64_t report_ms, std::vector<Line>& out);
+    void report_due(const void* sink, std::uint64_t now_ms, std::uint64_t report_ms, std::vector<Line>& out);
     void forget_uncounted();
 
     std::size_t max_messages_;
     mutable std::mutex mutex_;
     std::unordered_map<std::uint64_t, Entry> entries_;
     std::vector<Counted*> counted_;  // every counted message, for the reports
-    std::unordered_map<const void*, SinkStats> sinks_;
-    std::uint64_t next_scan_ms_ = 0;
+    struct SinkState {
+        SinkStats stats;
+        std::uint64_t next_scan_ms = 0;  // its due counts are looked for at most once a second
+    };
+    std::unordered_map<const void*, SinkState> sinks_;
 };
 
 // The texts the plugin writes; the game's writer puts its own

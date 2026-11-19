@@ -1,14 +1,17 @@
 // The panel's thread, its clicks and what they do outside the panel (open a
 // link, copy, search). The rows come from errors_model.cpp.
 //
-// One thread of the plugin, started when the setting is first on, does all
+// One thread of the plugin, started when the setting is first on and Anvil
+// has loaded every plugin (anvil.plugins_loaded: only an active plugin hears
+// it, so a plugin whose changes could not be enabled shows no panel), does all
 // the panel's work: it creates and shows the panel (a setting's callback runs
 // inside the overlay's own drawing, where it must not call the overlay back),
 // and once a second, while the panel is shown, it reads what changed in the
 // table and hands over new rows. A hidden panel costs a wake-up a second.
 // Clicks come on the game's main thread (anvil-game's run_on_main_thread) and
 // only change the view and wake the thread; a search and the opening of a
-// link run on threads of their own.
+// link run on threads of their own. The files of the playset are read
+// outside g_mutex, so a click never waits for them.
 #include "panel.hpp"
 
 #include <anvil/anvil_panel.h>
@@ -43,6 +46,7 @@ AnvilPanel* g_panel = nullptr;  // the thread's
 std::atomic<bool> g_on{false};
 std::atomic<bool> g_show{false};  // show it at the next wake-up
 std::atomic<bool> g_started{false};
+std::atomic<bool> g_active{false};  // anvil.plugins_loaded came: the plugin's changes are live
 bool g_from_start = false;  // set before the thread starts
 
 std::mutex g_wake_mutex;
@@ -68,20 +72,35 @@ void wake() {
     g_wake_cv.notify_one();
 }
 
-// Under g_mutex.
-const std::vector<se::Layer>& layers_locked() {
+// The playset's layers, read once. Not under g_mutex: the files are read
+// outside it, and two threads that both read them keep the first answer.
+std::vector<se::Layer> layers() {
+    {
+        std::lock_guard lock(g_mutex);
+        if (g_layers_read) return g_layers;
+    }
+    const std::filesystem::path user = se::user_dir();
+    std::vector<se::Layer> read = se::playset_layers(user / L"dlc_load.json", user, se::game_dir());
+    std::lock_guard lock(g_mutex);
     if (!g_layers_read) {
+        g_layers = std::move(read);
         g_layers_read = true;
-        const std::filesystem::path user = se::user_dir();
-        g_layers = se::playset_layers(user / L"dlc_load.json", user, se::game_dir());
     }
     return g_layers;
 }
 
-void resolve_locked(se::Message& m) {
-    if (m.resolve_tried) return;
-    m.resolve_tried = true;
-    if (!m.file.empty() && m.kind != se::Kind::files) se::resolve(layers_locked(), m.file, m.resolved, m.layer);
+// A message whose file is looked up in the playset, outside g_mutex.
+struct Lookup {
+    std::uint64_t index;
+    std::string file;
+    std::string resolved;
+    std::string layer;
+};
+
+// Under g_mutex: a message to look up.
+void want_locked(const se::Message& m, std::vector<Lookup>& out) {
+    if (m.resolve_tried || m.file.empty() || m.kind == se::Kind::files) return;
+    out.push_back(Lookup{m.index, m.file, {}, {}});
 }
 
 // What changed in the table since the last read, into the model.
@@ -107,16 +126,35 @@ bool read_table() {
 void publish() {
     const se::Texts t = texts();
     std::vector<se::Row> rows;
+    // The files the game names: looked up once, for the messages the panel can
+    // show with them. Collected under g_mutex, looked up outside it.
+    std::vector<Lookup> lookups;
     {
         std::lock_guard lock(g_mutex);
         if (!g_dirty) return;
+        // A click while the files are looked up sets it again: the next pass shows it.
         g_dirty = false;
-        // The files the game names: looked up once, for the messages the panel can show with them.
         for (std::uint64_t i = 0; i < g_model.size(); ++i) {
-            se::Message* m = g_model.message(i);
-            if (m != nullptr && m->kind == se::Kind::located) resolve_locked(*m);
+            const se::Message* m = g_model.message(i);
+            if (m != nullptr && m->kind == se::Kind::located) want_locked(*m, lookups);
         }
-        for (se::Message* m : g_model.item(g_view.selected)) resolve_locked(*m);
+        for (const se::Message* m : g_model.item(g_view.selected)) {
+            if (m->kind != se::Kind::located) want_locked(*m, lookups);
+        }
+    }
+    if (!lookups.empty()) {
+        const std::vector<se::Layer> found_in = layers();
+        for (Lookup& l : lookups) se::resolve(found_in, l.file, l.resolved, l.layer);
+    }
+    {
+        std::lock_guard lock(g_mutex);
+        for (Lookup& l : lookups) {
+            se::Message* m = g_model.message(l.index);
+            if (m == nullptr || m->resolve_tried || m->file != l.file) continue;
+            m->resolve_tried = true;
+            m->resolved = std::move(l.resolved);
+            m->layer = std::move(l.layer);
+        }
         const TallyTotals totals = g_tally->totals();
         rows = g_model.rows(g_view, se::Totals{totals.untracked, g_from_start}, t);
     }
@@ -180,13 +218,9 @@ bool start_search(std::uint64_t key, std::string token, se::FindIn in) {
     try {
         std::thread([key, token = std::move(token), in] {
             try {
-                std::vector<se::Layer> layers;
-                {
-                    std::lock_guard lock(g_mutex);
-                    layers = layers_locked();
-                }
+                const std::vector<se::Layer> found_in = layers();
                 const auto start = std::chrono::steady_clock::now();
-                se::Search found = se::search(layers, token, in);
+                se::Search found = se::search(found_in, token, in);
                 const auto ms = static_cast<std::uint64_t>(
                     std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
                 anvil::Host{}.info("the script errors panel: '{}' has {} uses in {} files ({} ms)", token, found.total, found.files, ms);
@@ -299,7 +333,7 @@ void run() {
 }
 
 void start_thread() {
-    if (g_started.exchange(true)) return;
+    if (!g_active.load(std::memory_order_acquire) || g_started.exchange(true)) return;
     // Called from a setting's callback too: an exception must not leave it.
     try {
         std::thread(run).detach();
@@ -319,12 +353,17 @@ void load(const anvil::Host& host, Tally& tally, bool on) {
         host.info("no anvil-overlay.panel: the script errors panel is not available");
         return;
     }
+    // Only an active plugin hears this: when its changes cannot be enabled, Anvil
+    // drops the subscription with them and no panel is shown.
+    host.subscribe(ANVIL_EVENT_PLUGINS_LOADED, [](std::string_view, const void*) {
+        g_active.store(true, std::memory_order_release);
+        if (g_on.load(std::memory_order_acquire)) start_thread();
+    });
     if (!on) return;
     tally.keep(GetTickCount64());
     g_from_start = true;
     g_on.store(true);
     g_show.store(true);
-    start_thread();
     host.info("the script errors panel is on: it counts every message of the throttled logs from now on");
 }
 
