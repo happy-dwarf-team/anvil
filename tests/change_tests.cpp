@@ -656,6 +656,43 @@ void change_tests() {
         CHECK(reg.rollback(a) == 1 && call(1) == 2 && g_trace.empty());
     });
 
+    run("write_memory: bytes across pages leave each page its own protection", [] {
+        // .rdata ends, .data begins, .text after it: three pages of three kinds.
+        auto* base = static_cast<uint8_t*>(VirtualAlloc(nullptr, 0x3000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+        CHECK(base != nullptr);
+        if (base == nullptr) return;
+        DWORD old = 0;
+        CHECK(VirtualProtect(base, 0x1000, PAGE_READONLY, &old));
+        CHECK(VirtualProtect(base + 0x2000, 0x1000, PAGE_EXECUTE_READ, &old));
+        uint8_t bytes[0x1010];
+        for (size_t i = 0; i < sizeof(bytes); ++i) bytes[i] = static_cast<uint8_t>(i * 7 + 1);
+        // From 8 bytes before the end of the first page to 8 bytes into the third.
+        CHECK(write_memory(base + 0xFF8, bytes, sizeof(bytes)));
+        CHECK(std::memcmp(base + 0xFF8, bytes, sizeof(bytes)) == 0);
+        CHECK(protection(base) == PAGE_READONLY);
+        CHECK(protection(base + 0x1000) == PAGE_READWRITE);
+        CHECK(protection(base + 0x2000) == PAGE_EXECUTE_READ);
+        // The middle page is still writable, as the game's own stores need (skipped when it is not,
+        // so the check above fails instead of the store ending the test).
+        if (protection(base + 0x1000) == PAGE_READWRITE) {
+            base[0x1800] = 0x5A;
+            CHECK(base[0x1800] == 0x5A);
+        }
+        // Within one page, and an empty write, as before.
+        const uint8_t one[4] = {1, 2, 3, 4};
+        CHECK(write_memory(base + 0x2100, one, sizeof(one)) && std::memcmp(base + 0x2100, one, 4) == 0);
+        CHECK(protection(base + 0x2000) == PAGE_EXECUTE_READ);
+        CHECK(write_memory(base + 0x10, one, 0));
+        // A page that cannot be unprotected (reserved, not committed) fails the write and restores the
+        // pages before it.
+        auto* half = static_cast<uint8_t*>(VirtualAlloc(nullptr, 0x2000, MEM_RESERVE, PAGE_NOACCESS));
+        CHECK(half != nullptr && VirtualAlloc(half, 0x1000, MEM_COMMIT, PAGE_READONLY) == half);
+        CHECK(!write_memory(half + 0xFFE, one, sizeof(one)));
+        CHECK(protection(half) == PAGE_READONLY);
+        VirtualFree(half, 0, MEM_RELEASE);
+        VirtualFree(base, 0, MEM_RELEASE);
+    });
+
     run("pointer swap: a request whose slot cannot be written leaves previous as it was", [] {
         // A read-only view of a section: the slot reads, but no protection
         // change makes it writable, so enabling the swap fails.
