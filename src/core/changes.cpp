@@ -1538,10 +1538,30 @@ ChangeStatus ChangeRegistry::remove(OwnerId owner, ChangeId id) {
     if (id == 0 || id > changes_.size()) return ChangeStatus::NotFound;
     Change& c = *changes_[id - 1];
     if (c.owner != owner || c.state == LinkState::Removed) return ChangeStatus::NotFound;
-    if (c.state == LinkState::Staged) std::erase(owners_[owner].staged, id);
+    std::vector<ChangeId>& staged = owners_[owner].staged;
+    const auto staged_at = std::find(staged.begin(), staged.end(), id);
+    const size_t staged_index = static_cast<size_t>(staged_at - staged.begin());
+    if (staged_at != staged.end()) staged.erase(staged_at);
+    std::vector<Change*>& links = c.site->links;
+    const auto link_at = std::find(links.begin(), links.end(), &c);
+    const size_t link_index = static_cast<size_t>(link_at - links.begin());
+    if (link_at != links.end()) links.erase(link_at);
+    const LinkState was = c.state;
     c.state = LinkState::Removed;
-    std::erase(c.site->links, &c);
-    if (!relink(*c.site)) return refuse(owner, ChangeStatus::Internal, std::string(c.label()) + ": cannot restore the game's memory");
+    if (!relink(*c.site)) {
+        // The game's memory may still lead through this link (a byte patch, a
+        // slot, a hook SafetyHook could not take out): it stays in its place,
+        // with its handle, so the plugin knows its code is still reached and
+        // can ask again. The links around it lead through it once more.
+        c.state = was;
+        links.insert(links.begin() + static_cast<std::ptrdiff_t>(std::min(link_index, links.size())), &c);
+        if (was == LinkState::Staged) {
+            staged.insert(staged.begin() + static_cast<std::ptrdiff_t>(std::min(staged_index, staged.size())), id);
+        }
+        relink(*c.site);
+        return refuse(owner, ChangeStatus::Internal,
+                      std::string(c.label()) + ": cannot restore the game's memory; the change stays in place");
+    }
     return ChangeStatus::Ok;
 }
 

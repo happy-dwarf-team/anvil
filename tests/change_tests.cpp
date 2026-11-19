@@ -693,6 +693,51 @@ void change_tests() {
         VirtualFree(base, 0, MEM_RELEASE);
     });
 
+    run("changes: a removal that cannot restore the memory keeps the change and its handle", [] {
+        // A slot in a section view; the view is mapped again read-only at the
+        // same address, so the removal's store fails.
+        HANDLE section = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 0x1000, nullptr);
+        CHECK(section != nullptr);
+        auto* base = static_cast<uint8_t*>(MapViewOfFile(section, FILE_MAP_WRITE, 0, 0, 0x1000));
+        CHECK(base != nullptr);
+        if (base == nullptr) return;
+        void* const shipped_value = value(0);
+        std::memcpy(base + 0x100, &shipped_value, sizeof(shipped_value));
+        const uintptr_t slot = reinterpret_cast<uintptr_t>(base) + 0x100;
+        const auto now = [&] { return *reinterpret_cast<void* const*>(slot); };
+        ChangeRegistry reg(reinterpret_cast<uintptr_t>(base), 0x1000);
+        std::vector<std::string> refusals;
+        reg.set_refusal_sink([&](OwnerId, const std::string& m) { refusals.push_back(m); });
+        const OwnerId a = reg.add_owner("a"), b = reg.add_owner("b");
+        ChangeId ha = 0, hb = 0;
+        CHECK(reg.swap_pointer(a, in_image(slot), reinterpret_cast<uintptr_t>(value(0)), value(1), &g_prev_a, &ha) ==
+              ChangeStatus::Ok);
+        CHECK(reg.swap_pointer(b, in_image(slot), 0, value(2), &g_prev_b, &hb) == ChangeStatus::Ok);
+        const std::vector<OwnerId> both = reg.chain_at(slot);
+        CHECK(both.size() == 2);
+        void* const head = now();
+        const auto remap = [&](DWORD access) {
+            UnmapViewOfFile(base);
+            return static_cast<uint8_t*>(MapViewOfFileEx(section, access, 0, 0, 0x1000, base)) == base;
+        };
+        CHECK(remap(FILE_MAP_READ));
+        // Removing either link needs a store only for the head; b is the head when it was the last asked.
+        const ChangeId head_id = head == value(2) ? hb : ha;
+        const OwnerId head_owner = head == value(2) ? b : a;
+        CHECK(reg.remove(head_owner, head_id) == ChangeStatus::Internal);
+        CHECK(!refusals.empty() && refusals.back().ends_with(": cannot restore the game's memory; the change stays in place"));
+        CHECK(now() == head && reg.chain_at(slot) == both);
+        CHECK(reg.describe(head_owner).size() == 1);
+        // Writable again: the same handle removes it.
+        CHECK(remap(FILE_MAP_WRITE));
+        CHECK(reg.remove(head_owner, head_id) == ChangeStatus::Ok);
+        CHECK(reg.chain_at(slot).size() == 1 && now() != head);
+        CHECK(reg.rollback(a) + reg.rollback(b) == 1 && now() == value(0) && reg.chain_at(slot).empty());
+        UnmapViewOfFile(base);
+        CloseHandle(section);
+        g_prev_a = g_prev_b = nullptr;
+    });
+
     run("pointer swap: a request whose slot cannot be written leaves previous as it was", [] {
         // A read-only view of a section: the slot reads, but no protection
         // change makes it writable, so enabling the swap fails.
