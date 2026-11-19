@@ -125,6 +125,33 @@ particles.
 - `reload mesh <text>`: it matches the text against the mesh types' names, not their files, so the
   plugin reloads the mesh types by their `file` itself.
 
+## What reloads, and what needs a restart
+
+The rows were tried in the game on 18–19.11.2026 (Steam and GOG 1.37.5, vanilla and Anbennar), except where they
+say otherwise. Model textures and animations were reloaded there with the console answering `ok`, but how they
+looked afterwards was not checked on screen.
+
+| A change to | In the running game | Drawn again |
+| --- | --- | --- |
+| a mesh (`.mesh`) of an existing mesh type | reloads | at once, also on the units already on the map |
+| a model texture (`.dds`, `.tga` under `gfx/models`) | reloads | at once |
+| an animation (`.anim`) | reloads | `reload anim` reads every animation from its file again |
+| `file`, `scale`, `cull_distance` or an animation's `type` of a `pdxmesh` entry | reloads | at once |
+| an entity (`.asset`): units, cities, ports, flags, buildings, trade goods | reloads | at once, through the map refresh |
+| an entity of the envoys on the map | reloads | the plugin creates them again; not yet seen in the game, which drew no envoy in the saves tried |
+| an entity of an ambient object (eagles, windmills, whales) | reloads | when the game creates it again, while its part of the map is drawn; not yet seen on screen |
+| a particle (`.asset` under `gfx/particles`, a particle texture) | reloads | at once, also smoke and fire already burning |
+| the units of the battle result window or the nation designer | reloads | when the window opens again (from the game's code; an open window kept its units in the game) |
+| a new mesh type (a new `pdxmesh` name) | **needs a restart** | ([#482](https://github.com/happy-dwarf-team/anvil/issues/482)) |
+| the animation `id`s of a `pdxmesh` entry (count or order) | **needs a restart** | ([#482](https://github.com/happy-dwarf-team/anvil/issues/482)) |
+| `meshsettings` and the other `pdxmesh` keys | **needs a restart** | the log names the keys |
+| a file that is empty, deleted or not in the game's format | left out | the window names it; save it again and reload |
+| a mesh with the `@@b@` mark but a bad body | goes to the game | nothing for that mesh (`error.log`: `won't render`) until a good file is reloaded |
+| flags, interface sprites, map textures, files of the game's own folder | not watched | not by this plugin |
+
+Repeated reloads were tried too: ten in a row did not grow the game's memory (private bytes −0.7 MiB, handles
+1395 → 1392), and ten while the game ran in a war, one with the battle result window open, gave no fault.
+
 ## For the lab
 
 The environment variable `ANVIL_MODEL_RELOAD_CONTROL` names a file of one line, `<n> look` or

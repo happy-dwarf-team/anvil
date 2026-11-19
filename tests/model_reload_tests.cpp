@@ -308,6 +308,14 @@ int main() {
         CHECK(mr::changes(now, now).empty());
         mr::scan(m.folders, 2, &cut);
         CHECK(cut);
+
+        // A deleted file is not a change; saved again, it is one.
+        fs::remove(local / "gfx/models/Units/RUS_01.mesh");
+        const mr::Snapshot gone = mr::scan(m.folders, 1000, &cut);
+        CHECK(gone.size() == now.size() - 1 && mr::changes(now, gone).empty());
+        write(local / "gfx/models/Units/RUS_01.mesh", "mesh, again");
+        const std::vector<mr::Change> back = mr::changes(gone, mr::scan(m.folders, 1000, &cut));
+        CHECK(back.size() == 1 && back[0].kind == mr::Kind::mesh && back[0].key.relative == "gfx/models/Units/RUS_01.mesh");
     });
 
     run("files: the steps in order, once each; a .gfx a later mod has is skipped", [] {
@@ -517,6 +525,87 @@ int main() {
             shown |= row.value == "gfx/models/b.anim is empty or not in the game's format: not reloaded.";
         }
         CHECK(shown);
+    });
+
+    run("run: a mesh or texture deleted before the reload is left out; a mesh cut after its mark goes to the game", [] {
+        FakeGame g = vanilla();
+        mr::RunInput in;
+        in.steps = {{mr::Step::What::reload_mesh, "gfx/models/Units/RUS_01.mesh", 0},
+                    {mr::Step::What::reload_texture, "gfx/models/Units/RUS_01_diffuse.dds", 0}};
+        std::map<std::string, std::string> disk;  // nothing: both deleted since the look
+        in.read_head = [&](std::size_t, std::string_view rel, std::string& out) {
+            const auto it = disk.find(std::string(rel));
+            if (it == disk.end()) return false;
+            out = it->second;
+            return true;
+        };
+        mr::RunResult r = mr::run(g, in);
+        CHECK(r.steps.size() == 2 && r.steps[0].status == mr::Status::bad_file &&
+              r.steps[0].bad_file == "gfx/models/Units/RUS_01.mesh");
+        CHECK(r.steps.size() == 2 && r.steps[1].status == mr::Status::bad_file &&
+              r.steps[1].bad_file == "gfx/models/Units/RUS_01_diffuse.dds");
+        CHECK(!r.faulted && !r.load_a_save && g.calls.empty());
+        // Saved again, only the mark left of the mesh (an export cut short): the
+        // check lets it through, and the game logs that it will not render.
+        disk = {{"gfx/models/Units/RUS_01.mesh", "@@b@"}, {"gfx/models/Units/RUS_01_diffuse.dds", "DDS "}};
+        r = mr::run(g, in);
+        CHECK(r.steps.size() == 2 && r.steps[0].status == mr::Status::ok && r.steps[0].count == 2 &&
+              r.steps[1].status == mr::Status::ok);
+        CHECK((g.calls == std::vector<std::string>{"reload RUS_INFANTRY_1", "reload RUS_INFANTRY_1_shadow",
+                                                    "console reloadtexture gfx/models/Units/RUS_01_diffuse.dds"}));
+    });
+
+    run("run: ten reloads in a row give the same calls and results; a .gfx saved back restores the type", [] {
+        FakeGame g = vanilla();
+        const mr::MeshType original = g.types[1];
+        const auto entry = [](const char* scale) {
+            return std::string("objectTypes = { pdxmesh = { name = RUS_INFANTRY_2 file = \"gfx/models/Units/RUS_02.mesh\" "
+                               "scale = ") +
+                   scale +
+                   " animation = { id = idle type = rifleman_idle_animation }"
+                   " animation = { id = attack type = rifleman_attack_animation } } }\n";
+        };
+        mr::RunInput gfx;
+        gfx.steps = {{mr::Step::What::reload_gfx, "interface/assets/eastern.gfx", 0}};
+        gfx.file_exists = [](std::string_view) { return true; };
+        std::string text;
+        gfx.read_file = [&](const mr::Step&, std::string& out) {
+            out = text;
+            return true;
+        };
+        for (int i = 0; i < 10; ++i) {
+            const bool bigger = i % 2 == 0;
+            text = entry(bigger ? "1.5" : "0.5");
+            g.calls.clear();
+            const mr::RunResult r = mr::run(g, gfx);
+            CHECK(r.steps.size() == 1 && r.steps[0].status == mr::Status::ok && r.steps[0].count == 1 &&
+                  r.steps[0].types.empty() && !r.faulted);
+            CHECK((g.calls == std::vector<std::string>{std::string("scale RUS_INFANTRY_2 ") + (bigger ? "1.500000" : "0.500000"),
+                                                        "reload RUS_INFANTRY_2"}));
+        }
+        const mr::MeshType& now = g.types[1];
+        CHECK(now.scale == original.scale && now.file == original.file && now.cull_square == original.cull_square &&
+              now.lookups.size() == original.lookups.size() && now.lookups[0].name == original.lookups[0].name &&
+              now.lookups[1].name == original.lookups[1].name);
+
+        // A mesh and the entities, ten times: the same calls and counts each
+        // time, and a refresh that faulted once does not hold back the next.
+        mr::RunInput mesh;
+        mesh.steps = {{mr::Step::What::reload_mesh, "gfx/models/Units/RUS_01.mesh", 0}, {mr::Step::What::reload_assets, "", 0}};
+        const std::vector<std::string> want = {"reload RUS_INFANTRY_1", "reload RUS_INFANTRY_1_shadow", "console reload assets",
+                                               "refresh map"};
+        for (int i = 0; i < 10; ++i) {
+            g.units = i == 4 ? mr::MapRefresh{true, true, 3, 120} : mr::MapRefresh{true, false, 7, 4940, 12, 30, 5};
+            g.calls.clear();
+            const mr::RunResult r = mr::run(g, mesh);
+            CHECK(g.calls == want);
+            if (i == 4) {
+                CHECK(r.faulted && r.load_a_save && r.steps[1].status == mr::Status::faulted);
+            } else {
+                CHECK(!r.faulted && r.map_refreshed && r.steps[0].count == 2 && r.unit_instances == 7 &&
+                      r.provinces == 4940 && r.envoys == 12 && r.trade_goods == 30 && r.ambient == 5);
+            }
+        }
     });
 
     run("rows: the menu, changed files and the button, the last run", [] {
