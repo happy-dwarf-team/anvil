@@ -38,7 +38,10 @@ def patterns(symbol):
 def value_in(rva, pattern, value):
     tokens = re.findall(r"\?\?|[0-9A-Fa-f]{2}", pattern)
     span = 4 if "rip_relative" in value else value["size"]
-    raw = int.from_bytes(bytes(int(t, 16) for t in tokens[value["at"]: value["at"] + span]), "little")
+    window = tokens[value["at"]: value["at"] + span]
+    if "??" in window:
+        return None  # the value lies on wildcard bytes: no `is`, the game's bytes give it
+    raw = int.from_bytes(bytes(int(t, 16) for t in window), "little")
     if "rip_relative" not in value:
         return raw
     if rva is None:
