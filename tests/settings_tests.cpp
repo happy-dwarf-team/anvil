@@ -815,6 +815,19 @@ void settings_tests() {
         for (const auto& s : f.settings) values[s.id] = s.default_value;
         CHECK(write_player_settings(f, values, file, error) && !std::filesystem::exists(file));
         CHECK(load_player_settings(f, file).warnings.empty());  // a missing file: the defaults
+
+        // A file with a typo was ignored at the start; a change does not replace it,
+        // so the player's other values in it survive until the typo is fixed.
+        const std::string typo = "budget_mb = 2048\nmode = tru\n";
+        write(file, typo);
+        values[1].integer = 4096;
+        error.clear();
+        CHECK(!write_player_settings(f, values, file, error) && read(file) == typo);
+        CHECK(error.starts_with("settings.toml line 2: ") && error.find("not rewritten") != std::string::npos);
+        write(file, "budget_mb = 2048\n");
+        error.clear();
+        CHECK(write_player_settings(f, values, file, error) && error.empty() &&
+              load_player_settings(f, file).values[1]->integer == 4096);
     });
 
     run("settings: the store starts from defaults, the player's file and the environment", [] {
