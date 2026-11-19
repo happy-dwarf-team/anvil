@@ -156,7 +156,9 @@ typedef struct AnvilHost {
     /* A slot symbol (`points_to`) holds `value`, stored atomically. *previous
      * receives the rest of the chain and is rewritten by Anvil whenever the
      * chain changes, until the change is removed: keep it in a lasting,
-     * 8-byte aligned place and read it on each use (may be NULL). */
+     * 8-byte aligned place and read it on each use (may be NULL). A request
+     * that fails leaves *previous holding what it held before (Anvil 1.25
+     * and later; earlier ones wrote NULL when enabling the swap failed). */
     AnvilResult (*swap_pointer)(AnvilPlugin *self, AnvilSymbol slot, void *value, void **previous,
                                 AnvilChange **out);
     /* An import of eu4.exe; module case-insensitive, e.g. "KERNEL32.dll". */

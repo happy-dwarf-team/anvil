@@ -965,6 +965,11 @@ ChangeStatus ChangeRegistry::add_link(OwnerId owner, Site& site, ChangeKind kind
     });
     site.links.insert(position, link);
     changes_.push_back(std::move(change));
+    // A swap's cell may be one an earlier, removed swap of the plugin still
+    // points: a thread inside that value's code reads it. A failed request
+    // puts back what it held rather than NULL.
+    void* const held_before =
+        kind == ChangeKind::PointerSwap && next != nullptr ? *reinterpret_cast<void* volatile*>(next) : nullptr;
     if (chains(kind)) point(*link, successor(site, *link));
     if (next != nullptr && kind != ChangeKind::PointerSwap) *next = link->next;
     if (out != nullptr) *out = link->id;
@@ -975,7 +980,11 @@ ChangeStatus ChangeRegistry::add_link(OwnerId owner, Site& site, ChangeKind kind
     o.staged.clear();
     const ChangeStatus status = enable(std::move(single));
     if (status != ChangeStatus::Ok) {
-        if (next != nullptr) *next = nullptr;
+        if (kind == ChangeKind::PointerSwap && next != nullptr) {
+            InterlockedExchangePointer(reinterpret_cast<void* volatile*>(next), held_before);
+        } else if (next != nullptr) {
+            *next = nullptr;
+        }
         if (out != nullptr) *out = 0;
     }
     return status;
