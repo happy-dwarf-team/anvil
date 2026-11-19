@@ -249,6 +249,46 @@ void gameplay_tests() {
         CHECK(w.patched(0x400) && !policy.suspended(late));
     });
 
+    run("gameplay: a plugin's anvil.suspended and anvil.resumed handlers may ask the policy", [] {
+        // As anvil.control's plugin_of does: the policy's lock is released before
+        // the events (held, the same thread could not take it again, and a thread
+        // the handler waits for would wait for ever).
+        World w;
+        GameplayPolicy policy(*w.changes, w.bus, {}, w.sink());
+        policy.subscribe();
+        static GameplayPolicy* asked = nullptr;
+        static OwnerId asking = 0;
+        static std::vector<std::string> answers;
+        asked = &policy;
+        answers.clear();
+        const AnvilEventCallback ask = [](const char* event, const void*, void*) {
+            try {
+                const bool suspended = asked->suspended(asking);
+                answers.push_back(std::string(event) + (suspended ? " suspended" : " active") +
+                                  (asked->session() ? " in a session" : ""));
+            } catch (const std::exception& e) {
+                answers.push_back(std::string(event) + " threw " + e.what());
+            }
+        };
+        asking = w.plugin("gp", 0x100);
+        w.bus.subscribe("gp", ANVIL_EVENT_SUSPENDED, ask, nullptr);
+        w.bus.subscribe("gp", ANVIL_EVENT_RESUMED, ask, nullptr);
+        policy.add(gameplay("gp"), asking);
+        w.session(ANVIL_GAME_SESSION_STARTED, true, false);
+        w.session(ANVIL_GAME_SESSION_ENDED, true, false);
+        // A plugin added during a session is told too.
+        w.session(ANVIL_GAME_SESSION_STARTED, true, false);
+        asking = w.plugin("late", 0x200);
+        w.bus.subscribe("late", ANVIL_EVENT_SUSPENDED, ask, nullptr);
+        policy.add(gameplay("late"), asking);
+        CHECK((answers == std::vector<std::string>{"anvil.suspended suspended in a session", "anvil.resumed active",
+                                                   "anvil.suspended suspended in a session",
+                                                   "anvil.suspended suspended in a session"}));
+        if (g_failures != 0) {
+            for (const auto& a : answers) std::printf("    answer: %s\n", a.c_str());
+        }
+    });
+
     run("gameplay: set_opt_ins replaces the player's opt-ins (the retired settings of ADR 0013)", [] {
         World w;
         GameplayPolicy policy(*w.changes, w.bus, {}, w.sink());
