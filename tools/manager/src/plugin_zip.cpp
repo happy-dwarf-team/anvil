@@ -190,6 +190,10 @@ PluginInstallResult install_plugin_zip(const ZipArchive& zip, const PluginZipChe
     // Move the installed folder aside: under its own name when the id's folder holds it, and
     // the id's folder too when another plugin's files are there (they would mix otherwise).
     std::vector<fs::path> aside;
+    // Every folder moved aside goes back where it was, whichever step failed.
+    const auto restore_aside = [&] {
+        for (size_t i = aside.size(); i >= 2; i -= 2) MoveFileExW(aside[i - 1].c_str(), aside[i - 2].c_str(), 0);
+    };
     for (const std::string& name : {check.installed_folder, check.id}) {
         if (name.empty()) continue;
         const fs::path folder = game_dir / "anvil" / "plugins" / widen(name);
@@ -200,6 +204,7 @@ PluginInstallResult install_plugin_zip(const ZipArchive& zip, const PluginZipChe
         if (previous.empty() || !RemoveDirectoryW(previous.c_str()) ||
             !MoveFileExW(folder.c_str(), previous.c_str(), 0)) {
             if (code == 0) code = GetLastError();
+            restore_aside();
             remove_tree(incoming);
             return fail(i18n::trf("cannot move {0} aside; is a file in it open?", {narrow(folder.wstring())}), code);
         }
@@ -208,7 +213,7 @@ PluginInstallResult install_plugin_zip(const ZipArchive& zip, const PluginZipChe
     }
     if (!MoveFileExW(incoming.c_str(), target.c_str(), 0)) {
         const DWORD code = GetLastError();
-        for (size_t i = 0; i + 1 < aside.size(); i += 2) MoveFileExW(aside[i + 1].c_str(), aside[i].c_str(), 0);
+        restore_aside();
         remove_tree(incoming);
         return fail(i18n::trf("cannot move the plugin to {0}", {narrow(target.wstring())}), code);
     }
