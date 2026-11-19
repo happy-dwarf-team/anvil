@@ -784,12 +784,26 @@ std::string player_settings_text(const SettingsFile& schema, const std::vector<S
 bool write_player_settings(const SettingsFile& schema, const std::vector<SettingValue>& values,
                            const std::filesystem::path& file, std::string& error) {
     std::string text = player_settings_text(schema, values);
+    std::string old;
+    const bool had = read_text(file, old);
+    if (had && old.starts_with("\xEF\xBB\xBF")) old.erase(0, 3);
+    // A file that does not parse was ignored at the start (every setting has its
+    // default): the player's other values are still in it, which a rewrite from
+    // the values in effect would lose. It stays as it is until the player fixes it.
+    if (had) {
+        try {
+            (void)toml::parse(old);
+        } catch (const toml::parse_error& e) {
+            error = shown(file.filename()) + " line " + std::to_string(e.source().begin.line) + ": " +
+                    std::string(e.description()) +
+                    "; not rewritten, so the values in it are kept (fix or delete it while the game is closed)";
+            return false;
+        }
+    }
     // A retired setting's value that did not move at the start (anvil.toml could not be
     // written) waits in this file for the next start: a rewrite from the schema alone
     // would drop it, and with it the player's choice of the module's switch.
-    std::string old;
-    if (!schema.retired.empty() && read_text(file, old)) {
-        if (old.starts_with("\xEF\xBB\xBF")) old.erase(0, 3);
+    if (!schema.retired.empty() && had) {
         std::string ignored;
         if (const std::optional<RetiredMove> move = plan_retired_move(schema, old, ignored)) {
             std::string kept;
