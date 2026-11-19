@@ -258,6 +258,10 @@ struct FakeEu4 {
 std::vector<std::pair<AnvilGameWork, void*>> g_work;
 DWORD g_main_thread = 0;
 uint32_t fake_main_thread_id() { return g_main_thread; }
+// anvil-game's user_dir: the game's own write folder, which -userdir does not
+// name when userdir.txt chose it.
+std::wstring g_game_user;
+const wchar_t* fake_user_dir() { return g_game_user.c_str(); }
 AnvilResult fake_run_on_main_thread(AnvilGameWork work, void* context) {
     g_work.push_back({work, context});
     return ANVIL_OK;
@@ -648,6 +652,9 @@ int main(int argc, char** argv) {
     }
     std::error_code ignored;
     fs::remove_all(user / "logs", ignored);
+    const fs::path game_user = user.parent_path() / (user.filename().wstring() + L"-game");
+    fs::remove_all(game_user / "logs", ignored);
+    g_game_user = game_user.wstring();
     g_main_thread = GetCurrentThreadId();
     recorder_tests();
     owner_tests();
@@ -664,6 +671,7 @@ int main(int argc, char** argv) {
     game.size = sizeof(game);
     game.main_thread_id = fake_main_thread_id;
     game.run_on_main_thread = fake_run_on_main_thread;
+    game.user_dir = fake_user_dir;
     CHECK(bus.register_service("anvil-game", ANVIL_GAME_SERVICE, ANVIL_GAME_SERVICE_VERSION, &game) == ANVIL_OK);
     AnvilPanelService& panels = *new AnvilPanelService{};
     panels.size = sizeof(panels);
@@ -752,7 +760,7 @@ int main(int argc, char** argv) {
     };
     const auto csv_files = [&] {
         std::vector<fs::path> out;
-        for (const auto& e : fs::directory_iterator(user / "logs", ignored)) {
+        for (const auto& e : fs::directory_iterator(game_user / "logs", ignored)) {
             if (e.path().extension() == ".csv") out.push_back(e.path());
         }
         std::sort(out.begin(), out.end());
@@ -778,6 +786,7 @@ int main(int argc, char** argv) {
         CHECK(any_starts(log, "anvil-script-profiler: profiling span ended (complete): 2 days"));
         const auto files = csv_files();
         CHECK(files.size() == 1);
+        CHECK(!fs::exists(user / "logs"));  // the game's folder, not the command line's
         if (files.size() != 1) return;
         const std::string text = read_text(files[0]);
         CHECK(text.find(" status=complete ") != std::string::npos && text.find(" days=2 ") != std::string::npos &&

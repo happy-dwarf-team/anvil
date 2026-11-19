@@ -182,14 +182,20 @@ std::string date_text(const AnvilGameDate& d) {
     return std::to_string(d.year) + "." + std::to_string(d.month) + "." + std::to_string(d.day);
 }
 
-// EU4's user folder: -userdir=<path> on the command line, else Documents.
+// EU4's user folder: the game's own write folder from anvil-game (-userdir,
+// userdir.txt or Documents, as the game chose it); without it, -userdir=<path>
+// on the command line, else Documents.
 std::filesystem::path user_dir() {
+    if (g_game != nullptr && ANVIL_GAME_HAS(g_game, user_dir) && g_game->user_dir != nullptr) {
+        if (const wchar_t* dir = g_game->user_dir(); dir != nullptr && dir[0] != L'\0') return dir;
+    }
     const std::wstring line = GetCommandLineW();
     const std::wstring key = L"-userdir=";
     if (const std::size_t at = line.find(key); at != std::wstring::npos) {
         std::size_t from = at + key.size();
-        const bool quoted = from < line.size() && line[from] == L'"';
-        if (quoted) ++from;
+        // Quoted after the = or as a whole ("-userdir=C:\My Games\eu4").
+        const bool quoted = (from < line.size() && line[from] == L'"') || (at > 0 && line[at - 1] == L'"');
+        if (from < line.size() && line[from] == L'"') ++from;
         std::size_t end = line.find(quoted ? L'"' : L' ', from);
         if (end == std::wstring::npos) end = line.size();
         return std::filesystem::path(line.substr(from, end - from));
