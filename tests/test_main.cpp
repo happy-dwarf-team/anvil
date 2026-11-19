@@ -64,6 +64,24 @@ int main(int argc, char** argv) {
         CHECK(VersionRange::parse("1.2")->matches(v("1.2.7")));
         CHECK(VersionRange::parse("*")->matches(v("0.0.1")));
         CHECK(!VersionRange::parse(">=x").has_value());
+        // Caret below 1.0 keeps the left-most part that is not zero, or the last one written.
+        auto in = [&](const char* range, const char* version) { return VersionRange::parse(range)->matches(v(version)); };
+        CHECK(in("^0", "0.9.9") && !in("^0", "1.0.0"));
+        CHECK(in("^0.0", "0.0.7") && !in("^0.0", "0.1.0"));
+        CHECK(in("^0.0.3", "0.0.3") && !in("^0.0.3", "0.0.4"));
+        CHECK(in("^0.2", "0.2.9") && !in("^0.2", "0.3.0"));
+        CHECK(in("^0.2.3", "0.2.9") && !in("^0.2.3", "0.3.0") && !in("^0.2.3", "0.2.2"));
+        // A partial bound names all of its line.
+        CHECK(in("<=1.2", "1.2.5") && !in("<=1.2", "1.3.0"));
+        CHECK(in("<=1", "1.9.0") && !in("<=1", "2.0.0"));
+        CHECK(!in(">1.2", "1.2.5") && in(">1.2", "1.3.0"));
+        CHECK(!in(">1", "1.9.0") && in(">1", "2.0.0"));
+        CHECK(in("<1.2", "1.1.9") && !in("<1.2", "1.2.0") && in(">=1.2", "1.2.0"));
+        CHECK(in("<=1.2.3", "1.2.3") && !in(">1.2.3", "1.2.3") && in(">1.2.3", "1.2.4"));
+        // An upper bound's prereleases are above the range, not inside it.
+        CHECK(!in("^1.2.3", "2.0.0-beta.1") && !in("<2.0.0", "2.0.0-rc.1") && !in("<2", "2.0.0-rc.1"));
+        CHECK(in("^1.2.3", "1.5.0-beta.1") && in("<2.0.0", "1.9.9-rc.1") && in(">=1.0.0", "1.0.1-rc.1"));
+        CHECK(in("*", "2.0.0-beta.1"));
     });
 
     manifest_tests();
