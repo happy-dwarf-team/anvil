@@ -136,11 +136,12 @@ void on_write(void* sink, int channel, const GameString* file, int line, const G
     // Only a failed allocation can throw. When record() itself fails, the game's
     // line is written; once it has answered, its verdict stands: a line it
     // counted is in the next report, so writing it too would log it twice.
+    // A failed record() still leaves in `out` the reports it took (their
+    // counts are already reset), never a part of a notice: they are written.
     try {
         verdict = g_throttle.record(sink, channel, file->view(), line, message->view(), GetTickCount64(), config, out);
     } catch (...) {
         verdict = log_throttle::Verdict::write;
-        out.clear();
     }
     try {
         write_lines(out);

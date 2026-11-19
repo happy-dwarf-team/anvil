@@ -971,7 +971,11 @@ ChangeStatus ChangeRegistry::add_link(OwnerId owner, Site& site, ChangeKind kind
     void* const held_before =
         kind == ChangeKind::PointerSwap && next != nullptr ? *reinterpret_cast<void* volatile*>(next) : nullptr;
     if (chains(kind)) point(*link, successor(site, *link));
-    if (next != nullptr && kind != ChangeKind::PointerSwap) *next = link->next;
+    // The cell may be the plugin's hook object itself (the SDKs pass it while
+    // it is empty), which its detour reads atomically: written atomically too.
+    if (next != nullptr && kind != ChangeKind::PointerSwap) {
+        InterlockedExchangePointer(reinterpret_cast<void* volatile*>(next), link->next);
+    }
     if (out != nullptr) *out = link->id;
     Owner& o = owners_[owner];
     o.staged.push_back(link->id);
@@ -983,7 +987,7 @@ ChangeStatus ChangeRegistry::add_link(OwnerId owner, Site& site, ChangeKind kind
         if (kind == ChangeKind::PointerSwap && next != nullptr) {
             InterlockedExchangePointer(reinterpret_cast<void* volatile*>(next), held_before);
         } else if (next != nullptr) {
-            *next = nullptr;
+            InterlockedExchangePointer(reinterpret_cast<void* volatile*>(next), nullptr);
         }
         if (out != nullptr) *out = 0;
     }

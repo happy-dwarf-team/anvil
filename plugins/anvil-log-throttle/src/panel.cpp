@@ -46,7 +46,11 @@ AnvilPanel* g_panel = nullptr;  // the thread's
 std::atomic<bool> g_on{false};
 std::atomic<bool> g_show{false};  // show it at the next wake-up
 std::atomic<bool> g_started{false};
-std::atomic<bool> g_active{false};  // anvil.plugins_loaded came: the plugin's changes are live
+// anvil.plugins_loaded came: the plugin's changes are live. With g_on a
+// Dekker pair (set_on stores g_on and reads g_active, the event stores
+// g_active and reads g_on): both sides use sequentially consistent order, or
+// each could miss the other's store and no thread would start.
+std::atomic<bool> g_active{false};
 bool g_from_start = false;  // set before the thread starts
 
 std::mutex g_wake_mutex;
@@ -333,7 +337,7 @@ void run() {
 }
 
 void start_thread() {
-    if (!g_active.load(std::memory_order_acquire) || g_started.exchange(true)) return;
+    if (!g_active.load() || g_started.exchange(true)) return;
     // Called from a setting's callback too: an exception must not leave it.
     try {
         std::thread(run).detach();
@@ -356,8 +360,8 @@ void load(const anvil::Host& host, Tally& tally, bool on) {
     // Only an active plugin hears this: when its changes cannot be enabled, Anvil
     // drops the subscription with them and no panel is shown.
     host.subscribe(ANVIL_EVENT_PLUGINS_LOADED, [](std::string_view, const void*) {
-        g_active.store(true, std::memory_order_release);
-        if (g_on.load(std::memory_order_acquire)) start_thread();
+        g_active.store(true);
+        if (g_on.load()) start_thread();
     });
     if (!on) return;
     tally.keep(GetTickCount64());
@@ -370,7 +374,7 @@ void load(const anvil::Host& host, Tally& tally, bool on) {
 void set_on(bool on) {
     if (g_panels == nullptr) return;
     if (on) g_tally->keep(GetTickCount64());
-    g_on.store(on, std::memory_order_release);
+    g_on.store(on);
     if (on) g_show.store(true);
     start_thread();
     wake();

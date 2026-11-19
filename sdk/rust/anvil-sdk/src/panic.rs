@@ -62,8 +62,15 @@ fn payload_text(payload: &(dyn Any + Send)) -> String {
 /// (`resume_unwind`) must not be named by it.
 fn text_of(kept: Option<String>, payload: &(dyn Any + Send)) -> String {
     let own = payload_text(payload);
+    // The hook writes the payload's text, alone or followed by " at file:line".
     match kept {
-        Some(kept) if kept.starts_with(&own) => kept,
+        Some(kept)
+            if kept
+                .strip_prefix(own.as_str())
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with(" at ")) =>
+        {
+            kept
+        }
         _ => own,
     }
 }
