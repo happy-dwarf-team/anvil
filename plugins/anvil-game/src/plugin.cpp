@@ -143,6 +143,8 @@ WorldLayout g_world;
 bool g_world_available = false;
 // Inside after_frame(): the moment a world read is allowed.
 std::atomic<bool> g_after_frame{false};
+// g_installs as this frame's session view read it. Main thread only.
+std::uint64_t g_frame_installs = 0;
 // The player's country of this session, to compare frame by frame. Main thread only.
 AnvilGameTag g_player{};
 std::uint64_t g_player_session = 0;
@@ -338,6 +340,10 @@ void publish_pending(std::uint64_t session) {
 
 void act_on_restart(std::uint8_t* app, const SessionView& view, std::int64_t front_end);
 
+// The game put a session into the root since this frame read its view: a save
+// loaded inside the frame. Main thread, inside after_frame() only.
+bool session_replaced_in_frame() { return g_installs.load(std::memory_order_acquire) != g_frame_installs; }
+
 void after_frame_body(std::uint8_t* app, std::uint64_t number) {
     const anvil::Host host;
     if (!g_ready.load(std::memory_order_relaxed) && *g_layout.ready_flag == 1) {
@@ -346,6 +352,7 @@ void after_frame_body(std::uint8_t* app, std::uint64_t number) {
         publish(ANVIL_GAME_EVENT_READY, nullptr);
     }
     const SessionView view = read_session();
+    g_frame_installs = view.installs;
     const SessionChanges changes = g_tracker.update(view);
     // A view that faulted says nothing, so the pending baseline stays.
     if (g_world_available && view.readable) see_pending(view.running && g_tracker.active());
@@ -403,7 +410,9 @@ void after_frame_body(std::uint8_t* app, std::uint64_t number) {
     const bool running = view.running && g_tracker.active();
     const DateEvents dates = g_dates.update(running, g_tracker.current().number, view.date);
     publish_date(dates);
-    if (running && g_world_available) {
+    // Work queued with run_on_main_thread may have loaded a save: the world is
+    // then another session's, which the next frame reports.
+    if (running && g_world_available && !session_replaced_in_frame()) {
         publish_player(g_tracker.current().number);
         // The first frame of a session has no day yet: that is the wars' baseline.
         if (dates.day || !g_wars.known(g_tracker.current().number)) publish_wars(g_tracker.current().number);
@@ -423,6 +432,9 @@ void after_frame_body(std::uint8_t* app, std::uint64_t number) {
     frame.size = sizeof(frame);
     frame.number = number;
     publish(ANVIL_GAME_EVENT_FRAME, &frame);
+    if (running && session_replaced_in_frame()) {
+        host.info("a save was loaded inside frame {}: the world stayed closed for the rest of it", number);
+    }
     // Last, so that the whole frame was published before the game quits.
     if (view.readable) act_on_restart(app, view, front_end);
 }
@@ -839,10 +851,15 @@ constexpr AnvilGameService kService = {
 // In a session as plugins are told it, not only as the tracker sees it: a save
 // loaded in the game ends the old session and starts the new one in one frame,
 // and while its ENDED is published the world is closed, as after an exit to the
-// menu. g_in_session is written only on the main thread, which this checks first.
+// menu. A save loaded inside the frame (a plugin's frame handler or queued work
+// calling the game's loader) closes the world for the rest of that frame: the
+// session and date reported are still the old ones until the next frame.
+// g_in_session and g_frame_installs are written only on the main thread, which
+// this checks first.
 bool world_open() {
     return GetCurrentThreadId() == g_main_thread.load(std::memory_order_acquire) &&
-           g_after_frame.load(std::memory_order_acquire) && g_tracker.active() && g_in_session;
+           g_after_frame.load(std::memory_order_acquire) && g_tracker.active() && g_in_session &&
+           !session_replaced_in_frame();
 }
 
 // The caller's struct takes only what its `size` covers, and keeps that size.

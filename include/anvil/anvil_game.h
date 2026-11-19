@@ -608,7 +608,9 @@ typedef struct AnvilGamePlayer {
  * handler of an anvil-game event or from run_on_main_thread work. Anywhere
  * else, and outside a session, a call answers ANVIL_ERROR_WRONG_PHASE and reads
  * nothing: the game is in the middle of a day on any other thread and in any
- * frame drawn inside its update.
+ * frame drawn inside its update. A save loaded during a frame (by a plugin's
+ * handler or work calling the game's loader) closes the world for the rest of
+ * that frame: the next frame reports the new session.
  *
  * Results. ANVIL_ERROR_NOT_FOUND for an unknown province ID or tag,
  * ANVIL_ERROR_INVALID_ARGUMENT for a bad argument or a tag that is not three
@@ -917,7 +919,8 @@ typedef struct AnvilGameWorldService {
  *
  * Thread and moment. Call only on the game's main thread, after an outer frame,
  * in a session: from a handler of an anvil-game event, from run_on_main_thread
- * work, or from an anvil-overlay.input handler. Anywhere else, and while this
+ * work, or from an anvil-overlay.input handler, and not after a save was loaded
+ * during the same frame. Anywhere else, and while this
  * machine takes part in a hot-join (the game would drop the command on every
  * machine), ANVIL_ERROR_WRONG_PHASE and nothing is posted; try again later. The
  * service draws nothing from the game's random numbers.
