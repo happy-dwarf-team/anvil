@@ -234,10 +234,23 @@ bool remove_plugin_folder(const fs::path& game_dir, const std::string& folder,
         return false;
     }
     const fs::path path = game_dir / "anvil" / "plugins" / widen(folder);
-    if (const DWORD code = remove_tree(path); code != 0) {
+    // Out of anvil/plugins in one move first, as the install does: deleting in
+    // place stopped at the first open file and left part of the plugin (its
+    // DLL without plugin.toml, say). A folder that cannot move stays whole.
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND) {
+        return true;  // gone already, as remove_tree answers
+    }
+    const fs::path work = game_dir / "anvil" / "data" / "anvil" / "manager";
+    DWORD code = 0;
+    const fs::path removed = fresh_folder(work, folder + ".removed", code);
+    if (removed.empty() || !RemoveDirectoryW(removed.c_str()) || !MoveFileExW(path.c_str(), removed.c_str(), 0)) {
+        if (code == 0) code = GetLastError();
         error = i18n::trf("cannot remove {0} (error {1})", {narrow(path.wstring()), std::to_string(code)});
         return false;
     }
+    // A file that cannot be deleted now (a DLL still loaded) stays in the
+    // Manager's work folder, out of the plugins the game loads.
+    remove_tree(removed);
     return true;
 }
 
