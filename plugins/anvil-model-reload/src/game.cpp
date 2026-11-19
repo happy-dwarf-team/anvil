@@ -143,7 +143,116 @@ constexpr std::uintptr_t kProvinceGraphicsSize = 0x1400;
 constexpr std::int32_t kMaxProvinces = 1 << 16;
 constexpr std::uint32_t kMaxUnitSlots = 64;
 
+// The objects Clear leaves (PDB layouts, symbols.toml's last section).
+constexpr std::uintptr_t kTempEnvoySize = 0x18;     // STemporaryEnvoyGraphics
+constexpr std::uintptr_t kTempEnvoyGraphics = 0x8;  // its CEnvoyGraphics*
+constexpr std::uintptr_t kEnvoySize = 0xC8;         // CEnvoyObject
+constexpr std::uintptr_t kEnvoyProvince = 0x48;
+constexpr std::uintptr_t kEnvoyInstance = 0x50;
+constexpr std::uintptr_t kEnvoyOwnerValid = 0x65;  // the owner tag's last byte
+constexpr std::uintptr_t kGoodsSize = 0x90;        // CTradeRouteGoods
+constexpr std::uintptr_t kGoodsType = 0x10;        // 0 naval, 1 land
+constexpr std::uintptr_t kGoodsInstance = 0x78;
+constexpr std::uintptr_t kAmbientInstance = 0x8;  // CAmbientObjectInstance
+constexpr std::uintptr_t kAmbientRemove = 0x10;
+constexpr std::size_t kMaxObjects = 1u << 16;  // per array: more is not a real one
+
+// A CArray (begin, end, capacity) of `size`-byte elements; false when it
+// cannot be read or does not look like one.
+bool read_array(std::uintptr_t at, std::uintptr_t size, std::uintptr_t& begin, std::size_t& count) {
+    std::uintptr_t end = 0;
+    if (!read(at, begin) || !read(at + 8, end) || end < begin || (end - begin) % size != 0) return false;
+    count = static_cast<std::size_t>((end - begin) / size);
+    return count <= kMaxObjects && (count == 0 || begin != 0);
+}
+
+using RecreateFn = void (*)(void* owner, std::uint32_t index);
+
+bool call_recreate(std::uintptr_t fn, std::uintptr_t owner, std::uint32_t index) {
+    __try {
+        reinterpret_cast<RecreateFn>(fn)(reinterpret_cast<void*>(owner), index);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 }  // namespace
+
+// The envoys of one province: every CEnvoyObject with an instance gets it
+// again from RecreateEnvoyObject, which reads the entity anew. One whose
+// owner tag is not valid is skipped: the function would delete its instance
+// and create none, which the game itself never asks for.
+bool GameMemory::recreate_envoys(std::uintptr_t graphics, int& count) {
+    std::uintptr_t temps = 0;
+    std::size_t n = 0;
+    if (!read_array(graphics + a_.envoy_graphics, kTempEnvoySize, temps, n)) return false;
+    for (std::size_t t = 0; t < n; ++t) {
+        std::uintptr_t envoy_graphics = 0, objects = 0;
+        std::size_t m = 0;
+        if (!read(temps + t * kTempEnvoySize + kTempEnvoyGraphics, envoy_graphics)) return false;
+        if (envoy_graphics == 0) continue;
+        if (!read_array(envoy_graphics + a_.envoys, kEnvoySize, objects, m)) return false;
+        for (std::size_t i = 0; i < m; ++i) {
+            const std::uintptr_t e = objects + i * kEnvoySize;
+            std::uintptr_t instance = 0, province = 0;
+            std::uint8_t owner_valid = 0;
+            if (!read(e + kEnvoyInstance, instance) || !read(e + kEnvoyProvince, province) ||
+                !read(e + kEnvoyOwnerValid, owner_valid)) {
+                return false;
+            }
+            if (instance == 0 || (province != 0 && owner_valid == 0)) continue;
+            if (!call_recreate(a_.envoy_recreate, envoy_graphics, static_cast<std::uint32_t>(i))) return false;
+            ++count;
+        }
+    }
+    return true;
+}
+
+// The trade goods on the map's trade routes: each with an instance and a type
+// the function knows (naval or land) is created again.
+bool GameMemory::recreate_trade_goods(std::uintptr_t map, int& count) {
+    std::uintptr_t routes = 0;
+    std::size_t n = 0;
+    if (!read_array(map + a_.trade_routes, 8, routes, n)) return false;
+    for (std::size_t r = 0; r < n; ++r) {
+        std::uintptr_t route = 0, goods = 0;
+        std::size_t m = 0;
+        if (!read(routes + r * 8, route)) return false;
+        if (route == 0) continue;
+        if (!read_array(route + a_.trade_goods, kGoodsSize, goods, m)) return false;
+        for (std::size_t i = 0; i < m; ++i) {
+            const std::uintptr_t g = goods + i * kGoodsSize;
+            std::uintptr_t instance = 0;
+            std::uint32_t type = 0;
+            if (!read(g + kGoodsInstance, instance) || !read(g + kGoodsType, type)) return false;
+            if (instance == 0 || type > 1) continue;
+            if (!call_recreate(a_.trade_goods_recreate, route, static_cast<std::uint32_t>(i))) return false;
+            ++count;
+        }
+    }
+    return true;
+}
+
+// The visible ambient objects: each is marked as when its time runs out, so
+// the game's next map update destroys its instance and creates the object's
+// instance again while its cell is drawn.
+bool GameMemory::remove_ambient(std::uintptr_t map, int& count) {
+    std::uintptr_t objects = 0;
+    std::size_t n = 0;
+    if (!read_array(map + a_.ambient_objects, 8, objects, n)) return false;
+    const std::uint8_t yes = 1;
+    for (std::size_t i = 0; i < n; ++i) {
+        std::uintptr_t object = 0, instance = 0;
+        if (!read(objects + i * 8, object)) return false;
+        if (object == 0) continue;
+        if (!read(object + kAmbientInstance, instance)) return false;
+        if (instance == 0) continue;
+        if (!write_raw(object + kAmbientRemove, &yes, sizeof yes)) return false;
+        ++count;
+    }
+    return true;
+}
 
 MapRefresh GameMemory::refresh_map_objects() {
     MapRefresh out;
@@ -174,6 +283,21 @@ MapRefresh GameMemory::refresh_map_objects() {
         }
         ++out.provinces;
     }
+    // Clear leaves these; a build without their symbols skips them.
+    if (a_.envoy_recreate != 0 && a_.envoy_graphics != 0 && a_.envoys != 0) {
+        for (std::int32_t p = 1; p < count; ++p) {
+            if (!recreate_envoys(data + kProvinceGraphicsSize * static_cast<std::uintptr_t>(p), out.envoys)) {
+                out.faulted = true;
+                return out;
+            }
+        }
+    }
+    if (a_.trade_goods_recreate != 0 && a_.trade_routes != 0 && a_.trade_goods != 0 &&
+        !recreate_trade_goods(map, out.trade_goods)) {
+        out.faulted = true;
+        return out;
+    }
+    if (a_.ambient_objects != 0 && !remove_ambient(map, out.ambient)) out.faulted = true;
     return out;
 }
 

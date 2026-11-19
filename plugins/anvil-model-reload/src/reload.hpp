@@ -43,6 +43,9 @@ struct MapRefresh {
     bool faulted = false;    // an exception in the game's code: stop
     int instances = 0;       // unit instances among the objects deleted
     int provinces = 0;       // provinces whose map objects were deleted
+    int envoys = 0;          // envoys on the map created again
+    int trade_goods = 0;     // trade goods on the trade routes created again
+    int ambient = 0;         // ambient objects (eagles, windmills, whales) the game removes and creates again
 };
 
 class Game {
@@ -62,7 +65,9 @@ public:
     // Deletes the 3D instances on the map (units, cities, ports, flags, city
     // sprawl) and the map icons of every province, as the game does for a
     // province it clears; the game creates them again from the reloaded
-    // entities when it next draws each province.
+    // entities when it next draws each province. Then creates the envoys and
+    // the trade goods on the trade routes again, and marks the ambient objects
+    // for the game to remove and create again.
     virtual MapRefresh refresh_map_objects() = 0;
 };
 
@@ -73,6 +78,7 @@ enum class Status {
     no_table,     // the gfx type table cannot be read
     nothing,      // a mesh no type uses
     unreadable,   // a .gfx file that cannot be read or does not parse
+    bad_file,     // a mesh, animation or texture that is empty or not in the game's format: not reloaded
     faulted,      // an exception in the game's code: the steps after it did not run
     not_run,      // after a fault
 };
@@ -98,6 +104,7 @@ struct StepResult {
     int count = 0;           // mesh types reloaded (mesh and .gfx steps)
     std::string answer;      // the console's text
     std::string texture;     // reload_texture: the name passed to the console
+    std::string bad_file;    // bad_file: the file (relative) that stopped the step
     std::vector<TypeNote> types;               // .gfx: every type that was not simply updated or unchanged
     int unchanged = 0;                         // .gfx
     std::vector<std::string> ignored_keys;     // .gfx: keys of its pdxmesh blocks not reloaded
@@ -113,6 +120,9 @@ struct RunResult {
     bool map_refreshed = false;
     int provinces = 0;
     int unit_instances = 0;
+    int envoys = 0;
+    int trade_goods = 0;
+    int ambient = 0;
     bool load_a_save = false;
 };
 
@@ -123,6 +133,9 @@ struct RunInput {
     std::function<bool(const Step&, std::string&)> read_file;
     // Whether a game path (as `file =` writes it) exists in a mod or in the game.
     std::function<bool(std::string_view)> file_exists;
+    // The first bytes (at most 32) of a mod's file; false when it cannot be
+    // read. Unset: the files are not looked at.
+    std::function<bool(std::size_t mod, std::string_view relative, std::string& head)> read_head;
 };
 
 RunResult run(Game& game, const RunInput& input);
