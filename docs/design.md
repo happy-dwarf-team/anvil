@@ -117,7 +117,7 @@ Knowledge that only some plugins need (GUI tree, console, text) stays in those p
 ### 5.1 `plugin.toml` (manifest v2)
 
 ```toml
-id = "hello"                        # [a-z0-9-]+, max 64, unique
+id = "hello"                        # [a-z0-9-]+, max 64, unique, not a Windows device name (con, nul, com1, …)
 name = "Hello"
 version = "0.1.0"                   # SemVer
 authors = ["Your Name"]
