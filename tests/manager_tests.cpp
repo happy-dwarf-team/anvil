@@ -826,6 +826,15 @@ int main(int argc, char** argv) {
         CHECK(!parse_release("{\"tag_name\":\"v1.2.0\",\"html_url\":\"https://evil.example/releases\"}"));
         CHECK(!parse_release("{\"tag_name\":\"v1.2.0\",\"html_url\":\"https://github.com/happy-dwarf-team/anvil/releases/x y\"}"));
         CHECK(!parse_release("{\"tag_name\":\"v1.2.0\"}"));
+        // Dot segments would lead the browser out of the repository's releases.
+        for (const char* tail : {"../../../evil/x", "tag/../../../../evil", "./x", "tag/..", "%2e%2e/%2E%2E/evil",
+                                 "..?x", "tag/v1/../..#y"}) {
+            const std::string bad = std::string("{\"tag_name\":\"v1.2.0\",\"html_url\":\"https://github.com/happy-dwarf-team/anvil/releases/") +
+                                    tail + "\"}";
+            CHECK(!parse_release(bad));
+        }
+        CHECK(parse_release("{\"tag_name\":\"v1.2.0\",\"html_url\":\"https://github.com/happy-dwarf-team/anvil/releases/tag/v1.2.0..x\"}"));
+        CHECK(parse_release("{\"tag_name\":\"v1.2.0\",\"html_url\":\"https://github.com/happy-dwarf-team/anvil/releases/tag/v1.2.0\"}"));
         CHECK(!parse_release("{\"tag_name\":\"v1.2.0\",") && !parse_release("[]") && !parse_release(""));
         CHECK(newer_release("v1.2.0", "1.1.0") && newer_release("1.1.1", "1.1.0"));
         CHECK(!newer_release("v1.1.0", "1.1.0") && !newer_release("v1.0.9", "1.1.0") && !newer_release("latest", "1.1.0"));

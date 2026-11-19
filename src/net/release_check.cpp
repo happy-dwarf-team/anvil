@@ -39,9 +39,20 @@ std::optional<Release> parse_release(std::string_view json) {
     if (!scan.eat('}') || !scan.at_end()) return std::nullopt;
     if (release.tag.empty() || !release.url.starts_with(std::string(kReleasesUrl) + "/")) return std::nullopt;
     for (const char c : release.url) {
-        if (static_cast<unsigned char>(c) <= 0x20 || c == '"' || c == '<' || c == '>' || c == '\\' || c == '`') {
+        if (static_cast<unsigned char>(c) <= 0x20 || c == '"' || c == '<' || c == '>' || c == '\\' || c == '`' ||
+            c == '%') {
             return std::nullopt;
         }
+    }
+    // The browser resolves dot segments before it asks: ".../releases/../../x"
+    // would open another repository's page. '%' is refused above, so "%2e" is too.
+    std::string_view rest = std::string_view(release.url).substr(std::string_view(kReleasesUrl).size());
+    while (!rest.empty()) {
+        rest.remove_prefix(1);  // the '/'
+        const size_t end = std::min(rest.find('/'), rest.size());
+        const std::string_view segment = rest.substr(0, std::min(end, rest.find_first_of("?#")));
+        if (segment == "." || segment == "..") return std::nullopt;
+        rest.remove_prefix(end);
     }
     return release;
 }
