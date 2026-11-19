@@ -26,6 +26,7 @@
 
 #include <objbase.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -401,6 +402,56 @@ int main(int argc, char** argv) {
         CHECK(read(game / "anvil" / "anvil.toml") == "# mine\ndisabled_plugins = [\"x\"]\n");
         CHECK(read(temp.dir / "outside" / "keep.txt") == "keep");
         CHECK(fs::exists(game / "anvil" / "plugins" / "mine" / "plugin.toml"));
+    });
+
+    run("repair: a standard plugin's folder that is a junction: the link goes, nothing behind it", [&] {
+        const auto package = make_package(version_dll);
+        if (!package) return;
+        const TempDir temp("repair-link");
+        const fs::path game = make_game(temp.dir / "game");
+        apply_plan(*package, plan_install(*package, inspect_installation(*package, game), game, {}, false), game, {});
+        // A developer's copy: anvil-overlay links to a build folder with the
+        // package's files and the build's own.
+        const fs::path build = temp.dir / "build" / "anvil-overlay";
+        fs::create_directories(build);
+        for (const auto& entry : fs::directory_iterator(game / "anvil" / "plugins" / "anvil-overlay")) {
+            fs::copy_file(entry.path(), build / entry.path().filename());
+        }
+        write(build / "anvil-overlay.pdb", "symbols");
+        write(build / "anvil-overlay.dll", "a newer build");
+        CHECK(remove_tree(game / "anvil" / "plugins" / "anvil-overlay") == 0);
+        CHECK(make_junction(game / "anvil" / "plugins" / "anvil-overlay", build));
+
+        const Installation linked = inspect_installation(*package, game);
+        CHECK(!linked.intact());
+        CHECK(linked.extra == std::vector<std::string>({"anvil/plugins/anvil-overlay"}));
+        CHECK(std::find(linked.missing.begin(), linked.missing.end(), "anvil/plugins/anvil-overlay/anvil-overlay.dll") !=
+              linked.missing.end());
+        const Plan plan = plan_install(*package, linked, game, {}, false);
+        CHECK(has_step(plan, Step::Kind::Remove, "anvil/plugins/anvil-overlay") &&
+              has_step(plan, Step::Kind::Write, "anvil/plugins/anvil-overlay/anvil-overlay.dll"));
+        CHECK(apply_plan(*package, plan, game, {}).ok);
+        // The build folder is as it was; the game has a folder of its own again.
+        CHECK(read(build / "anvil-overlay.pdb") == "symbols" && read(build / "anvil-overlay.dll") == "a newer build");
+        const DWORD a = GetFileAttributesW((game / "anvil" / "plugins" / "anvil-overlay").c_str());
+        CHECK(a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_REPARSE_POINT) == 0);
+        CHECK(inspect_installation(*package, game).intact());
+    });
+
+    run("repair: a package file on disk in another case is the package's, not an extra one", [&] {
+        const auto package = make_package(version_dll);
+        if (!package) return;
+        const TempDir temp("repair-case");
+        const fs::path game = make_game(temp.dir / "game");
+        apply_plan(*package, plan_install(*package, inspect_installation(*package, game), game, {}, false), game, {});
+        const fs::path lower = game / "anvil" / "plugins" / "anvil-game" / "plugin.toml";
+        const std::string bytes = read(lower);
+        fs::rename(lower, lower.parent_path() / "Plugin.toml");
+        const Installation renamed = inspect_installation(*package, game);
+        CHECK(renamed.extra.empty() && renamed.missing.empty() && renamed.differing.empty());
+        CHECK(renamed.intact());
+        CHECK(apply_plan(*package, plan_install(*package, renamed, game, {}, false), game, {}).ok);
+        CHECK(read(lower) == bytes);
     });
 
     run("install: another mod's version.dll is replaced only on purpose", [&] {

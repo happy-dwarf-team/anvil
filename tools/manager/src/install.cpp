@@ -350,17 +350,38 @@ Installation inspect_installation(const Package& package, const fs::path& game_d
     out.manager_current = out.manager_copy && !manager_exe.empty() &&
                           (same_file(manager_exe, game_dir / kManagerExe) ||
                            sha256_file(manager_exe) == sha256_file(game_dir / kManagerExe));
+    // A standard plugin's folder that is a link (a junction to a build folder,
+    // say): what it points to is not Anvil's to change. The link itself goes
+    // (remove_tree removes only the link) and the folder is written anew.
+    std::set<std::string> linked;
+    for (const std::string& plugin : package.standard_plugins) {
+        const std::string folder = "anvil/plugins/" + plugin;
+        const DWORD a = GetFileAttributesW(below(game_dir, folder).c_str());
+        if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_REPARSE_POINT) != 0) linked.insert(plugin);
+    }
+    // Windows' names match in any case: a file on disk as Plugin.toml is the
+    // package's plugin.toml, not an extra file to remove.
+    const auto folded = [](std::string path) {
+        for (char& c : path) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return path;
+    };
     std::set<std::string> known;
     for (const Package::File& file : package.files) {
-        known.insert(file.path);
+        known.insert(folded(file.path));
         const fs::path path = below(game_dir, file.path);
-        if (!is_file(path)) {
+        if (linked.contains(plugin_folder_of(file.path))) {
+            out.missing.push_back(file.path);
+        } else if (!is_file(path)) {
             out.missing.push_back(file.path);
         } else if (file.path != kPlayerToml && sha256_file(path) != file.sha256) {
             out.differing.push_back(file.path);
         }
     }
     for (const std::string& plugin : package.standard_plugins) {
+        if (linked.contains(plugin)) {
+            out.extra.push_back("anvil/plugins/" + plugin);
+            continue;
+        }
         const fs::path folder = below(game_dir, "anvil/plugins/" + plugin);
         if (!is_dir(folder)) continue;
         std::vector<fs::path> files;
@@ -368,7 +389,7 @@ Installation inspect_installation(const Package& package, const fs::path& game_d
         for (const fs::path& file : files) {
             const auto relative = file.lexically_relative(game_dir).generic_u8string();
             const std::string path(relative.begin(), relative.end());
-            if (known.count(path) == 0) out.extra.push_back(path);
+            if (!known.contains(folded(path))) out.extra.push_back(path);
         }
     }
     std::sort(out.extra.begin(), out.extra.end());
