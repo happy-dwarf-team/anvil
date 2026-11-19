@@ -642,7 +642,7 @@ int main() {
     });
 
     run("control client: the core's service through the overlay's client", [] {
-        const fs::path dir = fs::temp_directory_path() / "anvil-overlay-client";
+        const fs::path dir = fs::temp_directory_path() / ("anvil-overlay-client-" + std::to_string(GetCurrentProcessId()));
         std::error_code ignored;
         fs::remove_all(dir, ignored);
         fs::create_directories(dir / "anvil");
@@ -696,7 +696,8 @@ int main() {
     });
 
     run("control client: plugins from mods, approved and revoked", [] {
-        const fs::path dir = fs::temp_directory_path() / "anvil-overlay-client-mods";
+        const fs::path dir =
+            fs::temp_directory_path() / ("anvil-overlay-client-mods-" + std::to_string(GetCurrentProcessId()));
         std::error_code ignored;
         fs::remove_all(dir, ignored);
         const fs::path anvil = dir / "eu4" / "anvil";
@@ -735,7 +736,8 @@ int main() {
     });
 
     run("plugins model: a plugin from a mod when the core gives no next start's plan", [] {
-        const fs::path dir = fs::temp_directory_path() / "anvil-overlay-model-no-plan";
+        const fs::path dir =
+            fs::temp_directory_path() / ("anvil-overlay-model-no-plan-" + std::to_string(GetCurrentProcessId()));
         std::error_code ignored;
         fs::remove_all(dir, ignored);
         const fs::path anvil = dir / "eu4" / "anvil";

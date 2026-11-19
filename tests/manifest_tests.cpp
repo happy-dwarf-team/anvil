@@ -74,7 +74,8 @@ id = "legacy"
 
     run("manifest: a plugin.toml past the limit is not read", [] {
         namespace fs = std::filesystem;
-        const fs::path folder = fs::temp_directory_path() / L"anvil-manifest-limit";
+        const fs::path folder =
+            fs::temp_directory_path() / ("anvil-manifest-limit-" + std::to_string(GetCurrentProcessId()));
         fs::create_directories(folder);
         {
             std::ofstream file(folder / "plugin.toml", std::ios::binary);

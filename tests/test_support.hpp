@@ -8,7 +8,9 @@
 #include <cstdio>
 #include <exception>
 #include <functional>
+#include <stdexcept>
 #include <string>
+#include <utility>
 
 // True when the tests run under Wine or Proton (Linux). It reads Wine's own registry hive, so it does not
 // depend on the code under test (which has its own detect_wine()). Windows runs are unaffected.
@@ -58,8 +60,9 @@ inline void run(const char* name, const std::function<void()>& body) {
 
 inline anvil::Manifest manifest(const std::string& toml) {
     auto r = anvil::parse_manifest_text(toml, L"C:\\plugins\\x");
-    if (!r.manifest) std::printf("  manifest error: %s\n", r.error.c_str());
-    return *r.manifest;
+    // Thrown rather than read from an empty optional: run() fails the test with the parse error.
+    if (!r.manifest) throw std::runtime_error("manifest error: " + r.error);
+    return *std::move(r.manifest);
 }
 
 // A minimal valid plugin.toml v2 with `extra` appended.

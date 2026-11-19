@@ -137,7 +137,8 @@ void gameplay_tests() {
     });
 
     run("gameplay: anvil.toml allow_ironman and allow_multiplayer", [] {
-        const auto file = std::filesystem::temp_directory_path() / "anvil_gameplay_test.toml";
+        const auto file = std::filesystem::temp_directory_path() /
+                          ("anvil_gameplay_test_" + std::to_string(GetCurrentProcessId()) + ".toml");
         std::ofstream(file) << "allow_ironman = [\"a\", \"b\"]\nallow_multiplayer = [\"b\"]\n";
         const AnvilSettings s = read_anvil_settings(file);
         CHECK(s.error.empty() && (s.allow_ironman == std::vector<std::string>{"a", "b"}) &&
