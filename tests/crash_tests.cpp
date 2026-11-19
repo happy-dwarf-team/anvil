@@ -1031,8 +1031,10 @@ int main(int argc, char** argv) {
     });
 
     run("safe mode: two starts that ended before game_ready, then one safe start", [] {
-        const fs::path dir = fs::temp_directory_path() / "anvil-safe-mode-test";
-        fs::remove_all(dir);
+        // One folder per process: a second run of these tests at the same time does not share it.
+        const fs::path dir = fs::temp_directory_path() / ("anvil-safe-mode-test-" + std::to_string(GetCurrentProcessId()));
+        std::error_code ignored;
+        fs::remove_all(dir, ignored);
         const fs::path file = dir / "data" / "anvil" / "unfinished-starts.txt";
         {
             StartMarker m;
@@ -1081,10 +1083,10 @@ int main(int argc, char** argv) {
         StartMarker g;
         CHECK(g.begin(file).unfinished == 0);
         CHECK(!loads_in_safe_mode("tongs") && loads_in_safe_mode("anvil-game") && loads_in_safe_mode("anvil-overlay"));
-        fs::remove_all(dir);
+        fs::remove_all(dir, ignored);
     });
 
-    const fs::path root = fs::temp_directory_path() / "anvil-crash-tests";
+    const fs::path root = fs::temp_directory_path() / ("anvil-crash-tests-" + std::to_string(GetCurrentProcessId()));
 
     run("crash: a frame pointer a stack overrun overwrote ends the walk, not the report", [] {
         // A function with frame-pointer unwind data: push rbp; mov rbp, rsp;
@@ -1277,7 +1279,8 @@ int main(int argc, char** argv) {
         CHECK(r.dump && !r.pending_left);
         explain(r);
     });
-    fs::remove_all(root);
+    std::error_code ignored;
+    fs::remove_all(root, ignored);
 
     std::printf("\n%d checks, %d failed\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

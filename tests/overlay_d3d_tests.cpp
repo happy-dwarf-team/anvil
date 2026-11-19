@@ -209,7 +209,8 @@ int main(int argc, char** argv) {
         return 2;
     }
     const fs::path dir = fs::absolute(argv[1]) / "anvil-overlay";
-    const fs::path root = fs::temp_directory_path() / "anvil-overlay-d3d";
+    // One folder per process: a second run of this test at the same time does not share it.
+    const fs::path root = fs::temp_directory_path() / ("anvil-overlay-d3d-" + std::to_string(GetCurrentProcessId()));
     std::error_code ignored;
     fs::remove_all(root, ignored);
     fs::create_directories(root / "anvil");

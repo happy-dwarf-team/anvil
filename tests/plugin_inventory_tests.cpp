@@ -25,8 +25,9 @@ void write(const fs::path& file, std::string_view text) {
     std::ofstream(file, std::ios::binary) << text;
 }
 
+// One folder per process: a second run of these tests at the same time does not share it.
 fs::path fresh(const char* name) {
-    const fs::path dir = fs::temp_directory_path() / name;
+    const fs::path dir = fs::temp_directory_path() / (std::string(name) + "-" + std::to_string(GetCurrentProcessId()));
     std::error_code ignored;
     fs::remove_all(dir, ignored);
     fs::create_directories(dir);
