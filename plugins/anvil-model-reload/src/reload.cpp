@@ -126,6 +126,26 @@ StepResult gfx_step(Game& game, const Step& step, const RunInput& in) {
     return r;
 }
 
+// The first file of the step that is empty or not in the game's format, or "".
+std::string bad_file_of(const Step& step, const RunInput& in) {
+    if (!in.read_head) return {};
+    const auto bad = [&](std::size_t mod, const std::string& relative) {
+        std::string head;
+        return !in.read_head(mod, relative, head) || !plausible_file(relative, head);
+    };
+    switch (step.what) {
+    case Step::What::reload_texture:
+    case Step::What::reload_mesh: return bad(step.mod, step.path) ? step.path : std::string();
+    case Step::What::reload_anim:
+    case Step::What::reload_particle:
+        for (const FileKey& f : step.files) {
+            if (bad(f.mod, f.relative)) return f.relative;
+        }
+        return {};
+    default: return {};
+    }
+}
+
 }  // namespace
 
 std::string texture_name(std::string_view relative, const std::vector<MeshType>& types) {
@@ -145,6 +165,17 @@ RunResult run(Game& game, const RunInput& in) {
             StepResult skipped;
             skipped.step = step;
             skipped.status = Status::not_run;
+            out.steps.push_back(std::move(skipped));
+            continue;
+        }
+        // A file the game would read that is empty or not in its format (a
+        // save caught half written, a wrong export): the step is left out, so
+        // the game's loaders never see it.
+        if (const std::string bad = bad_file_of(step, in); !bad.empty()) {
+            StepResult skipped;
+            skipped.step = step;
+            skipped.status = Status::bad_file;
+            skipped.bad_file = bad;
             out.steps.push_back(std::move(skipped));
             continue;
         }

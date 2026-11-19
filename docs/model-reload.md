@@ -54,6 +54,11 @@ thread after a frame, in this order:
 5. `reload assets` once, when an `.asset` changed.
 6. Each changed `.gfx`: its `pdxmesh` entries (below).
 
+A step whose file is empty or not in the game's format (a `.mesh` or `.anim` without the PDX asset
+mark `@@b@` at its start, a `.dds` without `DDS `, a `.tga` shorter than its header), for example one
+caught while the exporter was still writing it, is left out and named in the window: the game's
+loaders never see it. Save the file again and reload.
+
 The window then shows each step's result and the time; `anvil.log` has the same lines. A step that
 faults in the game's code stops the rest, which the window marks **Not run**, and asks to save and
 restart.

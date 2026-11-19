@@ -83,7 +83,13 @@ struct Step {
     What what = What::reload_mesh;
     std::string path;  // relative, '/' (empty for the once-only steps)
     std::size_t mod = 0;
+    std::vector<FileKey> files;  // reload_anim and reload_particle: the changed files they read
 };
+
+// Whether the first bytes of a file (at most 32) can be the file its name
+// says: a .mesh or .anim starts with the PDX asset mark "@@b@", a .dds with
+// "DDS ", a .tga has its 18-byte header. Other files are not looked at.
+bool plausible_file(std::string_view relative, std::string_view head);
 
 // Textures, meshes, animations, particles, entities, then .gfx entries: a
 // .gfx entry looks its animations up by name, and the console's reloads come

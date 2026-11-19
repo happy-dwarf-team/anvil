@@ -462,6 +462,63 @@ int main() {
         CHECK(mr::run(g, in).steps[0].status == mr::Status::no_table);
     });
 
+    run("run: an empty or damaged mesh, animation or texture is not handed to the game", [] {
+        CHECK(mr::plausible_file("gfx/models/a.MESH", std::string("@@b@!\x08pdxasset", 14)));
+        CHECK(!mr::plausible_file("gfx/models/a.mesh", ""));
+        CHECK(!mr::plausible_file("gfx/models/a.anim", "@@b"));
+        CHECK(!mr::plausible_file("gfx/models/a.anim", "PK\x03\x04xxxx"));
+        CHECK(mr::plausible_file("gfx/models/a.dds", "DDS |...") && !mr::plausible_file("gfx/models/a.dds", "@@b@"));
+        CHECK(mr::plausible_file("gfx/models/a.tga", std::string(18, '\0')) && !mr::plausible_file("gfx/models/a.tga", "x"));
+        CHECK(mr::plausible_file("gfx/entities/a.asset", ""));  // text: not looked at
+
+        // The plan names the files of the once-only steps.
+        const std::vector<mr::Change> c = {
+            {mr::FileKey{0, "gfx/models/a.anim"}, mr::Kind::animation},
+            {mr::FileKey{1, "gfx/models/b.anim"}, mr::Kind::animation},
+            {mr::FileKey{0, "gfx/particles/fire.dds"}, mr::Kind::particle_texture}};
+        const std::vector<mr::Step> s = mr::plan(c, {});
+        CHECK(s.size() == 2 && s[0].files.size() == 2 && s[0].files[1].mod == 1 && s[1].files.size() == 1);
+
+        FakeGame g = vanilla();
+        mr::RunInput in;
+        in.steps = {{mr::Step::What::reload_mesh, "gfx/models/Units/RUS_01.mesh", 0},
+                    {mr::Step::What::reload_texture, "gfx/models/Units/RUS_01_diffuse.dds", 0}, s[0],
+                    {mr::Step::What::reload_assets, "", 0}};
+        const std::map<std::string, std::string> heads = {{"gfx/models/Units/RUS_01.mesh", ""},
+                                                          {"gfx/models/Units/RUS_01_diffuse.dds", "DDS |"},
+                                                          {"gfx/models/a.anim", "@@b@"}};
+        in.read_head = [&](std::size_t, std::string_view rel, std::string& out) {
+            const auto it = heads.find(std::string(rel));
+            if (it == heads.end()) return false;  // b.anim cannot be read
+            out = it->second;
+            return true;
+        };
+        const mr::RunResult r = mr::run(g, in);
+        CHECK(r.steps.size() == 4 && r.steps[0].status == mr::Status::bad_file &&
+              r.steps[0].bad_file == "gfx/models/Units/RUS_01.mesh");
+        CHECK(r.steps[1].status == mr::Status::ok);
+        CHECK(r.steps[2].status == mr::Status::bad_file && r.steps[2].bad_file == "gfx/models/b.anim");
+        CHECK(r.steps[3].status == mr::Status::ok && !r.faulted && r.map_refreshed);
+        CHECK((g.calls == std::vector<std::string>{"console reloadtexture gfx/models/Units/RUS_01_diffuse.dds",
+                                                    "console reload assets", "refresh map"}));
+        const std::vector<std::string> log = mr::log_lines(r);
+        CHECK(log.size() >= 3 && log[0] == "mesh gfx/models/Units/RUS_01.mesh: not reloaded, a file is empty or not in the "
+                                           "game's format (gfx/models/Units/RUS_01.mesh)");
+        CHECK(log.size() >= 3 && log[2] == "reload anim: not reloaded, a file is empty or not in the game's format "
+                                           "(gfx/models/b.anim)");
+        mr::PanelState ps;
+        ps.looked = true;
+        ps.mode = mr::Mode::game;
+        ps.has_last = true;
+        ps.last = r;
+        const mr::Texts t{mr::Lang::en};
+        bool shown = false;
+        for (const mr::Row& row : mr::rows(ps, t)) {
+            shown |= row.value == "gfx/models/b.anim is empty or not in the game's format: not reloaded.";
+        }
+        CHECK(shown);
+    });
+
     run("rows: the menu, changed files and the button, the last run", [] {
         const mr::Texts t{mr::Lang::en};
         mr::PanelState s;

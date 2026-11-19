@@ -55,6 +55,7 @@ std::string status_text(const StepResult& r, const Texts& t) {
     case Status::no_table: return t("The game's mesh types cannot be read.");
     case Status::nothing: return t("No mesh type of the game uses this file.");
     case Status::unreadable: return t("The file cannot be read, or its braces do not close.");
+    case Status::bad_file: return t.f("{0} is empty or not in the game's format: not reloaded.", {r.bad_file});
     case Status::faulted: return t("An error in the game's code: the rest did not run. Save and restart the game.");
     case Status::not_run: return t("Not run");
     }
@@ -80,6 +81,7 @@ const char* status_word(Status s) {
     case Status::no_table: return "no mesh type table";
     case Status::nothing: return "no mesh type uses it";
     case Status::unreadable: return "unreadable";
+    case Status::bad_file: return "not reloaded, a file is empty or not in the game's format";
     case Status::faulted: return "FAULTED";
     case Status::not_run: return "not run";
     }
@@ -194,6 +196,7 @@ std::vector<std::string> log_lines(const RunResult& result) {
         }
         for (const TypeNote& n : r.types) line += "; " + n.name + " " + type_word(n.status);
         if (!r.ignored_keys.empty()) line += "; not reloaded: " + join(r.ignored_keys, ", ");
+        if (!r.bad_file.empty()) line += " (" + r.bad_file + ")";
         if (!r.answer.empty()) line += " (console: " + r.answer + ")";
         out.push_back(std::move(line));
     }

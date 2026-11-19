@@ -189,6 +189,16 @@ std::vector<Change> changes(const Snapshot& before, const Snapshot& now) {
     return out;
 }
 
+bool plausible_file(std::string_view relative, std::string_view head) {
+    const auto ends = [&](std::string_view ext) {
+        return relative.size() >= ext.size() && iequals(relative.substr(relative.size() - ext.size()), ext);
+    };
+    if (ends(".mesh") || ends(".anim")) return head.size() >= 4 && head.substr(0, 4) == "@@b@";
+    if (ends(".dds")) return head.size() >= 4 && head.substr(0, 4) == "DDS ";
+    if (ends(".tga")) return head.size() >= 18;
+    return true;
+}
+
 std::vector<Step> plan(const std::vector<Change>& list, const Snapshot& all) {
     std::vector<Step> out;
     bool anim = false, particle = false, assets = false;
@@ -207,10 +217,17 @@ std::vector<Step> plan(const std::vector<Change>& list, const Snapshot& all) {
             out.push_back(Step{what, c.key.relative, c.key.mod});
         }
     };
+    auto once = [&](Kind kind, Step::What what) {
+        Step s{what, {}, 0, {}};
+        for (const Change& c : list) {
+            if (c.kind == kind) s.files.push_back(c.key);
+        }
+        out.push_back(std::move(s));
+    };
     add_each(Kind::model_texture, Step::What::reload_texture);
     add_each(Kind::mesh, Step::What::reload_mesh);
-    if (anim) out.push_back(Step{Step::What::reload_anim, {}, 0});
-    if (particle) out.push_back(Step{Step::What::reload_particle, {}, 0});
+    if (anim) once(Kind::animation, Step::What::reload_anim);
+    if (particle) once(Kind::particle_texture, Step::What::reload_particle);
     if (assets) out.push_back(Step{Step::What::reload_assets, {}, 0});
     // A .gfx of one path in two mods: the game reads only the copy of the
     // later mod in the launcher's order, so an earlier mod's copy is skipped.

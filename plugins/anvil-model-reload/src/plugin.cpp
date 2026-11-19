@@ -246,6 +246,16 @@ void reload_work(void* context) {
             out = ss.str();
             return true;
         };
+        in.read_head = [&](std::size_t mod, std::string_view relative, std::string& out) {
+            if (mod >= work->mods.size()) return false;
+            std::ifstream f(work->mods[mod].root / fs::path(std::u8string(relative.begin(), relative.end())),
+                            std::ios::binary);
+            if (!f) return false;
+            char buf[32];
+            f.read(buf, sizeof buf);
+            out.assign(buf, static_cast<std::size_t>(f.gcount()));
+            return true;
+        };
         in.file_exists = [&](std::string_view path) {
             const fs::path rel(std::u8string(path.begin(), path.end()));
             std::error_code ec;
