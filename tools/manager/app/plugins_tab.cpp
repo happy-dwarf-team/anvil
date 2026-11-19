@@ -525,6 +525,12 @@ void ManagerApp::ask_remove(const std::string& folder) {
     c.button = tr("Remove");
     c.lines.push_back(trf("Remove the folder {0}? Its settings and data in anvil/data stay.", {"anvil/plugins/" + folder}));
     c.action = [this, folder] {
+        // The game may have started since the page was drawn (it is checked every 1.5 s).
+        if (game_running(game_)) {
+            running_ = true;
+            show_message(tr("Nothing changed"), tr("EU4 is running from this folder. Close it first."));
+            return;
+        }
         std::string error;
         if (!remove_plugin_folder(game_, folder, package_->standard_plugins, error)) failed(tr("The plugin was not removed"), error, false);
         refresh();

@@ -759,9 +759,22 @@ int main(int argc, char** argv) {
         CHECK(check.error.empty() && check.would_skip && contains(check.report.skip_reason, "game build unknown"));
         CHECK(!contains(check.report.skip_reason, "anvil-manager-check"));  // no temporary paths shown
 
-        remove_plugin_folder(game, "hello", standard, check.error);
-        CHECK(!fs::exists(game / "anvil" / "plugins" / "hello") && fs::exists(game / "anvil" / "data" / "hello"));
         std::string error;
+        // A file open in the folder: nothing of the plugin is deleted, rather than part of it.
+        write(game / "anvil" / "plugins" / "hello" / "a-notes.txt", "x");
+        const HANDLE open_dll = CreateFileW((game / "anvil" / "plugins" / "hello" / "hello.dll").c_str(), GENERIC_READ,
+                                        FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+        CHECK(open_dll != INVALID_HANDLE_VALUE);
+        CHECK(!remove_plugin_folder(game, "hello", standard, error) && contains(error, "cannot remove"));
+        CloseHandle(open_dll);
+        CHECK(fs::exists(game / "anvil" / "plugins" / "hello" / "plugin.toml"));
+        CHECK(fs::exists(game / "anvil" / "plugins" / "hello" / "a-notes.txt"));
+        CHECK(fs::is_empty(game / "anvil" / "data" / "anvil" / "manager"));
+
+        CHECK(remove_plugin_folder(game, "hello", standard, error));
+        CHECK(!fs::exists(game / "anvil" / "plugins" / "hello") && fs::exists(game / "anvil" / "data" / "hello"));
+        CHECK(fs::is_empty(game / "anvil" / "data" / "anvil" / "manager"));
+        CHECK(remove_plugin_folder(game, "hello", standard, error));  // gone already
         CHECK(!remove_plugin_folder(game, "anvil-game", standard, error) && contains(error, "comes with Anvil"));
         CHECK(!remove_plugin_folder(game, "..", standard, error));
     });
