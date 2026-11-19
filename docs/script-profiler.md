@@ -60,8 +60,9 @@ lists: the effect's time includes it.
 
 ## The CSV file
 
-`logs/script_profile_<date>_<time>.csv` in the game's user folder (the `-userdir=` folder, else
-`Documents/Paradox Interactive/Europa Universalis IV`), one per span, never overwritten:
+`logs/script_profile_<date>_<time>.csv` in the game's user folder (the folder the game writes to, which
+anvil-game's `user_dir` gives: `-userdir=`, `userdir.txt` or `Documents/Paradox Interactive/Europa Universalis IV`;
+with an anvil-game before 1.24.0, the `-userdir=` folder, else Documents), one per span, never overwritten:
 
 - line 1, `#` and `key=value` pairs: `format=1`, `plugin`, `version` (Anvil's), `build` (the game build),
   `status` (`complete`, `interrupted_session` or `interrupted_exit`), `started` (local time),
