@@ -77,8 +77,8 @@ struct TestImage {
         IMAGE_EXPORT_DIRECTORY exports{};
         exports.Name = 0x21A0;
         exports.Base = 1;
-        exports.NumberOfFunctions = 2;
-        exports.NumberOfNames = 2;
+        exports.NumberOfFunctions = 3;
+        exports.NumberOfNames = 3;
         exports.AddressOfFunctions = 0x2140;
         exports.AddressOfNames = 0x2150;
         exports.AddressOfNameOrdinals = 0x2160;
@@ -89,6 +89,10 @@ struct TestImage {
         put_value<uint32_t>(0x2154, 0x2180);
         put_value<uint16_t>(0x2160, 0);
         put_value<uint16_t>(0x2162, 1);
+        put_value<uint32_t>(0x2148, 0x3500);  // Data_export: zeros in the writable section
+        put_value<uint32_t>(0x2158, 0x21B0);
+        put_value<uint16_t>(0x2164, 2);
+        put_text(0x21B0, "Data_export");
         put_text(0x2170, "Exported_fn");
         put_text(0x2180, "Forwarded_fn");
         put_text(0x2190, "OTHER.fn");

@@ -11,6 +11,7 @@ PluginSymbols::PluginSymbols(const SymbolFile& file, const SymbolVerification& v
         s.rva = verified.symbols[i].rva;
         s.address = s.absent ? 0 : image_base + s.rva;
         s.values = verified.symbols[i].values;
+        s.memory = verified.symbols[i].memory;
         symbols_.push_back(std::move(s));
     }
 }
@@ -49,12 +50,15 @@ ChangeTarget target_of(const PluginSymbol& symbol) {
 
 namespace {
 
-// A hook writes a 5-byte jump over declared, verified code.
+// A hook writes a 5-byte jump over declared, verified code. An `export` needs
+// no `memory`, so the section it was verified in decides: a data export with
+// matching bytes is not code to jump from.
 ChangeStatus hookable(const PluginSymbol* s, bool function_only) {
     if (s == nullptr) return ChangeStatus::NotDeclared;
     const Symbol& d = s->declaration;
     if (d.kind != SymbolKind::Function && (function_only || d.kind != SymbolKind::Site)) return ChangeStatus::WrongKind;
     if (d.memory && *d.memory != MemoryKind::Code) return ChangeStatus::WrongKind;
+    if (s->memory && *s->memory != MemoryKind::Code) return ChangeStatus::WrongKind;
     if (d.bytes.size() < 5) return ChangeStatus::UnsafeSite;
     return ChangeStatus::Ok;
 }

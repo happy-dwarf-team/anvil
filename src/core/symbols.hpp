@@ -102,6 +102,9 @@ struct VerifiedSymbol {
     std::vector<std::pair<std::string, uint64_t>> values;  // in declaration order
     bool absent = false;  // not in the selected build: rva 0, no values
     std::vector<uint8_t> bytes;  // of a `sha256` symbol: the bytes that matched, as read from the image
+    // The kind of the section it lies in, declared or not (an `export` needs no
+    // `memory`); none when absent.
+    std::optional<MemoryKind> memory;
 };
 
 struct SymbolVerification {
