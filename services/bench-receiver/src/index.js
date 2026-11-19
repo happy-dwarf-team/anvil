@@ -3,7 +3,7 @@
 // (docs/spec/benchmark-v1.md, section 9). A daily Cron Trigger deletes reports
 // past the retention period.
 
-import { checkReport } from "./report.js";
+import { checkReport, repeatsKey } from "./report.js";
 import { deleteExpired } from "./retention.js";
 
 export default {
@@ -71,6 +71,11 @@ async function receive(request, env) {
       report = JSON.parse(body);
     } catch {
       return { status: 422, message: "The report is not UTF-8 JSON.", bytes: size };
+    }
+    // The body is stored as sent and read with json_extract, so what is
+    // checked must be all it holds.
+    if (repeatsKey(body, report)) {
+      return { status: 422, message: "The report names a key twice in one object.", bytes: size };
     }
     const checked = checkReport(report, limits);
     if (!checked.ok) return { status: 422, message: checked.message, format: checked.format, bytes: size };

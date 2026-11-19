@@ -193,6 +193,48 @@ describe("check 4: validation", () => {
     expect(await message(response)).toMatch(/open_warmup.path of plugin bellows in start 3 is not declared/);
   });
 
+  it("refuses a key named twice in one object, and stores nothing", async () => {
+    // JSON.parse keeps the last copy, the one checked; json_extract over the
+    // stored body reads the first.
+    const r = report();
+    const text = JSON.stringify(r).replace(
+      '"versions":{',
+      '"versions":{"anvil":"<b>C:\\\\Users\\\\someone</b>","anvil":"' + r.versions.anvil + '",',
+    );
+    expect(JSON.parse(text).versions.anvil).toBe(r.versions.anvil);
+    const response = await post(text);
+    expect(response.status).toBe(422);
+    expect(await message(response)).toBe("The report names a key twice in one object.");
+    const stored = await env.DB.prepare("SELECT count(*) AS n FROM reports WHERE series_id = ?1")
+      .bind(r.series_id)
+      .first();
+    expect(stored.n).toBe(0);
+  });
+
+  it("refuses a plugin field or participant named after an Object member", async () => {
+    // Written into the text: assigning `__proto__` on an object would set its
+    // prototype, not a key.
+    for (const name of ["constructor", "__proto__"]) {
+      const text = JSON.stringify(report((r) => (r.starts[2].plugins.bellows.fields.marker = null))).replace(
+        '"marker":null',
+        `"${name}":null`,
+      );
+      const response = await post(text);
+      expect(response.status).toBe(422);
+      expect(await message(response)).toBe(
+        `The report is not plausible: field ${name} of plugin bellows in start 3 is not declared`,
+      );
+    }
+    const participant = report((r) => {
+      r.starts[2].plugins.constructor = { ...r.starts[2].plugins.bellows, fields: {} };
+    });
+    const response = await post(participant);
+    expect(response.status).toBe(422);
+    expect(await message(response)).toBe(
+      "The report is not plausible: plugin constructor is a benchmark participant in start 3 but has no field schema",
+    );
+  });
+
   it("refuses a plugin field of the wrong kind", async () => {
     const response = await post(report((r) => (r.starts[2].plugins.bellows.fields["open_warmup.mode"] = "fast")));
     expect(response.status).toBe(422);

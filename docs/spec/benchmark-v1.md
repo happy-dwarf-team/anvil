@@ -508,7 +508,8 @@ Decided in anvil#132.
 2. 5 requests per 60 s per IP through the `ratelimit` binding (429).
 3. At most 2000 new reports per UTC day across all senders (503).
 4. Validation against the format's schema (422; an unknown format says "update
-   Anvil"), plugin fields checked generically against the schemas in the same
+   Anvil"; a key named twice in one object is refused first, since the body is
+   stored as sent), plugin fields checked generically against the schemas in the same
    report, plus plausibility checks (1–200 starts, times in a sane range,
    medians consistent with the rows).
 5. `INSERT OR IGNORE`: a repeated `series_id` answers 200 "already received"

@@ -30,7 +30,9 @@ this folder, and changes here that do not touch the Manager use a hidden type
    the largest reports, read from the `daily_counts` row of the day: one row
    read per request
    instead of counting the day's reports.
-4. The format's schema, then the plugin fields against `plugin_schemas` in the
+4. No key named twice in one object (422): `JSON.parse` keeps the last copy,
+   which is the one checked, but `json_extract` in the columns and views reads
+   the first. Then the format's schema, then the plugin fields against `plugin_schemas` in the
    same report (every value declared, of its kind, or `null`), then
    plausibility: start positions 1…n, times between `MIN_START_MS` and
    `MAX_START_MS`, and the warm groups, medians, ranges and difference of
