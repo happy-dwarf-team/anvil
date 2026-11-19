@@ -808,6 +808,25 @@ int main(int argc, char** argv) {
         CHECK(g_evaluated == 15);  // the game's code runs as before
     });
 
+    run("profiler plugin: a Start whose hooks Anvil refuses leaves the next Start free to hook", [&] {
+        // CScriptedTrigger::Evaluate's bytes changed (another program patched them): its hook
+        // fails after the gate's and the effect's were requested, so the group is aborted.
+        const auto before = csv_files();
+        image.put(0xB99B30, {0x90});
+        click("Start");
+        CHECK_PANEL(changes.count(plugin->owner) == 0 && button("Start") != 0);
+        CHECK(any_starts(log, "anvil-script-profiler: profiling span not started: "));
+        image.put(0xB99B30, {0x40});
+        click("Start");
+        CHECK_PANEL(changes.count(plugin->owner) == 3 && button("Stop") != 0);
+        click("Stop");
+        CHECK_PANEL(changes.count(plugin->owner) == 0);
+        // The span's CSV goes, so the later cases count their own files.
+        for (const auto& f : csv_files()) {
+            if (std::find(before.begin(), before.end(), f) == before.end()) fs::remove(f, ignored);
+        }
+    });
+
     run("profiler plugin: Measure N days stops by itself; the setting changes N", [&] {
         CHECK(plugin->record->settings().set_text(0, "3").applied);
         run_work();
