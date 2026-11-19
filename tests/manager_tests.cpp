@@ -736,6 +736,22 @@ int main(int argc, char** argv) {
         CHECK(install_plugin_zip(*zip, check, game).ok);
         CHECK(!fs::exists(game / "anvil" / "plugins" / "hello-1.1") && read(game / "anvil" / "plugins" / "hello" / "hello.dll") == "MZ 1.2");
 
+        // Both folders go aside and the second cannot (a file open in it): the first comes back.
+        fs::rename(game / "anvil" / "plugins" / "hello", game / "anvil" / "plugins" / "hello-1.2");
+        check = check_plugin_zip(*zip, game, temp.dir / "tmp", standard);
+        CHECK(check.error.empty() && check.installed_folder == "hello-1.2");
+        write(game / "anvil" / "plugins" / "hello" / "held.txt", "x");  // appeared after the check
+        const HANDLE held = CreateFileW((game / "anvil" / "plugins" / "hello" / "held.txt").c_str(), GENERIC_READ,
+                                        FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+        CHECK(held != INVALID_HANDLE_VALUE);
+        installed = install_plugin_zip(*zip, check, game);
+        CloseHandle(held);
+        CHECK(!installed.ok && contains(installed.error, "aside"));
+        CHECK(read(game / "anvil" / "plugins" / "hello-1.2" / "hello.dll") == "MZ 1.2");
+        CHECK(fs::is_empty(game / "anvil" / "data" / "anvil" / "manager"));
+        fs::remove_all(game / "anvil" / "plugins" / "hello");
+        fs::rename(game / "anvil" / "plugins" / "hello-1.2", game / "anvil" / "plugins" / "hello");
+
         // Symbols for a build this eu4.exe is not: the loader would skip it.
         zip = zip_of({{"sym/plugin.toml", plugin_toml("sym", "symbols = \"symbols.toml\"\n")}, {"sym/sym.dll", "MZ"},
                       {"sym/symbols.toml", "build = \"eu4-1.37.5-steam-win64\"\n\n[symbol.f]\nrva = 0x1000\nbytes = \"48 8B\"\nmemory = \"code\"\n"}});
