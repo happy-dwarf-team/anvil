@@ -24,6 +24,8 @@ struct Fake {
     void* previous_value = reinterpret_cast<void*>(&game_fn);
     int handles = 0;
     int removed = 0;
+    AnvilResult commit = ANVIL_OK;
+    int aborts = 0;
     std::function<void()> during;  // runs inside the request
 } g_fake;
 
@@ -63,6 +65,9 @@ AnvilResult fake_remove(AnvilPlugin*, AnvilChange*) {
 }
 
 void fake_log(AnvilPlugin*, AnvilLogLevel, const char*) {}
+AnvilResult fake_begin(AnvilPlugin*) { return ANVIL_OK; }
+AnvilResult fake_commit(AnvilPlugin*) { return g_fake.commit; }
+void fake_abort(AnvilPlugin*) { ++g_fake.aborts; }
 
 AnvilHost make_host() {
     AnvilHost h{};
@@ -72,6 +77,9 @@ AnvilHost make_host() {
     h.hook_function_at = &fake_hook_at;
     h.swap_pointer = &fake_swap;
     h.remove = &fake_remove;
+    h.begin_group = &fake_begin;
+    h.commit_group = &fake_commit;
+    h.abort_group = &fake_abort;
     return h;
 }
 
@@ -192,6 +200,58 @@ int main() {
             h.hook_at(hook, address, &detour);
         }
         CHECK(g_fake.removed == 1);
+    });
+
+    run("group: a group whose changes are dropped frees the hooks it filled", [&] {
+        g_fake = {};
+        anvil::FunctionHook<int(int)> kept;  // filled before the group: not the group's
+        h.hook_at(kept, address, &detour);
+        anvil::FunctionHook<int(int)> hook;
+        anvil::PointerSwap<int(int)> swap;
+        // The body throws: Anvil drops what it requested.
+        bool threw = false;
+        try {
+            h.group([&] {
+                h.hook_at(hook, address, &detour);
+                h.swap(swap, kSlot, &detour);
+                throw anvil::Error(ANVIL_ERROR_INVALID_ARGUMENT, "the body failed");
+            });
+        } catch (const anvil::Error&) {
+            threw = true;
+        }
+        CHECK(threw && g_fake.aborts == 1);
+        CHECK(!hook.active() && !swap.active() && kept.active());
+        // Anvil refuses the commit (enabling failed: none enabled).
+        g_fake.commit = ANVIL_ERROR_CONFLICT;
+        threw = false;
+        try {
+            h.group([&] { h.hook_at(hook, address, &detour); });
+        } catch (const anvil::Error& e) {
+            threw = e.result() == ANVIL_ERROR_CONFLICT;
+        }
+        CHECK(threw && !hook.active());
+        // A hook destroyed in the body leaves nothing for the group to touch.
+        g_fake.commit = ANVIL_ERROR_CONFLICT;
+        try {
+            h.group([&] {
+                anvil::FunctionHook<int(int)> local;
+                h.hook_at(local, address, &detour);
+            });
+        } catch (const anvil::Error&) {
+        }
+        // Committed: the hook keeps its change, and a later failed group leaves it.
+        g_fake.commit = ANVIL_OK;
+        h.group([&] { h.hook_at(hook, address, &detour); });
+        CHECK(hook.active());
+        try {
+            h.group([] { throw anvil::Error(ANVIL_ERROR_INVALID_ARGUMENT, "nothing requested"); });
+        } catch (const anvil::Error&) {
+        }
+        CHECK(hook.active() && kept.active());
+        const int removed = g_fake.removed;
+        hook.remove();
+        kept.remove();
+        CHECK(g_fake.removed == removed + 2);
     });
 
     std::printf("%d checks, %d failed\n", g_checks, g_failures);

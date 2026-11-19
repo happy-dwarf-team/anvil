@@ -43,6 +43,7 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace anvil {
 
@@ -271,6 +272,20 @@ inline AnvilChange* claiming() noexcept {
     return reinterpret_cast<AnvilChange*>(&tag);
 }
 
+class ChangeSlot;
+
+// A slot filled while this thread's Host::group is open, and the handle it got.
+struct GroupFill {
+    ChangeSlot* slot;
+    AnvilChange* handle;
+};
+
+// The fills of this thread's open group; null outside one.
+inline std::vector<GroupFill>*& group_fills() noexcept {
+    static thread_local std::vector<GroupFill>* fills = nullptr;
+    return fills;
+}
+
 // The change of a FunctionHook or PointerSwap. A request takes the slot with a
 // compare-exchange, so two threads requesting a change on one object cannot
 // both get through (the later handle would replace the earlier one, whose
@@ -280,7 +295,10 @@ public:
     ChangeSlot() = default;
     ChangeSlot(const ChangeSlot&) = delete;
     ChangeSlot& operator=(const ChangeSlot&) = delete;
-    ~ChangeSlot() { remove(); }
+    ~ChangeSlot() {
+        remove();
+        if (std::vector<GroupFill>* fills = group_fills()) std::erase_if(*fills, [this](const GroupFill& f) { return f.slot == this; });
+    }
 
     bool active() const noexcept { return handle_.load(std::memory_order_acquire) != nullptr; }
     // Removes the change; nothing while another thread's request holds the slot.
@@ -313,6 +331,12 @@ public:
         void finish(AnvilChange* handle) noexcept {
             slot_.handle_.store(handle, std::memory_order_release);
             finished_ = true;
+            if (std::vector<GroupFill>* fills = group_fills(); fills != nullptr && handle != nullptr) {
+                try {
+                    fills->push_back({&slot_, handle});
+                } catch (...) {  // out of memory: the slot keeps the handle until remove()
+                }
+            }
         }
 
     private:
@@ -320,8 +344,32 @@ public:
         bool finished_ = false;
     };
 
+    // The group that filled the slot was dropped, so Anvil removed `handle`:
+    // empty the slot if it still holds it.
+    void forget(AnvilChange* handle) noexcept {
+        handle_.compare_exchange_strong(handle, nullptr, std::memory_order_acq_rel, std::memory_order_acquire);
+    }
+
 private:
     std::atomic<AnvilChange*> handle_{nullptr};
+};
+
+// Host::group's record of the slots this thread fills while the group is open.
+class GroupScope {
+public:
+    GroupScope() noexcept : outer_(group_fills()) { group_fills() = &fills_; }
+    GroupScope(const GroupScope&) = delete;
+    GroupScope& operator=(const GroupScope&) = delete;
+    ~GroupScope() { group_fills() = outer_; }
+    // Anvil dropped the group's changes: their slots are free again.
+    void discard() noexcept {
+        for (const GroupFill& f : fills_) f.slot->forget(f.handle);
+        fills_.clear();
+    }
+
+private:
+    std::vector<GroupFill>* outer_;
+    std::vector<GroupFill> fills_;
 };
 
 }  // namespace detail
@@ -664,15 +712,29 @@ public:
     // After load: the changes `body` requests are enabled together, or none
     // when it throws (the exception goes on). Inside load() the load itself is
     // the group, so this throws ANVIL_ERROR_WRONG_PHASE there.
+    //
+    // When the group's changes are dropped (`body` throws, or Anvil refuses
+    // the commit), the FunctionHooks and PointerSwaps this thread filled in
+    // `body` are free again: active() is false and they take a new request.
+    //
+    // The group is the plugin's, not this thread's: a request from any of the
+    // plugin's threads while it is open (a panel click, a thread `body`
+    // started) joins it, is enabled only with the commit and dropped with an
+    // abort. Hook objects another thread filled keep their handles then:
+    // remove() them before reusing them.
     template <class F> void group(F&& body) const {
         detail::check(c_api().begin_group(self()), "begin_group", "");
+        detail::GroupScope scope;
         try {
             std::forward<F>(body)();
         } catch (...) {
             c_api().abort_group(self());
+            scope.discard();
             throw;
         }
-        detail::check(c_api().commit_group(self()), "commit_group", "");
+        const AnvilResult committed = c_api().commit_group(self());
+        if (committed != ANVIL_OK) scope.discard();
+        detail::check(committed, "commit_group", "");
     }
 
     // --- addresses and calls ------------------------------------------------
