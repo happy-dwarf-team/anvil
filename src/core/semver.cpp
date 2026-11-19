@@ -120,8 +120,10 @@ std::optional<VersionRange> VersionRange::parse(std::string_view text) {
         if (sugar != 0) {
             Version upper = *base;
             if (sugar == '^') {
-                if (base->major > 0) upper = {base->major + 1, 0, 0, {}};
-                else if (parts >= 2 && base->minor > 0) upper = {0, base->minor + 1, 0, {}};
+                // The left-most part that is not zero, or the last one written, may not change:
+                // ^1.2.3 <2.0.0, ^0.2.3 <0.3.0, ^0.0.3 <0.0.4, ^0 <1.0.0, ^0.0 <0.1.0.
+                if (base->major > 0 || parts == 1) upper = {base->major + 1, 0, 0, {}};
+                else if (base->minor > 0 || parts == 2) upper = {0, base->minor + 1, 0, {}};
                 else upper = {0, 0, base->patch + 1, {}};
             } else {
                 upper = parts >= 2 ? Version{base->major, base->minor + 1, 0, {}} : Version{base->major + 1, 0, 0, {}};
@@ -133,6 +135,10 @@ std::optional<VersionRange> VersionRange::parse(std::string_view text) {
             const Version upper = parts == 1 ? Version{base->major + 1, 0, 0, {}} : Version{base->major, base->minor + 1, 0, {}};
             range.comparators_.push_back({Op::Ge, *base});
             range.comparators_.push_back({Op::Lt, upper});
+        } else if ((op == Op::Le || op == Op::Gt) && parts < 3) {
+            // A partial version names all of its line: "<=1.2" is "<1.3.0", ">1.2" is ">=1.3.0".
+            const Version next = parts == 1 ? Version{base->major + 1, 0, 0, {}} : Version{base->major, base->minor + 1, 0, {}};
+            range.comparators_.push_back({op == Op::Le ? Op::Lt : Op::Ge, next});
         } else {
             range.comparators_.push_back({op, *base});
         }
@@ -146,7 +152,13 @@ bool VersionRange::matches(const Version& version) const {
         bool ok = false;
         switch (c.op) {
         case Op::Eq: ok = r == 0; break;
-        case Op::Lt: ok = r < 0; break;
+        // "<2.0.0" (and "^1") stays below the 2.0.0 line: its prereleases sort before 2.0.0 but
+        // are not part of the 1.x range.
+        case Op::Lt:
+            ok = r < 0 && !(c.version.prerelease.empty() && !version.prerelease.empty() &&
+                            version.major == c.version.major && version.minor == c.version.minor &&
+                            version.patch == c.version.patch);
+            break;
         case Op::Le: ok = r <= 0; break;
         case Op::Gt: ok = r > 0; break;
         case Op::Ge: ok = r >= 0; break;
