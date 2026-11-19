@@ -78,12 +78,17 @@ void GameplayPolicy::set_opt_ins(GameplayOptIns opt_ins) {
 
 void GameplayPolicy::add(const Manifest& manifest, OwnerId owner) {
     for (const auto& problem : opt_in_problems(manifest, opt_ins_)) log_(ANVIL_LOG_WARNING, manifest.id, problem);
-    std::lock_guard lock(mutex_);
-    Entry& entry = entries_.emplace_back(Entry{manifest, owner, false, false});
-    if (!session_) return;
-    if (std::string reason = suspension_reason(manifest, *session_, opt_ins_); !reason.empty()) {
-        apply(entry, reason);
+    Events events;
+    {
+        std::lock_guard lock(mutex_);
+        Entry& entry = entries_.emplace_back(Entry{manifest, owner, false, false});
+        if (session_) {
+            if (std::string reason = suspension_reason(manifest, *session_, opt_ins_); !reason.empty()) {
+                apply(entry, reason, events);
+            }
+        }
     }
+    tell(events);
 }
 
 void GameplayPolicy::forget(OwnerId owner) {
@@ -93,8 +98,11 @@ void GameplayPolicy::forget(OwnerId owner) {
     }
 }
 
-void GameplayPolicy::apply(Entry& e, const std::string& reason) {
-    const ChangeStatus status = suspend_plugin(changes_, bus_, e.owner, e.manifest.id);
+// Suspending first takes the changes out, then tells the plugin (suspension.hpp).
+void GameplayPolicy::apply(Entry& e, const std::string& reason, Events& events) {
+    bool changed = false;
+    const ChangeStatus status = changes_.suspend(e.owner, &changed);
+    if (changed) events.emplace_back(e.manifest.id, kEventSuspended);
     e.suspended = true;
     const size_t out = changes_.suspended_count(e.owner);
     log_(ANVIL_LOG_INFO, e.manifest.id,
@@ -104,8 +112,10 @@ void GameplayPolicy::apply(Entry& e, const std::string& reason) {
     }
 }
 
-void GameplayPolicy::release(Entry& e, const char* why) {
-    const ChangeStatus status = resume_plugin(changes_, bus_, e.owner, e.manifest.id);
+void GameplayPolicy::release(Entry& e, const char* why, Events& events) {
+    bool changed = false;
+    const ChangeStatus status = changes_.resume(e.owner, &changed);
+    if (changed) events.emplace_back(e.manifest.id, kEventResumed);
     e.suspended = false;
     log_(ANVIL_LOG_INFO, e.manifest.id,
          std::string("resumed: ") + why + "; " + std::to_string(changes_.count(e.owner)) + " change(s) back");
@@ -114,8 +124,20 @@ void GameplayPolicy::release(Entry& e, const char* why) {
     }
 }
 
+void GameplayPolicy::tell(const Events& events) {
+    for (const auto& [id, event] : events) bus_.publish_to(id, event, nullptr);
+}
+
 void GameplayPolicy::session_started(SessionMode mode) {
-    std::lock_guard lock(mutex_);
+    Events events;
+    {
+        std::lock_guard lock(mutex_);
+        session_started_locked(mode, events);
+    }
+    tell(events);
+}
+
+void GameplayPolicy::session_started_locked(SessionMode mode, Events& events) {
     session_ = mode;
     size_t suspended = 0, allowed = 0;
     for (Entry& e : entries_) {
@@ -126,11 +148,11 @@ void GameplayPolicy::session_started(SessionMode mode) {
                 ++allowed;
                 log_(ANVIL_LOG_INFO, e.manifest.id, "stays active: the player allows it in " + mode_text(mode));
             }
-            if (e.suspended) release(e, "the new session allows it");
+            if (e.suspended) release(e, "the new session allows it", events);
             continue;
         }
         ++suspended;
-        if (!e.suspended) apply(e, reason);
+        if (!e.suspended) apply(e, reason, events);
     }
     log_(ANVIL_LOG_INFO, "anvil",
          "game session started (" + mode_text(mode) + "): " + std::to_string(suspended) +
@@ -138,16 +160,20 @@ void GameplayPolicy::session_started(SessionMode mode) {
 }
 
 void GameplayPolicy::session_ended() {
-    std::lock_guard lock(mutex_);
-    if (!session_) return;
-    session_.reset();
-    size_t resumed = 0;
-    for (Entry& e : entries_) {
-        if (!e.suspended) continue;
-        release(e, "the session ended");
-        ++resumed;
+    Events events;
+    {
+        std::lock_guard lock(mutex_);
+        if (!session_) return;
+        session_.reset();
+        size_t resumed = 0;
+        for (Entry& e : entries_) {
+            if (!e.suspended) continue;
+            release(e, "the session ended", events);
+            ++resumed;
+        }
+        log_(ANVIL_LOG_INFO, "anvil", "game session ended: " + std::to_string(resumed) + " plugin(s) resumed");
     }
-    log_(ANVIL_LOG_INFO, "anvil", "game session ended: " + std::to_string(resumed) + " plugin(s) resumed");
+    tell(events);
 }
 
 void GameplayPolicy::on_session_event(const void* payload) {

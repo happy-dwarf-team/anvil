@@ -9,6 +9,7 @@
 #include <functional>
 #include <mutex>
 #include <optional>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -77,8 +78,14 @@ private:
         bool suspended = false;
         bool forgotten = false;
     };
-    void apply(Entry& entry, const std::string& reason);  // mutex_ held
-    void release(Entry& entry, const char* why);          // mutex_ held
+    // A plugin's anvil.suspended or anvil.resumed, sent once mutex_ is released:
+    // its handler may ask anvil.control about itself (suspended() takes mutex_)
+    // or wait for a thread of its own that does.
+    using Events = std::vector<std::pair<std::string, const char*>>;
+    void apply(Entry& entry, const std::string& reason, Events& events);  // mutex_ held
+    void release(Entry& entry, const char* why, Events& events);          // mutex_ held
+    void tell(const Events& events);                                      // mutex_ not held
+    void session_started_locked(SessionMode mode, Events& events);       // mutex_ held
 
     ChangeRegistry& changes_;
     ServiceBus& bus_;
