@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::ffi::c_void;
 use std::fmt;
 use std::marker::PhantomData;
@@ -101,6 +102,43 @@ fn remove_slot(slot: &AtomicPtr<AnvilChange>, what: &str) -> Result<()> {
     }
 }
 
+/// A slot filled in a group, and the handle (as an address) it got.
+type FilledSlot = (&'static AtomicPtr<AnvilChange>, usize);
+
+thread_local! {
+    /// The hook and swap slots this thread filled inside its open
+    /// [`Host::group`](crate::Host::group), each with the handle it got. A
+    /// group that aborts or whose commit Anvil refuses removes those changes,
+    /// so the slots are emptied again (else `is_active` stays true and the
+    /// next request on the hook answers "already holds a change").
+    static GROUP_SLOTS: RefCell<Option<Vec<FilledSlot>>> = const { RefCell::new(None) };
+}
+
+/// A group opened on this thread: slots filled from now on are recorded.
+pub(crate) fn group_opened() {
+    GROUP_SLOTS.with(|slots| *slots.borrow_mut() = Some(Vec::new()));
+}
+
+/// The group ended. When Anvil removed its changes (`discarded`), each slot
+/// still holding the handle it got in the group is emptied; a slot that has
+/// moved on (removed, or filled again) is left as it is.
+pub(crate) fn group_closed(discarded: bool) {
+    let Some(filled) = GROUP_SLOTS.with(|slots| slots.borrow_mut().take()) else {
+        return;
+    };
+    if !discarded {
+        return;
+    }
+    for (slot, handle) in filled {
+        let _ = slot.compare_exchange(
+            handle as *mut AnvilChange,
+            ptr::null_mut(),
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
+}
+
 /// What a hook's or swap's `change` holds while a request on it runs.
 fn claiming() -> *mut AnvilChange {
     NonNull::<AnvilChange>::dangling().as_ptr()
@@ -111,12 +149,12 @@ fn claiming() -> *mut AnvilChange {
 /// get through (the later handle would overwrite the earlier one, which could
 /// then never be removed). Dropped without [`finish`](Claim::finish) (the
 /// request failed), the slot is empty again.
-pub(crate) struct Claim<'a> {
-    slot: &'a AtomicPtr<AnvilChange>,
+pub(crate) struct Claim {
+    slot: &'static AtomicPtr<AnvilChange>,
 }
 
-impl<'a> Claim<'a> {
-    fn take(slot: &'a AtomicPtr<AnvilChange>, what: &str) -> Result<Self> {
+impl Claim {
+    fn take(slot: &'static AtomicPtr<AnvilChange>, what: &str) -> Result<Self> {
         slot.compare_exchange(
             ptr::null_mut(),
             claiming(),
@@ -135,11 +173,18 @@ impl<'a> Claim<'a> {
     /// The request succeeded: the slot holds its handle.
     pub(crate) fn finish(self, change: *mut AnvilChange) {
         self.slot.store(change, Ordering::Release);
+        if !change.is_null() {
+            GROUP_SLOTS.with(|slots| {
+                if let Some(filled) = slots.borrow_mut().as_mut() {
+                    filled.push((self.slot, change as usize));
+                }
+            });
+        }
         std::mem::forget(self);
     }
 }
 
-impl Drop for Claim<'_> {
+impl Drop for Claim {
     fn drop(&mut self) {
         self.slot.store(ptr::null_mut(), Ordering::Release);
     }
@@ -200,7 +245,7 @@ impl<F: FnPtr> FunctionHook<F> {
         remove_slot(&self.change, "the hook object")
     }
 
-    pub(crate) fn claim(&self, call: &'static str) -> Result<Claim<'_>> {
+    pub(crate) fn claim(&'static self, call: &'static str) -> Result<Claim> {
         Claim::take(&self.change, &format!("{call}: the hook object"))
     }
 
@@ -209,7 +254,7 @@ impl<F: FnPtr> FunctionHook<F> {
     /// it replace the hook's. A request that fails leaves `next` as it was, so
     /// a thread still inside the detour of a removed change never reads a
     /// NULL that a failed request on the reused hook wrote.
-    pub(crate) fn finish(&self, claim: Claim<'_>, next: *mut c_void, change: *mut AnvilChange) {
+    pub(crate) fn finish(&self, claim: Claim, next: *mut c_void, change: *mut AnvilChange) {
         self.next.store(next, Ordering::Release);
         claim.finish(change);
     }
@@ -263,7 +308,7 @@ impl PointerSwap {
         remove_slot(&self.change, "the swap object")
     }
 
-    pub(crate) fn claim(&self) -> Result<Claim<'_>> {
+    pub(crate) fn claim(&'static self) -> Result<Claim> {
         Claim::take(&self.change, "swap_pointer: the swap object")
     }
 

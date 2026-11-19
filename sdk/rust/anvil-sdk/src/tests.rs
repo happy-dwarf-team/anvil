@@ -10,7 +10,7 @@ use std::sync::{Mutex, MutexGuard};
 use crate::sys::*;
 use crate::{
     camera, commands, game, input, log_throttle, map, panel, script, world, Change, ErrorCode,
-    FunctionHook, Host, Payload, Plugin, Tag,
+    FunctionHook, Host, Payload, Plugin, PointerSwap, Tag,
 };
 
 /// One test at a time: the host is global to the crate, as in a plugin DLL.
@@ -1371,6 +1371,87 @@ fn a_panic_out_of_a_group_is_logged_once_where_it_is_caught() {
         "{log:?}"
     );
     assert_eq!(host.group(|| Ok(7)).unwrap(), 7);
+}
+
+#[test]
+fn a_group_whose_changes_are_dropped_frees_the_hooks_it_filled() {
+    static HOOK: FunctionHook<unsafe extern "C" fn(i32) -> i32> = FunctionHook::new();
+    static SWAP: PointerSwap = PointerSwap::new();
+    static KEPT: FunctionHook<unsafe extern "C" fn(i32) -> i32> = FunctionHook::new();
+    static COMMIT: AtomicU32 = AtomicU32::new(0);
+    unsafe extern "C" fn begin(_: *mut AnvilPlugin) -> AnvilResult {
+        ANVIL_OK
+    }
+    unsafe extern "C" fn commit(_: *mut AnvilPlugin) -> AnvilResult {
+        COMMIT.load(Ordering::Relaxed) as AnvilResult
+    }
+    unsafe extern "C" fn abort(_: *mut AnvilPlugin) {}
+    unsafe extern "C" fn swap(
+        _: *mut AnvilPlugin,
+        _slot: AnvilSymbol,
+        _value: *mut c_void,
+        _previous: *mut *mut c_void,
+        out: *mut *mut AnvilChange,
+    ) -> AnvilResult {
+        unsafe { *out = NEXT_CHANGE.fetch_add(1, Ordering::Relaxed) as *mut AnvilChange };
+        ANVIL_OK
+    }
+    let (_guard, table) = fake_host();
+    let mut with_groups = *table;
+    with_groups.begin_group = Some(begin);
+    with_groups.commit_group = Some(commit);
+    with_groups.abort_group = Some(abort);
+    with_groups.swap_pointer = Some(swap);
+    assert_eq!(load::<Quiet>(Box::leak(Box::new(with_groups))), ANVIL_OK);
+    let host = Host::current().unwrap();
+    COMMIT.store(ANVIL_OK as u32, Ordering::Relaxed);
+    // A hook kept from before the group is not the group's.
+    unsafe { host.hook(&KEPT, 1, fake_original) }.unwrap();
+
+    // The body fails: Anvil drops what it requested.
+    let failed = host.group(|| -> crate::Result<()> {
+        unsafe { host.hook(&HOOK, 1, fake_original) }?;
+        unsafe { host.swap_pointer(&SWAP, 2, ptr::null_mut()) }?;
+        Err(crate::Error::new(
+            ErrorCode::InvalidArgument,
+            "the body failed",
+        ))
+    });
+    assert!(failed.is_err());
+    assert!(!HOOK.is_active() && !SWAP.is_active());
+    assert!(KEPT.is_active());
+
+    // A panic in the body: the same.
+    let panicked = std::panic::catch_unwind(|| {
+        host.group(|| -> crate::Result<()> {
+            unsafe { host.hook(&HOOK, 1, fake_original) }?;
+            panic!("in a group")
+        })
+    });
+    assert!(panicked.is_err());
+    assert!(!HOOK.is_active());
+
+    // Anvil refuses the commit (enabling failed: none enabled).
+    COMMIT.store(ANVIL_ERROR_CONFLICT as u32, Ordering::Relaxed);
+    let refused = host.group(|| unsafe { host.hook(&HOOK, 1, fake_original) }.map(|_| ()));
+    assert_eq!(refused.unwrap_err().code(), ErrorCode::Conflict);
+    assert!(!HOOK.is_active());
+
+    // Committed: the hook keeps its change, and a later failed group leaves it.
+    COMMIT.store(ANVIL_OK as u32, Ordering::Relaxed);
+    host.group(|| unsafe { host.hook(&HOOK, 1, fake_original) }.map(|_| ()))
+        .unwrap();
+    assert!(HOOK.is_active());
+    let _ = host.group(|| -> crate::Result<()> {
+        Err(crate::Error::new(
+            ErrorCode::InvalidArgument,
+            "nothing requested",
+        ))
+    });
+    assert!(HOOK.is_active() && KEPT.is_active());
+    assert!(with(|r| r.removed.is_empty()));
+    HOOK.remove().unwrap();
+    KEPT.remove().unwrap();
 }
 
 #[test]
