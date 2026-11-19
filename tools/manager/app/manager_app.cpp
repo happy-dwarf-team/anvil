@@ -351,7 +351,9 @@ void ManagerApp::poll() {
     benchmark_busy_ = benchmark_.busy();
 }
 
-bool ManagerApp::read_only() const { return running_ || pending_.valid(); }
+// A benchmark series locks every page but its own; a zip dropped or downloaded
+// meanwhile must not change the plugins between its starts.
+bool ManagerApp::read_only() const { return running_ || pending_.valid() || benchmark_.busy(); }
 
 bool ManagerApp::anvil_installed() const {
     return snapshot_ && snapshot_->installation && snapshot_->installation->dll == Installation::Dll::Anvil;
@@ -1300,9 +1302,21 @@ void ManagerApp::run_plan() {
     }
 }
 
+namespace {
+
+std::string not_now_reason(bool series, bool running) {
+    if (series) {
+        return tr("A start-up benchmark series is running: EU4 starts and quits by itself. The other "
+                  "pages are locked until the series ends.");
+    }
+    return running ? tr("Close the game first.") : tr("Install Anvil first, then its plugins.");
+}
+
+}  // namespace
+
 void ManagerApp::open_zip(const fs::path& file) {
     if (read_only() || !snapshot_ || !snapshot_->report) {
-        show_message(tr("Not now"), running_ ? tr("Close the game first.") : tr("Install Anvil first, then its plugins."));
+        show_message(tr("Not now"), not_now_reason(benchmark_.busy(), running_));
         return;
     }
     std::string error;
@@ -1334,7 +1348,7 @@ void ManagerApp::downloaded(ZipDownload download) {
         return;
     }
     if (read_only() || !snapshot_ || !snapshot_->report) {
-        show_message(tr("Not now"), running_ ? tr("Close the game first.") : tr("Install Anvil first, then its plugins."));
+        show_message(tr("Not now"), not_now_reason(benchmark_.busy(), running_));
         return;
     }
     std::string error;
@@ -1350,6 +1364,10 @@ void ManagerApp::install_zip() {
     if (game_running(game_)) {
         running_ = true;
         show_message(tr("Nothing changed"), tr("EU4 is running from this folder. Close it first."));
+        return;
+    }
+    if (benchmark_.busy()) {
+        show_message(tr("Nothing changed"), not_now_reason(true, false));
         return;
     }
     const PluginInstallResult result = install_plugin_zip(*zip_, *zip_check_, game_);

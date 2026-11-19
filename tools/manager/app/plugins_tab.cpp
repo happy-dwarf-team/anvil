@@ -406,6 +406,12 @@ void ManagerApp::draw_mod_approval(size_t i) {
         open_approve_ = true;
         break;
     case mui::ModAction::Revoke: {
+        // The game may have started since the page was drawn: it has this copy loaded.
+        if (game_running(game_)) {
+            running_ = true;
+            show_message(tr("Nothing changed"), tr("EU4 is running from this folder. Close it first."));
+            break;
+        }
         std::string error;
         if (!revoke_shown_plugin(game_, m, error)) failed(tr("The approval was not revoked"), error, false);
         refresh();
