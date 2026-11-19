@@ -282,6 +282,12 @@ std::string game_text_to_utf8(std::string_view text) {
     return out;
 }
 
+bool game_text_is(std::string_view game, std::string_view name) {
+    if (game == name) return true;
+    const bool ascii = std::none_of(game.begin(), game.end(), [](char c) { return static_cast<unsigned char>(c) >= 0x80; });
+    return !ascii && game_text_to_utf8(game) == name;
+}
+
 std::size_t fit_utf8(std::string_view text, std::size_t capacity) {
     if (capacity == 0) return 0;
     std::size_t fits = 0;
@@ -871,7 +877,7 @@ AnvilResult read_flag_id(const WorldLayout& l, std::string_view name, std::int32
     std::string text;
     for (std::size_t i = 0; i < count; ++i) {
         if (!read_string(begin + i * 0x20, text)) return ANVIL_ERROR_INTERNAL;
-        if (text == name) {
+        if (game_text_is(text, name)) {  // the name flag_name gives back
             id = static_cast<std::int32_t>(i);
             return ANVIL_OK;
         }

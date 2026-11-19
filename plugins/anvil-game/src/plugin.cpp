@@ -836,9 +836,13 @@ constexpr AnvilGameService kService = {
 
 // ---- the world service ------------------------------------------------------
 
+// In a session as plugins are told it, not only as the tracker sees it: a save
+// loaded in the game ends the old session and starts the new one in one frame,
+// and while its ENDED is published the world is closed, as after an exit to the
+// menu. g_in_session is written only on the main thread, which this checks first.
 bool world_open() {
     return GetCurrentThreadId() == g_main_thread.load(std::memory_order_acquire) &&
-           g_after_frame.load(std::memory_order_acquire) && g_tracker.active();
+           g_after_frame.load(std::memory_order_acquire) && g_tracker.active() && g_in_session;
 }
 
 // The caller's struct takes only what its `size` covers, and keeps that size.
@@ -1210,7 +1214,7 @@ AnvilResult give_variable(Read read, const char* name, std::int32_t* value) {
         const AnvilResult r = read(variables);
         if (r != ANVIL_OK) return r;
         for (const auto& v : variables) {
-            if (v.name == name) {
+            if (anvil_game::game_text_is(v.name, name)) {  // as the names' call gives it
                 *value = v.value;
                 return ANVIL_OK;
             }
