@@ -128,14 +128,6 @@ inline void check(AnvilResult result, const char* call, std::string_view what) {
 
 inline std::string address_text(const void* address) { return std::format("{}", address); }
 
-// A FunctionHook or PointerSwap holds one change: Anvil writes its next or
-// previous while the change lives.
-inline void require_unused(bool active, const char* call) {
-    if (active) {
-        throw Error(ANVIL_ERROR_INVALID_ARGUMENT, std::format("{}: the hook object is in use; remove() it first", call));
-    }
-}
-
 // Only named where a static_assert has already failed, so that no second
 // error follows it; never defined.
 template <class R> R unreachable();
@@ -271,9 +263,74 @@ private:
     AnvilChange* handle_ = nullptr;
 };
 
+namespace detail {
+
+// What a hook's or swap's change slot holds while a request on it runs.
+inline AnvilChange* claiming() noexcept {
+    static char tag;
+    return reinterpret_cast<AnvilChange*>(&tag);
+}
+
+// The change of a FunctionHook or PointerSwap. A request takes the slot with a
+// compare-exchange, so two threads requesting a change on one object cannot
+// both get through (the later handle would replace the earlier one, whose
+// change could then never be removed).
+class ChangeSlot {
+public:
+    ChangeSlot() = default;
+    ChangeSlot(const ChangeSlot&) = delete;
+    ChangeSlot& operator=(const ChangeSlot&) = delete;
+    ~ChangeSlot() { remove(); }
+
+    bool active() const noexcept { return handle_.load(std::memory_order_acquire) != nullptr; }
+    // Removes the change; nothing while another thread's request holds the slot.
+    void remove() noexcept {
+        AnvilChange* current = handle_.load(std::memory_order_acquire);
+        while (current != nullptr && current != claiming()) {
+            if (handle_.compare_exchange_weak(current, nullptr, std::memory_order_acq_rel, std::memory_order_acquire)) {
+                Change(current).reset();
+                return;
+            }
+        }
+    }
+
+    // Held for one request; released empty unless finish() gave it the handle.
+    class Claim {
+    public:
+        Claim(ChangeSlot& slot, const char* call) : slot_(slot) {
+            AnvilChange* expected = nullptr;
+            if (!slot_.handle_.compare_exchange_strong(expected, claiming(), std::memory_order_acq_rel,
+                                                       std::memory_order_acquire)) {
+                throw Error(ANVIL_ERROR_INVALID_ARGUMENT,
+                            std::format("{}: the hook object is in use; remove() it first", call));
+            }
+        }
+        Claim(const Claim&) = delete;
+        Claim& operator=(const Claim&) = delete;
+        ~Claim() {
+            if (!finished_) slot_.handle_.store(nullptr, std::memory_order_release);
+        }
+        void finish(AnvilChange* handle) noexcept {
+            slot_.handle_.store(handle, std::memory_order_release);
+            finished_ = true;
+        }
+
+    private:
+        ChangeSlot& slot_;
+        bool finished_ = false;
+    };
+
+private:
+    std::atomic<AnvilChange*> handle_{nullptr};
+};
+
+}  // namespace detail
+
 // A function hook, call redirect or import replacement and the rest of its
 // chain. Keep it where it outlives the change (a global or a member of the
-// plugin): Anvil writes `next` into it before the change is enabled.
+// plugin): it holds `next` for a thread inside the detour. A request that
+// fails leaves `next` as it was, so a thread still inside the detour of a
+// removed change never reads a NULL the failed request on the reused hook got.
 template <class F> class FunctionHook;
 template <class R, class... A> class FunctionHook<R(A...)> {
 public:
@@ -285,16 +342,23 @@ public:
     FunctionHook& operator=(const FunctionHook&) = delete;
 
     // The rest of the chain: the next plugin's detour or the game's code.
-    R next(A... args) const { return next_(args...); }
-    Pointer next_pointer() const noexcept { return next_; }
-    bool active() const noexcept { return static_cast<bool>(change_); }
+    R next(A... args) const { return next_.load(std::memory_order_acquire)(args...); }
+    Pointer next_pointer() const noexcept { return next_.load(std::memory_order_acquire); }
+    // Whether the hook holds a change (or another thread is installing one).
+    bool active() const noexcept { return change_.active(); }
     // A thread still inside the detour can still call next() afterwards.
-    void remove() noexcept { change_.reset(); }
+    void remove() noexcept { change_.remove(); }
 
 private:
     friend class Host;
-    Change change_;
-    Pointer next_ = nullptr;
+    // A request that succeeded: Anvil wrote `next` into the request's own
+    // slot during the call (and never changes it afterwards).
+    void finish(detail::ChangeSlot::Claim& claim, void* next, AnvilChange* handle) noexcept {
+        next_.store(reinterpret_cast<Pointer>(next), std::memory_order_release);
+        claim.finish(handle);
+    }
+    detail::ChangeSlot change_;
+    std::atomic<Pointer> next_{nullptr};
 };
 
 // anvil::HookOf<sym::speed_object> is the hook type for that symbol.
@@ -317,13 +381,13 @@ public:
     T* previous() const noexcept {
         return reinterpret_cast<T*>(std::atomic_ref<void*>(previous_).load(std::memory_order_acquire));
     }
-    bool active() const noexcept { return static_cast<bool>(change_); }
-    void remove() noexcept { change_.reset(); }
+    bool active() const noexcept { return change_.active(); }
+    void remove() noexcept { change_.remove(); }
 
 private:
     friend class Host;
     alignas(8) mutable void* previous_ = nullptr;
-    Change change_;
+    detail::ChangeSlot change_;
 };
 
 // A key binding (settings.toml type "key", e.g. "Ctrl+Shift+F12"): the
@@ -441,12 +505,12 @@ public:
                           "this symbol; the symbol is named in the note below");
             if constexpr (std::is_same_v<Sig, typename S::Signature> && std::is_convertible_v<D, typename S::Pointer>) {
                 const typename S::Pointer target = detour;
-                detail::require_unused(hook.active(), "hook_function");
+                detail::ChangeSlot::Claim claim(hook.change_, "hook_function");
                 AnvilChange* handle = nullptr;
-                detail::check(c_api().hook_function(self(), fn.id, reinterpret_cast<void*>(target),
-                                                    reinterpret_cast<void**>(&hook.next_), &handle),
+                void* next = nullptr;
+                detail::check(c_api().hook_function(self(), fn.id, reinterpret_cast<void*>(target), &next, &handle),
                               "hook_function", detail::name_of<S>());
-                hook.change_ = Change(handle);
+                hook.finish(claim, next, handle);
             }
         }
     }
@@ -501,12 +565,12 @@ public:
                       "anvil::Host::redirect: the target does not match the hook object's signature");
         if constexpr (SiteSymbol<S> && std::is_convertible_v<D, typename FunctionHook<Sig>::Pointer>) {
             const typename FunctionHook<Sig>::Pointer fn = target;
-            detail::require_unused(hook.active(), "redirect_call");
+            detail::ChangeSlot::Claim claim(hook.change_, "redirect_call");
             AnvilChange* handle = nullptr;
-            detail::check(c_api().redirect_call(self(), call_site.id, reinterpret_cast<void*>(fn),
-                                                reinterpret_cast<void**>(&hook.next_), &handle),
+            void* next = nullptr;
+            detail::check(c_api().redirect_call(self(), call_site.id, reinterpret_cast<void*>(fn), &next, &handle),
                           "redirect_call", detail::name_of<S>());
-            hook.change_ = Change(handle);
+            hook.finish(claim, next, handle);
         }
     }
 
@@ -535,11 +599,13 @@ public:
         static_assert(std::is_convertible_v<V, T*>, "anvil::Host::swap: the value is not a T* of the PointerSwap<T>");
         if constexpr (SlotSymbol<S> && std::is_convertible_v<V, T*>) {
             T* const pointer = value;
-            detail::require_unused(swap.active(), "swap_pointer");
+            detail::ChangeSlot::Claim claim(swap.change_, "swap_pointer");
             AnvilChange* handle = nullptr;
+            // `previous` cannot be a local: Anvil keeps the cell and rewrites it
+            // whenever the chain changes.
             detail::check(c_api().swap_pointer(self(), slot.id, to_void(pointer), &swap.previous_, &handle),
                           "swap_pointer", detail::name_of<S>());
-            swap.change_ = Change(handle);
+            claim.finish(handle);
         }
     }
 
@@ -550,12 +616,12 @@ public:
                       "anvil::Host::replace_import: the replacement does not match the hook object's signature");
         if constexpr (std::is_convertible_v<D, typename FunctionHook<Sig>::Pointer>) {
             const typename FunctionHook<Sig>::Pointer fn = replacement;
-            detail::require_unused(hook.active(), "replace_import");
+            detail::ChangeSlot::Claim claim(hook.change_, "replace_import");
             AnvilChange* handle = nullptr;
-            detail::check(c_api().replace_import(self(), module, function, reinterpret_cast<void*>(fn),
-                                                 reinterpret_cast<void**>(&hook.next_), &handle),
+            void* next = nullptr;
+            detail::check(c_api().replace_import(self(), module, function, reinterpret_cast<void*>(fn), &next, &handle),
                           "replace_import", std::string(module) + "!" + function);
-            hook.change_ = Change(handle);
+            hook.finish(claim, next, handle);
         }
     }
 
@@ -568,13 +634,14 @@ public:
                       "anvil::Host::hook_at: the detour does not match the hook object's signature");
         if constexpr (std::is_convertible_v<D, typename FunctionHook<Sig>::Pointer>) {
             const typename FunctionHook<Sig>::Pointer fn = detour;
-            detail::require_unused(hook.active(), "hook_function_at");
+            detail::ChangeSlot::Claim claim(hook.change_, "hook_function_at");
             AnvilChange* handle = nullptr;
+            void* next = nullptr;
             detail::check(c_api().hook_function_at(self(), address, data_or_null(expected_prologue),
-                                                   expected_prologue.size(), reinterpret_cast<void*>(fn),
-                                                   reinterpret_cast<void**>(&hook.next_), &handle),
+                                                   expected_prologue.size(), reinterpret_cast<void*>(fn), &next,
+                                                   &handle),
                           "hook_function_at", detail::address_text(address));
-            hook.change_ = Change(handle);
+            hook.finish(claim, next, handle);
         }
     }
 

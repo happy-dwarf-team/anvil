@@ -398,6 +398,12 @@ if(ANVIL_BUILD_TESTS)
     endif()
     add_test(NAME anvil_gen_compile COMMAND anvil_gen_compile)
 
+    # The C++ SDK's hook and swap objects against a fake host table.
+    add_executable(anvil_cpp_sdk_tests tests/cpp_sdk_tests.cpp)
+    target_link_libraries(anvil_cpp_sdk_tests PRIVATE anvil_loader)
+    target_include_directories(anvil_cpp_sdk_tests PRIVATE include)
+    add_test(NAME anvil_cpp_sdk_tests COMMAND anvil_cpp_sdk_tests)
+
     # Plugin API 2 end to end: the host table loads the hello examples and the
     # test plugins against a synthetic image (tests/plugin_tests.cpp).
     if(ANVIL_BUILD_EXAMPLES)

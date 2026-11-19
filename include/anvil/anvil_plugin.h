@@ -130,7 +130,10 @@ typedef struct AnvilHost {
      * overlapping another one at a different address is refused.
      *
      * `next` receives the rest of the chain before the change is enabled, and
-     * never changes afterwards; call through it to pass on. `out` (may be
+     * never changes afterwards; call through it to pass on. A request that
+     * fails may write NULL into it: pass a slot of the request's own and keep
+     * the value only on ANVIL_OK, so a thread inside a removed change's
+     * detour never reads that NULL (the SDKs do). `out` (may be
      * NULL) receives the handle for remove. Nothing a change uses (detours,
      * callbacks, `user`) may go away while it lives; Anvil never frees its
      * own stubs, so a thread still inside a removed change finishes safely. */
