@@ -57,14 +57,22 @@ export function repeatsKey(text, value) {
   return members !== countMembers(value);
 }
 
+// Without recursion: a body of 256 KB can nest arrays deeper than the stack.
 function countMembers(value) {
-  if (value === null || typeof value !== "object") return 0;
   let n = 0;
-  if (Array.isArray(value)) {
-    for (const item of value) n += countMembers(item);
-    return n;
+  const pending = [value];
+  while (pending.length > 0) {
+    const item = pending.pop();
+    if (item === null || typeof item !== "object") continue;
+    if (Array.isArray(item)) {
+      for (const element of item) pending.push(element);
+      continue;
+    }
+    for (const key of Object.keys(item)) {
+      n++;
+      pending.push(item[key]);
+    }
   }
-  for (const key of Object.keys(value)) n += 1 + countMembers(value[key]);
   return n;
 }
 

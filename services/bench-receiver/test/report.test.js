@@ -30,6 +30,9 @@ describe("repeatsKey", () => {
     expect(repeats('{"__proto__":{"constructor":null}}')).toBe(false);
     expect(repeats(' "a:b" ')).toBe(false);
     expect(repeats("[1, 2, null]")).toBe(false);
+    // Deeper than a recursive walk's stack.
+    const deep = "[".repeat(100000) + '{"a":1}' + "]".repeat(100000);
+    expect(repeats(deep)).toBe(false);
     expect(repeats(JSON.stringify(example))).toBe(false);
     expect(repeats(JSON.stringify(managerStopped, null, 2))).toBe(false);
   });
