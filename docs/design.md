@@ -466,7 +466,7 @@ The C ABI is [`include/anvil/anvil_plugin.h`](../include/anvil/anvil_plugin.h) (
    - disabled ids;
    - the symbols (§7);
    - `conflicts` (the declaring plugin is skipped, see below);
-   - dependencies and cycles. A plugin with `affects_gameplay = true` depends on `anvil-game` (any version) without declaring it, because only `anvil-game` tells Anvil about ironman and multiplayer (§13): without it the plugin is skipped with "affects gameplay, so it needs plugin 'anvil-game', which is not loaded".
+   - dependencies and cycles. A plugin with `affects_gameplay = true` depends on `anvil-game` (any version) without declaring it, because only `anvil-game` tells Anvil about ironman and multiplayer (§13): without it the plugin is skipped with "affects gameplay, so it needs plugin 'anvil-game', which is not loaded". A cycle of dependencies or `load_after` entries within a phase skips its members ("dependency/load_after cycle"); a plugin that only waits for one of them is resolved again without it (a `load_after` or an optional dependency is dropped, a required one skips it). An early plugin with a required dependency on a main plugin is skipped; an optional one is only absent while the early plugin loads.
 
    **Conflicts.** A plugin that declares a `conflicts` entry is skipped when a plugin with that id and a version in the range is among the candidates that passed the checks above; the other plugin loads normally. The log says `conflicts with <id> <version>; disable one of them`. Whatever depends on a skipped plugin is skipped by the dependency check, as usual. Edge cases are resolved the same way on every start, whatever the discovery order:
 

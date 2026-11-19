@@ -154,4 +154,47 @@ void resolver_tests() {
         CHECK((loaded(r) == Ids{"b"}));
         CHECK((skipped_ids(r) == Ids{"a", "d", "x"}));
     });
+
+    run("resolver cycles: only the members are skipped", [] {
+        // a and b require each other. after-a only loads after a, wants-a has an optional
+        // dependency on it, and needs-after-a requires after-a: none of them is on the cycle.
+        const std::string requires_a = "[[dependencies]]\nid = \"a\"\n";
+        const auto r = resolve_all({
+            manifest(plugin_toml("a", "[[dependencies]]\nid = \"b\"\n")),
+            manifest(plugin_toml("b", requires_a)),
+            manifest(plugin_toml("after-a", "load_after = [\"a\"]\n")),
+            manifest(plugin_toml("wants-a", requires_a + "optional = true\n")),
+            manifest(plugin_toml("needs-after-a", "[[dependencies]]\nid = \"after-a\"\n")),
+            manifest(plugin_toml("needs-a", requires_a)),
+        });
+        CHECK((loaded(r) == Ids{"after-a", "needs-after-a", "wants-a"}));
+        CHECK((skipped_ids(r) == Ids{"a", "b", "needs-a"}));
+        CHECK(contains(reason_of(r, "a"), "cycle"));
+        CHECK(contains(reason_of(r, "b"), "cycle"));
+        CHECK(contains(reason_of(r, "needs-a"), "requires plugin 'a'"));
+    });
+
+    run("resolver cycles: a plugin waiting on two cycles loads once both are gone", [] {
+        const auto r = resolve_all({
+            manifest(plugin_toml("a", "load_after = [\"b\"]\n")),
+            manifest(plugin_toml("b", "load_after = [\"a\"]\n")),
+            manifest(plugin_toml("c", "load_after = [\"c\"]\n")),
+            manifest(plugin_toml("later", "load_after = [\"a\", \"c\"]\n")),
+        });
+        CHECK((loaded(r) == Ids{"later"}));
+        CHECK((skipped_ids(r) == Ids{"a", "b", "c"}));
+    });
+
+    run("resolver phases: an optional dependency of an early plugin on a main one does not skip it", [] {
+        const auto r = resolve_all({
+            manifest(plugin_toml("early", "[[dependencies]]\nid = \"late\"\noptional = true\n", "1.0.0", "early")),
+            manifest(plugin_toml("early-needs", "[[dependencies]]\nid = \"late\"\n", "1.0.0", "early")),
+            manifest(plugin_toml("late")),
+        });
+        CHECK((loaded(r) == Ids{"early", "late"}));
+        CHECK((skipped_ids(r) == Ids{"early-needs"}));
+        CHECK(contains(reason_of(r, "early-needs"), "early plugin cannot depend on main-phase plugin 'late'"));
+        // The early plugin still loads first.
+        CHECK(r.order.size() == 2 && r.order[0].id == "early");
+    });
 }

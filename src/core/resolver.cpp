@@ -107,7 +107,8 @@ void prune_dependencies(std::map<std::string, Manifest>& candidates, std::vector
                     if (!d.optional) {
                         reason = i18n::Message("requires_version", {d.id, d.range.text(), dep->second.version.to_string()});
                     }
-                } else if (m.phase == Phase::Early && dep->second.phase == Phase::Main) {
+                } else if (!d.optional && m.phase == Phase::Early && dep->second.phase == Phase::Main) {
+                    // An optional one is only absent while the early plugin loads.
                     reason = i18n::Message("early_needs_main", {d.id});
                 }
                 if (!reason.empty()) break;
@@ -150,9 +151,26 @@ std::vector<std::string> order_phase(const std::map<std::string, Manifest>& cand
             }
         }
         if (ready.empty()) {
-            std::vector<std::string> stuck;
-            for (const auto& [id, edges] : before) stuck.push_back(id);
-            return stuck;
+            // Every plugin left waits, but only those on a cycle are its members: a
+            // plugin that only waits for one of them (a load_after, an optional or a
+            // required dependency) is settled once the members are gone.
+            std::vector<std::string> members;
+            for (const auto& [id, edges] : before) {
+                std::set<std::string> seen;
+                std::vector<std::string> next(edges.begin(), edges.end());
+                bool on_cycle = false;
+                while (!next.empty() && !on_cycle) {
+                    const std::string at = std::move(next.back());
+                    next.pop_back();
+                    if (at == id) on_cycle = true;
+                    if (on_cycle || !seen.insert(at).second) continue;
+                    if (const auto it = before.find(at); it != before.end()) {
+                        next.insert(next.end(), it->second.begin(), it->second.end());
+                    }
+                }
+                if (on_cycle) members.push_back(id);
+            }
+            return members;
         }
         std::sort(ready.begin(), ready.end());
         for (const auto& id : ready) {
