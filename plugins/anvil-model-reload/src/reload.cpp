@@ -184,6 +184,9 @@ RunResult run(Game& game, const RunInput& in) {
         out.map_refreshed = u.available && !u.faulted;
         out.unit_instances = u.instances;
         out.provinces = u.provinces;
+        out.envoys = u.envoys;
+        out.trade_goods = u.trade_goods;
+        out.ambient = u.ambient;
         out.load_a_save = !out.map_refreshed;
     } else if (assets) {
         out.load_a_save = true;

@@ -86,9 +86,28 @@ flag, the buildings of a city) keeps the 3D instance it was created with, and wi
 `scale` and attachments. So, once the steps above are done, the plugin clears every province's map
 objects with the game's own `CProvinceGraphics::Clear` and `CreateProvinceSprites`, as the game does
 for a province it rebuilds, and the game creates them again from the reloaded entities the next time it
-draws each province. `anvil.log` says how many provinces and unit models that was. When the map cannot
-be read, the window says to load a save instead; the plugin does not load one by itself. Trade route
-and ambient objects (not tied to a province) are not created again.
+draws each province. Three kinds of object that `Clear` leaves are created again too, each the way the
+game itself does it:
+
+- the envoys travelling on the map (merchants, missionaries, colonists, diplomats), with
+  `CEnvoyGraphics::RecreateEnvoyObject`, which the game calls when an envoy passes between land and sea;
+- the trade goods moving along the trade routes, with `CTradeRouteObject::RecreateTradeGoodsObject`, called
+  the same way;
+- the ambient objects (eagles, windmills, whales and the other objects of `map/ambient_object.txt`), which
+  are marked as when their time runs out: the game removes them on its next map update and creates them
+  again while their part of the map is drawn.
+
+`anvil.log` says how many provinces, unit models, envoys, trade goods and ambient objects that was. When
+the map cannot be read, the window says to load a save instead; the plugin does not load one by itself.
+
+What still needs a save load or a restart:
+
+- the 3D units of the battle result window and of the nation designer, until the window is opened again;
+- the `pdxmesh` keys the plugin does not reload, and new mesh types (above).
+
+Particles: `reload assets` reads the particle `.asset` files again into the effects the game already has
+(by name), and points every running particle instance at its effect again, so smoke and fire already on
+the map take the change at once.
 
 ### What it never runs
 
@@ -110,8 +129,10 @@ place of a click, which the overlay's input does not take from Tongs.
 - **Symbols** (`symbols.toml`, all three 1.37.5 builds): the graphics object and its hash table of 3D
   types (bucket count `+0x554`, buckets `+0x558`, entries `{type, next}`), read from a site in
   `CGraphics::GetPdx3DType`; the `CPdxMeshType` type id `0x180` and vtable; `CPdxMeshType::ReloadType`;
-  the game's `std::string::assign`; and the console's dispatcher, the value manager and the string free
-  that Tongs also uses.
+  the game's `std::string::assign`; the console's dispatcher, the value manager and the string free
+  that Tongs also uses; for the map, the path to `CEU3GraphicalMap` and its province graphics,
+  `CProvinceGraphics::Clear` and `CreateProvinceSprites`, the province's envoy graphics (`+0x2A0`), the map's
+  trade routes (`+0x4B8`) and visible ambient objects (`+0x4A0`), and the two `Recreate…Object` functions.
 - **Mesh type fields** (from `CPdx3DType::ReadMember`, `CPdxMeshType::ReadMember` and
   `SAnimationLookup::ReadMember`): name `+0x10`, scale `+0x30`, the square of `cull_distance` `+0x34`,
   `file` `+0xA0`, the animation lookups `+0xC0` (entries of `0x40`: id hash `+0x10`, animation name

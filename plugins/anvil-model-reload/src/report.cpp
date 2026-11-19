@@ -199,7 +199,10 @@ std::vector<std::string> log_lines(const RunResult& result) {
     }
     if (result.map_refreshed) {
         out.push_back("entities reloaded: map objects of " + std::to_string(result.provinces) + " provinces deleted (" +
-                      std::to_string(result.unit_instances) + " unit instances), the game creates them again");
+                      std::to_string(result.unit_instances) + " unit instances), the game creates them again; " +
+                      std::to_string(result.envoys) + " envoys and " + std::to_string(result.trade_goods) +
+                      " trade goods created again, " + std::to_string(result.ambient) +
+                      " ambient objects removed for the game to create again");
     }
     if (result.load_a_save) out.push_back("entities reloaded: objects on the map show them after a save load");
     return out;

@@ -479,6 +479,14 @@ struct ModelReload : anvil::Plugin {
                 static_cast<std::uint32_t>(host.value(sym::province_graphics_count, "province_count"));
             g_addresses.province_clear = addr(sym::province_graphics_clear);
             g_addresses.province_sprites = addr(sym::create_province_sprites);
+            g_addresses.envoy_graphics = static_cast<std::uint32_t>(host.value(sym::province_envoys, "envoy_graphics"));
+            g_addresses.envoys = static_cast<std::uint32_t>(host.value(sym::envoy_recreate, "envoys"));
+            g_addresses.envoy_recreate = addr(sym::envoy_recreate);
+            g_addresses.trade_routes = static_cast<std::uint32_t>(host.value(sym::map_trade_routes, "trade_routes"));
+            g_addresses.trade_goods = static_cast<std::uint32_t>(host.value(sym::trade_goods_recreate, "trade_goods"));
+            g_addresses.trade_goods_recreate = addr(sym::trade_goods_recreate);
+            g_addresses.ambient_objects =
+                static_cast<std::uint32_t>(host.value(sym::map_ambient_objects, "ambient_objects"));
             g_has_addresses = true;
         } catch (const std::exception& e) {
             host.warn("not available on this game build: {}", e.what());

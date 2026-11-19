@@ -171,3 +171,65 @@ note = "CProvinceGraphics::CreateProvinceSprites: destroys the city (+0x10) and 
 build."eu4-1.37.5-steam-win64" = { rva = 0x13238B0 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x131DA10 }   # CProvinceGraphics::CreateProvinceSprites
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x131DA10 }
+
+# --- Map objects outside the province's own slots ------------------------------
+#
+# Clear and CreateProvinceSprites leave three kinds of entity instance on the
+# map: the envoys travelling between provinces (merchants, missionaries,
+# colonists, diplomats), the trade goods moving along trade routes and the
+# ambient objects (eagles, windmills, whales). For each the game has a function
+# or a flag with which it creates the instance again itself.
+#
+# Field offsets read with them (PDB layouts, the same in every build; Steam's
+# code uses the same ones in the functions below): STemporaryEnvoyGraphics
+# (0x18 bytes) _pEnvoyGraphics +0x8; CEnvoyObject (0xC8 bytes) _pProvince
+# +0x48, _EntityInstance +0x50, the owner tag's valid byte +0x65;
+# CTradeRouteGoods (0x90 bytes) _Type +0x10, _EntityInstance +0x78;
+# CAmbientObjectInstance _EntityInstance +0x8, _bShouldRemove +0x10.
+
+[symbol.province_envoys]
+bytes = "4D 8B 85 A0 02 00 00 49 8B 85 A8 02 00 00 49 2B C0"
+memory = "code"
+values.envoy_graphics = { at = 3, size = 4 }
+note = "CProvinceGraphics::UpdateEnvoys: mov r8,[r13+0x2A0]; mov rax,[r13+0x2A8]; sub rax,r8: CProvinceGraphics::_EnvoyGraphics (CArray<STemporaryEnvoyGraphics>, begin/end/capacity)"
+build."eu4-1.37.5-steam-win64" = { rva = 0x132C4E5 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x1326645 }   # CProvinceGraphics::UpdateEnvoys+0x125
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x1326645 }
+
+[symbol.envoy_recreate]
+bytes = "85 D2 0F 88 0E 06 00 00 55 53 56 57 41 54 41 56 41 57 48 8D AC 24 70 FD FF FF 48 81 EC 90 03 00 00 4C 8B F1 48 8B 49 38 49 8B 46 40"
+memory = "code"
+signature = "void (void* envoy_graphics, uint32_t index)"
+values.envoys = { at = 39, size = 1 }
+note = "CEnvoyGraphics::RecreateEnvoyObject(index): destroys the instance of _Envoys[index] (CArray<CEnvoyObject> at +0x38) and creates it again from the land or naval envoy entity of its owner's graphical culture; what CEnvoyGraphics::Update calls when an envoy passes between land and sea"
+build."eu4-1.37.5-steam-win64" = { rva = 0x10945D0 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x1092DD0 }   # CEnvoyGraphics::RecreateEnvoyObject
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x1092DD0 }
+
+[symbol.trade_goods_recreate]
+bytes = "85 D2 0F 88 56 07 00 00 55 53 56 57 41 54 41 56 41 57 48 8D AC 24 70 FD FF FF 48 81 EC 90 03 00 00 4C 8B F1 48 8B 89 A0 00 00 00"
+memory = "code"
+signature = "void (void* trade_route, uint32_t index)"
+values.trade_goods = { at = 39, size = 4 }
+note = "CTradeRouteObject::RecreateTradeGoodsObject(index): destroys the instance of _TradeGoods[index] (CArray<CTradeRouteGoods> at +0xA0) and creates it again from the land or naval trade goods entity; what CTradeRouteObject::Update calls when the goods pass between land and sea"
+build."eu4-1.37.5-steam-win64" = { rva = 0x13F7780 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x13F1720 }   # CTradeRouteObject::RecreateTradeGoodsObject
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x13F1720 }
+
+[symbol.map_trade_routes]
+bytes = "48 8B C1 48 2B 87 B8 04 00 00 48 A9 F8 FF FF FF"
+memory = "code"
+values.trade_routes = { at = 6, size = 4 }
+note = "CEU3GraphicalMap::UpdateTradeRoutes: mov rax,rcx; sub rax,[rdi+0x4B8]: CEU3GraphicalMap::_TradeRouteObjects (CArray<CTradeRouteObject*>, begin/end/capacity)"
+build."eu4-1.37.5-steam-win64" = { rva = 0x10A6F14 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x10A5714 }   # CEU3GraphicalMap::UpdateTradeRoutes+0x54
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x10A5714 }
+
+[symbol.map_ambient_objects]
+bytes = "49 8B B4 24 A8 04 00 00 49 2B B4 24 A0 04 00 00"
+memory = "code"
+values.ambient_objects = { at = 12, size = 4 }
+note = "CEU3GraphicalMap::UpdateAmbientObjects, its removal loop: mov rsi,[r12+0x4A8]; sub rsi,[r12+0x4A0]: _VisibleAmbientObjects (CArray<CAmbientObjectInstance*>); the loop destroys an instance whose _bShouldRemove (+0x10) is set, as when its time runs out, and the grid loop before it creates the object's instance again while its cell is drawn"
+build."eu4-1.37.5-steam-win64" = { rva = 0x10A8609 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x10A6E09 }   # CEU3GraphicalMap::UpdateAmbientObjects+0x489
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x10A6E09 }

@@ -43,6 +43,9 @@ struct MapRefresh {
     bool faulted = false;    // an exception in the game's code: stop
     int instances = 0;       // unit instances among the objects deleted
     int provinces = 0;       // provinces whose map objects were deleted
+    int envoys = 0;          // envoys on the map created again
+    int trade_goods = 0;     // trade goods on the trade routes created again
+    int ambient = 0;         // ambient objects (eagles, windmills, whales) the game removes and creates again
 };
 
 class Game {
@@ -62,7 +65,9 @@ public:
     // Deletes the 3D instances on the map (units, cities, ports, flags, city
     // sprawl) and the map icons of every province, as the game does for a
     // province it clears; the game creates them again from the reloaded
-    // entities when it next draws each province.
+    // entities when it next draws each province. Then creates the envoys and
+    // the trade goods on the trade routes again, and marks the ambient objects
+    // for the game to remove and create again.
     virtual MapRefresh refresh_map_objects() = 0;
 };
 
@@ -113,6 +118,9 @@ struct RunResult {
     bool map_refreshed = false;
     int provinces = 0;
     int unit_instances = 0;
+    int envoys = 0;
+    int trade_goods = 0;
+    int ambient = 0;
     bool load_a_save = false;
 };
 

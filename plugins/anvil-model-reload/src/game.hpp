@@ -34,6 +34,16 @@ struct GameAddresses {
     std::uint32_t unit_slots = 0;
     std::uintptr_t province_clear = 0;
     std::uintptr_t province_sprites = 0;
+    // The objects Clear leaves: each province's envoys (_EnvoyGraphics, and
+    // CEnvoyGraphics::_Envoys in each), the map's trade routes and its visible
+    // ambient objects.
+    std::uint32_t envoy_graphics = 0;
+    std::uint32_t envoys = 0;
+    std::uintptr_t envoy_recreate = 0;
+    std::uint32_t trade_routes = 0;
+    std::uint32_t trade_goods = 0;
+    std::uintptr_t trade_goods_recreate = 0;
+    std::uint32_t ambient_objects = 0;
 };
 
 class GameMemory final : public Game {
@@ -50,6 +60,10 @@ public:
     MapRefresh refresh_map_objects() override;
 
 private:
+    bool recreate_envoys(std::uintptr_t province_graphics, int& count);
+    bool recreate_trade_goods(std::uintptr_t map, int& count);
+    bool remove_ambient(std::uintptr_t map, int& count);
+
     GameAddresses a_;
 };
 

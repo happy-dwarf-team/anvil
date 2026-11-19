@@ -107,7 +107,7 @@ struct FakeGame : mr::Game {
         if (const auto it = answers.find(line); it != answers.end()) return it->second;
         return mr::ConsoleAnswer{true, true, false, tokens[0] == "reloadtexture" ? tokens[1] + " reloaded" : "ok"};
     }
-    mr::MapRefresh units{true, false, 7, 4940};
+    mr::MapRefresh units{true, false, 7, 4940, 12, 30, 5};
     mr::MapRefresh refresh_map_objects() override {
         calls.push_back("refresh map");
         return units;
@@ -433,6 +433,7 @@ int main() {
               r.steps[0].answer == "gfx/models/Units/RUS_01_diffuse.dds reloaded");
         CHECK(r.steps[3].status == mr::Status::failed && r.steps[3].answer == "no");
         CHECK(r.map_refreshed && r.unit_instances == 7 && r.provinces == 4940 && !r.load_a_save && !r.faulted);
+        CHECK(r.envoys == 12 && r.trade_goods == 30 && r.ambient == 5);
         g.units = mr::MapRefresh{false, false, 0};  // no map: a save load shows them
         const mr::RunResult no_map = mr::run(g, in);
         CHECK(!no_map.map_refreshed && no_map.load_a_save && !no_map.faulted);
@@ -440,7 +441,7 @@ int main() {
         const mr::RunResult fault = mr::run(g, in);
         CHECK(fault.faulted && !fault.map_refreshed && fault.load_a_save);
         CHECK(fault.steps[4].status == mr::Status::faulted && fault.steps[0].status == mr::Status::ok);
-        g.units = mr::MapRefresh{true, false, 7, 4940};
+        g.units = mr::MapRefresh{true, false, 7, 4940, 12, 30, 5};
         g.console_present = false;
         g.calls.clear();
         const mr::RunResult none = mr::run(g, in);
@@ -504,7 +505,9 @@ int main() {
         CHECK(find_row(rows, "Units, cities, ports and flags on the map are drawn again with the reloaded entities.") != nullptr);
         CHECK(find_row(rows, "Objects already on the map keep their old entity: load a save to see the change.") == nullptr);
         const std::vector<std::string> log = mr::log_lines(s.last);
-        CHECK(log.size() == 4 && log[3] == "entities reloaded: map objects of 4940 provinces deleted (7 unit instances), the game creates them again");
+        CHECK(log.size() == 4 && log[3] == "entities reloaded: map objects of 4940 provinces deleted (7 unit instances), the game creates them "
+                                           "again; 12 envoys and 30 trade goods created again, 5 ambient objects "
+                                           "removed for the game to create again");
         CHECK(log.size() == 4 && log[0] == "mesh gfx/models/Units/RUS_01.mesh: ok, 2 mesh types reloaded");
         CHECK(log.size() == 4 && log[2] == "pdxmesh interface/assets/eastern.gfx: ok, 1 updated, 1 unchanged; NEW_TYPE not in "
                                            "the game (restart); not reloaded: meshsettings");
