@@ -456,10 +456,23 @@ void on_device(IDirect3DDevice9* device, HWND focus, const D3DPRESENT_PARAMETERS
     }
 }
 
+// Before a device is made: the game may have released the one ImGui's
+// backend holds, and the reference would keep it alive, with its display mode
+// in exclusive fullscreen, until a frame is drawn on the new device.
+void release_ui_device() {
+    overlay::Shared& s = shared();
+    std::lock_guard lock(s.mutex);
+    overlay::ui_release_device();
+}
+
 HRESULT STDMETHODCALLTYPE on_create_device(IDirect3D9* d3d, UINT adapter, D3DDEVTYPE type, HWND focus, DWORD flags,
                                            D3DPRESENT_PARAMETERS* parameters, IDirect3DDevice9** out) noexcept {
     try {
         subclass_before_device(focus, parameters);
+    } catch (...) {
+    }
+    try {
+        release_ui_device();
     } catch (...) {
     }
     const HRESULT hr = g_create_device.hook.next(d3d, adapter, type, focus, flags, parameters, out);
@@ -477,6 +490,10 @@ HRESULT STDMETHODCALLTYPE on_create_device_ex(IDirect3D9Ex* d3d, UINT adapter, D
                                               IDirect3DDevice9Ex** out) noexcept {
     try {
         subclass_before_device(focus, parameters);
+    } catch (...) {
+    }
+    try {
+        release_ui_device();
     } catch (...) {
     }
     const HRESULT hr = g_create_device_ex.hook.next(d3d, adapter, type, focus, flags, parameters, mode, out);

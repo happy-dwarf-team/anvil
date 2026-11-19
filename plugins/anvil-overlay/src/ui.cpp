@@ -1538,6 +1538,15 @@ void ui_invalidate(IDirect3DDevice9* device) {
     }
 }
 
+void ui_release_device() {
+    Ui& u = ui();
+    if (u.dx9_device == nullptr) return;
+    // ImGui_ImplDX9_Init took a reference; Shutdown releases it with the
+    // device objects.
+    ImGui_ImplDX9_Shutdown();
+    u.dx9_device = nullptr;
+}
+
 bool ui_message(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
     if (ImGui::GetCurrentContext() == nullptr || ui().win32_window != hwnd) return false;
     return ImGui_ImplWin32_WndProcHandler(hwnd, message, wparam, lparam) != 0;
