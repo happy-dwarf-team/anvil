@@ -673,9 +673,13 @@ impl Host {
     /// When the group's changes are dropped (an error, a panic, or a commit
     /// Anvil refuses), the [`FunctionHook`]s and [`PointerSwap`]s this thread
     /// filled in `body` are free again: `is_active` is false and they take a
-    /// new request. A request `body` hands to another thread goes into the
-    /// group too (the group is the plugin's), but that thread's hook objects
-    /// keep their handles: `remove()` them before reusing them.
+    /// new request.
+    ///
+    /// The group is the plugin's, not this thread's: a request from any of
+    /// the plugin's threads while it is open (a panel click, a thread `body`
+    /// started) joins it, is enabled only with the commit and dropped with an
+    /// abort. Hook objects another thread filled keep their handles then:
+    /// `remove()` them before reusing them.
     pub fn group<R>(&self, body: impl FnOnce() -> Result<R>) -> Result<R> {
         let begin = function!(self.table, AnvilHost, begin_group)?;
         let commit = function!(self.table, AnvilHost, commit_group)?;

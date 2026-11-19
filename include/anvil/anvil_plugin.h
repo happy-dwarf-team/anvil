@@ -170,7 +170,10 @@ typedef struct AnvilHost {
     AnvilResult (*remove)(AnvilPlugin *self, AnvilChange *change);
     /* After load: the changes between begin_group and commit_group are
      * enabled together or not at all; abort_group drops them. Inside
-     * anvil_plugin_load the whole load is a group: ANVIL_ERROR_WRONG_PHASE. */
+     * anvil_plugin_load the whole load is a group: ANVIL_ERROR_WRONG_PHASE.
+     * The group is the plugin's, not the calling thread's: a request from any
+     * of the plugin's threads while it is open joins it (answering OK with a
+     * handle), is enabled only with commit_group and dropped by abort_group. */
     AnvilResult (*begin_group)(AnvilPlugin *self);
     AnvilResult (*commit_group)(AnvilPlugin *self);
     void (*abort_group)(AnvilPlugin *self);
