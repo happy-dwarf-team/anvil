@@ -716,9 +716,12 @@ public:
     // When the group's changes are dropped (`body` throws, or Anvil refuses
     // the commit), the FunctionHooks and PointerSwaps this thread filled in
     // `body` are free again: active() is false and they take a new request.
-    // A request `body` hands to another thread goes into the group too (the
-    // group is the plugin's), but that thread's hook objects keep their
-    // handles: remove() them before reusing them.
+    //
+    // The group is the plugin's, not this thread's: a request from any of the
+    // plugin's threads while it is open (a panel click, a thread `body`
+    // started) joins it, is enabled only with the commit and dropped with an
+    // abort. Hook objects another thread filled keep their handles then:
+    // remove() them before reusing them.
     template <class F> void group(F&& body) const {
         detail::check(c_api().begin_group(self()), "begin_group", "");
         detail::GroupScope scope;
