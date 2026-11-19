@@ -407,6 +407,11 @@ std::uint32_t tag_bucket(std::string_view tag, std::uint32_t mask);
 // is Windows-1252, without its colour codes (§ and the character after it).
 std::string game_text_to_utf8(std::string_view text);
 
+// Whether the game's text is the name a caller gives: its own bytes, or the
+// UTF-8 that game_text_to_utf8 hands out for it. Only a text with a byte above
+// 0x7F is converted, so an ASCII name costs a comparison.
+bool game_text_is(std::string_view game, std::string_view name);
+
 // The longest start of `text` that fits `capacity - 1` bytes without cutting a
 // character: what a caller's buffer gets, with its NUL.
 std::size_t fit_utf8(std::string_view text, std::size_t capacity);

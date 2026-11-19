@@ -952,6 +952,12 @@ void run_in_frame_handler(const char*, const void*, void*) {
     }
 }
 
+// Runs in the handler of every session event while it is set.
+std::function<void(const AnvilGameSession&)> g_in_session_handler;
+void run_in_session_handler(const char*, const void* payload, void*) {
+    if (g_in_session_handler) g_in_session_handler(*static_cast<const AnvilGameSession*>(payload));
+}
+
 const AnvilGameService* g_service = nullptr;
 
 // CEU3Camera::Pan(camera, pan, frame time, keys), as the camera case calls it.
@@ -1948,6 +1954,7 @@ int main(int argc, char** argv) {
         bus.subscribe("listener", event, listen_campaign, &campaign);
     }
     bus.subscribe("listener", ANVIL_GAME_EVENT_FRAME, run_in_frame_handler, nullptr);
+    bus.subscribe("listener", ANVIL_GAME_EVENT_SESSION, run_in_session_handler, nullptr);
     std::vector<std::string> pending_heard;
     bus.subscribe("listener", ANVIL_GAME_EVENT_PENDING, listen_pending, &pending_heard);
     for (const char* event : {ANVIL_GAME_EVENT_READY, ANVIL_GAME_EVENT_FRAME, ANVIL_GAME_EVENT_SESSION,
@@ -3109,6 +3116,25 @@ int main(int argc, char** argv) {
             CHECK(world->country_variable_names("RUS", nullptr, 0, &length) == ANVIL_OK && length == all.size());
             CHECK(world->province_variable_names(1, names, sizeof names, &length) == ANVIL_OK && length == 0);
             CHECK(world->country_variable_names("RUS", nullptr, 4, &length) == ANVIL_ERROR_INVALID_ARGUMENT);
+            // Names in Windows-1252, as the game's files write them: the UTF-8 the names' calls
+            // give finds them again, and so do the game's own bytes.
+            FakeWorld::set_key(fake.flag_names[3], "\xE9tat_\x80");
+            CHECK(world->flag_name(3, text, sizeof text, &length) == ANVIL_OK &&
+                  std::strcmp(text, "\xC3\xA9tat_\xE2\x82\xAC") == 0);
+            id = -1;
+            CHECK(world->flag_id(text, &id) == ANVIL_OK && id == 3);
+            id = -1;
+            CHECK(world->flag_id("\xE9tat_\x80", &id) == ANVIL_OK && id == 3);
+            CHECK(world->flag_id("\xC3\xA9tat", &id) == ANVIL_ERROR_NOT_FOUND);
+            FakeWorld::set_key(fake.flag_names[3], fake.flag_texts[3]);
+            FakeWorld::set_key(fake.variable_nodes[0] + 0x10, "pr\xEAt_plan");
+            CHECK(world->country_variable_names("RUS", names, sizeof names, &length) == ANVIL_OK &&
+                  std::strcmp(names, "pr\xC3\xAAt_plan") == 0);
+            value = 0;
+            CHECK(world->country_variable("RUS", names, &value) == ANVIL_OK && value == 2500);
+            value = 0;
+            CHECK(world->country_variable("RUS", "pr\xEAt_plan", &value) == ANVIL_OK && value == 2500);
+            FakeWorld::set_key(fake.variable_nodes[0] + 0x10, "treasury_plan");
             // A variable list cut short costs that answer.
             FakeWorld::set(fake.rus, 0x330 + 0x20, uint64_t{3});
             CHECK(world->country_variable("RUS", "treasury_plan", &value) == ANVIL_ERROR_INTERNAL);
@@ -4037,6 +4063,72 @@ int main(int argc, char** argv) {
         frame(game.app, 1);
         CHECK(ran);
         g_in_frame_handler = nullptr;
+        for (void* p : g_game_commands.posted) std::free(p);
+        g_game_commands.posted.clear();
+        FakeWorld::set(game.root, 0x1E60, game_tag("TUR", 1));
+    });
+
+    run("anvil-game: the world and the commands are closed while a session ends, also by a save loaded in the game",
+        [&] {
+        const auto* world = static_cast<const AnvilGameWorldService*>(
+            bus.get_service(ANVIL_GAME_WORLD_SERVICE, ANVIL_GAME_WORLD_SERVICE_VERSION));
+        const auto* commands = static_cast<const AnvilGameCommandsService*>(
+            bus.get_service(ANVIL_GAME_COMMANDS_SERVICE, ANVIL_GAME_COMMANDS_SERVICE_VERSION));
+        CHECK(world != nullptr && commands != nullptr && g_command_caller != nullptr);
+        if (world == nullptr || commands == nullptr || g_command_caller == nullptr) return;
+        FakeWorld::set(game.root, 0x1E60, game_tag("RUS", 0));
+        game.set_session(game.session);
+        frame(game.app, 1);
+        CHECK(service->session(nullptr) == 1);
+        static AnvilGameUnitRef army = {FakeWorld::kArmyId, {"RUS"}, ANVIL_GAME_UNIT_ARMY};
+        static AnvilGameCommand stop{};
+        stop.size = sizeof(stop);
+        stop.type = ANVIL_GAME_COMMAND_DRILL;
+        stop.count = 1;
+        stop.units = &army;
+        // What a SESSION handler gets from the world and the commands: "ended player 5 limit 0 post 5 in 0".
+        std::vector<std::string> answers;
+        g_game_commands.calls.clear();
+        g_in_session_handler = [&](const AnvilGameSession& s) {
+            AnvilGameTag tag{};
+            AnvilGameCommandResult out{};
+            out.size = sizeof(out);
+            const AnvilResult player = world->player(&tag);
+            const int32_t limit = world->province_limit();
+            const AnvilResult posted = commands->post(g_command_caller, &stop, &out);
+            answers.push_back(std::string(s.change == ANVIL_GAME_SESSION_STARTED ? "started" : "ended") + " player " +
+                              std::to_string(player) + " limit " + std::to_string(limit) + " post " +
+                              std::to_string(posted) + " in " + std::to_string(service->session(nullptr)));
+        };
+        const auto closed = [](const char* change) {
+            return std::string(change) + " player " + std::to_string(ANVIL_ERROR_WRONG_PHASE) + " limit 0 post " +
+                   std::to_string(ANVIL_ERROR_WRONG_PHASE) + " in 0";
+        };
+        const std::string open = "started player " + std::to_string(ANVIL_OK) + " limit 4 post " +
+                                 std::to_string(ANVIL_OK) + " in 1";
+
+        // An exit to the menu, then the save again: closed on ENDED, open on STARTED.
+        game.set_session(nullptr);
+        frame(game.app, 1);
+        CHECK((answers == std::vector<std::string>{closed("ended")}) && g_game_commands.calls.empty());
+        game.set_session(game.session);
+        frame(game.app, 1);
+        CHECK((answers == std::vector<std::string>{closed("ended"), open}));
+        CHECK(g_game_commands.calls.size() == 3);  // STARTED's post reached the new session
+        answers.clear();
+        g_game_commands.calls.clear();
+
+        // A save loaded from the game menu: ENDED and STARTED in one frame. ENDED gets the same
+        // answers as after the exit, not the new save's world, and nothing is posted into it.
+        const auto set_session = reinterpret_cast<void (*)(void*, void*)>(image.address(0x756A30));
+        game.set_session(nullptr);
+        for (int i = 0; i < 5; ++i) set_session(game.root, game.session);
+        frame(game.app, 1);
+        CHECK((answers == std::vector<std::string>{closed("ended"), open}));
+        CHECK(g_game_commands.calls.size() == 3 && g_game_commands.calls[0] == "new 68");  // STARTED's post only
+
+        g_in_session_handler = nullptr;
+        g_game_commands.calls.clear();
         for (void* p : g_game_commands.posted) std::free(p);
         g_game_commands.posted.clear();
         FakeWorld::set(game.root, 0x1E60, game_tag("TUR", 1));
