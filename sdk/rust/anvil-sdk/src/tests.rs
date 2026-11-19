@@ -2567,3 +2567,18 @@ fn a_panic_the_plugin_caught_inside_an_adapter_does_not_name_a_later_one() {
     let line = log.iter().find(|l| l.starts_with("second")).unwrap();
     assert!(line.contains("the real one"), "{line}");
 }
+
+#[test]
+fn a_kept_panic_text_names_a_later_panic_only_when_it_is_that_panics_text() {
+    let (_guard, table) = fake_host();
+    assert_eq!(load::<Quiet>(table), ANVIL_OK);
+    for (swallowed, later, kind) in [("boom!!!", "boom", "prefix"), ("anything", "", "empty")] {
+        crate::catch_panic("first", (), || {
+            let _ = std::panic::catch_unwind(|| panic!("{swallowed}"));
+        });
+        crate::catch_panic(kind, (), || std::panic::resume_unwind(Box::new(later)));
+        let log = logged();
+        let line = log.iter().rev().find(|l| l.starts_with(kind)).unwrap();
+        assert!(!line.contains(swallowed), "{line}");
+    }
+}

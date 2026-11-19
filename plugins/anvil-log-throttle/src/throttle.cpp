@@ -103,7 +103,8 @@ Verdict Throttle::record(const void* sink, int channel, std::string_view file, i
     notice.text = notice_text(config.repeats, config.report_ms, text);
     notice.notice = true;
     notice.message_at = notice.text.size() - text.size();
-    // Every allocation before the state changes: a throw leaves the line uncounted.
+    // Every allocation before this message's count changes: a throw leaves the
+    // line uncounted (the reports already in `out` stay there).
     out.reserve(out.size() + 1);
     counted_.push_back(counted.get());
     e.counted = std::move(counted);
