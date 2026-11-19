@@ -51,9 +51,14 @@ jobs:
           "SCCACHE_DIR=$(Join-Path $env:RUNNER_TEMP sccache)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "SCCACHE_CACHE_SIZE=1G" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
+      # A pwsh step fails only on the exit code of its LAST native command, so a
+      # step that runs more than one sets $PSNativeCommandUseErrorActionPreference:
+      # with the runner's $ErrorActionPreference = 'stop' the first native command
+      # that exits non-zero then ends the step with that error.
       - name: MSVC environment
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * `
             -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           # Only what vcvars64.bat adds or changes, not the runner's own GITHUB_* and the rest.
@@ -92,6 +97,7 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           Get-Content (Join-Path $env:RUNNER_TEMP msvc.env) |
             ForEach-Object { $name, $value = $_ -split '=', 2; Set-Item "env:$name" $value }
           cmake --build build --config Release
@@ -236,6 +242,7 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           cmake --install build --config Release --component anvil --prefix dist/anvil-package
           # AnvilManager.exe next to version.dll (design §3); it is also an asset of its own.
           cmake --install build --config Release --component manager --prefix dist/anvil-package
@@ -277,6 +284,7 @@ jobs:
       - name: Manager screenshots
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           python -I tools/manager/screenshots/fixture.py build manager-fixture
           $game = (Resolve-Path manager-fixture/game).Path
           foreach ($lang in 'en', 'de', 'ja') {
@@ -310,6 +318,7 @@ jobs:
       - name: Package SDK
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           cmake --install build --config Release --component sdk --prefix dist/anvil-sdk
           $files = Get-ChildItem dist/anvil-sdk -Recurse -File
           $files | ForEach-Object {
