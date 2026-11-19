@@ -88,6 +88,12 @@ id = "legacy"
 
     run("manifest v2: unknown keys are errors", [] {
         CHECK(error_of(plugin_toml("a", "custom = 1\n")) == "plugin.toml: unknown key 'custom'");
+        // An id names folders: a Windows device name is not one.
+        for (const char* device : {"con", "prn", "aux", "nul", "com0", "com1", "lpt9"}) {
+            CHECK(error_of(plugin_toml(device)).find("not be a Windows device name") != std::string::npos);
+            CHECK(!is_valid_plugin_id(device));
+        }
+        for (const char* fine : {"conn", "com10", "lpt", "aux-tools", "nul0", "com-1"}) CHECK(is_valid_plugin_id(fine));
         CHECK(error_of(without_gameplay("a", "afects_gameplay = false\n")) ==
               "plugin.toml: unknown key 'afects_gameplay' (did you mean 'affects_gameplay'?)");
         CHECK(error_of(plugin_toml("a", "load_afer = []\n")).find("did you mean 'load_after'") != std::string::npos);

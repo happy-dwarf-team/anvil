@@ -175,6 +175,17 @@ int main(int argc, char** argv) {
         CHECK(zip_refusal({{"a/com10.txt", "x"}, {"console.txt", "y"}}).empty());
         CHECK(contains(zip_refusal({{"a?.txt", "x"}}), "does not allow"));
         CHECK(contains(zip_refusal({{"A.txt", "x"}, {"a.txt", "y"}}), "differ only in case"));
+        // NTFS folds case beyond ASCII: "Ä.txt" and "ä.txt" are one file, also as folders.
+        CHECK(contains(zip_refusal({{"\xC3\x84.txt", "x"}, {"\xC3\xA4.txt", "y"}}), "differ only in case"));
+        CHECK(contains(zip_refusal({{"\xC5\x81\xC3\x93" "D\xC5\xB9/a", "x"}, {"\xC5\x82\xC3\xB3" "d\xC5\xBA/a", "y"}}),
+                       "differ only in case"));
+        CHECK(contains(zip_refusal({{"\xC5\xBC", "x"}, {"\xC5\xBB/b", "y"}}), "both a file and a folder"));
+        CHECK(zip_refusal({{"\xC3\xA4.txt", "x"}, {"a.txt", "y"}, {"\xC3\xA5.txt", "z"}}).empty());
+        // COM0, LPT0 and the superscript forms are devices too.
+        CHECK(contains(zip_refusal({{"com0.txt", "x"}}), "reserved device name"));
+        CHECK(contains(zip_refusal({{"a/LPT0", "x"}}), "reserved device name"));
+        CHECK(contains(zip_refusal({{"COM\xC2\xB9.log", "x"}}), "reserved device name"));
+        CHECK(contains(zip_refusal({{"lpt\xC2\xB3", "x"}}), "reserved device name"));
         CHECK(contains(zip_refusal({{"a", "x"}, {"a/b", "y"}}), "both a file and a folder"));
         std::string error;
         CHECK(!ZipArchive::open(std::vector<uint8_t>{'P', 'K', 3, 4}, error) && contains(error, "not a zip archive"));

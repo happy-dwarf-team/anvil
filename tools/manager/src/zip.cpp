@@ -30,11 +30,33 @@ std::string lower(std::string_view text) {
 }
 
 bool reserved_name(std::string_view part) {
-    // CON, PRN, AUX, NUL, COM1-9, LPT1-9, with any extension.
+    // CON, PRN, AUX, NUL, COM0-9, LPT0-9 and COM/LPT with a superscript 1-3, with any extension.
     const std::string base = lower(part.substr(0, part.find('.')));
     static constexpr std::array<const char*, 4> plain = {"con", "prn", "aux", "nul"};
     if (std::find(plain.begin(), plain.end(), base) != plain.end()) return true;
-    return base.size() == 4 && (base.starts_with("com") || base.starts_with("lpt")) && base[3] >= '1' && base[3] <= '9';
+    if (!base.starts_with("com") && !base.starts_with("lpt")) return false;
+    const std::string_view number = std::string_view(base).substr(3);
+    return (number.size() == 1 && number[0] >= '0' && number[0] <= '9') || number == "\xC2\xB9" || number == "\xC2\xB2" ||
+           number == "\xC2\xB3";
+}
+
+// The key two names share when NTFS takes them for one file: upper case by
+// the system's table (not the player's locale), so "Ä.txt" and "ä.txt" meet
+// as "A.txt" and "a.txt" do.
+std::string same_file_key(std::string_view name) {
+    const int wide_size = MultiByteToWideChar(CP_UTF8, 0, name.data(), static_cast<int>(name.size()), nullptr, 0);
+    if (wide_size <= 0) return lower(name);
+    std::wstring wide(static_cast<size_t>(wide_size), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, name.data(), static_cast<int>(name.size()), wide.data(), wide_size);
+    std::wstring upper(wide.size(), L'\0');
+    if (LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_UPPERCASE, wide.data(), wide_size, upper.data(), wide_size, nullptr,
+                      nullptr, 0) != wide_size) {
+        return lower(name);
+    }
+    const int size = WideCharToMultiByte(CP_UTF8, 0, upper.data(), wide_size, nullptr, 0, nullptr, nullptr);
+    std::string out(static_cast<size_t>(size > 0 ? size : 0), '\0');
+    if (size > 0) WideCharToMultiByte(CP_UTF8, 0, upper.data(), wide_size, out.data(), size, nullptr, nullptr);
+    return out;
 }
 
 std::string zip_error(mz_zip_archive& zip) { return mz_zip_get_error_string(mz_zip_get_last_error(&zip)); }
@@ -128,7 +150,7 @@ std::optional<ZipArchive> ZipArchive::open(std::vector<uint8_t> bytes, std::stri
             error = i18n::trf("the archive unpacks to more than {0} MB", {std::to_string(kMaxZipTotalBytes >> 20)});
             return std::nullopt;
         }
-        if (!seen.insert(lower(name)).second) {
+        if (!seen.insert(same_file_key(name)).second) {
             error = "'" + name + "' is in the archive twice (names differ only in case)";
             return std::nullopt;
         }
@@ -137,7 +159,7 @@ std::optional<ZipArchive> ZipArchive::open(std::vector<uint8_t> bytes, std::stri
     // A file may not also be a folder of another one ("a" and "a/b").
     for (const ZipEntry& entry : state->entries) {
         for (size_t slash = entry.path.find('/'); slash != std::string::npos; slash = entry.path.find('/', slash + 1)) {
-            if (seen.count(lower(entry.path.substr(0, slash))) != 0) {
+            if (seen.count(same_file_key(entry.path.substr(0, slash))) != 0) {
                 error = "'" + entry.path.substr(0, slash) + "' in the archive is both a file and a folder";
                 return std::nullopt;
             }

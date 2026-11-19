@@ -168,7 +168,7 @@ bool read_plugin_ref(const toml::node& node, const std::set<std::string>& known,
     std::string rangeText = "*";
     if (!read_string(*entry, "id", id, error) || !read_string(*entry, "version", rangeText, error)) return false;
     if (!is_valid_plugin_id(id)) {
-        error.set("id '" + id + "' must match [a-z0-9-]+ (max 64 characters)", entry->contains("id") ? entry->get("id") : &node);
+        error.set("id '" + id + "' must match [a-z0-9-]+ (max 64 characters) and not be a Windows device name (con, prn, aux, nul, com0-9, lpt0-9)", entry->contains("id") ? entry->get("id") : &node);
         return false;
     }
     const auto parsed = VersionRange::parse(rangeText);
@@ -231,6 +231,14 @@ bool is_valid_plugin_id(std::string_view id) {
     for (char c : id) {
         if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) return false;
     }
+    // The id names the plugin's folders (plugins/<id>, data/<id>): a device
+    // name there opens the device, or on Windows 11 makes a folder that the
+    // Manager's own path checks then refuse to remove.
+    static constexpr std::string_view devices[] = {"con", "prn", "aux", "nul"};
+    for (const std::string_view device : devices) {
+        if (id == device) return false;
+    }
+    if (id.size() == 4 && (id.starts_with("com") || id.starts_with("lpt")) && id[3] >= '0' && id[3] <= '9') return false;
     return true;
 }
 
@@ -335,7 +343,9 @@ ManifestResult parse_manifest(std::string_view text, const std::filesystem::path
     }
     if (m.name.empty()) return fail("name must not be empty", line_of(table.get("name")));
     if (!is_valid_plugin_id(m.id)) {
-        return fail("id '" + m.id + "' must match [a-z0-9-]+ (max 64 characters)", line_of(table.get("id")));
+        return fail("id '" + m.id + "' must match [a-z0-9-]+ (max 64 characters) and not be a Windows device name "
+                    "(con, prn, aux, nul, com0-9, lpt0-9)",
+                    line_of(table.get("id")));
     }
     const auto version = Version::parse(versionText);
     if (!version) {
