@@ -21,23 +21,26 @@ param(
     [string]$Out = ("bench-lab-{0}{1}.json" -f $(if ($Memory) { 'memory-' } else { '' }), (Get-Date -Format 'yyyyMMdd-HHmmss'))
 )
 
+# Stop turns every Write-Error into a terminating error, which ends the script
+# with exit 1 (over budget); the unmet conditions below write theirs with
+# -ErrorAction Continue so that their exit 2 is reached.
 $ErrorActionPreference = 'Stop'
 [System.Threading.Thread]::CurrentThread.CurrentCulture = [cultureinfo]::InvariantCulture
 
 if ($Repetitions -lt 30) {
-    Write-Error "design §17 needs a median of at least 30 repetitions (got $Repetitions)"
+    Write-Error "design §17 needs a median of at least 30 repetitions (got $Repetitions)" -ErrorAction Continue
     exit 2
 }
 if (-not (Test-Path -LiteralPath $Bench)) {
-    Write-Error "anvil_bench not found at $Bench; build it first (cmake --build build --config Release --target anvil_bench)"
+    Write-Error "anvil_bench not found at $Bench; build it first (cmake --build build --config Release --target anvil_bench)" -ErrorAction Continue
     exit 2
 }
 if (Get-Process -Name eu4 -ErrorAction SilentlyContinue) {
-    Write-Error 'eu4.exe is running; close the game before a lab measurement'
+    Write-Error 'eu4.exe is running; close the game before a lab measurement' -ErrorAction Continue
     exit 2
 }
 if ($Cpu -ge [Environment]::ProcessorCount) {
-    Write-Error "CPU $Cpu does not exist on this machine ($([Environment]::ProcessorCount) logical CPUs)"
+    Write-Error "CPU $Cpu does not exist on this machine ($([Environment]::ProcessorCount) logical CPUs)" -ErrorAction Continue
     exit 2
 }
 
@@ -48,7 +51,7 @@ if ($Memory) {
     & $Bench --repetitions $Repetitions --cpu $Cpu --sample-ms $SampleMs --out $Out
 }
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "anvil_bench failed with exit code $LASTEXITCODE"
+    Write-Error "anvil_bench failed with exit code $LASTEXITCODE" -ErrorAction Continue
     exit 2
 }
 
@@ -69,7 +72,7 @@ Write-Host ''
 if ($Memory) {
     Write-Host "Result: $Out ($($result.changes) changes per kind)"
     if ($null -eq $result.image) {
-        Write-Error 'version.dll was not found next to anvil_bench; the core budget was not checked'
+        Write-Error 'version.dll was not found next to anvil_bench; the core budget was not checked' -ErrorAction Continue
         exit 2
     }
     foreach ($b in $over) {

@@ -55,12 +55,19 @@ def download(url: str, limit: int) -> bytes:
 
 
 def manifest_of(data: bytes) -> tuple[dict, dict | None]:
-    """plugin.toml and symbols.toml of the shallowest plugin folder in the zip, as the Manager finds it."""
+    """plugin.toml and symbols.toml of the shallowest plugin folder in the zip, as the Manager finds it.
+
+    Two plugin.toml at the shallowest depth are refused, as the Manager refuses them
+    (tools/manager/src/plugin_zip.cpp, check_plugin_zip).
+    """
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         names = [n for n in archive.namelist() if not n.endswith("/")]
         manifests = sorted((n for n in names if n.rsplit("/", 1)[-1] == "plugin.toml"), key=lambda n: n.count("/"))
         if not manifests:
             raise SystemExit("the zip has no plugin.toml")
+        if len(manifests) > 1 and manifests[1].count("/") == manifests[0].count("/"):
+            raise SystemExit(f"the zip holds more than one plugin ({manifests[0]}, {manifests[1]}); "
+                             "the Manager refuses it")
         root = manifests[0][: -len("plugin.toml")]
         manifest = tomllib.loads(archive.read(manifests[0]).decode("utf-8"))
         symbols_name = root + manifest.get("symbols", "")
@@ -166,17 +173,25 @@ def main() -> int:
         if not entries:
             raise SystemExit(f"{args.id} is not in the catalog")
         pin(entries[0], args.tag)
-        CATALOG.write_text(json.dumps(catalog, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        print(f"{args.id}: pinned {entries[0]['version']}")
     elif not args.check:
         parser.error("give a plugin id or --check")
     failed = False
+    pinned_ok = False
     for entry in catalog["plugins"] if args.check or not args.id else entries:
         problems = translation_problems(entry) + verify(entry)
         print(f"{entry['id']} {entry['version']}: {'ok' if not problems else 'FAIL'}")
         for problem in problems:
             print(f"  {problem}")
         failed |= bool(problems)
+        if args.id and entry is entries[0]:
+            pinned_ok = not problems
+    # A new pin is written only once it has been verified.
+    if args.id:
+        if pinned_ok:
+            CATALOG.write_text(json.dumps(catalog, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            print(f"{args.id}: pinned {entries[0]['version']}")
+        else:
+            print(f"{args.id}: not pinned, {CATALOG.name} is unchanged")
     return 1 if failed else 0
 
 
