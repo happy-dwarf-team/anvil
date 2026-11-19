@@ -35,6 +35,39 @@ export function checkReport(report, limits) {
   return { ok: true, format };
 }
 
+// Whether the JSON text names a key twice in one object. JSON.parse keeps the
+// last copy, which is what checkReport sees, while SQLite's json_extract (the
+// columns and views over the stored body) reads the first: a repeated key
+// would let a report store what was never checked. `text` is valid JSON and
+// `value` is JSON.parse(text): every ':' outside a string separates one
+// member, so the text holds more members than the value exactly when a key
+// is repeated.
+export function repeatsKey(text, value) {
+  let members = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c === 0x22) {
+      for (i++; text.charCodeAt(i) !== 0x22; i++) {
+        if (text.charCodeAt(i) === 0x5c) i++;
+      }
+    } else if (c === 0x3a) {
+      members++;
+    }
+  }
+  return members !== countMembers(value);
+}
+
+function countMembers(value) {
+  if (value === null || typeof value !== "object") return 0;
+  let n = 0;
+  if (Array.isArray(value)) {
+    for (const item of value) n += countMembers(item);
+    return n;
+  }
+  for (const key of Object.keys(value)) n += 1 + countMembers(value[key]);
+  return n;
+}
+
 // The deepest error is the most specific one; the enclosing if/then keywords
 // are reported too.
 function describe(errors) {
@@ -66,10 +99,12 @@ function checkPluginFields(report) {
   for (const start of report.starts) {
     for (const [id, entry] of Object.entries(start.plugins)) {
       if (entry.state !== "loaded" || !entry.participant) continue;
-      const schema = report.plugin_schemas[id];
+      // Own keys only: `constructor` or `__proto__` would otherwise find
+      // Object.prototype's members.
+      const schema = Object.hasOwn(report.plugin_schemas, id) ? report.plugin_schemas[id] : undefined;
       if (!schema) return `plugin ${id} is a benchmark participant in start ${start.position} but has no field schema`;
       for (const [name, value] of Object.entries(entry.fields)) {
-        const field = schema[name];
+        const field = Object.hasOwn(schema, name) ? schema[name] : undefined;
         if (!field) return `field ${name} of plugin ${id} in start ${start.position} is not declared`;
         if (value !== null && !matchesKind(field, value)) {
           return `field ${name} of plugin ${id} in start ${start.position} is not a valid ${field.kind}`;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import example from "../examples/report-format-1.json";
 import managerStopped from "./fixtures/manager-report-stopped.json";
-import { acceptedFormats, checkReport } from "../src/report.js";
+import { acceptedFormats, checkReport, repeatsKey } from "../src/report.js";
 
 const limits = { minStartMs: 1000, maxStartMs: 600000 };
 
@@ -10,6 +10,30 @@ function check(change) {
   change(r);
   return checkReport(r, limits);
 }
+
+describe("repeatsKey", () => {
+  const repeats = (text) => repeatsKey(text, JSON.parse(text));
+
+  it("finds a key named twice in any object", () => {
+    expect(repeats('{"a":1,"a":2}')).toBe(true);
+    expect(repeats('{"a":{"b":1,"b":1}}')).toBe(true);
+    expect(repeats('[{"x":1},{"y":[{"z":1,"z":2}]}]')).toBe(true);
+    // The same key after an escape is the same key.
+    expect(repeats('{"a":1,"\\u0061":2}')).toBe(true);
+    expect(repeats('{"__proto__":1,"__proto__":2}')).toBe(true);
+  });
+
+  it("passes keys that differ, and colons and quotes inside strings", () => {
+    expect(repeats('{"a":1,"b":{"a":2}}')).toBe(false);
+    expect(repeats('[{"a":1},{"a":2}]')).toBe(false);
+    expect(repeats('{"a:b":"c:d","e\\":":"\\\\:","f":[":",{"g":"\\"h:"}]}')).toBe(false);
+    expect(repeats('{"__proto__":{"constructor":null}}')).toBe(false);
+    expect(repeats(' "a:b" ')).toBe(false);
+    expect(repeats("[1, 2, null]")).toBe(false);
+    expect(repeats(JSON.stringify(example))).toBe(false);
+    expect(repeats(JSON.stringify(managerStopped, null, 2))).toBe(false);
+  });
+});
 
 describe("checkReport", () => {
   it("accepts format 1 only", () => {
