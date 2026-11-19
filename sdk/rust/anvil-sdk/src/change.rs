@@ -249,13 +249,32 @@ impl<F: FnPtr> FunctionHook<F> {
         Claim::take(&self.change, &format!("{call}: the hook object"))
     }
 
-    /// A request that succeeded: Anvil wrote `next` into the caller's slot
-    /// during the call (and never changes it afterwards), and only now does
-    /// it replace the hook's. A request that fails leaves `next` as it was, so
-    /// a thread still inside the detour of a removed change never reads a
-    /// NULL that a failed request on the reused hook wrote.
-    pub(crate) fn finish(&self, claim: Claim, next: *mut c_void, change: *mut AnvilChange) {
-        self.next.store(next, Ordering::Release);
+    /// Where Anvil writes `next` during a request (it writes it before it
+    /// enables the change, and a failed request writes NULL): the hook's own
+    /// cell while it is empty, so a detour the game enters as soon as the
+    /// change is enabled finds `next`; on a reused hook `local`, so a failed
+    /// request leaves the removed change's chain for a thread still inside
+    /// its detour.
+    pub(crate) fn next_cell(&self, local: &mut *mut c_void) -> *mut *mut c_void {
+        if self.next.load(Ordering::Acquire).is_null() {
+            self.next.as_ptr()
+        } else {
+            local
+        }
+    }
+
+    /// A request that succeeded: Anvil wrote `next` into `cell` during the
+    /// call (and never changes it afterwards); a local is copied in only now.
+    pub(crate) fn finish(
+        &self,
+        claim: Claim,
+        cell: *mut *mut c_void,
+        local: *mut c_void,
+        change: *mut AnvilChange,
+    ) {
+        if cell != self.next.as_ptr() {
+            self.next.store(local, Ordering::Release);
+        }
         claim.finish(change);
     }
 }
