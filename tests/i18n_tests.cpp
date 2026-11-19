@@ -43,6 +43,17 @@ std::set<std::string> placeholders(std::string_view text) {
     return out;
 }
 
+// A count's forms, split at '|'.
+std::vector<std::string_view> split_forms(std::string_view text) {
+    std::vector<std::string_view> out;
+    for (size_t start = 0;;) {
+        const size_t bar = text.find('|', start);
+        out.push_back(text.substr(start, bar == std::string_view::npos ? std::string_view::npos : bar - start));
+        if (bar == std::string_view::npos) return out;
+        start = bar + 1;
+    }
+}
+
 // The code points of a UTF-8 text; 0xFFFFFFFF for a broken sequence.
 std::vector<uint32_t> code_points(std::string_view text) {
     std::vector<uint32_t> out;
@@ -490,12 +501,29 @@ int main(int argc, char** argv) {
                     CHECK(false);
                 }
                 // A count's forms: as many as the language has, each with the English placeholders.
+                // A text that is not a count has no forms to split.
                 if (english.find('|') != std::string::npos) {
-                    const size_t forms = static_cast<size_t>(std::count(translated.begin(), translated.end(), '|')) + 1;
-                    if (forms != static_cast<size_t>(plural_forms(l))) {
-                        std::printf("  %s: %zu plural forms, not %d: %s\n", name_of(l), forms, plural_forms(l), english.c_str());
+                    const std::vector<std::string_view> forms = split_forms(translated);
+                    if (forms.size() != static_cast<size_t>(plural_forms(l))) {
+                        std::printf("  %s: %zu plural forms, not %d: %s\n", name_of(l), forms.size(), plural_forms(l), english.c_str());
                         CHECK(false);
                     }
+                    const std::set<std::string> wanted = placeholders(english);
+                    for (const std::string_view& english_form : split_forms(english)) {
+                        if (placeholders(english_form) != wanted) {
+                            std::printf("  English forms differ in placeholders: %s\n", english.c_str());
+                            CHECK(false);
+                        }
+                    }
+                    for (size_t f = 0; f < forms.size(); ++f) {
+                        if (placeholders(forms[f]) != wanted) {
+                            std::printf("  %s: form %zu has other placeholders: %s\n", name_of(l), f + 1, english.c_str());
+                            CHECK(false);
+                        }
+                    }
+                } else if (translated.find('|') != std::string::npos) {
+                    std::printf("  %s: '|' in a text that is not a count: %s\n", name_of(l), english.c_str());
+                    CHECK(false);
                 }
                 if (placeholders(english) != placeholders(translated)) {
                     std::printf("  %s: placeholders differ: %s\n", name_of(l), english.c_str());
