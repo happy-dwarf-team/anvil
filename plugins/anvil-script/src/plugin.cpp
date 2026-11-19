@@ -93,7 +93,7 @@ GetDescFn g_base_get_desc = nullptr;
 std::atomic<std::uint64_t> g_calls{0};
 std::array<std::atomic<std::uint64_t>, kMaxEffects> g_parsed{};
 // The reasons already logged per key (one line per key and reason).
-enum Reason : std::uint32_t { kGameWord = 1, kBlock = 2, kLongValue = 4, kNoMemory = 8 };
+enum Reason : std::uint32_t { kGameWord = 1, kBlock = 2, kLongValue = 4, kNoMemory = 8, kExecuteThrew = 16, kDescribeThrew = 32 };
 std::array<std::atomic<std::uint32_t>, kMaxEffects> g_logged{};
 
 template <class T> T read_at(const void* base, std::size_t offset) {
@@ -107,6 +107,18 @@ void log_once(int index, Reason reason, const char* why) {
     const Entry& e = g_registry.entry(index);
     anvil::Host{}.warn("{}: {}; the game reads it as its own (an unknown effect is skipped with a line in error.log)",
                        e.key, why);
+}
+
+// A plugin's callback that broke its contract and threw: the game's call goes
+// on without it (from a noexcept slot it would end the process). One line per
+// key and callback.
+void log_threw(int index, Reason reason, const char* callback) noexcept {
+    if (g_logged[static_cast<std::size_t>(index)].fetch_or(reason) & reason) return;
+    try {
+        anvil::Host{}.warn("{}: the plugin's {} threw a C++ exception; the game goes on without it (logged once)",
+                           g_registry.entry(index).key, callback);
+    } catch (...) {
+    }
 }
 
 bool caller_of(const AnvilPlugin* plugin, AnvilControlPlugin& out) {
@@ -161,7 +173,11 @@ void execute(void* self, void* scope, int) noexcept {
     const Entry& entry = g_registry.entry(static_cast<int>(e->entry));
     if (suspended(entry.owner)) return;  // as if the plugin were missing
     const AnvilScriptCall call = call_of(e, scope);
-    entry.execute(entry.context, &call);
+    try {
+        entry.execute(entry.context, &call);
+    } catch (...) {
+        log_threw(static_cast<int>(e->entry), kExecuteThrew, "execute");
+    }
 }
 
 struct MeiText {
@@ -195,7 +211,12 @@ void* get_desc(void* self, void* out, void* scope, void* prefix, int indent, boo
     if (entry.describe == nullptr || suspended(entry.owner)) return out;
     const AnvilScriptCall call = call_of(e, scope);
     char line[kMaxLine + 1] = {};
-    if (entry.describe(entry.context, &call, line, sizeof line) == 0) return out;
+    try {
+        if (entry.describe(entry.context, &call, line, sizeof line) == 0) return out;
+    } catch (...) {  // as no line: the tooltip keeps the base's empty one
+        log_threw(static_cast<int>(e->entry), kDescribeThrew, "describe");
+        return out;
+    }
     line[kMaxLine] = 0;
     // The game's own lines end with a line break, and the parent adds the
     // indentation (eu4-engine-lab#77): without it the next line joins ours.
@@ -254,6 +275,19 @@ void detour_read_member(void* self, void* reader, int token) noexcept {
 
 // --- the Day end -----------------------------------------------------------------
 
+std::array<std::atomic<bool>, anvil_script::kMaxDayEnd> g_day_end_threw{};
+
+void log_day_end_threw(std::size_t index, const AnvilPlugin* owner) noexcept {
+    if (g_day_end_threw[index].exchange(true)) return;
+    try {
+        AnvilControlPlugin info;
+        const std::string who = caller_of(owner, info) && info.id != nullptr ? info.id : "a plugin";
+        anvil::Host{}.warn("day end: a subscriber of {} threw a C++ exception; the other subscribers ran (logged once)",
+                           who);
+    } catch (...) {
+    }
+}
+
 void detour_daily_tick(void* game_state) noexcept {
     // Closed before the game's day, so a subscription from inside it is refused too.
     g_day_end.close();
@@ -272,7 +306,13 @@ void detour_daily_tick(void* game_state) noexcept {
     for (std::size_t i = 0; i < n; ++i) {
         const DayEndEntry& e = g_day_end.entry(i);
         if (suspended(e.owner)) continue;
-        e.callback(e.context, &day);
+        // "Must not throw" (anvil_script.h); one that does is skipped for this
+        // day, and the others still run.
+        try {
+            e.callback(e.context, &day);
+        } catch (...) {
+            log_day_end_threw(i, e.owner);
+        }
     }
 }
 

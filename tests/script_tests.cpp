@@ -25,6 +25,8 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <new>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -560,13 +562,17 @@ struct DayCalled {
     std::uint32_t flags;
 };
 std::string g_line = "Mountains ahead";
+// A plugin that breaks the contract: its callbacks throw.
+bool g_throw = false;
 
 void consumer_execute(void* context, const AnvilScriptCall* call) {
     CHECK(context == &g_executed && call->size == sizeof(AnvilScriptCall));
     g_executed.push_back({call->key, call->value, call->scope.country, call->scope.province});
+    if (g_throw) throw std::runtime_error("execute");
 }
 uint32_t consumer_describe(void*, const AnvilScriptCall* call, char* utf8, uint32_t capacity) {
     CHECK(std::string(call->value) == "mountains" && call->scope.province == 295);
+    if (g_throw) throw std::bad_alloc();
     std::snprintf(utf8, capacity, "%s", g_line.c_str());
     return static_cast<uint32_t>(g_line.size());
 }
@@ -760,6 +766,29 @@ int main(int argc, char** argv) {
         g_line = "Mountains ahead";
     });
 
+    run("script plugin: a callback that throws is skipped, logged once per key", [&] {
+        FakeScope scope{295, "RUS"};
+        g_executed.clear();
+        g_throw = true;
+        reinterpret_cast<ExecuteFn*>(slots[15])(effect, &scope, 0);
+        reinterpret_cast<ExecuteFn*>(slots[15])(effect, &scope, 0);
+        GameString prefix{}, out{};
+        g_strings.clear();
+        g_base_descs = 0;
+        reinterpret_cast<GetDescFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
+        g_throw = false;
+        CHECK(g_executed.size() == 2 && g_base_descs == 1 && g_strings.empty() && out.size == 0);
+        const auto lines = std::count_if(log.begin(), log.end(), [](const std::string& l) {
+            return l.rfind("anvil-script: chisel_set_terrain: the plugin's execute threw a C++ exception", 0) == 0;
+        });
+        CHECK(lines == 1);
+        CHECK(contains(log, "anvil-script: chisel_set_terrain: the plugin's describe threw a C++ exception; the game "
+                            "goes on without it (logged once)"));
+        // The effect still works once the plugin stops throwing.
+        reinterpret_cast<ExecuteFn*>(slots[15])(effect, &scope, 0);
+        CHECK(g_executed.size() == 3);
+    });
+
     run("script plugin: an effect without describe has the base's empty line", [&] {
         Parent p;
         member(p, "chisel_reset_terrain", "yes");
@@ -791,6 +820,7 @@ int main(int argc, char** argv) {
     const auto record = [](void* context, const AnvilScriptDay* d) {
         CHECK(d->size == sizeof(AnvilScriptDay));
         called.push_back({static_cast<const char*>(context), d->year, d->month, d->day, d->flags});
+        if (g_throw && std::string(static_cast<const char*>(context)) == "chisel") throw std::runtime_error("day");
     };
     static char chisel_name[] = "chisel", late_name[] = "late", chisel2_name[] = "chisel2";
 
@@ -839,6 +869,19 @@ int main(int argc, char** argv) {
         if (called.size() == 2) {
             CHECK(called[0].month == 2 && called[0].day == 1 && called[0].flags == ANVIL_SCRIPT_DAY_NEW_MONTH);
         }
+    });
+
+    run("day end: a subscriber that throws does not stop the others", [&] {
+        called.clear();
+        g_throw = true;
+        daily_tick(&game_state);
+        daily_tick(&game_state);
+        g_throw = false;
+        CHECK(called.size() == 6 && called[1].who == "late" && called[2].who == "chisel2");
+        const auto lines = std::count_if(log.begin(), log.end(), [](const std::string& l) {
+            return l.rfind("anvil-script: day end: a subscriber of chisel threw a C++ exception", 0) == 0;
+        });
+        CHECK(lines == 1);
     });
 
     run("day end: no subscription once a day has ended", [&] {
