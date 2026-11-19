@@ -2509,3 +2509,61 @@ fn a_shorter_table_is_read_only_as_far_as_its_size() {
     let full = unsafe { crate::Table::from_raw(ptr::from_ref(&FAKE_CAMERA.0)) }.unwrap();
     assert!(full.get().is_some());
 }
+
+#[test]
+fn a_detour_entered_as_soon_as_a_first_hook_is_enabled_has_next() {
+    static HOOK: FunctionHook<unsafe extern "C" fn(i32) -> i32> = FunctionHook::new();
+    static SEEN_AT_ENABLE: AtomicU32 = AtomicU32::new(0); // 1 = None, 2 = Some
+    unsafe extern "C" fn detour(x: i32) -> i32 {
+        match HOOK.next() {
+            Some(next) => (unsafe { next(x) }) * 10,
+            None => -1,
+        }
+    }
+    // As the core does after load, outside a group: *next is written, then the
+    // change is enabled inside the call; a game thread may enter the detour at once.
+    unsafe extern "C" fn hook_and_enable(
+        _: *mut AnvilPlugin,
+        _: AnvilSymbol,
+        detour: *mut c_void,
+        next: *mut *mut c_void,
+        out: *mut *mut AnvilChange,
+    ) -> AnvilResult {
+        let original: unsafe extern "C" fn(i32) -> i32 = fake_original;
+        unsafe { *next = original as *mut c_void };
+        // enable(): the game's next call goes through the detour.
+        let d: unsafe extern "C" fn(i32) -> i32 = unsafe { std::mem::transmute(detour) };
+        let r = unsafe { d(4) };
+        SEEN_AT_ENABLE.store(if r == -1 { 1 } else { 2 }, Ordering::Relaxed);
+        unsafe { *out = NEXT_CHANGE.fetch_add(1, Ordering::Relaxed) as *mut AnvilChange };
+        ANVIL_OK
+    }
+    let (_guard, table) = fake_host();
+    let mut t = *table;
+    t.hook_function = Some(hook_and_enable);
+    assert_eq!(load::<Quiet>(Box::leak(Box::new(t))), ANVIL_OK);
+    let host = Host::current().unwrap();
+    unsafe { host.hook(&HOOK, 1, detour) }.unwrap();
+    // The game call that came right after enabling (inside the request) has next.
+    assert_eq!(
+        SEEN_AT_ENABLE.load(Ordering::Relaxed),
+        2,
+        "detour ran with next() == None"
+    );
+    HOOK.remove().unwrap();
+}
+
+#[test]
+fn a_panic_the_plugin_caught_inside_an_adapter_does_not_name_a_later_one() {
+    let (_guard, table) = fake_host();
+    assert_eq!(load::<Quiet>(table), ANVIL_OK);
+    crate::catch_panic("first", (), || {
+        let _ = std::panic::catch_unwind(|| panic!("swallowed by the plugin"));
+    });
+    crate::catch_panic("second", (), || {
+        std::panic::resume_unwind(Box::new("the real one"))
+    });
+    let log = logged();
+    let line = log.iter().find(|l| l.starts_with("second")).unwrap();
+    assert!(line.contains("the real one"), "{line}");
+}

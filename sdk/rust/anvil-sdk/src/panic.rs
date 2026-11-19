@@ -56,12 +56,25 @@ fn payload_text(payload: &(dyn Any + Send)) -> String {
     }
 }
 
+/// The text of a caught panic: the hook's message (with its place) when it
+/// is this payload's. A panic the plugin caught itself, inside an adapter,
+/// leaves its message behind; a later payload that did not pass the hook
+/// (`resume_unwind`) must not be named by it.
+fn text_of(kept: Option<String>, payload: &(dyn Any + Send)) -> String {
+    let own = payload_text(payload);
+    match kept {
+        Some(kept) if kept.starts_with(&own) => kept,
+        _ => own,
+    }
+}
+
 /// Runs `body`; a panic comes back as its message (and place).
 pub(crate) fn catch<R>(body: impl FnOnce() -> R) -> Result<R, String> {
     catch_raw(body).map_err(|payload| {
-        let text = MESSAGE
-            .with(|message| message.borrow_mut().take())
-            .unwrap_or_else(|| payload_text(&*payload));
+        let text = text_of(
+            MESSAGE.with(|message| message.borrow_mut().take()),
+            &*payload,
+        );
         // Dropping a payload may panic in turn; never let that out.
         let _ = std_panic::catch_unwind(AssertUnwindSafe(move || drop(payload)));
         text
@@ -82,11 +95,11 @@ pub(crate) fn catch_raw<R>(body: impl FnOnce() -> R) -> std::thread::Result<R> {
 /// the hook logs a panic no adapter catches.
 pub(crate) fn resume(payload: Box<dyn Any + Send>) -> ! {
     if CATCHING.try_with(Cell::get).unwrap_or(0) == 0 {
-        let text = MESSAGE
+        let kept = MESSAGE
             .try_with(|message| message.borrow_mut().take())
             .ok()
-            .flatten()
-            .unwrap_or_else(|| payload_text(&*payload));
+            .flatten();
+        let text = text_of(kept, &*payload);
         let _ = catch(|| {
             if let Some(host) = Host::current() {
                 host.log(LogLevel::Error, format_args!("panic: {text}"));

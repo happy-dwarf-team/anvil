@@ -376,9 +376,11 @@ private:
 
 // A function hook, call redirect or import replacement and the rest of its
 // chain. Keep it where it outlives the change (a global or a member of the
-// plugin): it holds `next` for a thread inside the detour. A request that
-// fails leaves `next` as it was, so a thread still inside the detour of a
-// removed change never reads a NULL the failed request on the reused hook got.
+// plugin): it holds `next` for a thread inside the detour. On a hook that has
+// had no change, Anvil writes `next` into it before it enables the change, so
+// a detour the game enters at once already has it. A request on a reused hook
+// that fails leaves `next` as it was, so a thread still inside the detour of a
+// removed change never reads a NULL the failed request got.
 template <class F> class FunctionHook;
 template <class R, class... A> class FunctionHook<R(A...)> {
 public:
@@ -390,8 +392,10 @@ public:
     FunctionHook& operator=(const FunctionHook&) = delete;
 
     // The rest of the chain: the next plugin's detour or the game's code.
-    R next(A... args) const { return next_.load(std::memory_order_acquire)(args...); }
-    Pointer next_pointer() const noexcept { return next_.load(std::memory_order_acquire); }
+    R next(A... args) const { return next_pointer()(args...); }
+    Pointer next_pointer() const noexcept {
+        return reinterpret_cast<Pointer>(std::atomic_ref<void*>(next_).load(std::memory_order_acquire));
+    }
     // Whether the hook holds a change (or another thread is installing one).
     bool active() const noexcept { return change_.active(); }
     // A thread still inside the detour can still call next() afterwards.
@@ -399,14 +403,22 @@ public:
 
 private:
     friend class Host;
-    // A request that succeeded: Anvil wrote `next` into the request's own
-    // slot during the call (and never changes it afterwards).
-    void finish(detail::ChangeSlot::Claim& claim, void* next, AnvilChange* handle) noexcept {
-        next_.store(reinterpret_cast<Pointer>(next), std::memory_order_release);
+    // Where Anvil writes `next` during a request (it writes it before it
+    // enables the change, and a failed request writes NULL): the hook's own
+    // cell while it is empty, so a detour entered as soon as the change is
+    // enabled finds `next`; on a reused hook `local`, so a failed request
+    // leaves the removed change's chain for a thread still inside its detour.
+    void** next_cell(void*& local) noexcept {
+        return std::atomic_ref<void*>(next_).load(std::memory_order_acquire) == nullptr ? &next_ : &local;
+    }
+    // A request that succeeded: Anvil wrote `next` into `cell` during the
+    // call (and never changes it afterwards); a local is copied in only now.
+    void finish(detail::ChangeSlot::Claim& claim, void** cell, void* local, AnvilChange* handle) noexcept {
+        if (cell != &next_) std::atomic_ref<void*>(next_).store(local, std::memory_order_release);
         claim.finish(handle);
     }
     detail::ChangeSlot change_;
-    std::atomic<Pointer> next_{nullptr};
+    alignas(8) mutable void* next_ = nullptr;
 };
 
 // anvil::HookOf<sym::speed_object> is the hook type for that symbol.
@@ -556,9 +568,10 @@ public:
                 detail::ChangeSlot::Claim claim(hook.change_, "hook_function");
                 AnvilChange* handle = nullptr;
                 void* next = nullptr;
-                detail::check(c_api().hook_function(self(), fn.id, reinterpret_cast<void*>(target), &next, &handle),
+                void** const cell = hook.next_cell(next);
+                detail::check(c_api().hook_function(self(), fn.id, reinterpret_cast<void*>(target), cell, &handle),
                               "hook_function", detail::name_of<S>());
-                hook.finish(claim, next, handle);
+                hook.finish(claim, cell, next, handle);
             }
         }
     }
@@ -616,9 +629,10 @@ public:
             detail::ChangeSlot::Claim claim(hook.change_, "redirect_call");
             AnvilChange* handle = nullptr;
             void* next = nullptr;
-            detail::check(c_api().redirect_call(self(), call_site.id, reinterpret_cast<void*>(fn), &next, &handle),
+            void** const cell = hook.next_cell(next);
+            detail::check(c_api().redirect_call(self(), call_site.id, reinterpret_cast<void*>(fn), cell, &handle),
                           "redirect_call", detail::name_of<S>());
-            hook.finish(claim, next, handle);
+            hook.finish(claim, cell, next, handle);
         }
     }
 
@@ -667,9 +681,10 @@ public:
             detail::ChangeSlot::Claim claim(hook.change_, "replace_import");
             AnvilChange* handle = nullptr;
             void* next = nullptr;
-            detail::check(c_api().replace_import(self(), module, function, reinterpret_cast<void*>(fn), &next, &handle),
+            void** const cell = hook.next_cell(next);
+            detail::check(c_api().replace_import(self(), module, function, reinterpret_cast<void*>(fn), cell, &handle),
                           "replace_import", std::string(module) + "!" + function);
-            hook.finish(claim, next, handle);
+            hook.finish(claim, cell, next, handle);
         }
     }
 
@@ -685,11 +700,12 @@ public:
             detail::ChangeSlot::Claim claim(hook.change_, "hook_function_at");
             AnvilChange* handle = nullptr;
             void* next = nullptr;
+            void** const cell = hook.next_cell(next);
             detail::check(c_api().hook_function_at(self(), address, data_or_null(expected_prologue),
-                                                   expected_prologue.size(), reinterpret_cast<void*>(fn), &next,
+                                                   expected_prologue.size(), reinterpret_cast<void*>(fn), cell,
                                                    &handle),
                           "hook_function_at", detail::address_text(address));
-            hook.finish(claim, next, handle);
+            hook.finish(claim, cell, next, handle);
         }
     }
 

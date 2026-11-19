@@ -121,6 +121,29 @@ int main() {
         hook.remove();
     });
 
+    run("hook: a detour the game enters as soon as a first change is enabled already has next", [&] {
+        g_fake = {};
+        anvil::FunctionHook<int(int)> hook;
+        // Inside the request, after Anvil wrote next: when the core enables the
+        // change, a game thread may call the detour before the request returns.
+        Fn seen = nullptr;
+        g_fake.during = [&] { seen = hook.next_pointer(); };
+        h.hook_at(hook, address, &detour);
+        CHECK(seen == &game_fn && hook.next_pointer() == &game_fn && hook.next(1) == 2);
+        hook.remove();
+        // A first request that fails leaves the hook empty.
+        anvil::FunctionHook<int(int)> fresh;
+        g_fake.during = {};
+        g_fake.answer = ANVIL_ERROR_INTERNAL;
+        bool threw = false;
+        try {
+            h.hook_at(fresh, address, &detour);
+        } catch (const anvil::Error& e) {
+            threw = e.result() == ANVIL_ERROR_INTERNAL;
+        }
+        CHECK(threw && fresh.next_pointer() == nullptr && !fresh.active());
+    });
+
     run("hook: a second request while one runs is refused and leaves the first alone", [&] {
         g_fake = {};
         anvil::FunctionHook<int(int)> hook;
