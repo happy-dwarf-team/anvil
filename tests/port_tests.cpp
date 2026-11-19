@@ -464,6 +464,39 @@ void port_tests() {
         CHECK(!fs::exists(fx.out));
         CHECK(contains(format_port_report(report, fx.symbols, Format::Text), "nothing written"));
     });
+
+    run("port: --out may be a bare file name in the current folder", [&] {
+        const fs::path before = fs::current_path();
+        fs::current_path(fx.root);
+        write(fx.symbols, placeable());
+        PortOptions options;
+        options.symbols = fx.symbols;
+        options.from = fx.old_exe;
+        options.to = fx.new_exe;
+        options.build = "new";
+        options.from_build = "old";
+        options.out = "bare.toml";
+        const PortReport report = port_symbols(options);
+        fs::current_path(before);
+        if (!report.cannot_port.empty()) std::printf("  cannot: %s\n", report.cannot_port.c_str());
+        CHECK(report.exit_code == kExitOk && report.written);
+        CHECK(fx.verifies(read(fx.root / "bare.toml"), "new", fx.new_exe));
+    });
+
+    run("port: a failed write says why", [&] {
+        write(fx.symbols, placeable());
+        PortOptions options;
+        options.symbols = fx.symbols;
+        options.from = fx.old_exe;
+        options.to = fx.new_exe;
+        options.build = "new";
+        options.from_build = "old";
+        options.out = fx.symbols / "inside-a-file.toml";  // its parent is a file
+        const PortReport report = port_symbols(options);
+        CHECK(report.exit_code != kExitOk && !report.written);
+        CHECK(contains(report.cannot_port, "cannot write"));
+        CHECK(contains(report.cannot_port, "(error "));
+    });
 }
 
 int main() {
