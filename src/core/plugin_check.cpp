@@ -1,6 +1,7 @@
 #include "plugin_check.hpp"
 
 #include "discovery.hpp"
+#include "log.hpp"
 
 #include <algorithm>
 #include <fstream>
@@ -25,11 +26,9 @@ std::filesystem::path utf8_path(const std::string& text) { return std::filesyste
 
 // A path as UTF-8 with forward slashes. generic_string() would convert to the
 // ANSI code page and throw on a character it lacks (a Japanese name on a
-// Western system), which would end the whole start-up.
-std::string generic_utf8(const std::filesystem::path& path) {
-    const std::u8string u8 = path.generic_u8string();
-    return std::string(u8.begin(), u8.end());
-}
+// Western system), and generic_u8string() throws on a lone surrogate; either
+// would end the whole start-up. narrow() writes U+FFFD for what it cannot convert.
+std::string generic_utf8(const std::filesystem::path& path) { return narrow(path.generic_wstring()); }
 
 // The parsers start their errors with the file's name; a problem names it apart.
 std::string without_prefix(std::string message, std::string_view prefix) {

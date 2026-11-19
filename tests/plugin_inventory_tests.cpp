@@ -175,4 +175,42 @@ void plugin_inventory_tests() {
         }
         fs::remove_all(dir);
     });
+
+    run("plugin inventory: a file name that is not valid Unicode refuses its plugin, not the start", [] {
+        // NTFS allows a lone surrogate in a name; generic_u8string() throws on it, and
+        // nothing above the inventory caught it: no plugin loaded at all.
+        const std::wstring bad = L"a\xD800.txt";
+        const fs::path dir = fresh("anvil-inventory-lone-surrogate");
+        const fs::path anvil = dir / "anvil";
+        const fs::path user = dir / "user";
+        const fs::path ok = anvil / "plugins" / "ok";
+        write(ok / "plugin.toml", plugin_toml("ok"));
+        write(ok / "ok.dll", "MZ");
+        write(ok / "translations" / bad, "x");  // read by the translation check
+        const fs::path y = mod_plugin(user, "One", "y", "1.0.0");
+        write(y / bad, "x");  // hashed with the mod's plugin
+        enable_mods(user, {"One"});
+        CHECK(fs::exists(y / bad));
+
+        bool threw = false;
+        PluginInventory inventory;
+        try {
+            inventory = take_inventory(anvil, user, GameImage{});
+        } catch (const std::exception& e) {
+            std::printf("  threw: %s\n", e.what());
+            threw = true;
+        }
+        CHECK(!threw);
+        CHECK(inventory.local.size() == 1);
+        if (inventory.local.size() == 1) CHECK(inventory.local[0].check.manifest.manifest.has_value());
+        CHECK(inventory.mods.size() == 1);
+        if (inventory.mods.size() == 1) {
+            const ModPlugin& m = inventory.mods[0].found;
+            CHECK(m.hash.empty());
+            CHECK(m.problem.find("not valid Unicode") != std::string::npos);
+        }
+        const FolderHash hash = hash_plugin_folder(y);
+        CHECK(hash.sha256.empty() && hash.error.find("not valid Unicode") != std::string::npos);
+        fs::remove_all(dir);
+    });
 }

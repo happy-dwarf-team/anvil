@@ -44,21 +44,33 @@ private:
     BCRYPT_HASH_HANDLE hash_ = nullptr;
 };
 
+// UTF-8 with forward slashes. generic_u8string() throws on a name that is not
+// valid UTF-16 (a lone surrogate, which NTFS allows), and nothing above the
+// inventory catches it: one such file in any enabled mod stopped every plugin.
 std::string relative_name(const fs::path& folder, const fs::path& file) {
-    const auto u8 = file.lexically_relative(folder).generic_u8string();
-    std::string out(u8.begin(), u8.end());
+    std::string out = narrow(file.lexically_relative(folder).generic_wstring());
     for (char& c : out) {
         if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
     }
     return out;
 }
 
-// Every file below `dir`; false with `error` at a link or past the limits.
+bool valid_utf16(const std::wstring& name) {
+    return name.empty() || WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, name.data(), static_cast<int>(name.size()),
+                                               nullptr, 0, nullptr, nullptr) > 0;
+}
+
+// Every file below `dir`; false with `error` at a link, a name that is not
+// valid Unicode (it has no UTF-8 name to hash) or past the limits.
 bool collect(const fs::path& root, const fs::path& dir, std::vector<HashedFile>& out, std::string& error) {
     std::error_code ec;
     for (fs::directory_iterator it(dir, ec), end; it != end; it.increment(ec)) {
         if (ec) break;
         const fs::path path = it->path();
+        if (!valid_utf16(path.filename().wstring())) {
+            error = relative_name(root, path) + " has a name that is not valid Unicode; a plugin folder may not have one";
+            return false;
+        }
         const DWORD attributes = GetFileAttributesW(path.c_str());
         if (attributes == INVALID_FILE_ATTRIBUTES) {
             error = "cannot read " + relative_name(root, path) + " (error " + std::to_string(GetLastError()) + ")";
