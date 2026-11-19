@@ -57,7 +57,9 @@ thread after a frame, in this order:
 A step whose file is empty or not in the game's format (a `.mesh` or `.anim` without the PDX asset
 mark `@@b@` at its start, a `.dds` without `DDS `, a `.tga` shorter than its header), for example one
 caught while the exporter was still writing it, is left out and named in the window: the game's
-loaders never see it. Save the file again and reload.
+loaders never see it. Save the file again and reload. A mesh that has the mark but a bad body (cut short,
+for example) goes to the game, which logs `Pdx mesh type with no meshes: … won't render.` in
+`error.log` and draws nothing for that mesh until a good file is reloaded.
 
 The window then shows each step's result and the time; `anvil.log` has the same lines. A step that
 faults in the game's code stops the rest, which the window marks **Not run**, and asks to save and
@@ -112,7 +114,8 @@ What still needs a save load or a restart:
 
 Particles: `reload assets` reads the particle `.asset` files again into the effects the game already has
 (by name), and points every running particle instance at its effect again, so smoke and fire already on
-the map take the change at once.
+the map take the change at once (seen with the siege smoke on 19.11.2026); the plugin adds nothing for
+particles.
 
 ### What it never runs
 
