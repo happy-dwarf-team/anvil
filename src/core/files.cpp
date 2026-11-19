@@ -56,8 +56,11 @@ bool write_file_atomic(const std::filesystem::path& file, std::string_view bytes
         return false;
     };
     std::error_code ec;
-    std::filesystem::create_directories(file.parent_path(), ec);
-    if (ec) return fail(file.parent_path(), "cannot create", static_cast<DWORD>(ec.value()));
+    // A bare file name has no parent: it goes in the current folder, which exists.
+    if (!file.parent_path().empty()) {
+        std::filesystem::create_directories(file.parent_path(), ec);
+        if (ec) return fail(file.parent_path(), "cannot create", static_cast<DWORD>(ec.value()));
+    }
     std::filesystem::path temporary = file;
     temporary += L".anvil-new";
     const HANDLE out =

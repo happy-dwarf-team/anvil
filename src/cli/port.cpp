@@ -596,7 +596,7 @@ PortReport port_symbols(const PortOptions& options) {
     }
     // --out may be the input: a failed write must leave it as it was.
     std::string write_error;
-    if (!write_file_atomic(options.out, *written, write_error)) return cannot("cannot write " + shown(options.out));
+    if (!write_file_atomic(options.out, *written, write_error)) return cannot("cannot write " + shown(options.out) + ": " + write_error);
     report.written = true;
     return report;
 }
