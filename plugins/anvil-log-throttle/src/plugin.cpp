@@ -133,15 +133,26 @@ void on_write(void* sink, int channel, const GameString* file, int line, const G
     config.full_log = g_full_log.load(std::memory_order_relaxed);
     std::vector<log_throttle::Line> out;
     log_throttle::Verdict verdict = log_throttle::Verdict::write;
+    // Only a failed allocation can throw. When record() itself fails, the game's
+    // line is written; once it has answered, its verdict stands: a line it
+    // counted is in the next report, so writing it too would log it twice.
     try {
         verdict = g_throttle.record(sink, channel, file->view(), line, message->view(), GetTickCount64(), config, out);
+    } catch (...) {
+        verdict = log_throttle::Verdict::write;
+        out.clear();
+    }
+    try {
         write_lines(out);
+    } catch (...) {
+        // The rest of a notice or a report is lost, not the game's line.
+    }
+    try {
         if (g_tally.keeping()) {
             g_tally.add(file_name(path), file->view(), line, message->view(), verdict == log_throttle::Verdict::count);
         }
     } catch (...) {
-        // Only a failed allocation can throw: the game's line is written.
-        verdict = log_throttle::Verdict::write;
+        // The table misses this line; the log does not.
     }
     if (verdict == log_throttle::Verdict::write) next(sink, channel, file, line, message);
 }

@@ -58,12 +58,13 @@ std::string report_text(std::uint64_t count, std::uint64_t elapsed_ms, std::stri
 Verdict Throttle::record(const void* sink, int channel, std::string_view file, int line, std::string_view text,
                          std::uint64_t now_ms, const Config& config, std::vector<Line>& out) {
     std::lock_guard lock(mutex_);
-    SinkStats& stats = sinks_[sink];
+    SinkState& state = sinks_[sink];
+    SinkStats& stats = state.stats;
     ++stats.lines;
-    // At most once a second: the counts that are due, of any sink.
-    if (now_ms >= next_scan_ms_) {
-        report_due(now_ms, config.report_ms, out);
-        next_scan_ms_ = now_ms + 1000;
+    // At most once a second: the counts of this sink that are due.
+    if (now_ms >= state.next_scan_ms) {
+        report_due(sink, now_ms, config.report_ms, out);
+        state.next_scan_ms = now_ms + 1000;
     }
     if (config.full_log) {
         ++stats.written;
@@ -102,6 +103,8 @@ Verdict Throttle::record(const void* sink, int channel, std::string_view file, i
     notice.text = notice_text(config.repeats, config.report_ms, text);
     notice.notice = true;
     notice.message_at = notice.text.size() - text.size();
+    // Every allocation before the state changes: a throw leaves the line uncounted.
+    out.reserve(out.size() + 1);
     counted_.push_back(counted.get());
     e.counted = std::move(counted);
     ++stats.counted;
@@ -110,9 +113,9 @@ Verdict Throttle::record(const void* sink, int channel, std::string_view file, i
     return Verdict::count;
 }
 
-void Throttle::report_due(std::uint64_t now_ms, std::uint64_t report_ms, std::vector<Line>& out) {
+void Throttle::report_due(const void* sink, std::uint64_t now_ms, std::uint64_t report_ms, std::vector<Line>& out) {
     for (Counted* c : counted_) {
-        if (c->pending == 0 || now_ms - c->since_ms < report_ms) continue;
+        if (c->line.sink != sink || c->pending == 0 || now_ms - c->since_ms < report_ms) continue;
         Line report = c->line;
         report.text = report_text(c->pending, now_ms - c->since_ms, c->line.text);
         report.message_at = report.text.size() - c->line.text.size();
@@ -141,7 +144,7 @@ SinkStats Throttle::close(const void* sink, std::uint64_t now_ms, std::vector<Li
     std::erase_if(entries_, [sink](const auto& item) { return item.second.sink == sink; });
     SinkStats stats;
     if (const auto it = sinks_.find(sink); it != sinks_.end()) {
-        stats = it->second;
+        stats = it->second.stats;
         sinks_.erase(it);
     }
     return stats;
@@ -150,7 +153,7 @@ SinkStats Throttle::close(const void* sink, std::uint64_t now_ms, std::vector<Li
 SinkStats Throttle::stats(const void* sink) const {
     std::lock_guard lock(mutex_);
     const auto it = sinks_.find(sink);
-    return it != sinks_.end() ? it->second : SinkStats{};
+    return it != sinks_.end() ? it->second.stats : SinkStats{};
 }
 
 std::size_t Throttle::tracked() const {

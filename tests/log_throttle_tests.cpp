@@ -13,10 +13,12 @@
 #include "../plugins/anvil-log-throttle/src/throttle.hpp"
 
 #include <anvil/anvil_log_throttle.h>
+#include <anvil/anvil_panel.h>
 #include <anvil/anvil_plugin.h>
 #include <windows.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -84,7 +86,7 @@ void throttle_tests() {
         CHECK(record(t, &a, "m", 0, out, c) == lt::Verdict::count && out.size() == 1);
     });
 
-    run("log throttle: a count is reported once it is due, at the next line of any sink", [&] {
+    run("log throttle: a count is reported once it is due, at the next line of its own sink", [&] {
         lt::Throttle t;
         lt::Config c;
         c.repeats = 1;
@@ -95,11 +97,14 @@ void throttle_tests() {
         for (int i = 0; i < 4; ++i) record(t, &a, "spam", 2'000 + i, out, c);
         out.clear();
         // Not due yet.
-        CHECK(record(t, &b, "other 1", 10'999, out, c) == lt::Verdict::write && out.empty());
+        CHECK(record(t, &a, "other 1", 10'999, out, c) == lt::Verdict::write && out.empty());
         // Due, but the due counts are looked for at most once a second.
-        CHECK(record(t, &b, "other 2", 11'500, out, c) == lt::Verdict::write && out.empty());
-        // Reported before the line of the other sink.
-        CHECK(record(t, &b, "other 3", 12'000, out, c) == lt::Verdict::write);
+        CHECK(record(t, &a, "other 2", 11'500, out, c) == lt::Verdict::write && out.empty());
+        // Another sink's line never writes them: that would be a write into this
+        // sink from another log's thread.
+        CHECK(record(t, &b, "elsewhere 1", 12'000, out, c) == lt::Verdict::write && out.empty());
+        // Reported before the next line of its own sink.
+        CHECK(record(t, &a, "other 3", 12'000, out, c) == lt::Verdict::write);
         CHECK(out.size() == 1 && !out[0].notice && out[0].sink == &a &&
               out[0].text == "[anvil-log-throttle] repeated 5 more times in the last 11 s: spam" &&
               out[0].text.substr(out[0].message_at) == "spam");
@@ -107,14 +112,33 @@ void throttle_tests() {
         // The next report counts from the last one.
         record(t, &a, "spam", 15'000, out, c);
         CHECK(out.empty());
-        record(t, &b, "other 4", 21'999, out, c);
+        record(t, &a, "other 4", 21'999, out, c);
         CHECK(out.empty());
-        record(t, &b, "other 5", 23'000, out, c);
+        record(t, &b, "elsewhere 2", 23'000, out, c);
+        CHECK(out.empty());
+        record(t, &a, "other 5", 23'000, out, c);
         CHECK(out.size() == 1 && out[0].text == "[anvil-log-throttle] repeated 1 more times in the last 11 s: spam");
         out.clear();
         // Nothing new: no report.
-        record(t, &b, "other 6", 40'000, out, c);
+        record(t, &a, "other 6", 40'000, out, c);
         CHECK(out.empty());
+    });
+
+    run("log throttle: each sink looks for its due counts on its own second", [&] {
+        lt::Throttle t;
+        lt::Config c;
+        c.repeats = 1;
+        c.report_ms = 1'000;
+        std::vector<lt::Line> out;
+        for (int i = 0; i < 3; ++i) record(t, &a, "spam a", 0, out, c);
+        for (int i = 0; i < 3; ++i) record(t, &b, "spam b", 0, out, c);
+        out.clear();
+        // b's busy lines do not use up a's scan: a still reports at its next line.
+        record(t, &b, "x", 1'000, out, c);
+        CHECK(out.size() == 1 && out[0].sink == &b);
+        out.clear();
+        record(t, &a, "y", 1'200, out, c);
+        CHECK(out.size() == 1 && out[0].sink == &a && out[0].text.ends_with(": spam a"));
     });
 
     run("log throttle: a closing sink reports its counts and is forgotten", [&] {
@@ -817,6 +841,30 @@ std::vector<std::string> texts() {
     return out;
 }
 
+// A stand-in of anvil-overlay.panel that only counts the panels asked for: it
+// has no room, so the plugin's thread asks once and turns the panel off.
+std::atomic<int> g_panels_asked{0};
+AnvilResult fake_panel_create(const char*, AnvilPanel** out) {
+    *out = nullptr;
+    g_panels_asked.fetch_add(1);
+    return ANVIL_ERROR_OUT_OF_MEMORY;
+}
+AnvilResult fake_panel_rows(AnvilPanel*, const AnvilPanelRow*, uint32_t, uint32_t) { return ANVIL_OK; }
+AnvilResult fake_panel_click(AnvilPanel*, AnvilPanelClick, void*) { return ANVIL_OK; }
+AnvilResult fake_panel_show(AnvilPanel*, int) { return ANVIL_OK; }
+int fake_panel_shown(const AnvilPanel*) { return 0; }
+const char* fake_panel_language() { return "en"; }
+const AnvilPanelService kFakePanels = {sizeof(AnvilPanelService), &fake_panel_create, &fake_panel_rows, &fake_panel_click,
+                                       &fake_panel_show, &fake_panel_shown, &fake_panel_language};
+
+bool panels_asked_within(int ms) {
+    for (int waited = 0; waited < ms; waited += 50) {
+        if (g_panels_asked.load() != 0) return true;
+        Sleep(50);
+    }
+    return g_panels_asked.load() != 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -847,6 +895,7 @@ int main(int argc, char** argv) {
         CHECK(resolved != nullptr && resolved->symbols.size() == 3);
         if (resolved == nullptr) return;
         resolved->data_dir = data;
+        CHECK(bus.register_service("anvil-overlay", ANVIL_PANEL_SERVICE, ANVIL_PANEL_SERVICE_VERSION, &kFakePanels) == ANVIL_OK);
         // Three lines per message, as an environment override.
         start.environment = [](const std::string& name) -> std::optional<std::string> {
             if (name == "ANVIL_ANVIL_LOG_THROTTLE_REPEATS") return "3";
@@ -996,6 +1045,16 @@ int main(int argc, char** argv) {
         }
         CHECK(in_log == 25);
         CHECK(svc->read(0, 0, out, 4, sizeof(AnvilLogMessage), &count, &next) == ANVIL_OK && out[0].written + out[0].counted == 25);
+    });
+
+    // Last: it turns the panel on, which keeps the table from then on.
+    run("log throttle plugin: the panel waits until Anvil has loaded every plugin", [&] {
+        CHECK(plugin->record->settings().set_text(4, "true").applied);
+        // Before anvil.plugins_loaded the plugin's changes may still be rolled back: no panel.
+        CHECK(!panels_asked_within(1500));
+        CHECK(bus.publish(ANVIL_EVENT_PLUGINS_LOADED, nullptr) >= 1);
+        CHECK(panels_asked_within(3000) && g_panels_asked.load() == 1);
+        CHECK(contains(log, "anvil-log-throttle: the script errors panel: the overlay has no room for another panel"));
     });
 
     std::error_code ec;
