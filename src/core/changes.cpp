@@ -581,12 +581,39 @@ struct ChangeRegistry::Owner {
     std::vector<ChangeId> staged;  // in request order
 };
 
+// Each page the bytes cover is unprotected and restored on its own:
+// VirtualProtect answers only the first page's old protection, so one call
+// over a range that crosses into a page of another kind (.rdata into .data)
+// gave the later pages the first one's protection when it restored them.
 bool write_memory(void* address, const void* data, size_t size) {
-    DWORD old = 0;
-    if (!VirtualProtect(address, size, PAGE_EXECUTE_READWRITE, &old)) return false;
+    if (size == 0) return true;
+    constexpr uintptr_t kPage = 0x1000;
+    const uintptr_t start = reinterpret_cast<uintptr_t>(address);
+    const uintptr_t end = start + size;
+    struct Page {
+        uintptr_t from;
+        size_t size;
+        DWORD old;
+    };
+    std::vector<Page> pages;
+    const auto restore = [&] {
+        for (const Page& page : pages) {
+            DWORD ignored = 0;
+            VirtualProtect(reinterpret_cast<void*>(page.from), page.size, page.old, &ignored);
+        }
+    };
+    for (uintptr_t from = start; from < end;) {
+        const uintptr_t to = std::min(end, (from & ~(kPage - 1)) + kPage);
+        DWORD old = 0;
+        if (!VirtualProtect(reinterpret_cast<void*>(from), to - from, PAGE_EXECUTE_READWRITE, &old)) {
+            restore();
+            return false;
+        }
+        pages.push_back({from, static_cast<size_t>(to - from), old});
+        from = to;
+    }
     std::memcpy(address, data, size);
-    DWORD ignored = 0;
-    VirtualProtect(address, size, old, &ignored);
+    restore();
     FlushInstructionCache(GetCurrentProcess(), address, size);
     return true;
 }
