@@ -1,5 +1,6 @@
 #include "symbols.hpp"
 
+#include "log.hpp"
 #include "manifest.hpp"
 
 #include "game_build.hpp"
@@ -572,11 +573,8 @@ SymbolFileResult parse_symbols_text(std::string_view text) {
 
 namespace {
 // The file's name as UTF-8 (string() would convert to the ANSI code page and
-// may throw).
-std::string utf8_name(const std::filesystem::path& file) {
-    const std::u8string u8 = file.filename().u8string();
-    return std::string(u8.begin(), u8.end());
-}
+// may throw; u8string() throws on a lone surrogate).
+std::string utf8_name(const std::filesystem::path& file) { return narrow(file.filename().wstring()); }
 }  // namespace
 
 SymbolFileResult load_symbols(const std::filesystem::path& file) {

@@ -1,5 +1,7 @@
 #include "plugin_translation.hpp"
 
+#include "log.hpp"
+
 #include <toml++/toml.hpp>
 
 #include <algorithm>
@@ -187,8 +189,7 @@ std::vector<TranslationProblem> check_plugin_translations(const std::filesystem:
     }
     std::sort(entries.begin(), entries.end());
     for (const auto& path : entries) {
-        const auto name8 = path.filename().u8string();
-        const std::string name(name8.begin(), name8.end());
+        const std::string name = narrow(path.filename().wstring());  // u8string() throws on a lone surrogate
         const std::string file = dir + "/" + name;
         if (!std::filesystem::is_regular_file(path, ec)) {
             problems.push_back({file, 0, "not a translation file (translations/ holds <code>.toml files only)"});

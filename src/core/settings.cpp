@@ -1,6 +1,7 @@
 #include "settings.hpp"
 
 #include "files.hpp"
+#include "log.hpp"
 #include "manifest.hpp"
 
 #include <toml++/toml.hpp>
@@ -689,10 +690,8 @@ SettingsFileResult parse_settings_text(std::string_view text) {
 
 namespace {
 
-std::string shown(const std::filesystem::path& path) {
-    const auto u8 = path.generic_u8string();
-    return std::string(u8.begin(), u8.end());
-}
+// Not generic_u8string(): it throws on a lone surrogate in a name.
+std::string shown(const std::filesystem::path& path) { return narrow(path.generic_wstring()); }
 
 bool read_text(const std::filesystem::path& file, std::string& text) {
     std::error_code size_error;
