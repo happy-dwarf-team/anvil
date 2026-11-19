@@ -11,6 +11,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -766,6 +767,38 @@ signature = "const char* ()"
         CHECK(reinterpret_cast<Speed>(next)(&session) == &session);  // the original through the chain
         CHECK(reinterpret_cast<Speed>(mapped.base + 0x1000)(&session) == nullptr);
         CHECK(changes.rollback(owner) == 2 && mapped.base[0x1000] == 0x48 && mapped.base[0x1010] == 0x48);
+    });
+
+    run("loader: a hook needs code even when an export declares no memory", [&] {
+        MappedImage mapped(test_image);
+        ChangeRegistry changes(mapped.address(), TestImage::kSize);
+        const OwnerId owner = changes.add_owner("p");
+        // An export resolves to data; its bytes match (zeros) and nothing declares `memory`.
+        const SymbolFile file = symbols("build = \"test-build\"\n"
+                                        "[symbol.data_fn]\nexport = \"Data_export\"\nbytes = \"00 00 00 00 00\"\n"
+                                        "signature = \"void ()\"\n"
+                                        "[symbol.data_site]\nexport = \"Data_export\"\nbytes = \"00 00 00 00 00\"\n"
+                                        "[symbol.code_fn]\nexport = \"Exported_fn\"\nbytes = \"40 53 48 83 EC\"\n"
+                                        "signature = \"void ()\"\n");
+        const OriginalImageReader reader(changes, mapped.address());
+        std::string error;
+        const auto image = PeImage::parse(reader, error);
+        CHECK(image.has_value());
+        if (!image) return;
+        const SymbolVerification verified = verify_symbols(file, *image);
+        for (const auto& p : verified.problems) std::printf("  (problem) %s\n", p.c_str());
+        CHECK(verified.ok());
+        if (!verified.ok()) return;
+        CHECK(verified.symbols[0].rva == 0x3500u && verified.symbols[0].memory == MemoryKind::Write);
+        CHECK(verified.symbols[2].memory == MemoryKind::Code);
+        const PluginSymbols syms(file, verified, mapped.address());
+        void* next = nullptr;
+        auto* detour = reinterpret_cast<void*>(+[](void*) -> void* { return nullptr; });
+        CHECK(hook_function(changes, owner, syms, 0, detour, &next) == ChangeStatus::WrongKind);
+        CHECK(mid_hook(changes, owner, syms, 1, +[](AnvilCpuContext*, void*) {}, nullptr) == ChangeStatus::WrongKind);
+        CHECK(replace_block(changes, owner, syms, 1, +[](AnvilCpuContext*, void*) {}, nullptr) == ChangeStatus::WrongKind);
+        CHECK(std::all_of(mapped.base + 0x3500, mapped.base + 0x3505, [](uint8_t b) { return b == 0; }));
+        CHECK(changes.rollback(owner) == 0);
     });
 
     run("loader: a symbol absent on the running build is not verified and has no address", [&] {

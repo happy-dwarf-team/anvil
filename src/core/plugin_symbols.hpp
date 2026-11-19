@@ -18,6 +18,7 @@ struct PluginSymbol {
     uint32_t rva = 0;
     uintptr_t address = 0;
     std::vector<std::pair<std::string, uint64_t>> values;  // in declaration order
+    std::optional<MemoryKind> memory;  // the verified section's kind; none when absent
 };
 
 // The verified symbols of one plugin, looked up by AnvilSymbol (the

@@ -690,6 +690,7 @@ SymbolVerification verify_symbols(const SymbolFile& file, const PeImage& image) 
         // Values lie on fixed bytes that now match, so the bytes read are the declared ones.
         VerifiedSymbol verified;
         verified.rva = rva;
+        verified.memory = section->kind;
         bool values_ok = true;
         for (const auto& v : s.values) {
             uint64_t raw = 0;
