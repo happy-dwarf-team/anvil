@@ -77,6 +77,10 @@ Shared& shared();
 void ui_frame(IDirect3DDevice9* device);
 // Before IDirect3DDevice9::Reset: drops the device objects ImGui holds.
 void ui_invalidate(IDirect3DDevice9* device);
+// Before the game creates a device: ImGui's DX9 backend lets go of the one it
+// holds a reference to, so a device the game released is not kept alive into
+// the next one. The next frame starts the backend on its device again.
+void ui_release_device();
 // Feeds a window message to ImGui when a frame runs; true when ImGui wants
 // the message for itself (the game should not see it).
 bool ui_message(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);

@@ -609,6 +609,41 @@ int main(int argc, char** argv) {
         SendMessageW(window, WM_RBUTTONUP, 0, point(1, 1));
     });
 
+    run("overlay: a new device frees the one ImGui drew on, and the overlay draws on the new one", [&] {
+        const auto references = [](IDirect3DDevice9* d) {
+            d->AddRef();
+            return d->Release();
+        };
+        // The panel is open: ImGui's DX9 backend is on `device` and holds a reference to it.
+        AnvilControlResult result{};
+        CHECK(control.service()->setting_set_text("anvil-overlay", 0, "F11", &result) == ANVIL_OK && result.applied == 1);
+        CHECK(release_modifiers());
+        SendMessageW(window, WM_KEYDOWN, VK_F11, 1);
+        size_t drawn = 0;
+        for (int i = 0; i < 3; ++i) drawn = frame(device, middle);
+        CHECK(drawn > 1000);
+        const ULONG before = references(device);
+        // The game makes another device (as after releasing this one): the
+        // backend lets go of `device` before the new one is made.
+        IDirect3DDevice9* next = nullptr;
+        D3DPRESENT_PARAMETERS p = parameters(window);
+        CHECK(SUCCEEDED(d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window,
+                                          D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE, &p, &next)));
+        // The backend's own reference and those of its buffers and font texture.
+        const ULONG after = references(device);
+        CHECK(after < before);
+        if (after >= before) std::printf("    references to the old device: %lu before, %lu after\n", before, after);
+        if (next == nullptr) return;
+        for (int i = 0; i < 3; ++i) drawn = frame(next, middle);
+        CHECK(drawn > 1000);
+        SendMessageW(window, WM_KEYDOWN, VK_F11, 1);
+        frame(next, middle);
+        CHECK(frame(next, middle) == 0);
+        CHECK(control.service()->setting_reset("anvil-overlay", 0, &result) == ANVIL_OK);
+        // The next device made (in the test below) lets go of this one too: no reference is left on it.
+        next->Release();
+    });
+
     run("overlay: under DXVK's window hook, devices made and released in fullscreen keep one chain to the game", [&] {
         // EU4 on DXVK in exclusive fullscreen: a device, released, then the
         // device it keeps, each hooking the window inside CreateDevice.
