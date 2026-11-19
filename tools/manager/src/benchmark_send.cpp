@@ -10,7 +10,12 @@ std::string receiver_message(std::string_view body) {
     const auto doc = parse_json(body, error);
     if (!doc || !(*doc)["message"].is_string()) return "";
     std::string message = (*doc)["message"].as_string();
-    if (message.size() > 300) message.resize(300);
+    if (message.size() > 300) {
+        // Cut at a whole character: a continuation byte (10xxxxxx) goes with the one it continues.
+        size_t end = 300;
+        while (end > 0 && (static_cast<unsigned char>(message[end]) & 0xC0) == 0x80) --end;
+        message.resize(end);
+    }
     return message;
 }
 

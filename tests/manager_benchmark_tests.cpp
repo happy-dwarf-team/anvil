@@ -818,6 +818,11 @@ void manager_runner_tests() {
               "The report was not sent: cannot reach bench.happydwarf.dev (error 12007). You can copy it instead.");
         CHECK(send_outcome_text(SendOutcome{404, "{\"message\":\"Not found.\"}", ""}) == "The receiver answered 404: Not found.");
         CHECK(receiver_message("{\"message\":" + std::string("\"") + std::string(400, 'x') + "\"}").size() == 300);
+        // The cut falls inside a two-byte character (ł): the whole character goes, not half of it.
+        const std::string cut = receiver_message("{\"message\":\"" + std::string(299, 'x') + "\xC5\x82zzz\"}");
+        CHECK(cut == std::string(299, 'x'));
+        const std::string fits = receiver_message("{\"message\":\"" + std::string(298, 'x') + "\xC5\x82zzz\"}");
+        CHECK(fits == std::string(298, 'x') + "\xC5\x82");
     });
 
     run("runner: the child's environment carries the arm and SteamAppId", [] {
