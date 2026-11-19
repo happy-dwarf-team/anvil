@@ -669,26 +669,42 @@ impl Host {
     /// `panic: …` unless an adapter of this crate catches it further out,
     /// which logs it itself). Inside `load`
     /// the load itself is the group: `WrongPhase`.
+    ///
+    /// When the group's changes are dropped (an error, a panic, or a commit
+    /// Anvil refuses), the [`FunctionHook`]s and [`PointerSwap`]s this thread
+    /// filled in `body` are free again: `is_active` is false and they take a
+    /// new request.
+    ///
+    /// The group is the plugin's, not this thread's: a request from any of
+    /// the plugin's threads while it is open (a panel click, a thread `body`
+    /// started) joins it, is enabled only with the commit and dropped with an
+    /// abort. Hook objects another thread filled keep their handles then:
+    /// `remove()` them before reusing them.
     pub fn group<R>(&self, body: impl FnOnce() -> Result<R>) -> Result<R> {
         let begin = function!(self.table, AnvilHost, begin_group)?;
         let commit = function!(self.table, AnvilHost, commit_group)?;
         let abort = function!(self.table, AnvilHost, abort_group)?;
         // SAFETY: the host's functions with this plugin.
         check(unsafe { begin(self.plugin) }, || "begin_group")?;
+        crate::change::group_opened();
         match catch_raw(body) {
             Ok(Ok(value)) => {
                 // SAFETY: as above.
-                check(unsafe { commit(self.plugin) }, || "commit_group")?;
+                let committed = check(unsafe { commit(self.plugin) }, || "commit_group");
+                crate::change::group_closed(committed.is_err());
+                committed?;
                 Ok(value)
             }
             Ok(Err(error)) => {
                 // SAFETY: as above.
                 unsafe { abort(self.plugin) };
+                crate::change::group_closed(true);
                 Err(error)
             }
             Err(panic) => {
                 // SAFETY: as above.
                 unsafe { abort(self.plugin) };
+                crate::change::group_closed(true);
                 // Logged here when no adapter of this thread catches it further out.
                 resume(panic)
             }
