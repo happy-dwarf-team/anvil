@@ -1,6 +1,6 @@
 id = "anvil-model-reload"
 name = "Anvil model reload"
-version = "1.24.0"
+version = "1.25.0"
 authors = ["Happy Dwarf Team"]
 description = "Standard plugin for modders: a window of the overlay that reloads the meshes, model textures, animations, entities and .gfx mesh entries of your mod that you saved, while the game runs. Not in ironman or multiplayer, and off until you turn it on."
 api = 2
