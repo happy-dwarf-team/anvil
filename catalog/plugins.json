@@ -81,7 +81,7 @@
       "repo": "https://github.com/happy-dwarf-team/tongs",
       "page": "https://anvil.happydwarf.dev/plugins/tongs/",
       "workshop": "https://steamcommunity.com/sharedfiles/filedetails/?id=3826695093",
-      "version": "0.36.0",
+      "version": "0.37.0",
       "anvil": ">=1.23.0",
       "affects_gameplay": true,
       "builds": [
@@ -90,9 +90,9 @@
         "eu4-1.37.5.0-gog-win64"
       ],
       "zip": {
-        "url": "https://github.com/happy-dwarf-team/tongs/releases/download/v0.36.0/tongs-windows-x64.zip",
-        "size": 793696,
-        "sha256": "5f65d89c5463ff6ca25a8f1ec032060125ca6fd1920c9d9074bc0beee76d20cb"
+        "url": "https://github.com/happy-dwarf-team/tongs/releases/download/v0.37.0/tongs-windows-x64.zip",
+        "size": 810542,
+        "sha256": "c54a3bbe6c22b99573c32b13f1e79c710784c6e3a27bc2b7faf14406a91bbdb4"
       }
     },
     {
