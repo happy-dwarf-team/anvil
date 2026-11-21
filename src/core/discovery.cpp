@@ -8,11 +8,24 @@ namespace anvil {
 
 namespace {
 
+// A key of the wrong type: as a file that does not parse (K3, #537), so a
+// list the loader cannot read never turns a plugin back on.
+struct WrongType {
+    std::string what;
+    uint32_t line;
+};
+
+uint32_t line_of(const toml::node& node) { return static_cast<uint32_t>(node.source().begin.line); }
+
 void read_ids(const toml::table& t, const char* key, std::vector<std::string>& out) {
-    if (const auto* list = t.get_as<toml::array>(key)) {
-        for (const auto& item : *list) {
-            if (auto v = item.value<std::string>()) out.push_back(*v);
-        }
+    const toml::node* node = t.get(key);
+    if (node == nullptr) return;
+    const auto* list = node->as_array();
+    if (list == nullptr) throw WrongType{std::string(key) + " is not a list of strings", line_of(*node)};
+    for (const auto& item : *list) {
+        const auto v = item.value<std::string>();
+        if (!v) throw WrongType{std::string(key) + " has a value that is not a string", line_of(item)};
+        out.push_back(*v);
     }
 }
 
@@ -33,7 +46,10 @@ AnvilSettings read_anvil_settings(const std::filesystem::path& file) {
     if (!std::filesystem::exists(file, ec)) return s;
     try {
         const toml::table t = toml::parse_file(file.wstring());
-        s.enabled = t["enabled"].value_or(true);
+        if (const toml::node* enabled = t.get("enabled")) {
+            if (!enabled->is_boolean()) throw WrongType{"enabled is not true or false", line_of(*enabled)};
+            s.enabled = *enabled->value<bool>();
+        }
         read_ids(t, "disabled_plugins", s.disabled_plugins);
         read_ids(t, "allow_ironman", s.allow_ironman);
         read_ids(t, "allow_multiplayer", s.allow_multiplayer);
@@ -48,6 +64,10 @@ AnvilSettings read_anvil_settings(const std::filesystem::path& file) {
         s = AnvilSettings{};
         s.error = std::string(e.description());
         s.line = static_cast<uint32_t>(e.source().begin.line);
+    } catch (const WrongType& e) {
+        s = AnvilSettings{};
+        s.error = e.what;
+        s.line = e.line;
     }
     return s;
 }

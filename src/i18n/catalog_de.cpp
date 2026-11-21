@@ -1001,6 +1001,8 @@ extern const Translation kGerman[] = {
      "anvil-game wird geladen"},
     {"anvil.toml has enabled = false: no plugins load",
      "anvil.toml enthält enabled = false: Es werden keine Plugins geladen"},
+    {"anvil.toml cannot be read (line {0}): no plugins load until it is fixed",
+     "anvil.toml kann nicht gelesen werden (Zeile {0}): Bis zur Korrektur werden keine Plugins geladen"},
     {"anvil.toml says enabled = false: no plugin loads.",
      "anvil.toml sagt enabled = false: Es wird kein Plugin geladen."},
     {"anvil.toml was not changed",

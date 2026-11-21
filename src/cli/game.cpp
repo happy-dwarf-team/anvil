@@ -161,7 +161,7 @@ GameReport check_game(const GameOptions& options) {
     const AnvilSettings& settings = report.choices.anvil_toml;
     if (!settings.error.empty()) {
         report.problems.push_back({shown(anvil_dir / "anvil.toml"), settings.line,
-                                   settings.error + " (the loader ignores this file and uses the defaults)"});
+                                   settings.error + " (the loader loads no plugin until it is fixed)"});
     }
     report.user_dir = shown(user_dir);
     const Playset& playset = report.inventory.playset;

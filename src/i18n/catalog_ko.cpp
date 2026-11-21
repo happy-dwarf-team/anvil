@@ -1002,6 +1002,8 @@ extern const Translation kKorean[] = {
      "anvil-game이 로드됩니다"},
     {"anvil.toml has enabled = false: no plugins load",
      "anvil.toml이 enabled = false: 플러그인이 로드되지 않습니다"},
+    {"anvil.toml cannot be read (line {0}): no plugins load until it is fixed",
+     "anvil.toml을 읽을 수 없습니다({0}행): 수정할 때까지 플러그인이 로드되지 않습니다"},
     {"anvil.toml says enabled = false: no plugin loads.",
      "anvil.toml에 enabled = false가 설정되어 있어 플러그인이 로드되지 않습니다."},
     {"anvil.toml was not changed",

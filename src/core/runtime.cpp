@@ -357,7 +357,14 @@ void startup_impl(const std::filesystem::path& game_dir) {
         return;
     }
     const AnvilSettings settings = read_anvil_settings(g_runtime->anvil_dir / "anvil.toml");
-    if (!settings.error.empty()) log_warning("anvil.toml ignored: " + settings.error);
+    if (!settings.error.empty()) {
+        // Fail safe (K3, #537): the lists are unknown, so a plugin the player
+        // turned off would load again. Nothing loads and nothing is written,
+        // last-start.toml included, so the Manager still shows the last start.
+        log_error("anvil.toml cannot be read (line " + std::to_string(settings.line) + "): " + settings.error +
+                  "; no plugins loaded until it is fixed");
+        return;
+    }
     Log::instance().set_min_level(settings.log_level);
     if (!settings.enabled) {
         log_info("disabled in anvil.toml: no plugins loaded");

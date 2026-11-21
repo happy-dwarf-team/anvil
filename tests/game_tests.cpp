@@ -356,11 +356,20 @@ int main(int argc, char** argv) {
         const GameReport off = game.check();
         CHECK(off.exit_code == kExitOk && !off.plan.enabled && off.plan.load.empty() && off.plan.skipped.size() == 2);
         CHECK(skipped_for(off, "a-ok", "enabled = false", true));
-        // A broken anvil.toml is ignored by the loader, so it is a problem here.
+        // A broken anvil.toml loads no plugin (K3, #537): a problem here, with its line.
         game.settings("enabled = [\n");
         const GameReport broken = game.check();
         CHECK(broken.exit_code == kExitProblems && broken.problems.size() == 1 && broken.problems[0].line != 0);
-        CHECK(contains(broken.problems[0].file, "anvil.toml") && broken.plan.enabled);
+        CHECK(contains(broken.problems[0].file, "anvil.toml") && !broken.plan.enabled && broken.plan.load.empty());
+        CHECK(contains(broken.problems[0].message, "loads no plugin"));
+        CHECK(skipped_for(broken, "a-ok", "anvil.toml cannot be read (line 1)", true));
+        // A list of the wrong type is the same error, at the key's line: b-stale would load again otherwise.
+        game.settings("# the player's\ndisabled_plugins = \"b-stale\"\n");
+        const GameReport wrong = game.check();
+        CHECK(wrong.exit_code == kExitProblems && wrong.problems.size() == 1 && wrong.problems[0].line == 2);
+        CHECK(!wrong.plan.enabled && wrong.plan.load.empty() && skipped_for(wrong, "a-ok", "(line 2)", true));
+        game.settings("disabled_plugins = [\"b-stale\", 3]\n");
+        CHECK(game.check().plan.load.empty());
     });
 
     run("overlapping code ranges of plugins that load together are warnings", [&] {

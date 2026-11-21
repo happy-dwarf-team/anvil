@@ -13,8 +13,11 @@
 namespace anvil {
 
 // anvil/anvil.toml (design §11). Every key is optional; a missing file gives
-// the defaults. A file that does not parse is ignored as a whole: `error` says
-// why (and on which `line`) while the other fields keep their defaults.
+// the defaults. A file that does not parse, or whose `enabled` or a list has
+// the wrong type, is read as a whole as broken: `error` says why (and on which
+// `line`) while the other fields keep their defaults, and no plugin loads at
+// that start (K3, #537): its lists are unknown, so a plugin the player turned
+// off must not load again.
 struct AnvilSettings {
     bool enabled = true;
     std::vector<std::string> disabled_plugins;

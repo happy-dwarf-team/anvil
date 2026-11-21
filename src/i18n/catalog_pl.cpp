@@ -1002,6 +1002,8 @@ extern const Translation kPolish[] = {
      "anvil-game się ładuje"},
     {"anvil.toml has enabled = false: no plugins load",
      "anvil.toml ma enabled = false: żadna wtyczka się nie ładuje"},
+    {"anvil.toml cannot be read (line {0}): no plugins load until it is fixed",
+     "nie można odczytać anvil.toml (wiersz {0}): żadna wtyczka się nie ładuje, dopóki nie zostanie poprawiony"},
     {"anvil.toml says enabled = false: no plugin loads.",
      "anvil.toml ma enabled = false: żadna wtyczka się nie ładuje."},
     {"anvil.toml was not changed",
