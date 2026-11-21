@@ -220,9 +220,13 @@ Json versions_json(const ReportInput& in) {
 
 }  // namespace
 
-std::string new_series_id() {
+bool system_random(unsigned char* out, std::size_t size) {
+    return BCRYPT_SUCCESS(BCryptGenRandom(nullptr, out, static_cast<ULONG>(size), BCRYPT_USE_SYSTEM_PREFERRED_RNG));
+}
+
+std::string new_series_id(RandomFill fill) {
     unsigned char b[16] = {};
-    BCryptGenRandom(nullptr, b, sizeof(b), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    if (!fill(b, sizeof(b))) return {};
     b[6] = static_cast<unsigned char>((b[6] & 0x0F) | 0x40);  // version 4
     b[8] = static_cast<unsigned char>((b[8] & 0x3F) | 0x80);  // variant 10
     char text[40];

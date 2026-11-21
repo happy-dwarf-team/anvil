@@ -614,6 +614,15 @@ void manager_benchmark_tests() {
         CHECK(std::regex_match(a, uuid) && std::regex_match(b, uuid) && a != b);
     });
 
+    run("report: no series id when Windows gives no random bytes", [] {
+        // The zeros of a failed fill would give every such series the same id.
+        CHECK(new_series_id([](unsigned char*, std::size_t) { return false; }).empty());
+        CHECK(new_series_id([](unsigned char* out, std::size_t size) {
+                  std::fill(out, out + size, static_cast<unsigned char>(0));
+                  return true;
+              }) == "00000000-0000-4000-8000-000000000000");
+    });
+
     run("kept reports: the last 10, sent markers, the Workshop-id switch", [] {
         const fs::path dir = fs::temp_directory_path() / ("anvil-bench-kept-" + std::to_string(GetCurrentProcessId()));
         fs::remove_all(dir);
