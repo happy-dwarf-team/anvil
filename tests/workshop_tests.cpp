@@ -217,6 +217,29 @@ int main() {
         CHECK(named(L"\"C:\\a -userdir=C:\\b\\eu4.exe\"") == L"");
     });
 
+    run("the user folder: a -userdir folder that does not exist yet is an empty playset (T2, #542)", [] {
+        Playground g("userdir_missing");
+        const fs::path game = g.root / "eu4";
+        // userdir.txt names a folder with a playset: a -userdir start must not read it.
+        const fs::path other = g.root / "other-profile";
+        write(other / "dlc_load.json", R"({"enabled_mods":["mod/a.mod"]})");
+        write(game / "userdir.txt", generic(other));
+        const fs::path fresh = g.root / "new-profile";
+        const std::wstring line = L"eu4.exe -userdir=" + fresh.wstring() + L" -debug";
+        const StartUserDir missing = start_user_dir(game, line);
+        CHECK(missing.from_argument && missing.dir == fresh);
+        CHECK(contains(missing.line, "does not exist yet") && contains(missing.line, "no plugins from mods"));
+        const Playset empty = read_playset(missing.dir);
+        CHECK(!empty.found && empty.mods.empty());
+        fs::create_directories(fresh);
+        const StartUserDir there = start_user_dir(game, line);
+        CHECK(there.dir == fresh && contains(there.line, "EU4's user folder from -userdir: "));
+        // Without -userdir: userdir.txt, and nothing to log.
+        const StartUserDir plain = start_user_dir(game, L"eu4.exe -debug");
+        CHECK(!plain.from_argument && plain.dir == fs::path(widen(generic(other))) && plain.line.empty());
+        CHECK(read_playset(plain.dir).found);
+    });
+
     run("the user folder: userdir.txt names it, otherwise Documents", [] {
         Playground g("userdir");
         const fs::path game = g.root / "eu4";

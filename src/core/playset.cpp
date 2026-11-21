@@ -157,6 +157,24 @@ std::optional<fs::path> user_dir_argument(std::wstring_view line) {
     return std::nullopt;
 }
 
+StartUserDir start_user_dir(const fs::path& game_dir, std::wstring_view command_line) {
+    StartUserDir out;
+    if (const auto named = user_dir_argument(command_line)) {
+        out.dir = *named;
+        out.from_argument = true;
+        const auto u8 = named->u8string();
+        const std::string shown(u8.begin(), u8.end());
+        std::error_code ec;
+        out.line = fs::is_directory(*named, ec)
+                       ? "EU4's user folder from -userdir: " + shown
+                       : "EU4's user folder from -userdir does not exist yet: " + shown +
+                             "; an empty playset at this start, so no plugins from mods";
+        return out;
+    }
+    out.dir = eu4_user_dir(game_dir);
+    return out;
+}
+
 std::optional<std::vector<std::string>> parse_dlc_load(std::string_view json, std::string& error) {
     if (json.starts_with("\xEF\xBB\xBF")) json.remove_prefix(3);
     JsonScanner scan(json);
