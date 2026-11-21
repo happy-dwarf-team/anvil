@@ -634,7 +634,8 @@ int service_paused(std::uint32_t* flags) {
 }
 
 // PHYSFS_getWriteDir takes PhysFS' state lock for a moment and returns its
-// string, copied at once under SEH like every read of the game's memory.
+// string, copied at once under SEH like every read of the game's memory (an
+// access violation only: any other exception goes on to the crash handler).
 // The bytes copied; 0 without a folder, when it faulted, or when it does not
 // fit in size - 1 bytes.
 std::size_t copy_write_dir(sym::Types::physfs_get_write_dir::Pointer get, char* out, std::size_t size) {
@@ -645,7 +646,8 @@ std::size_t copy_write_dir(sym::Types::physfs_get_write_dir::Pointer get, char* 
         for (; i + 1 < size && dir[i] != '\0'; ++i) out[i] = dir[i];
         out[i] = '\0';
         return dir[i] == '\0' ? i : 0;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER
+                                                                  : EXCEPTION_CONTINUE_SEARCH) {
         return 0;
     }
 }
@@ -661,7 +663,8 @@ std::size_t write_dir_length(sym::Types::physfs_get_write_dir::Pointer get) {
         std::size_t n = 0;
         while (n < kWriteDirMax && dir[n] != '\0') ++n;
         return n < kWriteDirMax ? n : 0;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER
+                                                                  : EXCEPTION_CONTINUE_SEARCH) {
         return 0;
     }
 }

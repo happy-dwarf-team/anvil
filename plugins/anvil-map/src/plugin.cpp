@@ -232,6 +232,10 @@ void on_tooltip(void* province, std::uint8_t flag, const void* other, void* tool
     g_tooltips.fetch_add(1, std::memory_order_relaxed);
     std::int32_t id = 0;
     if (province == nullptr || !read(reinterpret_cast<std::uintptr_t>(province) + g_layout.province_id, id)) return;
+    // Without anvil-game.world, the map's own count of provinces is the limit.
+    const std::int32_t world_limit = g_province_limit.load(std::memory_order_relaxed);
+    const std::uint64_t limit = world_limit > 0 ? static_cast<std::uint64_t>(world_limit) : paint_count();
+    if (!anvil_map::describable(id, limit)) return;
     g_asked_province.store(id, std::memory_order_relaxed);
     g_asked_mode.store(m, std::memory_order_release);
     try {
@@ -244,12 +248,15 @@ void on_tooltip(void* province, std::uint8_t flag, const void* other, void* tool
 
 // ---- the step ------------------------------------------------------------------
 
-// No objects with destructors here: the body runs under __try.
+// No objects with destructors here: the body runs under __try. Only an access
+// violation costs the switch; any other exception in the game's code goes on
+// to the crash handler.
 bool call_set_mode(std::uintptr_t session, std::int32_t number, unsigned long* code) noexcept {
     __try {
         g_set_mode(reinterpret_cast<void*>(session), number, 0, 0);
         return true;
-    } __except (*code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+    } __except (*code = GetExceptionCode(),
+                *code == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
         return false;
     }
 }

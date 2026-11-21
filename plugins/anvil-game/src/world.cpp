@@ -1238,12 +1238,16 @@ AnvilResult read_selected_province(const WorldLayout& l, std::int32_t& province)
 
 namespace {
 
-// No objects with destructors here: the bodies run under __try.
+// No objects with destructors here: the bodies run under __try. Only an access
+// violation (a map torn down under the call) costs the answer; any other
+// exception in the game's code goes on to the crash handler, as in every call
+// into the game's code below.
 bool call_pick(std::int32_t (*pick)(void*, const float*), std::uintptr_t map, const float* point, std::int32_t* out) {
     __try {
         *out = pick(reinterpret_cast<void*>(map), point);
         return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER
+                                                                  : EXCEPTION_CONTINUE_SEARCH) {
         return false;
     }
 }
@@ -1255,7 +1259,8 @@ bool call_pick_object(void* (*pick)(void*, const float*, void*, std::uint8_t, st
         alignas(8) unsigned char selection[0x20] = {};
         *out = pick(reinterpret_cast<void*>(map), point, selection, 0, 1);
         return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER
+                                                                  : EXCEPTION_CONTINUE_SEARCH) {
         return false;
     }
 }
@@ -1333,7 +1338,8 @@ bool call_explore_regions(void (*regions)(const void*, const void*, void*, void*
     __try {
         regions(reinterpret_cast<const void*>(country), reinterpret_cast<const void*>(navy), coast, sea);
         return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER
+                                                                  : EXCEPTION_CONTINUE_SEARCH) {
         return false;
     }
 }
@@ -1342,7 +1348,8 @@ bool call_delete(void (*game_delete)(void*, std::size_t), void* block, std::size
     __try {
         game_delete(block, size);
         return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER
+                                                                  : EXCEPTION_CONTINUE_SEARCH) {
         return false;
     }
 }

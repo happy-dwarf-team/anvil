@@ -52,6 +52,12 @@ template <typename Text> ModuleRow module_row(const AnvilControlModule& m, Text&
 }
 
 std::string result_text(AnvilResult result, const AnvilControlResult& out) {
+    // A change that took (applied at once, or nothing to apply) but that the
+    // player's file does not hold says why: a settings.toml that does not parse
+    // is kept as it is (anvil#514), so the change is gone at the next start.
+    if (result == ANVIL_OK && out.saved == 0 && out.error[0] != '\0') {
+        return std::string(anvil::i18n::tr("The settings were not saved")) + ": " + out.error;
+    }
     if (result == ANVIL_OK) return {};
     if (out.error[0] != '\0') return out.error;
     return anvil::i18n::trf("refused ({0})", {std::to_string(static_cast<int>(result))});

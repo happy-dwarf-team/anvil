@@ -685,6 +685,17 @@ int main() {
         CHECK(client.setting_value("anvil-overlay", 0, ANVIL_CONTROL_VALUE_CURRENT) == "off");
         CHECK(!client.set_text("anvil-overlay", 0, "sideways").empty());
         CHECK(client.reset("anvil-overlay", 0).empty());
+        // A player's file that does not parse is kept as it is (anvil#514): the
+        // change applies, and the overlay says that it was not saved (anvil#545).
+        const fs::path player_file = dir / "anvil" / "data" / "anvil-overlay" / "settings.toml";
+        fs::create_directories(player_file.parent_path());
+        std::ofstream(player_file, std::ios::binary) << "mode = \n";
+        const std::string not_saved = client.set_text("anvil-overlay", 0, "off");
+        CHECK(not_saved.starts_with("The settings were not saved: ") &&
+              not_saved.find("not rewritten") != std::string::npos);
+        CHECK(client.setting_value("anvil-overlay", 0, ANVIL_CONTROL_VALUE_CURRENT) == "off");
+        fs::remove(player_file, ignored);
+        CHECK(client.reset("anvil-overlay", 0).empty());
         CHECK(client.disable_next_start("tongs").empty() && client.plugins()[1].disabled_next);
         CHECK(!client.disable_next_start("missing").empty());
         CHECK(!client.previous_crash().has_value());
