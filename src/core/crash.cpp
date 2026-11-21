@@ -422,6 +422,11 @@ size_t gather_notes(const Request& request) {
                 }
             }
         }
+        // A note that wrote nothing has nothing to say: no heading for it in the report.
+        if (!note.failed && size == 0) {
+            --count;
+            continue;
+        }
         keep_utf8(call.out, size);
         note.text = std::string_view(call.out, size);
     }

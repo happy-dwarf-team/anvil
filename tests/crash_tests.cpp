@@ -235,6 +235,8 @@ size_t note_rsp(void*, const AnvilControlCrashScope* scope, char* out, size_t ca
                                 null_write ? "a write to 0" : "another exception");
     return n > 0 ? static_cast<size_t>(n) : 0;
 }
+// A note with nothing to say this time.
+size_t note_silent(void*, const AnvilControlCrashScope*, char*, size_t) { return 0; }
 size_t note_fault(void*, const AnvilControlCrashScope*, char* out, size_t) {
     std::memcpy(out, "before the fault\nhalf", 21);
     crash_here();
@@ -336,8 +338,12 @@ int child(const std::string& mode, const fs::path& dir) {
     add_plugin(plugins, "crasher", "issues = \"https://example.org/crasher/issues\"\n", this_executable());
     add_plugin(plugins, "patcher", "issues = \"https://example.org/patcher/issues\"\n").symbols =
         symbols(image.at(0), "add_one", 0x200, kAddOne.size());
+    // silent: a note that writes nothing.
+    add_plugin(plugins, "silent", "issues = \"https://example.org/silent/issues\"\n");
     plugins.make();
-    if (plugins.load("crasher") == nullptr || plugins.load("patcher") == nullptr) return 17;
+    if (plugins.load("crasher") == nullptr || plugins.load("patcher") == nullptr || plugins.load("silent") == nullptr) {
+        return 17;
+    }
     ChangeRegistry& registry = plugins.changes;
     const OwnerId crasher = plugins.handle("crasher")->owner;
     const OwnerId patcher = plugins.handle("patcher")->owner;
@@ -374,7 +380,8 @@ int child(const std::string& mode, const fs::path& dir) {
         return 11;
     }
     if (!crash::set_note(plugins.handle("crasher"), note_rsp, nullptr) ||
-        !crash::set_note(plugins.handle("patcher"), note_fault, nullptr)) {
+        !crash::set_note(plugins.handle("patcher"), note_fault, nullptr) ||
+        !crash::set_note(plugins.handle("silent"), note_silent, nullptr)) {
         return 18;
     }
     // As the game does after Anvil's entry: through its own import.
@@ -1178,6 +1185,8 @@ int main(int argc, char** argv) {
         CHECK(contains(r.text, "  patcher: (its note failed with exception 0xC0000005; what it wrote before)\r\n"
                                "    before the fault\r\n"));
         CHECK(!contains(r.text, "half"));
+        // A note that wrote nothing gets no heading, in the text or the JSON.
+        CHECK(!contains(r.text, "  silent:") && !contains(r.json, "{\"plugin\": \"silent\""));
         CHECK(contains(r.json, "{\"plugin\": \"patcher\", \"failed\": \"0xC0000005\""));
         CHECK(r.dump && !r.pending_left);
         explain(r);
