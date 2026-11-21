@@ -558,6 +558,46 @@ int main(int argc, char** argv) {
         CHECK(read(game / "README.md") == "EU4DLL" && !fs::exists(game / "anvil-legacy-backup"));
     });
 
+    run("legacy text patch: an interrupted replace is finished in its own backup (M2, #541)", [&] {
+        const auto package = make_package(version_dll);
+        if (!package) return;
+        const TempDir temp("legacy_interrupted");
+        const fs::path game = make_game(temp.dir / "game");
+        add_eu4dll(game);
+        const std::string original = read(game / "version.dll");
+        const Plan plan = plan_install(*package, inspect_installation(*package, game), game, {}, false, "2026-11-09");
+        CHECK(has_step(plan, Step::Kind::Mark, "anvil-legacy-backup/eu4dll-2026-11-09/" + std::string(kBackupComplete)));
+        // Stopped after the first move: version.dll is in the backup, the rest of EU4DLL is not.
+        Plan first = plan;
+        first.steps.resize(1);
+        CHECK(apply_plan(*package, first, game, {}).ok);
+        const Installation stopped = inspect_installation(*package, game);
+        CHECK(stopped.dll == Installation::Dll::Missing && stopped.unfinished == "eu4dll-2026-11-09");
+        CHECK(stopped.legacy.size() == 1 && stopped.legacy_name() == "EU4DLL" && stopped.legacy[0].files.size() == 8);
+        CHECK(stopped.backup && !stopped.backup->complete);
+        // Run again (another day): the same backup, no second folder, no version.dll move.
+        const Plan again = plan_install(*package, stopped, game, {}, false, "2026-11-10");
+        CHECK(again.refused.empty() && !has_step(again, Step::Kind::Move, "version.dll"));
+        CHECK(has_step(again, Step::Kind::Move, "plugins/plugin64.dll"));
+        CHECK(std::none_of(again.steps.begin(), again.steps.end(),
+                           [](const Step& s) { return contains(s.to, "2026-11-10"); }));
+        CHECK(std::any_of(again.notes.begin(), again.notes.end(),
+                          [](const std::string& n) { return contains(n, "anvil-legacy-backup/eu4dll-2026-11-09"); }));
+        CHECK(apply_plan(*package, again, game, {}).ok);
+        const fs::path backup = game / "anvil-legacy-backup" / "eu4dll-2026-11-09";
+        const Installation done = inspect_installation(*package, game);
+        CHECK(done.intact() && done.unfinished.empty() && done.backup && done.backup->complete);
+        CHECK(done.backup_folders == std::vector<std::string>({"eu4dll-2026-11-09"}) && done.backup->files.size() == 9);
+        CHECK(fs::exists(backup / kBackupComplete) && read(backup / "version.dll") == original);
+        CHECK(!fs::exists(game / "plugins") && !fs::exists(game / "d3d9.dll") && fs::exists(backup / "plugins" / "plugin64.dll"));
+        // Uninstall restores that one backup, the marker staying behind with nothing.
+        const Plan restore = plan_uninstall(*package, done, false, true);
+        CHECK(!has_step(restore, Step::Kind::Move, "anvil-legacy-backup/eu4dll-2026-11-09/" + std::string(kBackupComplete)));
+        CHECK(apply_plan(*package, restore, game, {}).ok);
+        CHECK(read(game / "version.dll") == original && read(game / "plugins" / "plugin64.dll") == "plugin64.dll");
+        CHECK(!fs::exists(game / kBackupComplete) && !fs::exists(game / "anvil-legacy-backup"));
+    });
+
     run("legacy text patch: a 64-bit d3d9.dll is not EU4DLL's", [&] {
         const auto package = make_package(version_dll);
         if (!package) return;

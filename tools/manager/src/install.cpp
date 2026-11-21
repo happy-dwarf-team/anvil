@@ -198,7 +198,7 @@ std::optional<Package> load_package(ZipArchive zip, std::string version, std::st
 }
 
 bool Installation::intact() const {
-    return dll == Dll::Anvil && differing.empty() && extra.empty() &&
+    return dll == Dll::Anvil && differing.empty() && extra.empty() && (unfinished.empty() || legacy.empty()) &&
            std::all_of(missing.begin(), missing.end(), [](const std::string& path) { return path == kPlayerToml; });
 }
 
@@ -214,7 +214,21 @@ Installation inspect_installation(const Package& package, const fs::path& game_d
             out.dll = Installation::Dll::Foreign;
         }
     }
-    if (out.dll == Installation::Dll::Foreign) out.legacy = find_legacy_patches(game_dir);
+    {
+        std::error_code ec;
+        for (fs::directory_iterator it(game_dir / kLegacyBackup, ec), end; !ec && it != end; it.increment(ec)) {
+            if (it->is_directory(ec) && !it->is_symlink(ec)) out.backup_folders.push_back(relative_text(it->path(), game_dir / kLegacyBackup));
+        }
+        std::sort(out.backup_folders.begin(), out.backup_folders.end(), [](const std::string& a, const std::string& b) {
+            return std::make_pair(backup_order(a), a) < std::make_pair(backup_order(b), b);
+        });
+    }
+    // An interrupted replace (M2, #541): its version.dll moved, the rest of the patch may still be here.
+    if (out.dll != Installation::Dll::Foreign && !out.backup_folders.empty() &&
+        !present(game_dir / kLegacyBackup / widen(out.backup_folders.back()) / kBackupComplete)) {
+        out.unfinished = out.backup_folders.back();
+    }
+    if (out.dll == Installation::Dll::Foreign || !out.unfinished.empty()) out.legacy = find_legacy_patches(game_dir);
     if (!out.legacy.empty() && is_dir(game_dir / "plugins")) {
         std::vector<fs::path> files;
         list_files(game_dir / "plugins", files);
@@ -228,15 +242,6 @@ Installation inspect_installation(const Package& package, const fs::path& game_d
         }
         std::sort(out.other_plugins.begin(), out.other_plugins.end());
     }
-    {
-        std::error_code ec;
-        for (fs::directory_iterator it(game_dir / kLegacyBackup, ec), end; !ec && it != end; it.increment(ec)) {
-            if (it->is_directory(ec) && !it->is_symlink(ec)) out.backup_folders.push_back(relative_text(it->path(), game_dir / kLegacyBackup));
-        }
-        std::sort(out.backup_folders.begin(), out.backup_folders.end(), [](const std::string& a, const std::string& b) {
-            return std::make_pair(backup_order(a), a) < std::make_pair(backup_order(b), b);
-        });
-    }
     if (!out.backup_folders.empty()) {
         LegacyBackup backup;
         backup.folder = std::string(kLegacyBackup) + "/" + out.backup_folders.back();
@@ -246,6 +251,10 @@ Installation inspect_installation(const Package& package, const fs::path& game_d
         list_files(folder, files);
         for (const fs::path& file : files) {
             const std::string path = relative_text(file, folder);
+            if (same_name(path, kBackupComplete)) {
+                backup.complete = true;  // Anvil's, not the patch's: it never goes back
+                continue;
+            }
             backup.files.push_back(path);
             const bool anvil_dll = same_name(path, "version.dll") && out.dll == Installation::Dll::Anvil;
             if (!anvil_dll && present(below(game_dir, path))) backup.taken.push_back(path);
@@ -315,35 +324,43 @@ Plan plan_install(const Package& package, const Installation& installation, cons
                                 "first, or replace it on purpose.");
         return plan;
     }
-    if (foreign) {
-        // Nothing foreign is overwritten (lab#104): it moves to a new backup folder first.
-        std::string id;
-        for (const LegacyPatch& patch : installation.legacy) id += (id.empty() ? "" : "+") + std::string(legacy_patch_id(patch.kind));
-        if (id.empty()) id = "version-dll";
-        if (date.empty()) date = today();
-        std::string folder = id + "-" + date;
-        for (int n = 2; std::find(installation.backup_folders.begin(), installation.backup_folders.end(), folder) !=
-                        installation.backup_folders.end();
-             ++n) {
-            folder = id + "-" + date + "-" + std::to_string(n);
+    const bool finish = !foreign && !installation.unfinished.empty();
+    if (foreign || finish) {
+        // Nothing foreign is overwritten (lab#104): it moves to a new backup folder first,
+        // or into the one an interrupted replace left (M2, #541).
+        std::string folder = installation.unfinished;
+        if (!finish) {
+            std::string id;
+            for (const LegacyPatch& patch : installation.legacy) id += (id.empty() ? "" : "+") + std::string(legacy_patch_id(patch.kind));
+            if (id.empty()) id = "version-dll";
+            if (date.empty()) date = today();
+            folder = id + "-" + date;
+            for (int n = 2; std::find(installation.backup_folders.begin(), installation.backup_folders.end(), folder) !=
+                            installation.backup_folders.end();
+                 ++n) {
+                folder = id + "-" + date + "-" + std::to_string(n);
+            }
         }
         const std::string backup = std::string(kLegacyBackup) + "/" + folder;
-        plan.steps.push_back({Step::Kind::Move, "version.dll", backup + "/version.dll"});
+        if (!finish) plan.steps.push_back({Step::Kind::Move, "version.dll", backup + "/version.dll"});
         for (const LegacyPatch& patch : installation.legacy) {
             for (const std::string& file : patch.files) plan.steps.push_back({Step::Kind::Move, file, backup + "/" + file});
         }
-        if (legacy) {
-            plan.steps.push_back({Step::Kind::RemoveIfEmpty, "plugins"});
+        if (!installation.legacy.empty()) plan.steps.push_back({Step::Kind::RemoveIfEmpty, "plugins"});
+        // Last of the moves: the backup is whole (an interrupted replace has no marker).
+        plan.steps.push_back({Step::Kind::Mark, backup + "/" + kBackupComplete});
+        if (!installation.legacy.empty()) {
             plan.notes.push_back(i18n::trf("{0} is replaced: its files move to {1}. Uninstalling Anvil can put them back.",
                                            {installation.legacy_name(), backup}));
             if (!installation.other_plugins.empty()) {
                 plan.notes.push_back(i18n::trf("These files in plugins are not {0}'s and stay: {1}",
                                                {installation.legacy_name(), joined(installation.other_plugins)}));
             }
-        } else {
+        } else if (!finish) {
             plan.notes.push_back(i18n::trf("version.dll is not Anvil's: it moves to {0}.", {backup}));
         }
-    } else if (installation.dll == Installation::Dll::Anvil && installation.dll_version != package.version) {
+    }
+    if (installation.dll == Installation::Dll::Anvil && installation.dll_version != package.version) {
         plan.notes.push_back(i18n::trf("Anvil {0} is updated to {1}.", {installation.dll_version, package.version}));
     }
     const auto listed = [](const std::vector<std::string>& list, const std::string& path) {
@@ -428,6 +445,10 @@ Plan plan_uninstall(const Package& package, const Installation& installation, bo
                    (std::count(a.begin(), a.end(), '/') == std::count(b.begin(), b.end(), '/') && a < b);
         });
         for (const std::string& folder : emptied) plan.steps.push_back({Step::Kind::RemoveIfEmpty, backup.folder + "/" + folder});
+        // The marker goes only with a backup that is otherwise empty.
+        if (backup.complete && backup.taken.empty()) {
+            plan.steps.push_back({Step::Kind::Remove, backup.folder + "/" + kBackupComplete});
+        }
         plan.steps.push_back({Step::Kind::RemoveIfEmpty, backup.folder});
         plan.steps.push_back({Step::Kind::RemoveIfEmpty, kLegacyBackup});
         plan.notes.push_back(i18n::trf("{0} goes back from {1}.", {backup.name, backup.folder}));
@@ -496,6 +517,16 @@ ApplyResult apply_plan(const Package& package, const Plan& plan, const fs::path&
             fs::create_directories(to.parent_path(), ec);
             if (!MoveFileExW(target.c_str(), to.c_str(), MOVEFILE_COPY_ALLOWED)) {
                 return fail(step, i18n::trf("cannot move it to {0}", {step.to}), GetLastError());
+            }
+            break;
+        }
+        case Step::Kind::Mark: {
+            fs::create_directories(target.parent_path(), ec);
+            std::string error;
+            bool denied = false;
+            if (!write_file_atomic(target, std::string_view(), error, &denied)) {
+                result.access_denied = denied;
+                return fail(step, error, 0);
             }
             break;
         }
