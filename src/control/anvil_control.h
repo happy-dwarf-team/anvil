@@ -55,6 +55,9 @@ typedef struct AnvilControlCrashScope {
     const void *context;  /* its CONTEXT at the exception */
     uintptr_t stack_low;  /* its stack: [stack_low, stack_high) */
     uintptr_t stack_high;
+
+    /* --- appended in 1.26 (anvil#426); check size before reading --- */
+    const void *exception; /* its EXCEPTION_RECORD: the code and, for an access violation, the address */
 } AnvilControlCrashScope;
 
 /* Writes the note as lines of UTF-8 text, each ended by '\n', into `out`

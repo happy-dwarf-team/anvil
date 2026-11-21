@@ -10,6 +10,7 @@
 #include "plugin_set_fixture.hpp"
 
 #include "../plugins/anvil-game/src/commands.hpp"
+#include "../plugins/anvil-game/src/crash_hints.hpp"
 #include "../plugins/anvil-game/src/restart.hpp"
 #include "../plugins/anvil-game/src/session.hpp"
 #include "../plugins/anvil-game/src/user_dir.hpp"
@@ -1027,6 +1028,15 @@ void listen(const char* event, const void* payload, void* context) {
     }
 }
 
+// The crash note's memory: the game root's global holds g_note_root's address.
+std::uintptr_t g_note_global = 0;
+alignas(8) std::uint8_t g_note_root[0x300] = {};
+bool note_test_read(std::uintptr_t address, void* out, std::size_t size) {
+    SIZE_T done = 0;
+    return ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(address), out, size, &done) != 0 &&
+           done == size;
+}
+
 bool contains(const std::vector<std::string>& list, const std::string& item) {
     return std::find(list.begin(), list.end(), item) != list.end();
 }
@@ -1452,6 +1462,85 @@ int main(int argc, char** argv) {
         CHECK(!anvil_game::same_war(a, war(0x1000, start + day, "RUS", "SWE", "a")));
         CHECK(!anvil_game::same_war(a, war(0x1000, start, "SWE", "SWE", "a")));
         CHECK(!anvil_game::same_war(a, war(0x1000, start, "RUS", "RUS", "a")));
+    });
+
+    run("anvil-game: the crash note names a province ID past the map and an idea loop on the stack", [] {
+        namespace ch = anvil_game::crash_hints;
+        constexpr std::uint32_t kSize = 0x2E10;
+        constexpr std::int64_t kCount = 4942;  // vanilla: provinces 1 to 4941
+        const std::uintptr_t array = 0x46300000020;  // never read: only the address is compared
+        const std::uintptr_t begin = 0x10000;
+        const std::uintptr_t end = begin + kCount * 8;
+        std::memcpy(g_note_root + 0x100, &begin, 8);
+        std::memcpy(g_note_root + 0x108, &end, 8);
+        std::memcpy(g_note_root + 0x200, &array, 8);
+        g_note_global = reinterpret_cast<std::uintptr_t>(g_note_root);
+        ch::ProvinceLayout l;
+        l.root = reinterpret_cast<std::uintptr_t>(&g_note_global);
+        l.provinces = 0x100;
+        l.provinces_end = 0x108;
+        l.pointer_shift = 3;
+        l.province_array = 0x200;
+        l.province_size = kSize;
+        char out[4096];
+        const auto note = [&](const ch::Crash& c, std::uintptr_t base = 0, std::uintptr_t idea = 0) {
+            return std::string(out, ch::write_note(l, base, idea, c, &note_test_read, out, sizeof out));
+        };
+        ch::Crash c;
+        c.access_violation = true;
+        // anvil#426: owns = 5075 reads the owner at +0x468 of an entry past the map.
+        c.address = array + 5075 * kSize + 0x468;
+        std::string text = note(c);
+        CHECK(text.find("The game read 0x46303912BB8, where the entry of province 5075 would be (0x468 into it), "
+                        "but this map has provinces 1 to 4941.\n") == 0);
+        CHECK(text.find("(such as owns = 5075)") != std::string::npos && text.find("anvil#426") != std::string::npos);
+        CHECK(text.back() == '\n');
+        c.write = true;
+        CHECK(note(c).find("The game wrote to 0x") == 0);
+        c.write = false;
+        // The first entry past the map, and one before the array (a negative ID).
+        CHECK(ch::province_entry(array, kCount, kSize, array + kCount * kSize).id == kCount);
+        const ch::ProvinceEntry before = ch::province_entry(array, kCount, kSize, array - 8);
+        CHECK(before.found && before.id == -1 && before.offset == kSize - 8);
+        CHECK(ch::province_entry(array, kCount, kSize, array - ch::kReach * kSize).id == -ch::kReach);
+        // Inside the map, or farther than kReach entries: nothing.
+        for (const std::uintptr_t a : {array + 100 * kSize + 8, array + 0x10, array + (kCount + ch::kReach) * kSize,
+                                       array - ch::kReach * kSize - 1, std::uintptr_t{0x10}}) {
+            c.address = a;
+            CHECK(!ch::province_entry(array, kCount, kSize, a).found && note(c).empty());
+        }
+        // Not an access violation, or no game root yet: nothing.
+        c.address = array + 5075 * kSize;
+        c.access_violation = false;
+        CHECK(note(c).empty());
+        c.access_violation = true;
+        g_note_global = 0;
+        CHECK(note(c).empty());
+        g_note_global = reinterpret_cast<std::uintptr_t>(g_note_root);
+        // A cut note stays within its buffer.
+        CHECK(ch::write_note(l, 0, 0, c, &note_test_read, out, 10) == 10);
+
+        // The idea loop's return address on the stack, here a buffer standing in for it.
+        const std::uintptr_t base = 0x7FF600000000, idea = base + 0x930FE4;
+        std::vector<std::uintptr_t> stack(3000, 0);
+        stack[2500] = idea;
+        ch::Crash s;
+        s.access_violation = true;
+        s.address = 0x10;
+        s.rsp = reinterpret_cast<std::uintptr_t>(stack.data()) + 3;  // rounded down to 8
+        s.stack_high = reinterpret_cast<std::uintptr_t>(stack.data() + stack.size());
+        text = note(s, base, idea);
+        CHECK(text.find("The stack holds a return address of the loop that adds up a country's idea modifiers "
+                        "(eu4.exe+0x930FE4, CalcTechAndIdeaModifiers).\n") == 0);
+        CHECK(text.find("active_idea_groups") != std::string::npos);
+        stack[2500] = 0;
+        CHECK(note(s, base, idea).empty());
+        // Below rsp it does not count, and an unknown address looks for nothing.
+        stack[0] = idea;
+        s.rsp = reinterpret_cast<std::uintptr_t>(stack.data() + 1);
+        CHECK(note(s, base, idea).empty());
+        stack[1] = idea;
+        CHECK(note(s, base, 0).empty() && !note(s, base, idea).empty());
     });
 
     run("anvil-game: the work queue", [] {
@@ -2074,7 +2163,7 @@ int main(int argc, char** argv) {
         start.add(gp_toml);
         start.add(plugin_toml("other"));
         start.make();
-        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 186);
+        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 187);
         AnvilPlugin* p = start.load(ANVIL_GAME_ID);
         CHECK(p != nullptr);
         if (p == nullptr) return;

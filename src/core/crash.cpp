@@ -398,7 +398,7 @@ void keep_utf8(char* text, size_t size) {
 // The notes of the plugins that set one, each called guarded.
 size_t gather_notes(const Request& request) {
     AnvilControlCrashScope scope{sizeof(AnvilControlCrashScope), request.pointers->ContextRecord, request.stack_low,
-                                 request.stack_high};
+                                 request.stack_high, request.pointers->ExceptionRecord};
     g_quiet_thread.store(GetCurrentThreadId());
     size_t count = 0;
     for (size_t i = 0; i < kNoteMax; ++i) {
