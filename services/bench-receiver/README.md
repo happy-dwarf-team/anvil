@@ -15,7 +15,7 @@ this folder, and changes here that do not touch the Manager use a hidden type
 | --- | --- |
 | `schemas/report-format-<n>.schema.json` | The JSON Schema of report format *n*, the contract between the Manager and the Worker |
 | `examples/report-format-<n>.json` | A valid report of format *n*, used by the tests |
-| `src/` | The Worker: `index.js` (the request, checks 1–5), `report.js` (check 4), `retention.js` (the Cron Trigger) |
+| `src/` | The Worker: `index.js` (the request, checks 1–5), `report.js` (check 3), `quota.js` (check 4), `retention.js` (the Cron Trigger) |
 | `scripts/compile-schemas.js` | Compiles the schemas into `src/generated/` (not in Git) |
 | `migrations/` | D1 migrations: the tables and the views per format |
 | `queries/` | Saved queries for maintainers |
@@ -25,30 +25,50 @@ this folder, and changes here that do not touch the Manager use a hidden type
 
 1. Body up to `MAX_BODY_BYTES` (413) and `application/json` (415).
 2. 5 requests per 60 s per IP through the `RATE_LIMITER` binding (429).
-3. At most `DAILY_LIMIT` new reports and `DAILY_BYTES_LIMIT` bytes per UTC day
-   across all senders (503), so that one address cannot fill the database with
-   the largest reports, read from the `daily_counts` row of the day: one row
-   read per request
-   instead of counting the day's reports.
-4. No key named twice in one object (422): `JSON.parse` keeps the last copy,
+3. No key named twice in one object (422): `JSON.parse` keeps the last copy,
    which is the one checked, but `json_extract` in the columns and views reads
    the first. Then the format's schema, then the plugin fields against `plugin_schemas` in the
    same report (every value declared, of its kind, or `null`), then
    plausibility: start positions 1…n, times between `MIN_START_MS` and
    `MAX_START_MS`, and the warm groups, medians, ranges and difference of
    `result` as the rows give them (422). An unknown format answers 422 with
-   "Update Anvil".
-5. `INSERT OR IGNORE` by `series_id`: 201 for a new series, 200 "already
-   arrived" for a repeat, without a write.
+   "Update Anvil". A series already stored answers 200 "already arrived" here,
+   before check 4, so a repeat or a refused report takes nothing from the
+   quota.
+4. The quota (anvil#539), in one `UPDATE … RETURNING` before the insert, so
+   that requests in flight together cannot pass it:
+   - at most `SENDER_DAILY_LIMIT` new reports and `SENDER_DAILY_BYTES_LIMIT`
+     bytes per sender per UTC day (429). The sender is the IPv4 address or the
+     IPv6 /64; its row in `daily_counts` is named by an HMAC of it under a key
+     of the day, itself an HMAC of the day under the `QUOTA_KEY` secret, so the
+     address is not stored and the next day's value is another;
+   - at most `DAILY_LIMIT` new reports and `DAILY_BYTES_LIMIT` bytes per UTC
+     day across all senders (503);
+   - at most `TOTAL_BYTES_LIMIT` bytes of stored bodies (503) until retention
+     frees space. `stored_bytes` holds the total, kept by triggers on
+     `reports`, so deleting by hand counts too.
+
+   A limit refuses the report that would pass it. Without `QUOTA_KEY` the
+   receiver answers 503 to every new report.
+5. `INSERT OR IGNORE` by `series_id`: 201 for a new series; 200 "already
+   arrived" for one that came in another request at the same time, whose
+   reservation is given back.
 
 Every response is `{"message": "…"}`; the Manager shows the message for 413
-and 422. The numbers are `vars` and the `ratelimits` entry in
-`wrangler.jsonc`. The Worker logs one line per request with status, format and
-size; invocation logs are off, so no IP, body or series id reaches the logs.
+and 422 and "Try again later" for 429 and 503. The numbers are `vars` and the
+`ratelimits` entry in `wrangler.jsonc`. The Worker logs one line per request
+with status, format, size and, for check 4, the limit that refused it
+(`sender`, `day` or `total`); invocation logs are off, so no IP, body or series
+id reaches the logs.
+
+The Cron Trigger deletes past days' `daily_counts`, the senders' rows with
+them. On the Workers Free plan a D1 database holds at most 500 MB, so D1
+refuses writes (503) before the 1 GiB of `TOTAL_BYTES_LIMIT` is reached; the
+cap matters on the Paid plan.
 
 The schema is compiled ahead of time with Ajv, because a Worker cannot
 generate code at run time and the Free plan allows 10 ms of CPU per request: a
-200-start report parses and passes check 4 in about 1 ms on a desktop CPU.
+200-start report parses and passes check 3 in about 1 ms on a desktop CPU.
 
 ## Tests
 
@@ -112,26 +132,41 @@ Zone › Workers Routes › Edit on `happydwarf.dev`. Never commit the token.
    npx wrangler d1 migrations apply anvil-bench --remote
    ```
 
-3. Deploy. The custom domain creates the `bench.happydwarf.dev` DNS record and
+3. Set the `QUOTA_KEY` secret (check 4) to 32 random bytes that nobody keeps:
+   Cloudflare does not show a secret again, so no one can test addresses
+   against the senders' rows. Setting a new one only starts the day's
+   per-sender counts again.
+
+   ```sh
+   node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))" | npx wrangler secret put QUOTA_KEY
+   ```
+
+4. Deploy. The custom domain creates the `bench.happydwarf.dev` DNS record and
    certificate; there must be no other record for that name.
 
    ```sh
    npm run deploy
    ```
 
-4. Send the example as a test report and expect 201, then 200 for a repeat:
+5. Send the example as a test report and expect 201, then 200 for a repeat:
 
    ```sh
    curl -i -X POST https://bench.happydwarf.dev/reports -H "content-type: application/json" --data-binary @examples/report-format-1.json
    ```
 
-5. Delete the test report (below) once it has been checked.
+6. Delete the test report (below) once it has been checked.
 
 ### Later deployments
 
 `npm run deploy` after the pull request is merged on `main`; first
 `npx wrangler d1 migrations apply anvil-bench --remote` when it adds a
 migration.
+
+The deployment that brings check 4 (migration `0004_sender_quota.sql`) sets
+`QUOTA_KEY` first (step 3 above; the running Worker ignores it), then applies
+the migration and deploys at once: between the two, the old Worker stores a
+new report but answers 503, because `daily_counts` has a new key, and a second
+Send answers 200.
 
 ## Reading reports
 

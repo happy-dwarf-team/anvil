@@ -57,10 +57,13 @@ of you or your installation that lasts beyond the series.
   Cloudflare Worker run by the Anvil maintainers on Cloudflare's network.
   Cloudflare processes the request for us as our hosting provider.
 - Like any web server, Cloudflare sees your IP address. The receiver uses it
-  only to limit how many reports one address can send per minute; the address
-  lives in the rate limiter's short-lived counters and is not stored. Request
-  logs are switched off: the receiver logs only the response code, the report
-  format and its size.
+  only to limit how many reports one address can send per minute and per day;
+  the address lives in the rate limiter's short-lived counters and is not
+  stored. For the daily limit the receiver counts reports under a keyed hash of
+  the address, which cannot be turned back into the address without the
+  receiver's secret key, changes every day, and is deleted the next day.
+  Request logs are switched off: the receiver logs only the response code, the
+  report format, its size and which limit refused it.
 - The receiver stores the report's bytes as sent and adds one thing: the day
   of receipt (a date in UTC, without the time). It does not store your IP
   address, country, browser or Manager identification, or the time of day.

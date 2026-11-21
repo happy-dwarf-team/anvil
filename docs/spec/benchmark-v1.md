@@ -493,12 +493,18 @@ Decided in anvil#132.
   plugin and version, series state) are indexed generated columns from
   `json_extract`; per-format views read rows with `json_each`. No R2.
 - A second table, `daily_counts`, holds the number of reports and bytes received
-  per UTC day for the daily limits, so a request reads one row instead of counting
-  the day's reports; past days are deleted daily.
+  per UTC day for the daily limits, one row for all senders and one per sender,
+  so a request updates two rows instead of counting the day's reports; past days
+  are deleted daily. A sender's row is named by an HMAC of its address (IPv4, or
+  the IPv6 /64) under a key of the day derived from a Worker secret, so the
+  address is not stored and the same address gives another value the next day
+  (anvil#539). A third table, `stored_bytes`, holds the bytes of all stored
+  reports, kept by triggers on `reports`.
 - Nothing else is stored: no IP address, country, User-Agent or time of day.
-  The IP lives only in the rate limiter's counters.
-- `invocation_logs = false`; one log line per request with status, format and
-  size, never the IP, the body or the series id.
+  The IP lives only in the rate limiter's counters and, for one day, as that
+  keyed hash.
+- `invocation_logs = false`; one log line per request with status, format,
+  size and the limit that refused it, never the IP, the body or the series id.
 - Kept 24 months from the day of receipt; a daily Cron Trigger deletes older
   reports.
 
@@ -506,14 +512,18 @@ Decided in anvil#132.
 
 1. Body up to 256 KB (413), `application/json` only.
 2. 5 requests per 60 s per IP through the `ratelimit` binding (429).
-3. At most 2000 new reports per UTC day across all senders (503).
-4. Validation against the format's schema (422; an unknown format says "update
+3. Validation against the format's schema (422; an unknown format says "update
    Anvil"; a key named twice in one object is refused first, since the body is
    stored as sent), plugin fields checked generically against the schemas in the same
    report, plus plausibility checks (1–200 starts, times in a sane range,
-   medians consistent with the rows).
-5. `INSERT OR IGNORE`: a repeated `series_id` answers 200 "already received"
-   without a write; a new one 201.
+   medians consistent with the rows). A series already stored answers 200
+   "already received" without a write.
+4. The quota, taken in one statement before the insert so that requests in
+   flight together cannot pass it (anvil#539): at most 20 new reports and
+   2 MiB per sender per UTC day (429), 2000 reports and 64 MiB per UTC day
+   across all senders (503), and 1 GiB of stored reports in all (503 until
+   retention frees space).
+5. `INSERT OR IGNORE`: a new `series_id` answers 201.
 
 The numbers are starting values in the Worker's configuration. No secret, no
 CAPTCHA: the Manager is open source, so a report cannot be proven genuine; the

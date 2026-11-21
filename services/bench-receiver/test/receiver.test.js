@@ -131,7 +131,7 @@ describe("check 2: per IP", () => {
   });
 });
 
-describe("check 3: per day", () => {
+describe("check 4: per day", () => {
   it("answers 503 once the day's limit is reached", async () => {
     await env.DB.prepare("INSERT INTO daily_counts (day, received) VALUES (?1, 2000)").bind(today()).run();
     const response = await post(report());
@@ -145,7 +145,7 @@ describe("check 3: per day", () => {
   });
 });
 
-describe("check 3: per day, in bytes", () => {
+describe("check 4: per day, in bytes", () => {
   it("answers 503 once the day's bytes are reached", async () => {
     await env.DB.prepare("INSERT INTO daily_counts (day, received, bytes) VALUES (?1, 1, ?2)")
       .bind(today(), Number(env.DAILY_BYTES_LIMIT))
@@ -163,7 +163,7 @@ describe("check 3: per day, in bytes", () => {
   });
 });
 
-describe("check 4: validation", () => {
+describe("check 3: validation", () => {
   it("refuses a body that is not JSON", async () => {
     const response = await post("{");
     expect(response.status).toBe(422);
