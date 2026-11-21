@@ -36,6 +36,11 @@ struct InventoryCopy {
     // folder's check (PluginInventory::copy_check), and the copies of other
     // hashes, which the start removes, have none.
     std::optional<PluginCheck> check;
+    // The copy trust.toml approves for its id no longer has its name's hash
+    // (T4, #543): it does not count as there, so the start makes it again
+    // from a mod folder that still has the approved hash, and without one
+    // the plugin waits for approval. Other copies are not hashed.
+    bool damaged = false;
 };
 
 // Plugin inventory (GLOSSARY, ADR 0014): what a game folder and its playset

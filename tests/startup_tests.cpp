@@ -180,11 +180,12 @@ int main(int argc, char** argv) {
         CHECK(contains(log, "mod-probe from mod 'Probe Mod' (local mod): made the approved copy") && contains(log, kRunning));
         CHECK(hash_plugin_folder(copy).sha256 == game.approved_hash());
 
-        // The approved copy changed: checked right before LoadLibrary, not loaded.
+        // The approved copy changed while the mod still has the approved files: made again,
+        // and it loads (T4, #543).
         write(copy / "extra.txt", "changed");
         log = game.start();
-        CHECK(contains(log, "mod-probe 1.0.0: not loaded; its approved copy changed (hash ") && !contains(log, kRunning));
-        fs::remove(copy / "extra.txt");
+        CHECK(contains(log, "mod-probe from mod 'Probe Mod' (local mod): made the approved copy") && contains(log, kRunning));
+        CHECK(!fs::exists(copy / "extra.txt") && hash_plugin_folder(copy).sha256 == game.approved_hash());
 
         // Steam (or the author) changes the mod: the approved copy keeps loading.
         write(in_mod / "README.txt", "new");
