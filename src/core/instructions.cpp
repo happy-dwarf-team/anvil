@@ -3,6 +3,7 @@
 #include <Zydis/Zydis.h>
 
 #include <cstdio>
+#include <optional>
 #include <vector>
 
 namespace anvil {
@@ -27,6 +28,13 @@ const char* unrelocatable(ZydisMnemonic mnemonic) {
     case ZYDIS_MNEMONIC_LOOPNE: return "loopne";
     default: return nullptr;
     }
+}
+
+// A short (rel8) jcc or jmp: SafetyHook's E9 trampoline holds it as a near one.
+bool widened_branch(const ZydisDecodedInstruction& instruction) {
+    return instruction.meta.branch_type == ZYDIS_BRANCH_TYPE_SHORT &&
+           (instruction.meta.category == ZYDIS_CATEGORY_COND_BR ||
+            instruction.meta.category == ZYDIS_CATEGORY_UNCOND_BR);
 }
 
 }  // namespace
@@ -54,6 +62,8 @@ std::string check_instruction_boundaries(const Symbol& symbol, uint32_t rva, con
     ZydisDecoder decoder;
     ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_STACK_WIDTH_64);
     size_t offset = 0;
+    size_t stolen = 0;                             // the end of the stolen bytes, once known
+    std::optional<size_t> short_branch;            // a stolen short branch, while it is the last one seen
     while (offset < size) {
         ZydisDecodedInstruction instruction;
         if (!ZYAN_SUCCESS(ZydisDecoderDecodeInstruction(&decoder, nullptr, code.data() + offset, available - offset,
@@ -66,6 +76,15 @@ std::string check_instruction_boundaries(const Symbol& symbol, uint32_t rva, con
                        " lies in the first " + std::to_string(kHookJumpSize) +
                        " bytes, which a hook relocates, and cannot be relocated";
             }
+            // SafetyHook widens a short branch in its copy, so the instructions
+            // after it sit further on there; a thread it moves between the code
+            // and the copy past such a branch lands inside an instruction.
+            if (short_branch) {
+                return "instruction boundaries: the short branch at " + offset_text(*short_branch, rva) +
+                       " is not the last of the instructions in the first " + std::to_string(kHookJumpSize) +
+                       " bytes, which a hook relocates; hook the code at or after it instead";
+            }
+            if (widened_branch(instruction)) short_branch = offset;
         }
         const size_t end = offset + instruction.length;
         if (end > size) {
@@ -73,7 +92,18 @@ std::string check_instruction_boundaries(const Symbol& symbol, uint32_t rva, con
                    offset_text(offset, rva) + " ends past the declared " + std::to_string(size) +
                    " bytes; declare whole instructions (" + std::to_string(end) + " bytes)";
         }
+        if (offset < kHookJumpSize) stolen = end;
         offset = end;
+    }
+    // A hook writes over the stolen bytes: at least one of them must be fixed,
+    // so the jump never lands on code that only "??" bytes matched.
+    if (!symbol.mask.empty()) {
+        bool fixed = false;
+        for (size_t i = 0; i < stolen && i < symbol.mask.size(); ++i) fixed |= symbol.mask[i] == 0xFF;
+        if (!fixed) {
+            return "instruction boundaries: the " + std::to_string(stolen) +
+                   " bytes a hook overwrites are all \"??\"; at least one of them must be a fixed byte";
+        }
     }
     return {};
 }

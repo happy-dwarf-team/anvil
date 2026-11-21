@@ -280,6 +280,7 @@ private:
     Site& add_site(uintptr_t address, ChangeKind kind, size_t footprint);
     ChangeStatus code_site(OwnerId owner, const ChangeTarget& target, ChangeKind kind, size_t span,
                            const std::string& label, Site*& out);
+    ChangeStatus check_stolen(OwnerId owner, const ChangeTarget& target, size_t stolen, const std::string& label);
     bool add_call_stub(Site& code, const Site* call);
     ChangeStatus add_link(OwnerId owner, Site& site, ChangeKind kind, uintptr_t detour,
                           std::unique_ptr<uint8_t[]> bytes, const std::string& label, void** next, ChangeId* out,

@@ -387,6 +387,8 @@ Every call that touches `eu4.exe` takes a declared symbol, never a raw RVA. Raw 
 - A change whose bytes overlap another plugin's change at a different address is refused, and both owners are logged. A block replacement owns its whole block.
 - The one exception: identical byte patches share ownership.
 - A hook whose stolen bytes contain `JRCXZ` or `LOOP*` is refused, because SafetyHook mis-encodes them.
+- A hook whose stolen bytes hold a short branch (`Jcc rel8`, `JMP rel8`) that is not their last instruction is refused (anvil#535). SafetyHook widens such a branch in the trampoline, so the instructions after it move, and a thread it moves out of the stolen bytes would land at the wrong offset.
+- A symbol's declared bytes must cover what the hook copies, including the 14-byte form SafetyHook falls back to when no trampoline fits within ±2 GB, and at least one of the overwritten bytes must be a fixed byte rather than `??` (anvil#536). Otherwise the hook would copy bytes nobody compared.
 
 ### 8.4 Staging, handles, suspension
 
@@ -801,7 +803,8 @@ Decided in [Player UI: in-game overlay and Anvil Manager](https://github.com/hap
 - **Problems carry lines:** the parsers report the line of the key (one error per file, as the loader stops at it); `--exe` reports every failing symbol at its `[symbol.<name>]` line. `--format github` prints `::error file=<path>,line=<n>,title=anvil check::<message>` with the path as passed, so CI runs it from the repository root.
 - **Instruction boundaries** (`--exe`): `symbols.toml` does not say how a symbol is used, so the rule covers every function or site in code with at least 5 declared bytes (a `jmp rel32`):
   - decoded from the first byte (Zydis, x86-64; `??` bytes take the image's values), the declared bytes are valid instructions and the last one ends exactly at their end, so a block replacement owns whole instructions and a hook's stolen bytes lie in verified bytes;
-  - the instructions that start in the first 5 bytes, which a hook relocates, include no `JRCXZ`, `JECXZ`, `LOOP`, `LOOPE` or `LOOPNE` (§8.3);
+  - the instructions that start in the first 5 bytes, which a hook relocates, include no `JRCXZ`, `JECXZ`, `LOOP`, `LOOPE` or `LOOPNE`, and a short branch among them is the last of them (§8.3);
+  - at least one of the bytes a hook's 5-byte jump overwrites is a fixed byte, not `??` or an `any` offset (§8.3);
   - a block's `resume` symbol is in code.
 
   Shorter sites (byte patches, which may start inside an instruction), data and pointer slots are not decoded. Hooking a symbol with fewer than 5 declared bytes would steal unverified bytes; the change registry decides whether to refuse it.

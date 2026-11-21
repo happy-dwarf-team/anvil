@@ -46,6 +46,8 @@ TestImage boundary_image() {
     image.put(0x1070, {0x48, 0x83, 0xEC, 0x28, 0x90, 0xE2, 0xF0, 0xC3});  // sub rsp, 0x28; nop; loop at +5; ret
     image.put(0x1080, {0x06, 0x06, 0x06, 0x06, 0x06});                    // push es: invalid in 64-bit mode
     image.put(0x1090, {0x67, 0xE3, 0x10, 0x90, 0x90, 0x90});              // jecxz; nop x3
+    image.put(0x10A0, {0x74, 0x01, 0x90, 0x90, 0x90, 0x90, 0xC3});        // jz at +0, then nops: not the last stolen
+    image.put(0x10B0, {0x90, 0x90, 0x90, 0x74, 0x01, 0x90, 0xC3});        // jz at +3: the last stolen instruction
     return image;
 }
 
@@ -879,6 +881,13 @@ int main(int argc, char** argv) {
         // A LOOP after the stolen bytes is fine; "??" bytes decode as the image's.
         CHECK(check_one("rva = 0x1070\nbytes = \"48 83 EC 28 90 E2 F0 C3\"\nmemory = \"code\"\n").exit_code == kExitOk);
         CHECK(check_one("rva = 0x1000\nbytes = \"48 8B ?? ?? ?? ?? ?? C3\"\nmemory = \"code\"\n").exit_code == kExitOk);
+        // A short branch that is not the last stolen instruction (anvil#535); as the last one it is fine.
+        CHECK(problem("rva = 0x10A0\nbytes = \"74 01 90 90 90 90 C3\"\nmemory = \"code\"\n",
+                      "the short branch at +0x0 (rva 0x10A0) is not the last of the instructions in the first 5 bytes"));
+        CHECK(check_one("rva = 0x10B0\nbytes = \"90 90 90 74 01 90 C3\"\nmemory = \"code\"\n").exit_code == kExitOk);
+        // The stolen bytes need a fixed byte, even when a later one is fixed (anvil#536).
+        CHECK(problem("rva = 0x1000\nbytes = \"?? ?? ?? ?? ?? ?? ?? C3\"\nmemory = \"code\"\n",
+                      "the 7 bytes a hook overwrites are all \"??\"; at least one of them must be a fixed byte"));
         // A block's resume target must be code.
         const auto resume = fx.check(fx.plugin("resume", symbol("block", "rva = 0x1000\nbytes = \"48 8B 81 18 04 00 00\"\n"
                                                                           "memory = \"code\"\nresume = \"slot\"\n"

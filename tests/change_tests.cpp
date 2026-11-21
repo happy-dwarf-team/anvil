@@ -148,7 +148,7 @@ void change_tests() {
         const OwnerId a = reg.add_owner("a"), b = reg.add_owner("b"), c = reg.add_owner("c");
         ChangeId ha = 0, hb = 0, hc = 0;
         // Requested out of load order: the chain still follows the owners.
-        CHECK(reg.hook_function(c, in_image(s.at(0x40), {0x8D, 0x41}), reinterpret_cast<void*>(&detour_c),
+        CHECK(reg.hook_function(c, in_image(s.at(0x40), {0x8D, 0x41, 0x01, 0x90, 0x90}), reinterpret_cast<void*>(&detour_c),
                                 slot(g_next_c), &hc) == ChangeStatus::Ok);
         CHECK(traced(f, 1) == 12 && g_trace == "c");
         CHECK(reg.hook_function(a, in_image(s.at(0x40), kAddOne), reinterpret_cast<void*>(&detour_a), slot(g_next_a),
@@ -236,15 +236,46 @@ void change_tests() {
         CHECK(reg.hook_function(a, in_image(s.at(0x140)), reinterpret_cast<void*>(&detour_a), slot(next)) ==
               ChangeStatus::UnsafeSite);
         CHECK(refusals.back().find("short branch at +0x0 to +0x4") != std::string::npos);
-        // A forward one with nothing widened between keeps its distance, and one past the
-        // stolen bytes is relocated by its address: both are hooked.
+        // A short branch that is not the last stolen instruction: the copy runs longer
+        // after it, so a thread SafetyHook moves between code and copy would land inside
+        // an instruction (anvil#535). As the last one it keeps every offset before it,
+        // and a target past the stolen bytes is relocated by its address: hooked.
         s.put(0x180, {0x74, 0x01, 0x90, 0x90, 0x90, 0x90, 0xC3});
         s.put(0x1C0, {0x90, 0x90, 0x90, 0x74, 0x01, 0x90, 0xC3});
         CHECK(reg.hook_function(a, in_image(s.at(0x180)), reinterpret_cast<void*>(&detour_a), slot(next)) ==
-              ChangeStatus::Ok);
+              ChangeStatus::UnsafeSite);
+        CHECK(refusals.back() == "function hook rva 0x180: the stolen bytes hold a short branch at +0x0 that is not "
+                                 "their last instruction; hook the code at or after it instead");
         Fn next2 = nullptr;
         CHECK(reg.hook_function(a, in_image(s.at(0x1C0)), reinterpret_cast<void*>(&detour_a), slot(next2)) ==
               ChangeStatus::Ok);
+        // The declared bytes a hook overwrites (anvil#536): they cover what SafetyHook
+        // copies, and one of them is fixed. mov rax, [rcx+0x418] (7 bytes); ret.
+        s.put(0x200, {0x48, 0x8B, 0x81, 0x18, 0x04, 0x00, 0x00, 0xC3});
+        const std::vector<uint8_t> mov = {0x48, 0x8B, 0x81, 0x18, 0x04, 0x00, 0x00, 0xC3};
+        const auto declared = [&](size_t size, const uint8_t* mask) {
+            return ChangeTarget{s.at(0x200), true, mov.data(), mask, size};
+        };
+        CHECK(reg.hook_function(a, declared(5, nullptr), reinterpret_cast<void*>(&detour_a), slot(next)) ==
+              ChangeStatus::UnsafeSite);
+        CHECK(refusals.back() == "function hook rva 0x200: the hook copies 7 bytes, past the 5 declared; declare them all");
+        const uint8_t any_but_ret[] = {0, 0, 0, 0, 0, 0, 0, 0xFF};
+        CHECK(reg.hook_function(a, declared(8, any_but_ret), reinterpret_cast<void*>(&detour_a), slot(next)) ==
+              ChangeStatus::UnsafeSite);
+        CHECK(refusals.back() == "function hook rva 0x200: the 7 bytes the hook overwrites are all \"??\"; declare at "
+                                 "least one of them as a fixed byte");
+        const uint8_t one_fixed[] = {0, 0xFF, 0, 0, 0, 0, 0, 0};
+        Fn next3 = nullptr;
+        CHECK(reg.hook_function(a, declared(8, one_fixed), reinterpret_cast<void*>(&detour_a), slot(next3)) ==
+              ChangeStatus::Ok);
+        // A second hook at the hooked site is held to the same bytes.
+        const OwnerId b = reg.add_owner("b");
+        Fn next4 = nullptr;
+        CHECK(reg.hook_function(b, declared(8, any_but_ret), reinterpret_cast<void*>(&detour_b), slot(next4)) ==
+              ChangeStatus::UnsafeSite);
+        CHECK(reg.hook_function(b, declared(7, nullptr), reinterpret_cast<void*>(&detour_b), slot(next4)) ==
+              ChangeStatus::Ok);
+        CHECK(reg.rollback(b) == 1);
         CHECK(reg.rollback(a) == 2);
         CHECK(reg.hook_function(a, in_image(s.at(0xFFE)), reinterpret_cast<void*>(&detour_a), slot(next)) ==
               ChangeStatus::InvalidArgument);  // 5 bytes run past the image end
@@ -818,7 +849,7 @@ void change_tests() {
         CHECK(traced(f, 0) == 15);
         // At the function start: the argument is rcx; rsp points at the return address.
         ChangeId start = 0;
-        CHECK(reg.mid_hook(a, in_image(s.at(0x40), {0x8D, 0x41, 0x01}), &set_rcx, reinterpret_cast<void*>(100),
+        CHECK(reg.mid_hook(a, in_image(s.at(0x40), {0x8D, 0x41, 0x01, 0x83, 0xC0, 0x02}), &set_rcx, reinterpret_cast<void*>(100),
                            &start) == ChangeStatus::Ok);
         CHECK(traced(f, 7) == 115 && g_trace == "m" && g_seen_rcx == 7);
         CHECK(g_seen_rsp % 16 == 8 && g_seen_return != 0);
@@ -827,7 +858,7 @@ void change_tests() {
         Probe plus{'p', 0, 0, 1000};
         CHECK(reg.mid_hook(a, in_image(s.at(0x43)), &probe, &plus) == ChangeStatus::Conflict);  // inside 0x40's jump
         CHECK(reg.remove(a, start) == ChangeStatus::Ok);
-        CHECK(reg.mid_hook(a, in_image(s.at(0x43), {0x83, 0xC0, 0x02}), &probe, &plus) == ChangeStatus::Ok);
+        CHECK(reg.mid_hook(a, in_image(s.at(0x43), {0x83, 0xC0, 0x02, 0x83, 0xC0, 0x04}), &probe, &plus) == ChangeStatus::Ok);
         CHECK(traced(f, 0) == 1015 && g_trace == "p");
         // XMM registers: g(x) = x + xmm1.
         CHECK(reg.mid_hook(a, in_image(s.at(0x80), kAddXmm1), &set_xmm1, nullptr) == ChangeStatus::Ok);
