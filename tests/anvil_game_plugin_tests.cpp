@@ -121,6 +121,26 @@ void fake_game_delete(void* block, std::size_t) {
 }
 void faulting_explore_regions(const void*, const void*, void*, void*) { (void)*g_fault_at; }
 
+// Game code that raises something other than an access violation: a bug of its
+// own, which the calls must leave to the crash handler (anvil#545, G4).
+constexpr DWORD kNotAFault = 0xE0414E56;
+std::int32_t raising_pick(void*, const float*) {
+    RaiseException(kNotAFault, 0, 0, nullptr);
+    return 0;
+}
+void raising_explore_regions(const void*, const void*, void*, void*) { RaiseException(kNotAFault, 0, 0, nullptr); }
+
+// Whether `call` let kNotAFault go on to its caller. No objects with
+// destructors here: the body runs under __try.
+bool passes_on(void (*call)(void*), void* context) {
+    __try {
+        call(context);
+        return false;
+    } __except (GetExceptionCode() == kNotAFault ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
+        return true;
+    }
+}
+
 // The types of the events the stand-in of SDL_PushEvent got, and its time stamp.
 std::vector<uint32_t> g_pushed;
 int fake_push_event_rest(const void* event) {
@@ -3520,6 +3540,20 @@ int main(int argc, char** argv) {
         };
         frame(game.app, 1);
         CHECK(ran);
+        // Any other exception in the pick is not the plugin's to swallow.
+        jump_to(kPick, reinterpret_cast<std::uintptr_t>(&raising_pick));
+        ran = false;
+        g_in_frame_handler = [&] {
+            ran = true;
+            CHECK(passes_on(
+                [](void* w) {
+                    std::int32_t p = -1;
+                    (void)static_cast<const AnvilGameWorldService*>(w)->province_at(3, 700, &p);
+                },
+                const_cast<AnvilGameWorldService*>(world)));
+        };
+        frame(game.app, 1);
+        CHECK(ran);
         std::memcpy(image.base + kPick, pick_bytes, sizeof(pick_bytes));
         std::memcpy(image.base + kSelectable, selectable_bytes, sizeof(selectable_bytes));
         g_in_frame_handler = [&] {  // the restored picks answer again
@@ -3679,6 +3713,26 @@ int main(int argc, char** argv) {
             count = 99;
             CHECK(world->exploration_regions(&fleet, ANVIL_GAME_EXPLORE_SEA, list, 8, &count) == ANVIL_ERROR_INTERNAL &&
                   count == 99);
+        };
+        frame(game.app, 1);
+        CHECK(ran);
+        // Any other exception in the call is not the plugin's to swallow.
+        jump_to(kExplore, reinterpret_cast<std::uintptr_t>(&raising_explore_regions));
+        struct Explore {
+            const AnvilGameWorldService* world;
+            const AnvilGameUnitRef* fleet;
+            std::int32_t* list;
+        } explore{world, &fleet, list};
+        ran = false;
+        g_in_frame_handler = [&] {
+            ran = true;
+            CHECK(passes_on(
+                [](void* c) {
+                    const auto* e = static_cast<const Explore*>(c);
+                    std::uint32_t n = 0;
+                    (void)e->world->exploration_regions(e->fleet, ANVIL_GAME_EXPLORE_SEA, e->list, 8, &n);
+                },
+                &explore));
         };
         frame(game.app, 1);
         CHECK(ran);

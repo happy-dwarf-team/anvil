@@ -257,6 +257,14 @@ void color_tests() {
 }
 
 void text_tests() {
+    run("map modes: a tooltip's province goes to describe only within the province limit", [] {
+        // The ID is read from the game's memory (anvil#545, the anvil#426 class).
+        CHECK(describable(1, 4942) && describable(4941, 4942));
+        CHECK(!describable(0, 4942) && !describable(-1, 4942) && !describable(4942, 4942));
+        CHECK(!describable(0x7FFFFFFF, 4942) && !describable(INT32_MIN, 4942));
+        CHECK(!describable(1, 0));  // no limit known: none
+    });
+
     run("map modes: UTF-8 is cut at a whole character and at the first bad byte", [] {
         CHECK(utf8_prefix("abc") == "abc");
         CHECK(utf8_prefix("a\xC5\x82", 2) == "a");

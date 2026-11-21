@@ -181,6 +181,14 @@ AnvilResult make_colors(const std::uint32_t* colors, std::uint32_t count, std::i
 // Hands `colors` to `mode` and counts a new generation.
 void set_colors(AnvilMapMode& mode, std::shared_ptr<const Colors> colors);
 
+// Whether a tooltip's `province` may go to a mode's describe: a province ID
+// 1 .. limit - 1, where `limit` is the session's province limit (0 when it is
+// not known: then none does). The ID is read from the game's memory, and a
+// describe may index its own tables with it (the anvil#426 class).
+inline bool describable(std::int32_t province, std::uint64_t limit) noexcept {
+    return province > 0 && static_cast<std::uint64_t>(province) < limit;
+}
+
 // The kept tooltip text of `mode` for `province`, empty when it has none.
 std::string kept_text(AnvilMapMode& mode, std::int32_t province);
 void keep_text(AnvilMapMode& mode, std::int32_t province, std::string text);
