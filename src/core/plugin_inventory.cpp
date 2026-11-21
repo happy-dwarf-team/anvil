@@ -2,6 +2,7 @@
 
 #include "discovery.hpp"
 #include "log.hpp"
+#include "plugin_hash.hpp"
 #include "trust.hpp"
 
 #include <algorithm>
@@ -31,7 +32,10 @@ std::set<std::string> PluginInventory::local_ids() const {
     return ids;
 }
 
-bool PluginInventory::copy_exists(const std::string& id, const std::string& hash) const { return copy(id, hash) != nullptr; }
+bool PluginInventory::copy_exists(const std::string& id, const std::string& hash) const {
+    const InventoryCopy* c = copy(id, hash);
+    return c != nullptr && !c->damaged;
+}
 
 const InventoryCopy* PluginInventory::copy(const std::string& id, const std::string& hash) const {
     for (const InventoryCopy& c : copies) {
@@ -114,7 +118,10 @@ PluginInventory take_inventory(const fs::path& anvil_dir, const fs::path& user_d
             }
             const TrustEntry* approved = trust.error.empty() ? trust.find(id) : nullptr;
             const bool may_load = approved != nullptr && approved->hash == c.name;
-            if (of_a_mod && !same_as_a_mod && may_load) c.check = check_plugin_folder(folder, game);
+            // The load hashes it again and refuses a changed copy (copy_changed); this
+            // one is for the plan, so a damaged copy is made again before that (T4, #543).
+            if (of_a_mod && may_load) c.damaged = hash_plugin_folder(folder).sha256 != c.name;
+            if (of_a_mod && !same_as_a_mod && may_load && !c.damaged) c.check = check_plugin_folder(folder, game);
             inventory.copies.push_back(std::move(c));
         }
     }

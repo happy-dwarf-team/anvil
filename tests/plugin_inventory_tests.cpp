@@ -102,9 +102,12 @@ void plugin_inventory_tests() {
         enable_mods(user, {"One"});
         const std::string h2 = hash_plugin_folder(now).sha256;
         // The copy of 1.0.0, from before the player approved the update.
-        const fs::path stale = approved_copy(anvil, "x", std::string(64, 'a'));
-        write(stale / "plugin.toml", plugin_toml("x", "", "1.0.0"));
-        write(stale / "x.dll", "MZ");
+        const fs::path source = dir / "x-1.0.0";
+        write(source / "plugin.toml", plugin_toml("x", "", "1.0.0"));
+        write(source / "x.dll", "MZ");
+        const std::string h1 = hash_plugin_folder(source).sha256;
+        const fs::path stale = approved_copy(anvil, "x", h1);
+        copy_folder(source, stale);
         std::string error;
         CHECK(write_trust(anvil / "trust.toml", {approval("One", "x", "2.0.0", h2)}, error));
 
@@ -113,9 +116,50 @@ void plugin_inventory_tests() {
         const StartPlan plan = plan_start(inventory, read_player_choices(inventory), {});
         CHECK(plan.writes.remove.size() == 1 && plan.writes.remove[0] == stale);
         // The copy trust.toml names while the mod has another hash is checked.
-        CHECK(write_trust(anvil / "trust.toml", {approval("One", "x", "1.0.0", std::string(64, 'a'))}, error));
+        CHECK(write_trust(anvil / "trust.toml", {approval("One", "x", "1.0.0", h1)}, error));
         const PluginInventory waits = take_inventory(anvil, user, GameImage{});
-        CHECK(waits.copies.size() == 1 && waits.copies[0].check.has_value());
+        CHECK(waits.copies.size() == 1 && waits.copies[0].check.has_value() && !waits.copies[0].damaged);
+        fs::remove_all(dir);
+    });
+
+    run("plugin inventory: a damaged approved copy is made again from an unchanged mod, else waits for approval (T4, #543)", [] {
+        const fs::path dir = fresh("anvil-inventory-damaged-copy");
+        const fs::path anvil = dir / "anvil";
+        const fs::path user = dir / "user";
+        const fs::path in_mod = mod_plugin(user, "One", "x", "1.0.0");
+        enable_mods(user, {"One"});
+        const std::string h1 = hash_plugin_folder(in_mod).sha256;
+        const fs::path copy = approved_copy(anvil, "x", h1);
+        copy_folder(in_mod, copy);
+        std::string error;
+        CHECK(write_trust(anvil / "trust.toml", {approval("One", "x", "1.0.0", h1)}, error));
+        const auto plan_of = [&] {
+            const PluginInventory inventory = take_inventory(anvil, user, GameImage{});
+            return std::make_pair(inventory.copies.size() == 1 && inventory.copies[0].damaged,
+                                  plan_start(inventory, read_player_choices(inventory), {}));
+        };
+        {
+            const auto [damaged, plan] = plan_of();
+            CHECK(!damaged && plan.mods.size() == 1 && !plan.mods[0].copy_missing && plan.writes.copies.empty());
+        }
+        // A file of the copy changed (a disk error, a tool): the plan makes it again from the mod.
+        write(copy / "x.dll", "MZ damaged");
+        {
+            const auto [damaged, plan] = plan_of();
+            CHECK(damaged && plan.mods.size() == 1 && plan.mods[0].state == ModPluginState::Approved);
+            CHECK(plan.mods[0].copy_missing && plan.writes.copies.size() == 1 && plan.writes.copies[0].hash == h1);
+            const PlannedPlugin* x = plan.find("x");
+            CHECK(x != nullptr && x->not_loading == NotLoading::None && x->makes_copy);
+        }
+        // The mod changed too: nothing has the approved files, so it waits for approval (Approve shows).
+        write(in_mod / "README.txt", "2.0");
+        {
+            const auto [damaged, plan] = plan_of();
+            CHECK(damaged && plan.mods.size() == 1 && plan.mods[0].state == ModPluginState::Pending);
+            const PlannedPlugin* x = plan.find("x");
+            CHECK(x != nullptr && x->not_loading == NotLoading::WaitsForApproval && x->awaiting_approval);
+            CHECK(plan.writes.copies.empty());
+        }
         fs::remove_all(dir);
     });
 
