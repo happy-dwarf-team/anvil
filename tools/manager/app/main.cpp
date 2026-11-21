@@ -434,7 +434,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         if (args[i] == L"--remove-after-exit" && i + 2 < args.size()) {
             return run_remove_after_exit(args[i + 1], static_cast<DWORD>(std::wcstoul(args[i + 2].c_str(), nullptr, 10)));
         }
-        if (args[i] == L"--game" && i + 1 < args.size()) game = args[++i];
+        if (args[i] == L"--game" && i + 1 < args.size()) game = absolute_folder(args[++i]);
         if (args[i] == L"--screenshot" && i + 1 < args.size()) shot_options().out = args[++i];
         if (args[i] == L"--tab" && i + 1 < args.size()) shot_options().tab = anvil::narrow(args[++i]);
         if (args[i] == L"--select" && i + 1 < args.size()) shot_options().select = anvil::narrow(args[++i]);

@@ -101,10 +101,10 @@ void skip_space(std::string_view text, size_t& at) {
 }  // namespace
 
 std::vector<std::string> crash_report_names(const std::filesystem::path& crash_dir) {
-    std::vector<std::string> names;
+    std::vector<std::pair<uint64_t, std::string>> reports;  // creation time, name
     WIN32_FIND_DATAW found{};
     const HANDLE find = FindFirstFileW((crash_dir / L"*.json").c_str(), &found);
-    if (find == INVALID_HANDLE_VALUE) return names;
+    if (find == INVALID_HANDLE_VALUE) return {};
     do {
         if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
         std::wstring name = found.cFileName;
@@ -118,10 +118,15 @@ std::vector<std::string> crash_report_names(const std::filesystem::path& crash_d
             }
             narrow += static_cast<char>(c);
         }
-        if (!narrow.empty()) names.push_back(std::move(narrow));
+        const uint64_t created = (uint64_t{found.ftCreationTime.dwHighDateTime} << 32) | found.ftCreationTime.dwLowDateTime;
+        if (!narrow.empty()) reports.emplace_back(created, std::move(narrow));
     } while (FindNextFileW(find, &found));
     FindClose(find);
-    std::sort(names.begin(), names.end(), std::greater<>());
+    // The names are local time, which repeats an hour when the clocks go back; the creation time does not.
+    std::sort(reports.begin(), reports.end(), std::greater<>());
+    std::vector<std::string> names;
+    names.reserve(reports.size());
+    for (auto& report : reports) names.push_back(std::move(report.second));
     return names;
 }
 

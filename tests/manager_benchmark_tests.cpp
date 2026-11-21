@@ -612,6 +612,9 @@ void manager_benchmark_tests() {
         const std::regex uuid("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$");
         const std::string a = new_series_id(), b = new_series_id();
         CHECK(std::regex_match(a, uuid) && std::regex_match(b, uuid) && a != b);
+        // N5: no random bytes, no id (not one every such series shares).
+        CHECK(new_series_id([](unsigned char*, size_t) { return false; }).empty());
+        CHECK(std::regex_match(new_series_id(system_random), uuid));
     });
 
     run("report: no series id when Windows gives no random bytes", [] {
@@ -650,6 +653,12 @@ void manager_benchmark_tests() {
         kept = kept_reports(dir);
         CHECK(kept.size() == kKeptReports && kept.front().name == "2026-10-26T11-10-00" && kept.back().name == "2026-10-26T11-01-00");
         CHECK(!fs::exists(first) && !fs::exists(dir / "2026-10-26T10-00-00.sent"));
+        // MU8: the clocks went back, so the new report's stamp sorts oldest; it stays, the oldest other goes.
+        CHECK(keep_report(dir, "2026-10-26T02-30-00", text, file, error) && fs::exists(file));
+        kept = kept_reports(dir);
+        CHECK(kept.size() == kKeptReports && kept.back().name == "2026-10-26T02-30-00");
+        CHECK(!fs::exists(dir / "2026-10-26T11-01-00.json"));
+        fs::remove(file);
 
         write_file_atomic(dir / "zz-broken.json", "{", error);
         kept = kept_reports(dir);

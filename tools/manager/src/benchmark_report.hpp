@@ -93,7 +93,8 @@ std::string report_stamp();
 
 // Writes `text` as <dir>/<stamp>.json in one step (another suffix when that
 // name exists), then removes the oldest reports and their .sent markers
-// beyond kKeptReports. `file` gets the path. False with `error`.
+// beyond kKeptReports, never the new one (a stamp from the hour the clocks
+// go back sorts before older ones). `file` gets the path. False with `error`.
 bool keep_report(const std::filesystem::path& dir, const std::string& stamp, const std::string& text,
                  std::filesystem::path& file, std::string& error);
 // The Workshop-id switch rewrites the kept file; a sent report stays as it

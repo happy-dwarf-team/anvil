@@ -346,6 +346,30 @@ void control_tests() {
         fs::remove_all(dir);
     });
 
+    run("crash history: the newest report by creation time, when the clocks went back (T5)", [] {
+        const fs::path dir = fresh_dir("anvil-control-crashes-dst");
+        // 02:45 before the clocks went back, then 02:10 local, 25 minutes later.
+        write_file(dir / "2026-10-25_02-45-00.json", report_json("no_plugin", {}, true));
+        write_file(dir / "2026-10-25_02-10-00.json", report_json("no_plugin", {}, true));
+        write_file(dir / "2026-10-25_01-00-00.json", report_json("no_plugin", {}, true));
+        const auto created = [&](const char* name, unsigned long long minutes) {
+            const HANDLE file = CreateFileW((dir / name).c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ, nullptr,
+                                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            CHECK(file != INVALID_HANDLE_VALUE);
+            const unsigned long long time = 134000000000000000ULL + minutes * 600000000ULL;
+            const FILETIME at{static_cast<DWORD>(time), static_cast<DWORD>(time >> 32)};
+            CHECK(SetFileTime(file, &at, nullptr, nullptr));
+            CloseHandle(file);
+        };
+        created("2026-10-25_01-00-00.json", 0);
+        created("2026-10-25_02-45-00.json", 105);
+        created("2026-10-25_02-10-00.json", 130);
+        CHECK(crash_report_names(dir) ==
+              std::vector<std::string>({"2026-10-25_02-10-00", "2026-10-25_02-45-00", "2026-10-25_01-00-00"}));
+        CHECK(safe_mode_crashes(dir, 1).size() == 1 && safe_mode_crashes(dir, 1)[0].name == "2026-10-25_02-10-00");
+        fs::remove_all(dir);
+    });
+
     run("safe mode: a standard plugin the crash was in is left out", [] {
         CHECK(loads_in_safe_mode("anvil-game") && loads_in_safe_mode("anvil-overlay") && !loads_in_safe_mode("tongs"));
         const fs::path dir = fresh_dir("anvil-control-safe");

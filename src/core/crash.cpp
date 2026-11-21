@@ -184,9 +184,11 @@ bool write_all(HANDLE file, std::string_view text) {
     return true;
 }
 
-// Keeps the newest `keep` reports: their names sort by time.
+// Keeps the newest `keep` reports, by creation time, then name (crash_report_names'
+// order: the names are local time, which repeats an hour when the clocks go back).
 void prune(size_t keep) {
     static wchar_t stems[128][64];
+    static unsigned long long created[128];
     size_t count = 0;
     wchar_t pattern[MAX_PATH * 2 + 80];
     path_of(pattern, L"*", L".json");
@@ -198,16 +200,23 @@ void prune(size_t keep) {
         if (length <= 5 || length - 5 >= std::size(stems[0]) || count >= std::size(stems)) continue;
         std::wmemcpy(stems[count], found.cFileName, length - 5);
         stems[count][length - 5] = L'\0';
+        created[count] = (static_cast<unsigned long long>(found.ftCreationTime.dwHighDateTime) << 32) |
+                         found.ftCreationTime.dwLowDateTime;
         ++count;
     } while (FindNextFileW(find, &found));
     FindClose(find);
     // Newest first.
     for (size_t i = 1; i < count; ++i) {
-        for (size_t k = i; k > 0 && std::wcscmp(stems[k - 1], stems[k]) < 0; --k) {
+        for (size_t k = i; k > 0 && (created[k - 1] < created[k] ||
+                                     (created[k - 1] == created[k] && std::wcscmp(stems[k - 1], stems[k]) < 0));
+             --k) {
             wchar_t swap[64];
             std::wmemcpy(swap, stems[k], 64);
             std::wmemcpy(stems[k], stems[k - 1], 64);
             std::wmemcpy(stems[k - 1], swap, 64);
+            const unsigned long long time = created[k];
+            created[k] = created[k - 1];
+            created[k - 1] = time;
         }
     }
     for (size_t i = keep; i < count; ++i) {

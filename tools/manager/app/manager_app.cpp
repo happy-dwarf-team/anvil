@@ -612,6 +612,9 @@ void ManagerApp::draw_notices() {
         if (text_button(tr("What to check"))) open_url(kTroubleshootingUrl);
         end_banner(Tone::Warn);
     }
+    if (!manager_settings_error().empty()) {
+        banner("settings-error", Tone::Bad, trf("The Manager's settings were not saved: {0}", {manager_settings_error()}));
+    }
     if (ImGui::GetCursorPosY() > before) ImGui::Spacing();
 }
 
