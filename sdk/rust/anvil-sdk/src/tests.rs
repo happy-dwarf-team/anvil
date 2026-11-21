@@ -1531,6 +1531,112 @@ fn a_group_whose_changes_are_dropped_frees_the_hooks_it_filled() {
     KEPT.remove().unwrap();
 }
 
+/// A fake core for groups whose commit fails only for `FAIL_COMMIT_OF` (an
+/// owner handle as an address), and with modules.
+static FAIL_COMMIT_OF: AtomicUsize = AtomicUsize::new(0);
+
+fn host_with_groups_and_modules() -> (MutexGuard<'static, ()>, Host) {
+    unsafe extern "C" fn begin(_: *mut AnvilPlugin) -> AnvilResult {
+        ANVIL_OK
+    }
+    unsafe extern "C" fn commit(owner: *mut AnvilPlugin) -> AnvilResult {
+        if owner as usize == FAIL_COMMIT_OF.load(Ordering::Relaxed) {
+            ANVIL_ERROR_CONFLICT
+        } else {
+            ANVIL_OK
+        }
+    }
+    unsafe extern "C" fn abort(_: *mut AnvilPlugin) {}
+    let (guard, table) = fake_host();
+    let mut with_groups = *table;
+    with_groups.begin_group = Some(begin);
+    with_groups.commit_group = Some(commit);
+    with_groups.abort_group = Some(abort);
+    with_groups.module = Some(fake_module);
+    assert_eq!(load::<Quiet>(Box::leak(Box::new(with_groups))), ANVIL_OK);
+    FAIL_COMMIT_OF.store(0, Ordering::Relaxed);
+    (guard, Host::current().unwrap())
+}
+
+#[test]
+fn a_hook_filled_on_another_thread_in_a_dropped_group_is_freed() {
+    static MINE: FunctionHook<unsafe extern "C" fn(i32) -> i32> = FunctionHook::new();
+    static THEIRS: FunctionHook<unsafe extern "C" fn(i32) -> i32> = FunctionHook::new();
+    let (_guard, host) = host_with_groups_and_modules();
+    let failed = host.group(|| -> crate::Result<()> {
+        unsafe { host.hook(&MINE, 1, fake_original) }?;
+        // A thread the body started (or a panel click) requests on the same host.
+        std::thread::spawn(move || unsafe { host.hook(&THEIRS, 1, fake_original) }.map(|_| ()))
+            .join()
+            .unwrap()?;
+        Err(crate::Error::new(
+            ErrorCode::InvalidArgument,
+            "the body failed",
+        ))
+    });
+    assert!(failed.is_err());
+    assert!(!MINE.is_active() && !THEIRS.is_active());
+    // Both take a new request.
+    unsafe { host.hook(&THEIRS, 1, fake_original) }.unwrap();
+    assert!(THEIRS.is_active());
+    THEIRS.remove().unwrap();
+}
+
+#[test]
+fn a_modules_hook_is_not_part_of_the_plugins_group() {
+    static PLUGIN: FunctionHook<unsafe extern "C" fn(i32) -> i32> = FunctionHook::new();
+    static MODULE: FunctionHook<unsafe extern "C" fn(i32) -> i32> = FunctionHook::new();
+    let (_guard, host) = host_with_groups_and_modules();
+    let module = host.module("drill_all").unwrap();
+    let failed = host.group(|| -> crate::Result<()> {
+        unsafe { host.hook(&PLUGIN, 1, fake_original) }?;
+        // The module's own change, enabled at once.
+        unsafe { module.hook(&MODULE, 1, fake_original) }?;
+        Err(crate::Error::new(
+            ErrorCode::InvalidArgument,
+            "the body failed",
+        ))
+    });
+    assert!(failed.is_err());
+    assert!(!PLUGIN.is_active() && MODULE.is_active());
+    MODULE.remove().unwrap();
+}
+
+#[test]
+fn a_modules_group_inside_the_plugins_keeps_the_plugins_record() {
+    static BEFORE: FunctionHook<unsafe extern "C" fn(i32) -> i32> = FunctionHook::new();
+    static MODULE: FunctionHook<unsafe extern "C" fn(i32) -> i32> = FunctionHook::new();
+    static AFTER: FunctionHook<unsafe extern "C" fn(i32) -> i32> = FunctionHook::new();
+    let (_guard, host) = host_with_groups_and_modules();
+    let module = host.module("drill_all").unwrap();
+    // The module's group commits, the plugin's fails: only the plugin's hooks are freed.
+    FAIL_COMMIT_OF.store(host.raw_plugin() as usize, Ordering::Relaxed);
+    let refused = host.group(|| -> crate::Result<()> {
+        unsafe { host.hook(&BEFORE, 1, fake_original) }?;
+        module.group(|| unsafe { module.hook(&MODULE, 1, fake_original) }.map(|_| ()))?;
+        unsafe { host.hook(&AFTER, 1, fake_original) }?;
+        Ok(())
+    });
+    assert_eq!(refused.unwrap_err().code(), ErrorCode::Conflict);
+    assert!(!BEFORE.is_active() && !AFTER.is_active() && MODULE.is_active());
+    MODULE.remove().unwrap();
+    // The module's group fails inside the plugin's, which commits: only the module's hook is freed.
+    FAIL_COMMIT_OF.store(module.raw_plugin() as usize, Ordering::Relaxed);
+    let mut inner = None;
+    host.group(|| -> crate::Result<()> {
+        unsafe { host.hook(&BEFORE, 1, fake_original) }?;
+        inner =
+            Some(module.group(|| unsafe { module.hook(&MODULE, 1, fake_original) }.map(|_| ())));
+        unsafe { host.hook(&AFTER, 1, fake_original) }?;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(inner.unwrap().unwrap_err().code(), ErrorCode::Conflict);
+    assert!(BEFORE.is_active() && AFTER.is_active() && !MODULE.is_active());
+    BEFORE.remove().unwrap();
+    AFTER.remove().unwrap();
+}
+
 #[test]
 fn an_event_reads_only_the_size_its_publisher_knows() {
     let (_guard, table) = fake_host();

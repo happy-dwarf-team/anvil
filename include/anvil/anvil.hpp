@@ -28,6 +28,7 @@
 #include <anvil/anvil_plugin.h>
 #include <anvil/anvil_symbols.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <concepts>
 #include <cstddef>
@@ -37,7 +38,9 @@
 #include <format>
 #include <initializer_list>
 #include <new>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -274,16 +277,27 @@ inline AnvilChange* claiming() noexcept {
 
 class ChangeSlot;
 
-// A slot filled while this thread's Host::group is open, and the handle it got.
+// A slot filled while its owner's Host::group was open, and the handle it got.
 struct GroupFill {
     ChangeSlot* slot;
     AnvilChange* handle;
 };
 
-// The fills of this thread's open group; null outside one.
-inline std::vector<GroupFill>*& group_fills() noexcept {
-    static thread_local std::vector<GroupFill>* fills = nullptr;
-    return fills;
+// The open groups of the plugin and its modules, by owner handle (anvil#533).
+// A group is its owner's: a request of that owner from any thread joins it,
+// and each module is an owner of its own. Never destroyed: a hook object in a
+// global may outlive any static.
+struct GroupRecords {
+    // Held shared by a request from its host call until its slot is recorded,
+    // and exclusively by Host::group around begin_group and around the commit
+    // or abort, so a request is recorded exactly when Anvil staged it.
+    std::shared_mutex gate;
+    std::mutex mutex;  // guards `open` and the slots it names
+    std::vector<std::pair<AnvilPlugin*, std::vector<GroupFill>>> open;
+};
+inline GroupRecords& group_records() noexcept {
+    static GroupRecords* records = new GroupRecords();
+    return *records;
 }
 
 // The change of a FunctionHook or PointerSwap. A request takes the slot with a
@@ -297,7 +311,11 @@ public:
     ChangeSlot& operator=(const ChangeSlot&) = delete;
     ~ChangeSlot() {
         remove();
-        if (std::vector<GroupFill>* fills = group_fills()) std::erase_if(*fills, [this](const GroupFill& f) { return f.slot == this; });
+        GroupRecords& records = group_records();
+        std::lock_guard lock(records.mutex);
+        for (auto& [owner, fills] : records.open) {
+            std::erase_if(fills, [this](const GroupFill& f) { return f.slot == this; });
+        }
     }
 
     bool active() const noexcept { return handle_.load(std::memory_order_acquire) != nullptr; }
@@ -328,12 +346,18 @@ public:
         ~Claim() {
             if (!finished_) slot_.handle_.store(nullptr, std::memory_order_release);
         }
-        void finish(AnvilChange* handle) noexcept {
+        // The request of `owner` succeeded. Called under the request's shared
+        // hold of GroupRecords::gate.
+        void finish(AnvilChange* handle, AnvilPlugin* owner) noexcept {
             slot_.handle_.store(handle, std::memory_order_release);
             finished_ = true;
-            if (std::vector<GroupFill>* fills = group_fills(); fills != nullptr && handle != nullptr) {
+            if (handle == nullptr) return;
+            GroupRecords& records = group_records();
+            std::lock_guard lock(records.mutex);
+            for (auto& [open_owner, fills] : records.open) {
+                if (open_owner != owner) continue;
                 try {
-                    fills->push_back({&slot_, handle});
+                    fills.push_back({&slot_, handle});
                 } catch (...) {  // out of memory: the slot keeps the handle until remove()
                 }
             }
@@ -354,22 +378,37 @@ private:
     std::atomic<AnvilChange*> handle_{nullptr};
 };
 
-// Host::group's record of the slots this thread fills while the group is open.
+// Host::group's record of the slots its owner fills, from any thread, while
+// the group is open. Opened and closed under the exclusive hold of the gate.
 class GroupScope {
 public:
-    GroupScope() noexcept : outer_(group_fills()) { group_fills() = &fills_; }
+    explicit GroupScope(AnvilPlugin* owner) : owner_(owner) {
+        GroupRecords& records = group_records();
+        std::lock_guard lock(records.mutex);
+        records.open.emplace_back(owner, std::vector<GroupFill>());
+    }
     GroupScope(const GroupScope&) = delete;
     GroupScope& operator=(const GroupScope&) = delete;
-    ~GroupScope() { group_fills() = outer_; }
-    // Anvil dropped the group's changes: their slots are free again.
-    void discard() noexcept {
-        for (const GroupFill& f : fills_) f.slot->forget(f.handle);
-        fills_.clear();
+    ~GroupScope() { close(false); }
+    // The group ended; when Anvil dropped its changes (`discarded`), the slots
+    // still holding their handles are free again.
+    void close(bool discarded) noexcept {
+        if (closed_) return;
+        closed_ = true;
+        GroupRecords& records = group_records();
+        std::lock_guard lock(records.mutex);
+        const auto it = std::find_if(records.open.begin(), records.open.end(),
+                                     [this](const auto& entry) { return entry.first == owner_; });
+        if (it == records.open.end()) return;
+        if (discarded) {
+            for (const GroupFill& f : it->second) f.slot->forget(f.handle);
+        }
+        records.open.erase(it);
     }
 
 private:
-    std::vector<GroupFill>* outer_;
-    std::vector<GroupFill> fills_;
+    AnvilPlugin* owner_;
+    bool closed_ = false;
 };
 
 // Whether a failed request leaves a hook's `next` cell as it was: Anvil after
@@ -437,9 +476,10 @@ private:
     }
     // A request that succeeded: Anvil wrote `next` into `cell` during the
     // call (and never changes it afterwards); a local is copied in only now.
-    void finish(detail::ChangeSlot::Claim& claim, void** cell, void* local, AnvilChange* handle) noexcept {
+    void finish(detail::ChangeSlot::Claim& claim, void** cell, void* local, AnvilChange* handle,
+                AnvilPlugin* owner) noexcept {
         if (cell != &next_) std::atomic_ref<void*>(next_).store(local, std::memory_order_release);
-        claim.finish(handle);
+        claim.finish(handle, owner);
     }
     detail::ChangeSlot change_;
     alignas(8) mutable void* next_ = nullptr;
@@ -599,13 +639,14 @@ public:
                           "this symbol; the symbol is named in the note below");
             if constexpr (std::is_same_v<Sig, typename S::Signature> && std::is_convertible_v<D, typename S::Pointer>) {
                 const typename S::Pointer target = detour;
+                std::shared_lock gate(detail::group_records().gate);
                 detail::ChangeSlot::Claim claim(hook.change_, "hook_function");
                 AnvilChange* handle = nullptr;
                 void* next = nullptr;
                 void** const cell = hook.next_cell(next, detail::restores_next(c_api()));
                 detail::check(c_api().hook_function(self(), fn.id, reinterpret_cast<void*>(target), cell, &handle),
                               "hook_function", detail::name_of<S>());
-                hook.finish(claim, cell, next, handle);
+                hook.finish(claim, cell, next, handle, self());
             }
         }
     }
@@ -660,13 +701,14 @@ public:
                       "anvil::Host::redirect: the target does not match the hook object's signature");
         if constexpr (SiteSymbol<S> && std::is_convertible_v<D, typename FunctionHook<Sig>::Pointer>) {
             const typename FunctionHook<Sig>::Pointer fn = target;
+            std::shared_lock gate(detail::group_records().gate);
             detail::ChangeSlot::Claim claim(hook.change_, "redirect_call");
             AnvilChange* handle = nullptr;
             void* next = nullptr;
             void** const cell = hook.next_cell(next, detail::restores_next(c_api()));
             detail::check(c_api().redirect_call(self(), call_site.id, reinterpret_cast<void*>(fn), cell, &handle),
                           "redirect_call", detail::name_of<S>());
-            hook.finish(claim, cell, next, handle);
+            hook.finish(claim, cell, next, handle, self());
         }
     }
 
@@ -695,13 +737,14 @@ public:
         static_assert(std::is_convertible_v<V, T*>, "anvil::Host::swap: the value is not a T* of the PointerSwap<T>");
         if constexpr (SlotSymbol<S> && std::is_convertible_v<V, T*>) {
             T* const pointer = value;
+            std::shared_lock gate(detail::group_records().gate);
             detail::ChangeSlot::Claim claim(swap.change_, "swap_pointer");
             AnvilChange* handle = nullptr;
             // `previous` cannot be a local: Anvil keeps the cell and rewrites it
             // whenever the chain changes.
             detail::check(c_api().swap_pointer(self(), slot.id, to_void(pointer), &swap.previous_, &handle),
                           "swap_pointer", detail::name_of<S>());
-            claim.finish(handle);
+            claim.finish(handle, self());
         }
     }
 
@@ -712,13 +755,14 @@ public:
                       "anvil::Host::replace_import: the replacement does not match the hook object's signature");
         if constexpr (std::is_convertible_v<D, typename FunctionHook<Sig>::Pointer>) {
             const typename FunctionHook<Sig>::Pointer fn = replacement;
+            std::shared_lock gate(detail::group_records().gate);
             detail::ChangeSlot::Claim claim(hook.change_, "replace_import");
             AnvilChange* handle = nullptr;
             void* next = nullptr;
             void** const cell = hook.next_cell(next, detail::restores_next(c_api()));
             detail::check(c_api().replace_import(self(), module, function, reinterpret_cast<void*>(fn), cell, &handle),
                           "replace_import", std::string(module) + "!" + function);
-            hook.finish(claim, cell, next, handle);
+            hook.finish(claim, cell, next, handle, self());
         }
     }
 
@@ -731,6 +775,7 @@ public:
                       "anvil::Host::hook_at: the detour does not match the hook object's signature");
         if constexpr (std::is_convertible_v<D, typename FunctionHook<Sig>::Pointer>) {
             const typename FunctionHook<Sig>::Pointer fn = detour;
+            std::shared_lock gate(detail::group_records().gate);
             detail::ChangeSlot::Claim claim(hook.change_, "hook_function_at");
             AnvilChange* handle = nullptr;
             void* next = nullptr;
@@ -739,7 +784,7 @@ public:
                                                    expected_prologue.size(), reinterpret_cast<void*>(fn), cell,
                                                    &handle),
                           "hook_function_at", detail::address_text(address));
-            hook.finish(claim, cell, next, handle);
+            hook.finish(claim, cell, next, handle, self());
         }
     }
 
@@ -763,27 +808,42 @@ public:
     // when it throws (the exception goes on). Inside load() the load itself is
     // the group, so this throws ANVIL_ERROR_WRONG_PHASE there.
     //
-    // When the group's changes are dropped (`body` throws, or Anvil refuses
-    // the commit), the FunctionHooks and PointerSwaps this thread filled in
-    // `body` are free again: active() is false and they take a new request.
+    // The group is this host's (the plugin's, or the module's for a module
+    // host), not this thread's: a request on this host from any thread while
+    // it is open (a panel click, a thread `body` started) joins it, is
+    // enabled only with the commit and dropped with an abort. A request on
+    // another host (a module inside the plugin's group) is not part of it.
     //
-    // The group is the plugin's, not this thread's: a request from any of the
-    // plugin's threads while it is open (a panel click, a thread `body`
-    // started) joins it, is enabled only with the commit and dropped with an
-    // abort. Hook objects another thread filled keep their handles then:
-    // remove() them before reusing them.
+    // When the group's changes are dropped (`body` throws, or Anvil refuses
+    // the commit), the FunctionHooks and PointerSwaps filled in the group, on
+    // any thread, are free again: active() is false and they take a new
+    // request.
     template <class F> void group(F&& body) const {
-        detail::check(c_api().begin_group(self()), "begin_group", "");
-        detail::GroupScope scope;
+        std::optional<detail::GroupScope> scope;
+        {
+            std::unique_lock gate(detail::group_records().gate);
+            detail::check(c_api().begin_group(self()), "begin_group", "");
+            try {
+                scope.emplace(self());
+            } catch (...) {
+                c_api().abort_group(self());
+                throw;
+            }
+        }
         try {
             std::forward<F>(body)();
         } catch (...) {
+            std::unique_lock gate(detail::group_records().gate);
             c_api().abort_group(self());
-            scope.discard();
+            scope->close(true);
             throw;
         }
-        const AnvilResult committed = c_api().commit_group(self());
-        if (committed != ANVIL_OK) scope.discard();
+        AnvilResult committed = ANVIL_OK;
+        {
+            std::unique_lock gate(detail::group_records().gate);
+            committed = c_api().commit_group(self());
+            scope->close(committed != ANVIL_OK);
+        }
         detail::check(committed, "commit_group", "");
     }
 

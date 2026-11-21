@@ -424,6 +424,7 @@ impl Host {
         symbol: AnvilSymbol,
         detour: F,
     ) -> Result<()> {
+        let _gate = crate::change::request_gate();
         let claim = hook.claim("hook_function")?;
         let call = function!(self.table, AnvilHost, hook_function)?;
         let mut change: *mut AnvilChange = ptr::null_mut();
@@ -433,7 +434,7 @@ impl Host {
         // detour has the symbol's declared type.
         let result = unsafe { call(self.plugin, symbol, detour.into_raw(), cell, &mut change) };
         check(result, || format!("hook_function symbol {symbol}"))?;
-        hook.finish(claim, cell, next, change);
+        hook.finish(claim, cell, next, change, self.plugin);
         Ok(())
     }
 
@@ -500,6 +501,7 @@ impl Host {
         call_site: AnvilSymbol,
         target: F,
     ) -> Result<()> {
+        let _gate = crate::change::request_gate();
         let claim = hook.claim("redirect_call")?;
         let call = function!(self.table, AnvilHost, redirect_call)?;
         let mut change: *mut AnvilChange = ptr::null_mut();
@@ -508,7 +510,7 @@ impl Host {
         // SAFETY: a declared symbol; the caller vouches for the type.
         let result = unsafe { call(self.plugin, call_site, target.into_raw(), cell, &mut change) };
         check(result, || format!("redirect_call symbol {call_site}"))?;
-        hook.finish(claim, cell, next, change);
+        hook.finish(claim, cell, next, change, self.plugin);
         Ok(())
     }
 
@@ -547,13 +549,14 @@ impl Host {
         slot: AnvilSymbol,
         value: *mut c_void,
     ) -> Result<()> {
+        let _gate = crate::change::request_gate();
         let claim = swap.claim()?;
         let call = function!(self.table, AnvilHost, swap_pointer)?;
         let mut change: *mut AnvilChange = ptr::null_mut();
         // SAFETY: `previous` lives in a static and is 8-byte aligned; the caller vouches for `value`.
         let result = unsafe { call(self.plugin, slot, value, swap.previous_slot(), &mut change) };
         check(result, || format!("swap_pointer symbol {slot}"))?;
-        claim.finish(change);
+        claim.finish(change, self.plugin);
         Ok(())
     }
 
@@ -569,6 +572,7 @@ impl Host {
         function: &str,
         replacement: F,
     ) -> Result<()> {
+        let _gate = crate::change::request_gate();
         let claim = hook.claim("replace_import")?;
         let call = function!(self.table, AnvilHost, replace_import)?;
         let (module_c, function_c) = (c_string(module), c_string(function));
@@ -587,7 +591,7 @@ impl Host {
             )
         };
         check(result, || format!("replace_import {module}!{function}"))?;
-        hook.finish(claim, cell, next, change);
+        hook.finish(claim, cell, next, change, self.plugin);
         Ok(())
     }
 
@@ -604,6 +608,7 @@ impl Host {
         expected_prologue: &[u8],
         detour: F,
     ) -> Result<()> {
+        let _gate = crate::change::request_gate();
         let claim = hook.claim("hook_function_at")?;
         let call = function!(self.table, AnvilHost, hook_function_at)?;
         let mut change: *mut AnvilChange = ptr::null_mut();
@@ -624,7 +629,7 @@ impl Host {
         check(result, || {
             format!("hook_function_at {:p}", address.as_ptr())
         })?;
-        hook.finish(claim, cell, next, change);
+        hook.finish(claim, cell, next, change, self.plugin);
         Ok(())
     }
 
@@ -666,41 +671,49 @@ impl Host {
     /// which logs it itself). Inside `load`
     /// the load itself is the group: `WrongPhase`.
     ///
-    /// When the group's changes are dropped (an error, a panic, or a commit
-    /// Anvil refuses), the [`FunctionHook`]s and [`PointerSwap`]s this thread
-    /// filled in `body` are free again: `is_active` is false and they take a
-    /// new request.
-    ///
-    /// The group is the plugin's, not this thread's: a request from any of
-    /// the plugin's threads while it is open (a panel click, a thread `body`
+    /// The group is this host's (the plugin's, or the module's for a
+    /// [`module`](Self::module) host), not this thread's: a request on this
+    /// host from any thread while it is open (a panel click, a thread `body`
     /// started) joins it, is enabled only with the commit and dropped with an
-    /// abort. Hook objects another thread filled keep their handles then:
-    /// `remove()` them before reusing them.
+    /// abort. A request on another host (a module inside the plugin's group)
+    /// is not part of it.
+    ///
+    /// When the group's changes are dropped (an error, a panic, or a commit
+    /// Anvil refuses), the [`FunctionHook`]s and [`PointerSwap`]s filled in
+    /// the group, on any thread, are free again: `is_active` is false and
+    /// they take a new request.
     pub fn group<R>(&self, body: impl FnOnce() -> Result<R>) -> Result<R> {
         let begin = function!(self.table, AnvilHost, begin_group)?;
         let commit = function!(self.table, AnvilHost, commit_group)?;
         let abort = function!(self.table, AnvilHost, abort_group)?;
-        // SAFETY: the host's functions with this plugin.
-        check(unsafe { begin(self.plugin) }, || "begin_group")?;
-        crate::change::group_opened();
-        match catch_raw(body) {
+        {
+            let _gate = crate::change::group_gate();
+            // SAFETY: the host's functions with this plugin.
+            check(unsafe { begin(self.plugin) }, || "begin_group")?;
+            crate::change::group_opened(self.plugin);
+        }
+        let outcome = catch_raw(body);
+        let gate = crate::change::group_gate();
+        match outcome {
             Ok(Ok(value)) => {
                 // SAFETY: as above.
                 let committed = check(unsafe { commit(self.plugin) }, || "commit_group");
-                crate::change::group_closed(committed.is_err());
+                crate::change::group_closed(self.plugin, committed.is_err());
+                drop(gate);
                 committed?;
                 Ok(value)
             }
             Ok(Err(error)) => {
                 // SAFETY: as above.
                 unsafe { abort(self.plugin) };
-                crate::change::group_closed(true);
+                crate::change::group_closed(self.plugin, true);
                 Err(error)
             }
             Err(panic) => {
                 // SAFETY: as above.
                 unsafe { abort(self.plugin) };
-                crate::change::group_closed(true);
+                crate::change::group_closed(self.plugin, true);
+                drop(gate);
                 // Logged here when no adapter of this thread catches it further out.
                 resume(panic)
             }

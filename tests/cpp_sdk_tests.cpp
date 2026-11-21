@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <functional>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -25,6 +26,7 @@ struct Fake {
     int handles = 0;
     int removed = 0;
     AnvilResult commit = ANVIL_OK;
+    AnvilPlugin* fail_commit_of = nullptr;  // when set: only this owner's commit fails, with `commit`
     int aborts = 0;
     bool old_core = true;          // Anvil 1.25.0 and older: a failed request writes NULL into next
     std::function<void()> during;  // runs inside the request
@@ -69,7 +71,16 @@ AnvilResult fake_remove(AnvilPlugin*, AnvilChange*) {
 
 void fake_log(AnvilPlugin*, AnvilLogLevel, const char*) {}
 AnvilResult fake_begin(AnvilPlugin*) { return ANVIL_OK; }
-AnvilResult fake_commit(AnvilPlugin*) { return g_fake.commit; }
+AnvilResult fake_commit(AnvilPlugin* owner) {
+    if (g_fake.fail_commit_of != nullptr) return owner == g_fake.fail_commit_of ? g_fake.commit : ANVIL_OK;
+    return g_fake.commit;
+}
+
+AnvilPlugin* const kModule = reinterpret_cast<AnvilPlugin*>(static_cast<uintptr_t>(0x40D));
+AnvilResult fake_module(AnvilPlugin*, const char*, AnvilPlugin** out) {
+    *out = kModule;
+    return ANVIL_OK;
+}
 void fake_abort(AnvilPlugin*) { ++g_fake.aborts; }
 
 AnvilGameInfo g_game{};
@@ -86,6 +97,7 @@ AnvilHost make_host() {
     h.begin_group = &fake_begin;
     h.commit_group = &fake_commit;
     h.abort_group = &fake_abort;
+    h.module = &fake_module;
     return h;
 }
 
@@ -335,6 +347,85 @@ int main() {
         CHECK(h.game_sha256() == "9AD3EFE1");
         g_game.size = offsetof(AnvilGameInfo, sha256);
         CHECK(h.game_sha256().empty());
+    });
+
+    run("group: a hook filled on another thread in a dropped group is freed (anvil#533)", [&] {
+        g_fake = {};
+        anvil::FunctionHook<int(int)> mine;
+        anvil::FunctionHook<int(int)> theirs;
+        bool threw = false;
+        try {
+            h.group([&] {
+                h.hook_at(mine, address, &detour);
+                // A thread the body started (or a panel click) requests on the same host.
+                std::thread([&] { h.hook_at(theirs, address, &detour); }).join();
+                throw anvil::Error(ANVIL_ERROR_INVALID_ARGUMENT, "the body failed");
+            });
+        } catch (const anvil::Error&) {
+            threw = true;
+        }
+        CHECK(threw && g_fake.aborts == 1);
+        CHECK(!mine.active() && !theirs.active());
+        // Both take a new request.
+        h.hook_at(theirs, address, &detour);
+        CHECK(theirs.active());
+        theirs.remove();
+    });
+
+    run("group: a module's hook is not part of the plugin's group (anvil#533)", [&] {
+        g_fake = {};
+        const std::optional<anvil::Host> m = h.module("drill_all");
+        CHECK(m.has_value() && m->self() == kModule);
+        anvil::FunctionHook<int(int)> plugin_hook;
+        anvil::FunctionHook<int(int)> module_hook;
+        try {
+            h.group([&] {
+                h.hook_at(plugin_hook, address, &detour);
+                m->hook_at(module_hook, address, &detour);  // the module's own change, enabled at once
+                throw anvil::Error(ANVIL_ERROR_INVALID_ARGUMENT, "the body failed");
+            });
+        } catch (const anvil::Error&) {
+        }
+        CHECK(!plugin_hook.active() && module_hook.active());
+        module_hook.remove();
+    });
+
+    run("group: a module's group inside the plugin's keeps the plugin's record (anvil#533)", [&] {
+        g_fake = {};
+        const std::optional<anvil::Host> m = h.module("drill_all");
+        anvil::FunctionHook<int(int)> before;  // the plugin's, before the module's group
+        anvil::FunctionHook<int(int)> module_hook;
+        anvil::FunctionHook<int(int)> after;  // the plugin's, after it
+        // The module's group commits, the plugin's fails: only the plugin's hooks are freed.
+        g_fake.commit = ANVIL_ERROR_CONFLICT;
+        g_fake.fail_commit_of = h.self();
+        bool threw = false;
+        try {
+            h.group([&] {
+                h.hook_at(before, address, &detour);
+                m->group([&] { m->hook_at(module_hook, address, &detour); });
+                h.hook_at(after, address, &detour);
+            });
+        } catch (const anvil::Error& e) {
+            threw = e.result() == ANVIL_ERROR_CONFLICT;
+        }
+        CHECK(threw && !before.active() && !after.active() && module_hook.active());
+        module_hook.remove();
+        // The module's group fails inside the plugin's, which commits: only the module's hook is freed.
+        g_fake.fail_commit_of = kModule;
+        threw = false;
+        h.group([&] {
+            h.hook_at(before, address, &detour);
+            try {
+                m->group([&] { m->hook_at(module_hook, address, &detour); });
+            } catch (const anvil::Error& e) {
+                threw = e.result() == ANVIL_ERROR_CONFLICT;
+            }
+            h.hook_at(after, address, &detour);
+        });
+        CHECK(threw && before.active() && after.active() && !module_hook.active());
+        before.remove();
+        after.remove();
     });
 
     std::printf("%d checks, %d failed\n", g_checks, g_failures);

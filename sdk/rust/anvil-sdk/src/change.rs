@@ -1,14 +1,14 @@
-use std::cell::RefCell;
 use std::ffi::c_void;
 use std::fmt;
 use std::marker::PhantomData;
 use std::ptr::{self, NonNull};
 use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::error::{check, Error, ErrorCode, Result};
 use crate::fnptr::FnPtr;
 use crate::host::Host;
-use crate::sys::AnvilChange;
+use crate::sys::{AnvilChange, AnvilPlugin};
 
 /// A change's handle: dropping it removes the change; [`keep`](Change::keep)
 /// keeps the change for the rest of the process.
@@ -105,26 +105,50 @@ fn remove_slot(slot: &AtomicPtr<AnvilChange>, what: &str) -> Result<()> {
 /// A slot filled in a group, and the handle (as an address) it got.
 type FilledSlot = (&'static AtomicPtr<AnvilChange>, usize);
 
-thread_local! {
-    /// The hook and swap slots this thread filled inside its open
-    /// [`Host::group`](crate::Host::group), each with the handle it got. A
-    /// group that aborts or whose commit Anvil refuses removes those changes,
-    /// so the slots are emptied again (else `is_active` stays true and the
-    /// next request on the hook answers "already holds a change").
-    static GROUP_SLOTS: RefCell<Option<Vec<FilledSlot>>> = const { RefCell::new(None) };
+/// The open [`Host::group`](crate::Host::group)s of the plugin and its
+/// modules, by owner handle (as an address), each with the hook and swap
+/// slots filled in it and the handles they got (anvil#533). A group is its
+/// owner's: a request of that owner from any thread joins it, and each module
+/// is an owner of its own. A group that aborts or whose commit Anvil refuses
+/// removes those changes, so the slots are emptied again (else `is_active`
+/// stays true and the next request on the hook answers "already holds a
+/// change").
+static OPEN_GROUPS: Mutex<Vec<(usize, Vec<FilledSlot>)>> = Mutex::new(Vec::new());
+
+/// Held shared by a request from its host call until its slot is recorded,
+/// and exclusively by `Host::group` around `begin_group` and around the
+/// commit or abort, so a request is recorded exactly when Anvil staged it.
+static GROUP_GATE: RwLock<()> = RwLock::new(());
+
+/// The shared hold of a request.
+pub(crate) fn request_gate() -> RwLockReadGuard<'static, ()> {
+    GROUP_GATE.read().unwrap_or_else(|e| e.into_inner())
 }
 
-/// A group opened on this thread: slots filled from now on are recorded.
-pub(crate) fn group_opened() {
-    GROUP_SLOTS.with(|slots| *slots.borrow_mut() = Some(Vec::new()));
+/// The exclusive hold of a group's start and end.
+pub(crate) fn group_gate() -> RwLockWriteGuard<'static, ()> {
+    GROUP_GATE.write().unwrap_or_else(|e| e.into_inner())
 }
 
-/// The group ended. When Anvil removed its changes (`discarded`), each slot
-/// still holding the handle it got in the group is emptied; a slot that has
-/// moved on (removed, or filled again) is left as it is.
-pub(crate) fn group_closed(discarded: bool) {
-    let Some(filled) = GROUP_SLOTS.with(|slots| slots.borrow_mut().take()) else {
-        return;
+fn open_groups() -> std::sync::MutexGuard<'static, Vec<(usize, Vec<FilledSlot>)>> {
+    OPEN_GROUPS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// `owner` opened a group: slots its requests fill from now on are recorded.
+pub(crate) fn group_opened(owner: *mut AnvilPlugin) {
+    open_groups().push((owner as usize, Vec::new()));
+}
+
+/// `owner`'s group ended. When Anvil removed its changes (`discarded`), each
+/// slot still holding the handle it got in the group is emptied; a slot that
+/// has moved on (removed, or filled again) is left as it is.
+pub(crate) fn group_closed(owner: *mut AnvilPlugin, discarded: bool) {
+    let filled = {
+        let mut groups = open_groups();
+        let Some(at) = groups.iter().position(|(o, _)| *o == owner as usize) else {
+            return;
+        };
+        groups.swap_remove(at).1
     };
     if !discarded {
         return;
@@ -170,15 +194,15 @@ impl Claim {
         })
     }
 
-    /// The request succeeded: the slot holds its handle.
-    pub(crate) fn finish(self, change: *mut AnvilChange) {
+    /// The request of `owner` succeeded: the slot holds its handle. Called
+    /// under the request's [`request_gate`].
+    pub(crate) fn finish(self, change: *mut AnvilChange, owner: *mut AnvilPlugin) {
         self.slot.store(change, Ordering::Release);
         if !change.is_null() {
-            GROUP_SLOTS.with(|slots| {
-                if let Some(filled) = slots.borrow_mut().as_mut() {
-                    filled.push((self.slot, change as usize));
-                }
-            });
+            let mut groups = open_groups();
+            if let Some((_, filled)) = groups.iter_mut().find(|(o, _)| *o == owner as usize) {
+                filled.push((self.slot, change as usize));
+            }
         }
         std::mem::forget(self);
     }
@@ -273,11 +297,12 @@ impl<F: FnPtr> FunctionHook<F> {
         cell: *mut *mut c_void,
         local: *mut c_void,
         change: *mut AnvilChange,
+        owner: *mut AnvilPlugin,
     ) {
         if cell != self.next.as_ptr() {
             self.next.store(local, Ordering::Release);
         }
-        claim.finish(change);
+        claim.finish(change, owner);
     }
 }
 
