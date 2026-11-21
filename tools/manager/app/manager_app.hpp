@@ -65,6 +65,8 @@ public:
     void select_plugin(std::string id) { plugins_tab_.selected = std::move(id); }
     // The dialog to open once the folder is read: "install" (the Anvil page's
     // Install, Replace or Repair) or "uninstall"; it opens only where its button would.
+    // "send-<status>" or "send-<status>-tomorrow" opens the newest kept benchmark
+    // report and shows the receiver's answer under Send (with "retry": "tomorrow").
     void open_dialog(std::string name) { shot_dialog_ = std::move(name); }
 
 private:

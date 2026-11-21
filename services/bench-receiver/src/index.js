@@ -22,7 +22,12 @@ export default {
     );
     const headers = { "content-type": "application/json; charset=utf-8" };
     if (outcome.status === 405) headers.allow = "POST";
-    return new Response(JSON.stringify({ message: outcome.message }), { status: outcome.status, headers });
+    // `retry: "tomorrow"` tells the Manager that a daily limit refused the
+    // report, so another Send today is refused too.
+    return new Response(JSON.stringify({ message: outcome.message, retry: outcome.retry }), {
+      status: outcome.status,
+      headers,
+    });
   },
 
   async scheduled(controller, env) {
@@ -122,8 +127,16 @@ async function receive(request, env) {
 }
 
 const REFUSED = {
-  sender: { status: 429, message: "This address has sent all the reports it can today. Try again tomorrow." },
-  day: { status: 503, message: "The receiver has taken all the reports it can today. Try again tomorrow." },
+  sender: {
+    status: 429,
+    message: "This address has sent all the reports it can today. Try again tomorrow.",
+    retry: "tomorrow",
+  },
+  day: {
+    status: 503,
+    message: "The receiver has taken all the reports it can today. Try again tomorrow.",
+    retry: "tomorrow",
+  },
   total: { status: 503, message: "The receiver has no room for more reports. Try again later." },
 };
 

@@ -534,7 +534,8 @@ data is a diagnostic signal, and bad reports are removed by hand.
 | 201 | "Sent" |
 | 200 | "This report has already arrived" |
 | 413 / 422 | the server's message |
-| 429 / 503 | "Try again later" |
+| 429 / 503 with `"retry": "tomorrow"` (a daily limit) | "Try again tomorrow" |
+| other 429 / 503 | "Try again later" |
 | network error | the error, with Copy |
 
 No automatic retries: the player clicks again.

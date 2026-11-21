@@ -820,6 +820,8 @@ extern const Translation kKorean[] = {
      "수신 서버 응답: {0}."},
     {"The receiver answered {0}: {1}",
      "수신 서버 응답 {0}: {1}"},
+    {"The receiver cannot take more reports today. Try again tomorrow.",
+     "수신 서버는 이제 보고서를 더 받을 수 없습니다. 내일 다시 시도하세요."},
     {"The receiver is busy. Try again later.",
      "수신 서버가 바쁩니다. 나중에 다시 시도하세요."},
     {"The receiver refused the report.",

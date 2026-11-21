@@ -820,6 +820,8 @@ extern const Translation kPolish[] = {
      "Serwer odpowiedział {0}."},
     {"The receiver answered {0}: {1}",
      "Serwer odpowiedział {0}: {1}"},
+    {"The receiver cannot take more reports today. Try again tomorrow.",
+     "Serwer nie przyjmie dziś więcej raportów. Spróbuj jutro."},
     {"The receiver is busy. Try again later.",
      "Serwer jest zajęty. Spróbuj później."},
     {"The receiver refused the report.",

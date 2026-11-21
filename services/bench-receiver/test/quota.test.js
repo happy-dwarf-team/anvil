@@ -98,7 +98,10 @@ describe("check 4: per sender, per day", () => {
     const log = vi.spyOn(console, "log");
     const refused = await post(report(), ip);
     expect(refused.status).toBe(429);
-    expect((await refused.json()).message).toBe("This address has sent all the reports it can today. Try again tomorrow.");
+    expect(await refused.json()).toEqual({
+      message: "This address has sent all the reports it can today. Try again tomorrow.",
+      retry: "tomorrow",
+    });
     expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({ status: 429, limit: "sender" });
     // Another sender is not affected, nor the count of all senders.
     expect((await post(report())).status).toBe(201);
@@ -155,7 +158,8 @@ describe("check 4: the stored total", () => {
     const log = vi.spyOn(console, "log");
     const refused = await post(body);
     expect(refused.status).toBe(503);
-    expect((await refused.json()).message).toBe("The receiver has no room for more reports. Try again later.");
+    // Retention frees space at no set time: no "retry".
+    expect(await refused.json()).toEqual({ message: "The receiver has no room for more reports. Try again later." });
     expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({ status: 503, limit: "total" });
     // Nothing was taken from the day's counts.
     expect((await counts()).map((row) => [row.received, row.bytes])).toEqual([

@@ -820,6 +820,8 @@ extern const Translation kJapanese[] = {
      "受信サーバーの応答：{0}。"},
     {"The receiver answered {0}: {1}",
      "受信サーバーの応答 {0}：{1}"},
+    {"The receiver cannot take more reports today. Try again tomorrow.",
+     "受信サーバーは今日はこれ以上レポートを受け付けられません。明日もう一度お試しください。"},
     {"The receiver is busy. Try again later.",
      "受信サーバーが混み合っています。後でもう一度お試しください。"},
     {"The receiver refused the report.",
