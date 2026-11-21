@@ -128,12 +128,20 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
   flags already on the map.
   Not in ironman or multiplayer games.
 - Each start writes `anvil/anvil.log`: what was loaded, what was skipped and why.
+  From Anvil 1.26 an `anvil/anvil.toml` that does not parse, or a list of the
+  wrong type in it, loads no plugin until it is fixed, so a plugin you turned
+  off does not load by mistake; the log names the line.
 - A crash writes a report to `anvil/crashes/` (the last 10 are kept): where it
   happened and which plugins were involved, with each plugin's `issues` link.
   From Anvil 1.25 it also lists the notes of Anvil's own plugins: the one of
   `anvil-script-profiler` names the events, decisions and other script found
   on the crashed thread's stack
   ([docs/script-profiler.md](docs/script-profiler.md#crash-reports)).
+  From Anvil 1.26 `anvil-game` adds a note for two crashes of the game itself
+  ([#426](https://github.com/happy-dwarf-team/anvil/issues/426)): a read or
+  write where a province past the map would be names that province ID, and a
+  save with more ideas taken in a group than the group has is named when the
+  game adds up the ideas' modifiers.
   After two starts in a row that ended before the game was ready, the next
   start loads only `anvil-game` and `anvil-overlay` (safe mode), and the
   overlay says why.
@@ -177,7 +185,9 @@ menu" on its Anvil tab makes that one click, and uninstalling removes the entry.
   and its modules on or off, says where each runs (ironman, multiplayer) and
   edits its settings (Anvil 1.23 and later, [ADR 0013](docs/adr/0013-module-settings-and-overlay-writes.md)).
 - It approves and revokes plugins that come with enabled mods (Anvil 1.3 and
-  later), checking that the mod still has the version shown.
+  later), checking that the mod still has the version shown. From Anvil 1.26 a
+  damaged approved copy is made again from the mod while the mod still has the
+  approved files.
 - On its Benchmark tab (Anvil 1.5 and later) it measures how long the game
   takes to start without a plugin and with it, in a series of starts that quit
   by themselves, and shows the result with cold starts apart. The report is
@@ -198,7 +208,9 @@ menu" on its Anvil tab makes that one click, and uninstalling removes the entry.
   shows Chinese, Japanese and Korean text instead): "Replace EU4DLL" moves
   their files to `anvil-legacy-backup/` in the game folder and installs
   Anvil. Another mod's `version.dll` is replaced only if you tick the box,
-  and also goes to that folder rather than being overwritten.
+  and also goes to that folder rather than being overwritten. From Anvil 1.26
+  a replace that was interrupted is finished in the same backup the next time
+  you click the button.
 - "Uninstall Anvil" removes `version.dll`, the standard plugins and the
   Manager, and keeps your plugins, their settings and `anvil/anvil.toml`.
   Tick "Also remove my plugins…" to remove the `anvil` folder too, and
