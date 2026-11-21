@@ -342,6 +342,16 @@ void BenchmarkTab::start(const BenchmarkContext& context) {
     // The checks again, as they are now: EU4 may have started since they were shown.
     check(context);
     if (checks_.empty() || !checks_pass(checks_)) return;
+    // Without random bytes from Windows there is no series id to send the
+    // report under: no series, and "The series ended before a start ran."
+    const std::string series_id = new_series_id();
+    if (series_id.empty()) {
+        report_.reset();
+        series_.reset();
+        series_note_.clear();
+        screen_ = Screen::Result;
+        return;
+    }
     // The first arm alternates between series; only this computer remembers it.
     const Arm first = settings_.benchmark_first_arm == "without" ? Arm::With : Arm::Without;
     settings_.benchmark_first_arm = arm_name(first);
@@ -350,7 +360,7 @@ void BenchmarkTab::start(const BenchmarkContext& context) {
 
     user_dir_ = context.report->user_dir.empty() ? eu4_user_dir(context.game) : fs::path(widen(context.report->user_dir));
     input_ = ReportInput{};
-    input_.series_id = new_series_id();
+    input_.series_id = series_id;
     input_.compared_version = compared->version;
     input_.game_build = context.exe_build;
     input_.game_sha256 = context.exe_sha256;

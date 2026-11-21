@@ -63,8 +63,14 @@ struct ReportInput {
     std::vector<ReportPluginSource> plugins;  // every plugin that may have loaded
 };
 
+// Fills `size` bytes at `out` with random bytes; false when it cannot.
+using RandomFill = bool (*)(unsigned char* out, std::size_t size);
+bool system_random(unsigned char* out, std::size_t size);  // BCryptGenRandom
+
 // A random UUID v4, new for every series; only used to drop a repeated Send.
-std::string new_series_id();
+// Empty when `fill` fails: the zeros it would leave make one id for every such
+// series, and the receiver would keep only the first of them.
+std::string new_series_id(RandomFill fill = system_random);
 
 // The report document, members in the schema's order.
 Json benchmark_report(const ReportInput& input);
