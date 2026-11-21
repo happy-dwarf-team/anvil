@@ -172,6 +172,12 @@ int main() {
         // Keys inside blocks and nested blocks do not count; bare words are values too.
         const PlaysetMod nested = parse_mod_descriptor("tags = { path = \"no\" inner = { name = \"no\" } }\nname = yes\npath = \"C:/m\"");
         CHECK(nested.name == "yes" && generic(nested.folder) == "C:/m");
+        // A backslash before the closing quote escapes it, as in the game, which
+        // then does not load the mod (anvil#545 T7): its folder never exists.
+        const PlaysetMod escaped = parse_mod_descriptor("name=\"e\"\npath=\"C:\\mods\\e\\\"\nsupported_version=\"1.37.*\"\n");
+        CHECK(escaped.name == "e" && generic(escaped.folder) == "C:/mods/e\"\nsupported_version=");
+        CHECK(generic(parse_mod_descriptor("path=\"C:\\\\mods\\\\x\"").folder) == "C:/mods/x");
+        CHECK(generic(parse_mod_descriptor("path=\"C:\\mods\\x\"").folder) == "C:/mods/x");  // other backslashes stay
     });
 
     run("the playset: descriptors relative to the user folder; Workshop ids from the Workshop folder only", [] {

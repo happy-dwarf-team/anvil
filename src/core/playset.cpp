@@ -66,6 +66,9 @@ std::string workshop_id_of(const fs::path& folder) {
 }
 
 // Paradox script tokens: = { } "quoted" and bare words; # starts a comment.
+// In a quoted string \" and \\ are escapes, as in EU4 1.37.5's own reader: for
+// path="C:\mods\x\" the game reports "Quoted string doesn't close" and does not
+// load the mod either (anvil#545 T7), so both agree on which mods a playset has.
 class ScriptTokens {
 public:
     explicit ScriptTokens(std::string_view text) : text_(text) {}
