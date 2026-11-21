@@ -38,6 +38,16 @@ VersionResource parse_version_resource(const void* data, size_t size);
 // The version resource of a loaded module (also one loaded as a data file).
 VersionResource module_version_resource(HMODULE module);
 
+// ProductName and ProductVersion of a DLL's version resource; nullopt when
+// it has none, names no product or cannot be read. Read as data: nothing in
+// it runs. The Manager tells Anvil's version.dll by it, and `anvil check
+// --game` takes the installed Anvil's version from it.
+struct DllProduct {
+    std::string name;
+    std::string version;
+};
+std::optional<DllProduct> read_dll_product(const std::filesystem::path& dll);
+
 // The DXVK version a DXVK build keeps next to its "DXVK: " log prefix
 // ("v2.7.1", "v2.7.1-498-ga6764047"); nullopt when the bytes hold none.
 // DXVK's version resource copies Microsoft's d3d9.dll version, so this

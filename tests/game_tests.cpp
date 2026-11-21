@@ -160,14 +160,117 @@ Run run_anvil(const std::string& anvil, const std::string& args) {
 
 std::string quoted(const fs::path& path) { return "\"" + path.string() + "\""; }
 
+std::string read(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream text;
+    text << in.rdbuf();
+    return text.str();
+}
+
+std::string utf16(std::string_view ascii) {
+    std::string out;
+    for (const char c : ascii) out += {c, '\0'};
+    return out;
+}
+
+// The build's version.dll with `version` in place of its own in the strings
+// of its version resource (ProductVersion, FileVersion): an older Anvil
+// installed in a game folder. `version` is not longer than ANVIL_VERSION; the
+// rest of the string is NULs, where a reader stops.
+std::string version_dll_of(const fs::path& built, std::string_view version) {
+    std::string bytes = read(built);
+    const std::string own = utf16(ANVIL_VERSION) + std::string(2, '\0');
+    std::string other = utf16(version);
+    other.resize(own.size(), '\0');
+    size_t replaced = 0;
+    for (size_t at = bytes.find(own); at != std::string::npos; at = bytes.find(own, at + own.size()), ++replaced) {
+        bytes.replace(at, own.size(), other);
+    }
+    CHECK(replaced >= 1);
+    return bytes;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        std::printf("usage: anvil_game_tests <anvil.exe>\n");
+    if (argc < 3) {
+        std::printf("usage: anvil_game_tests <anvil.exe> <version.dll>\n");
         return 2;
     }
     const std::string anvil = fs::path(argv[1]).make_preferred().string();
+    const fs::path built_dll = fs::path(argv[2]).make_preferred();
+
+    run("host version: the installed version.dll's, this build's without one, or --host-version (#544)", [&] {
+        const Game game;
+        // Needs this build or newer: an older Anvil installed in the folder skips it.
+        game.plugin("a-new", "anvil = \">=" + std::string(ANVIL_VERSION) + "\"\n");
+        game.plugin("b-any");
+
+        // No version.dll: this build's own version, and why.
+        const GameReport none = game.check();
+        CHECK(none.host_source == HostVersionSource::Tool && none.host_version == ANVIL_VERSION);
+        CHECK(contains(none.host_note, "no version.dll in"));
+        CHECK(loaded(none) == "a-new,b-any" && none.exit_code == kExitOk);
+        const std::string none_text = format_game_report(none, Format::Text);
+        CHECK(contains(none_text, "plugins checked against Anvil " + std::string(ANVIL_VERSION) +
+                                      ", the version of this anvil check: no version.dll in "));
+        CHECK(contains(format_game_report(none, Format::Json), "\"host\": {\"version\": \"" + std::string(ANVIL_VERSION) +
+                                                                   "\", \"source\": \"tool\", \"note\": \"no version.dll in "));
+
+        // A version.dll that is not Anvil's (no version resource): the same, with that reason.
+        const auto image = TestImage().file();
+        write(game.dir / "version.dll", std::string(image.begin(), image.end()));
+        const GameReport foreign = game.check();
+        CHECK(foreign.host_source == HostVersionSource::Tool && foreign.host_version == ANVIL_VERSION);
+        CHECK(contains(foreign.host_note, "version.dll is not Anvil's") && loaded(foreign) == "a-new,b-any");
+
+        // This build's version.dll: its version resource.
+        write(game.dir / "version.dll", read(built_dll));
+        const GameReport same = game.check();
+        CHECK(same.host_source == HostVersionSource::VersionDll && same.host_version == ANVIL_VERSION && same.host_note.empty());
+        CHECK(loaded(same) == "a-new,b-any");
+        CHECK(contains(format_game_report(same, Format::Text), "plugins checked against Anvil " + std::string(ANVIL_VERSION) +
+                                                                   " (the version.dll installed in "));
+
+        // An older Anvil installed: the plan is that Anvil's, as its loader decides.
+        write(game.dir / "version.dll", version_dll_of(built_dll, "0.0.1"));
+        const GameReport older = game.check();
+        CHECK(older.host_source == HostVersionSource::VersionDll && older.host_version == "0.0.1");
+        CHECK(loaded(older) == "b-any" && skipped_for(older, "a-new", "0.0.1") && older.exit_code == kExitProblems);
+        CHECK(contains(format_game_report(older, Format::Json), "\"host\": {\"version\": \"0.0.1\", \"source\": \"version.dll\"},"));
+
+        // An Anvil version.dll without a version: this build's, with that reason.
+        write(game.dir / "version.dll", version_dll_of(built_dll, ""));
+        const GameReport unnamed = game.check();
+        CHECK(unnamed.host_source == HostVersionSource::Tool && unnamed.host_version == ANVIL_VERSION);
+        CHECK(contains(unnamed.host_note, "names no version"));
+
+        // --host-version overrides the installed version.dll.
+        write(game.dir / "version.dll", version_dll_of(built_dll, "0.0.1"));
+        GameOptions options;
+        options.game_dir = game.dir;
+        options.user_dir = game.user;
+        const std::string sha = game.exe_sha256;
+        options.build_of = [sha](std::string_view actual) -> const char* { return actual == sha ? "test-build" : nullptr; };
+        options.host_version = Version::parse(ANVIL_VERSION);
+        const GameReport chosen = check_game(options);
+        CHECK(chosen.host_source == HostVersionSource::Option && chosen.host_version == ANVIL_VERSION);
+        CHECK(loaded(chosen) == "a-new,b-any");
+        CHECK(contains(format_game_report(chosen, Format::Text), " (--host-version)\n"));
+
+        // anvil.exe: the option, and its usage errors.
+        const std::string at = " --user-dir " + quoted(game.user);
+        const Run installed = run_anvil(anvil, "check --game " + quoted(game.dir) + at);
+        CHECK(installed.exit_code == 1 && contains(installed.out, "plugins checked against Anvil 0.0.1 (the version.dll installed in "));
+        const Run picked = run_anvil(anvil, "check --game " + quoted(game.dir) + at + " --host-version " + ANVIL_VERSION + " --format json");
+        CHECK(picked.exit_code == 0 && contains(picked.out, "\"source\": \"option\""));
+        const Run picked_eq = run_anvil(anvil, "check --game " + quoted(game.dir) + at + " --host-version=0.0.2");
+        CHECK(picked_eq.exit_code == 1 && contains(picked_eq.out, "Anvil 0.0.2 (--host-version)"));
+        CHECK(run_anvil(anvil, "check --game " + quoted(game.dir) + " --host-version").exit_code == 2);
+        CHECK(run_anvil(anvil, "check --game " + quoted(game.dir) + " --host-version one").exit_code == 2);
+        CHECK(run_anvil(anvil, "check " + quoted(game.dir) + " --host-version 1.0.0").exit_code == 2);
+        CHECK(contains(run_anvil(anvil, "--help").out, "[--host-version <x.y.z>]"));
+    });
 
     run("a game folder without plugins is fine, one that is not a game folder cannot be checked", [&] {
         const Game game;

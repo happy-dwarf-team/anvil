@@ -4,6 +4,7 @@
 #include "core/mod_plugins.hpp"
 #include "core/game_build.hpp"
 #include "core/pe_image.hpp"
+#include "core/platform.hpp"
 #include "core/resolver.hpp"
 #include "core/start_plan.hpp"
 
@@ -79,7 +80,42 @@ std::vector<OverlapWarning> find_overlaps(const std::vector<const CheckReport*>&
     return warnings;
 }
 
+// The Anvil version the loader installed in the folder checks the plugins'
+// `anvil` ranges against: --host-version, else its version.dll's
+// ProductVersion, else this build's own (issue #544).
+void take_host_version(const GameOptions& options, GameReport& report) {
+    if (options.host_version) {
+        report.host_version = options.host_version->to_string();
+        report.host_source = HostVersionSource::Option;
+        return;
+    }
+    const std::filesystem::path dll = options.game_dir / "version.dll";
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(dll, ec)) {
+        report.host_note = "no version.dll in " + report.game_dir;
+    } else if (const auto product = read_dll_product(dll); !product || product->name != "Anvil") {
+        report.host_note = shown(dll) + " is not Anvil's";
+    } else if (const auto version = Version::parse(product->version); !version) {
+        report.host_note = shown(dll) + " names no version (ProductVersion \"" + product->version + "\")";
+    } else {
+        report.host_version = version->to_string();
+        report.host_source = HostVersionSource::VersionDll;
+        return;
+    }
+    report.host_version = Version::parse(ANVIL_VERSION)->to_string();
+    report.host_source = HostVersionSource::Tool;
+}
+
 }  // namespace
+
+const char* host_source_name(HostVersionSource source) {
+    switch (source) {
+        case HostVersionSource::Option: return "option";
+        case HostVersionSource::VersionDll: return "version.dll";
+        case HostVersionSource::Tool: break;
+    }
+    return "tool";
+}
 
 GameReport check_game(const GameOptions& options) {
     GameReport report;
@@ -118,7 +154,10 @@ GameReport check_game(const GameOptions& options) {
     report.inventory = take_inventory(anvil_dir, user_dir, game);
     report.choices = read_player_choices(report.inventory);
     report.next_start = read_next_start(anvil_dir).record;
-    report.plan = plan_start(report.inventory, report.choices, StartConditions{});
+    take_host_version(options, report);
+    StartConditions conditions;
+    conditions.host_version = Version::parse(report.host_version);
+    report.plan = plan_start(report.inventory, report.choices, conditions);
     const AnvilSettings& settings = report.choices.anvil_toml;
     if (!settings.error.empty()) {
         report.problems.push_back({shown(anvil_dir / "anvil.toml"), settings.line,
@@ -345,6 +384,19 @@ std::string safe_mode_line(const GameReport& report) {
            " starts ended before the game was ready; it loads only the standard plugins the overlay needs";
 }
 
+// The Anvil version the plan checked the `anvil` ranges against, and where it
+// comes from; "" when the folder could not be checked.
+std::string host_line(const GameReport& report) {
+    if (report.host_version.empty()) return {};
+    const std::string head = "plugins checked against Anvil " + report.host_version;
+    switch (report.host_source) {
+        case HostVersionSource::Option: return head + " (--host-version)";
+        case HostVersionSource::VersionDll: return head + " (the version.dll installed in " + report.game_dir + ")";
+        case HostVersionSource::Tool: break;
+    }
+    return head + ", the version of this anvil check: " + report.host_note + " (--host-version picks another)";
+}
+
 std::string game_json(const GameReport& report) {
     const char* result = report.exit_code == kExitCannotCheck ? "cannot-check"
                          : report.exit_code == kExitOk         ? "ok"
@@ -358,7 +410,13 @@ std::string game_json(const GameReport& report) {
                ", \"build\": " + (report.exe_build.empty() ? std::string("null") : json_string(report.exe_build)) + "}";
     }
     const AnvilSettings& toml = report.choices.anvil_toml;
-    out += "},\n  \"anvil_toml\": {\"enabled\": " + std::string(toml.enabled ? "true" : "false") + ", \"disabled_plugins\": [";
+    out += "},\n";
+    if (!report.host_version.empty()) {
+        out += "  \"host\": {\"version\": " + json_string(report.host_version) + ", \"source\": " +
+               json_string(host_source_name(report.host_source)) +
+               (report.host_note.empty() ? std::string() : ", \"note\": " + json_string(report.host_note)) + "},\n";
+    }
+    out += "  \"anvil_toml\": {\"enabled\": " + std::string(toml.enabled ? "true" : "false") + ", \"disabled_plugins\": [";
     for (size_t i = 0; i < toml.disabled_plugins.size(); ++i) {
         out += (i == 0 ? "" : ", ") + json_string(toml.disabled_plugins[i]);
     }
@@ -513,6 +571,7 @@ std::string format_game_report(const GameReport& report, Format format) {
         }
         out += problem_lines(p.report.problems, format, counts ? "error" : "warning");
     }
+    if (const std::string line = host_line(report); !line.empty()) out += line + "\n";
     out += "load order (" + std::to_string(report.plan.load.size()) + "):\n";
     for (size_t i = 0; i < report.plan.load.size(); ++i) {
         const PlannedPlugin& p = report.plan.load[i];

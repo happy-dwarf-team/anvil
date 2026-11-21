@@ -308,8 +308,8 @@ if(ANVIL_BUILD_TESTS)
 
     add_executable(anvil_game_tests tests/game_tests.cpp)
     target_link_libraries(anvil_game_tests PRIVATE anvil_tool)
-    add_dependencies(anvil_game_tests anvil)
-    add_test(NAME anvil_game_tests COMMAND anvil_game_tests $<TARGET_FILE:anvil>)
+    add_dependencies(anvil_game_tests anvil version_dll)
+    add_test(NAME anvil_game_tests COMMAND anvil_game_tests $<TARGET_FILE:anvil> $<TARGET_FILE:version_dll>)
 
     # Plugins in mods (design §14, #60): the playset, the folder hash,
     # trust.toml, the decisions and approved copies, on made-up playsets.

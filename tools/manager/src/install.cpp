@@ -32,80 +32,6 @@ std::string plugin_folder_of(std::string_view path) {
     return slash == std::string_view::npos ? std::string() : std::string(path.substr(prefix.size(), slash - prefix.size()));
 }
 
-// A block of a version resource: WORD length, WORD value length, WORD type,
-// a NUL-terminated UTF-16 key, padding to 4 bytes, the value, padding, then
-// the child blocks up to `length`.
-struct VersionBlock {
-    const uint8_t* start = nullptr;
-    size_t length = 0;
-    std::wstring key;
-    const uint8_t* value = nullptr;
-    size_t value_length = 0;  // as the block says: bytes, or characters for text
-    const uint8_t* children = nullptr;
-};
-
-size_t align4(size_t offset) { return (offset + 3) & ~size_t(3); }
-
-std::optional<VersionBlock> read_block(const uint8_t* start, size_t available) {
-    if (available < 6) return std::nullopt;
-    VersionBlock block;
-    block.start = start;
-    uint16_t length = 0, value_length = 0, type = 0;
-    std::memcpy(&length, start, 2);
-    std::memcpy(&value_length, start + 2, 2);
-    std::memcpy(&type, start + 4, 2);
-    if (length < 6 || length > available) return std::nullopt;
-    block.length = length;
-    size_t at = 6;
-    while (at + 1 < length) {
-        wchar_t c = 0;
-        std::memcpy(&c, start + at, 2);
-        at += 2;
-        if (c == 0) break;
-        block.key += c;
-    }
-    at = align4(at);
-    block.value = start + std::min<size_t>(at, length);
-    block.value_length = value_length;
-    const size_t value_bytes = type == 1 ? size_t(value_length) * 2 : value_length;
-    block.children = start + std::min<size_t>(align4(at + value_bytes), length);
-    return block;
-}
-
-// The string `name` in any StringTable of the resource.
-std::string version_string(const uint8_t* data, size_t size, std::wstring_view name) {
-    const auto root = read_block(data, size);
-    if (!root || root->key != L"VS_VERSION_INFO") return {};
-    const uint8_t* end = root->start + root->length;
-    for (const uint8_t* at = root->children; at < end;) {
-        const auto info = read_block(at, end - at);
-        if (!info) break;
-        if (info->key == L"StringFileInfo") {
-            const uint8_t* info_end = info->start + info->length;
-            for (const uint8_t* t = info->children; t < info_end;) {
-                const auto table = read_block(t, info_end - t);
-                if (!table) break;
-                const uint8_t* table_end = table->start + table->length;
-                for (const uint8_t* s = table->children; s < table_end;) {
-                    const auto text = read_block(s, table_end - s);
-                    if (!text) break;
-                    if (text->key == name && text->value_length > 0) {
-                        const size_t chars = std::min<size_t>(text->value_length, (table_end - text->value) / 2);
-                        std::wstring value(chars, L'\0');
-                        std::memcpy(value.data(), text->value, chars * 2);
-                        while (!value.empty() && value.back() == L'\0') value.pop_back();
-                        return narrow(value);
-                    }
-                    s = text->start + align4(text->length);
-                }
-                t = table->start + align4(table->length);
-            }
-        }
-        at = info->start + align4(info->length);
-    }
-    return {};
-}
-
 bool is_dir(const fs::path& path) {
     std::error_code ec;
     return fs::is_directory(path, ec);
@@ -269,23 +195,6 @@ std::optional<Package> load_package(ZipArchive zip, std::string version, std::st
     }
     package.standard_plugins.assign(plugins.begin(), plugins.end());
     return package;
-}
-
-std::optional<DllProduct> read_dll_product(const fs::path& dll) {
-    const HMODULE module = LoadLibraryExW(dll.c_str(), nullptr, LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE);
-    if (module == nullptr) return std::nullopt;
-    std::optional<DllProduct> out;
-    if (const HRSRC resource = FindResourceW(module, MAKEINTRESOURCEW(1), MAKEINTRESOURCEW(16))) {  // RT_VERSION
-        const HGLOBAL loaded = LoadResource(module, resource);
-        const auto* data = static_cast<const uint8_t*>(loaded != nullptr ? LockResource(loaded) : nullptr);
-        const DWORD size = SizeofResource(module, resource);
-        if (data != nullptr && size > 0) {
-            DllProduct product{version_string(data, size, L"ProductName"), version_string(data, size, L"ProductVersion")};
-            if (!product.name.empty()) out = std::move(product);
-        }
-    }
-    FreeLibrary(module);
-    return out;
 }
 
 bool Installation::intact() const {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/platform.hpp"
 #include "zip.hpp"
 
 #include <cstdint>
@@ -32,13 +33,10 @@ inline constexpr const char* kManagerExe = "AnvilManager.exe";
 // standard plugin) and hashes its files.
 std::optional<Package> load_package(ZipArchive zip, std::string version, std::string& error);
 
-// ProductName and ProductVersion of a DLL's version resource; nullopt when
-// it has none or cannot be read. Read as data: nothing in it runs.
-struct DllProduct {
-    std::string name;
-    std::string version;
-};
-std::optional<DllProduct> read_dll_product(const std::filesystem::path& dll);
+// ProductName and ProductVersion of a DLL's version resource (anvil_core,
+// shared with `anvil check --game`).
+using anvil::DllProduct;
+using anvil::read_dll_product;
 
 // The Machine of a PE file's header (0x014C: 32-bit x86, 0x8664: x64);
 // nullopt when it is not a PE file.
