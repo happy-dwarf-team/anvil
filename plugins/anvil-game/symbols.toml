@@ -2630,3 +2630,20 @@ bytes = """
 48 89 5C 24 08 57 48 83 EC 70 33 FF 0F 29 74 24 60 48 8B D9 0F 29 7C 24 50 F3 0F 10 3D C7 D7 D0 00 48 8D 4C
 24 30 F3 0F 5D BC 24 A0 00 00 00
 """
+
+# --- crash report hints (anvil.control set_crash_note, 1.26.0) -------------------
+# Never hooked or called: the note looks for this loop's return address on a
+# crashed thread's stack (anvil#426).
+
+[symbol.idea_modifiers_loop]
+# mov rdx,[rbp+30h]      ; the group's ideas
+# mov rcx,[r15] ; add rcx,8
+# mov rdx,[rdx+rbx*8]    ; idea rbx, for rbx below the taken count in esi
+# call <merge of a modifier list>
+# inc ebx ; cmp ebx,esi ; jl
+bytes = "48 8B 55 30 49 8B 0F 48 83 C1 08 48 8B 14 DA E8 ?? ?? ?? ?? FF C3 3B DE 7C E6"
+memory = "code"
+note = "CalcTechAndIdeaModifiers: adds the modifiers of a group's first `taken` ideas; a save with more taken than the group has reads ideas past its end (anvil#426). The call returns to +0x14"
+build."eu4-1.37.5-steam-win64" = { rva = 0x930FD0 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x930200 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x930200 }

@@ -18,6 +18,7 @@
 
 #include <windows.h>
 
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -222,8 +223,16 @@ void crash_in_callback(AnvilCpuContext*, void*) { crash_here(); }
 size_t note_rsp(void*, const AnvilControlCrashScope* scope, char* out, size_t capacity) {
     const auto& c = *static_cast<const CONTEXT*>(scope->context);
     const bool inside = c.Rsp >= scope->stack_low && c.Rsp < scope->stack_high;
+    // The exception, appended in 1.26: crash_here() writes to address 0.
+    const auto* e = scope->size >= offsetof(AnvilControlCrashScope, exception) + sizeof(scope->exception)
+                        ? static_cast<const EXCEPTION_RECORD*>(scope->exception)
+                        : nullptr;
+    const bool null_write = e != nullptr && e->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+                            e->NumberParameters >= 2 && e->ExceptionInformation[0] == 1 &&
+                            e->ExceptionInformation[1] == 0;
     // A byte of cp1252 (as in a game's key) must not reach the JSON as it is.
-    const int n = std::snprintf(out, capacity, "rsp %s the stack\ncaf\xE9\n", inside ? "inside" : "outside");
+    const int n = std::snprintf(out, capacity, "rsp %s the stack\n%s\ncaf\xE9\n", inside ? "inside" : "outside",
+                                null_write ? "a write to 0" : "another exception");
     return n > 0 ? static_cast<size_t>(n) : 0;
 }
 size_t note_fault(void*, const AnvilControlCrashScope*, char* out, size_t) {
@@ -1156,7 +1165,7 @@ int main(int argc, char** argv) {
         CHECK(contains(r.json, "\"minidump\": \"20"));  // <time>.dmp
         CHECK(contains(r.text, "Verdict: in plugin crasher's code."));
         CHECK(contains(r.text, "Minidump: 20"));
-        CHECK(contains(r.text, "  crasher:\r\n    rsp inside the stack\r\n    caf?\r\n"));
+        CHECK(contains(r.text, "  crasher:\r\n    rsp inside the stack\r\n    a write to 0\r\n    caf?\r\n"));
         // The note's own fault, on the helper thread, is not an earlier exception: only the crash is.
         const size_t earlier = r.json.find("\"earlier_exceptions\": [");
         CHECK(earlier != std::string::npos);

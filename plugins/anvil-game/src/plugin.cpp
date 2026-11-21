@@ -33,6 +33,7 @@
 
 #include <windows.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 
@@ -41,6 +42,7 @@
 #include "anvil_control.h"
 #include "camera.hpp"
 #include "commands.hpp"
+#include "crash_hints.hpp"
 #include "restart.hpp"
 #include "session.hpp"
 #include "user_dir.hpp"
@@ -141,6 +143,13 @@ anvil_game::RestartRequests g_restart;
 // The world: false when a symbol of it is absent on this build.
 WorldLayout g_world;
 bool g_world_available = false;
+
+// The note in Anvil's crash reports (anvil#426): set at load, read by the
+// crash helper thread. A zero field leaves its hint out.
+anvil_game::crash_hints::ProvinceLayout g_note_provinces;
+std::uintptr_t g_note_image_base = 0;
+std::uintptr_t g_note_idea_return = 0;
+void install_crash_note();  // at ready: anvil.control may register after this plugin
 // Inside after_frame(): the moment a world read is allowed.
 std::atomic<bool> g_after_frame{false};
 // g_installs as this frame's session view read it. Main thread only.
@@ -352,6 +361,7 @@ void after_frame_body(std::uint8_t* app, std::uint64_t number) {
     if (!g_ready.load(std::memory_order_relaxed) && *g_layout.ready_flag == 1) {
         g_ready.store(true, std::memory_order_release);
         host.info("game ready (frame {})", number);
+        install_crash_note();
         publish(ANVIL_GAME_EVENT_READY, nullptr);
     }
     const SessionView view = read_session();
@@ -2062,6 +2072,12 @@ void load_world(anvil::Host& host) {
     }
     g_world = l;
     g_world_available = true;
+    g_note_provinces.root = l.root;
+    g_note_provinces.provinces = l.provinces;
+    g_note_provinces.provinces_end = l.provinces_end;
+    g_note_provinces.pointer_shift = l.pointer_shift;
+    g_note_provinces.province_array = l.province_array;
+    g_note_provinces.province_size = l.province_size;
     host.register_service(ANVIL_GAME_WORLD_SERVICE, ANVIL_GAME_WORLD_SERVICE_VERSION, kWorldService);
     host.info("service {} v{}; events {}, {}, {}, {}, {}{}{}", ANVIL_GAME_WORLD_SERVICE, ANVIL_GAME_WORLD_SERVICE_VERSION,
               ANVIL_GAME_EVENT_DAY, ANVIL_GAME_EVENT_MONTH, ANVIL_GAME_EVENT_YEAR, ANVIL_GAME_EVENT_PLAYER,
@@ -2289,6 +2305,48 @@ const AnvilControlService* control() {
         g_control = found;
     }
     return g_control;
+}
+
+bool note_read(std::uintptr_t address, void* out, std::size_t size) {
+    SIZE_T done = 0;
+    return ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(address), out, size, &done) != 0 &&
+           done == size;
+}
+
+std::size_t crash_note(void*, const AnvilControlCrashScope* scope, char* out, std::size_t capacity) {
+    constexpr std::size_t kFirst = offsetof(AnvilControlCrashScope, stack_high) + sizeof(scope->stack_high);
+    if (scope == nullptr || scope->size < kFirst || scope->context == nullptr) return 0;
+    anvil_game::crash_hints::Crash crash;
+    crash.rsp = static_cast<const CONTEXT*>(scope->context)->Rsp;
+    crash.stack_high = scope->stack_high;
+    // The exception came with Anvil 1.26.0; an older core gives the stack only.
+    if (scope->size >= offsetof(AnvilControlCrashScope, exception) + sizeof(scope->exception) &&
+        scope->exception != nullptr) {
+        const auto& e = *static_cast<const EXCEPTION_RECORD*>(scope->exception);
+        if (e.ExceptionCode == EXCEPTION_ACCESS_VIOLATION && e.NumberParameters >= 2) {
+            crash.access_violation = true;
+            crash.write = e.ExceptionInformation[0] == 1;
+            crash.address = static_cast<std::uintptr_t>(e.ExceptionInformation[1]);
+        }
+    }
+    return anvil_game::crash_hints::write_note(g_note_provinces, g_note_image_base, g_note_idea_return, crash,
+                                               &note_read, out, capacity);
+}
+
+void install_crash_note() {
+    static bool done = false;
+    if (done) return;
+    done = true;
+    if (g_note_provinces.root == 0 && g_note_idea_return == 0) return;
+    const anvil::Host host;
+    const auto* core = static_cast<const AnvilControlService*>(
+        host.c_api().get_service(host.self(), ANVIL_CONTROL_SERVICE, ANVIL_CONTROL_VERSION));
+    if (core == nullptr || core->size < offsetof(AnvilControlService, set_crash_note) + sizeof(core->set_crash_note)) {
+        return;
+    }
+    if (core->set_crash_note(host.self(), &crash_note, nullptr) == ANVIL_OK) {
+        host.info("crash reports name a province ID past the map and an idea count past its group (anvil#426)");
+    }
 }
 
 std::string caller_id(const AnvilPlugin* self) {
@@ -2651,6 +2709,11 @@ struct AnvilGame : anvil::Plugin {
         }
 
         host.register_service(ANVIL_GAME_SERVICE, ANVIL_GAME_SERVICE_VERSION, kService);
+        g_note_image_base = host.game().image_base;
+        // The call in CalcTechAndIdeaModifiers' idea loop returns 0x14 bytes in.
+        if (host.present(sym::idea_modifiers_loop)) {
+            g_note_idea_return = reinterpret_cast<std::uintptr_t>(host.address(sym::idea_modifiers_loop)) + 0x14;
+        }
         load_world(host);
         load_commands(host);
         load_camera(host);
