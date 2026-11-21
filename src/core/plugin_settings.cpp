@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include <algorithm>
+
 namespace anvil {
 namespace {
 
@@ -30,8 +32,31 @@ SettingValue normalized(const Setting& s, const SettingValue& v) {
 
 }  // namespace
 
+SharedVariables shared_environment_names(const std::vector<PluginSchema>& plugins) {
+    std::map<std::string, std::vector<std::string>> owners;
+    for (const PluginSchema& p : plugins) {
+        if (p.schema == nullptr) continue;
+        const auto add = [&](const std::string& name) {
+            auto& list = owners[setting_environment_name(p.plugin_id, name)];
+            std::string owner = std::string(p.plugin_id) + "." + name;
+            if (std::find(list.begin(), list.end(), owner) == list.end()) list.push_back(std::move(owner));
+        };
+        for (const Setting& s : p.schema->settings) add(s.name);
+        for (const RetiredSetting& r : p.schema->retired) add(r.name);
+    }
+    SharedVariables out;
+    for (auto& [variable, list] : owners) {
+        if (list.size() < 2) continue;
+        std::string text;
+        for (size_t i = 0; i < list.size(); ++i) text += (i == 0 ? "" : i + 1 == list.size() ? " and " : ", ") + list[i];
+        out.emplace(variable, std::move(text));
+    }
+    return out;
+}
+
 std::vector<PluginSettings::Note> PluginSettings::init(SettingsFile schema, const std::filesystem::path& player_file,
-                                                       std::string_view plugin_id, const Environment& environment) {
+                                                       std::string_view plugin_id, const Environment& environment,
+                                                       const SharedVariables& shared) {
     std::vector<Note> notes;
     schema_ = std::move(schema);
     player_file_ = player_file;
@@ -52,7 +77,11 @@ std::vector<PluginSettings::Note> PluginSettings::init(SettingsFile schema, cons
         current_[s.id] = saved_[s.id];
         const std::string variable = setting_environment_name(plugin_id, s.name);
         const auto text = environment ? environment(variable) : process_environment(variable);
-        if (text) {
+        if (text && shared.contains(variable)) {
+            warnings_.push_back(variable + " is the variable of " + shared.at(variable) +
+                                ", so it cannot say which one it sets; ignored");
+            notes.push_back({ANVIL_LOG_WARNING, warnings_.back()});
+        } else if (text) {
             std::string error;
             if (const auto value = parse_setting_text(s, *text, error)) {
                 current_[s.id] = normalized(s, *value);
@@ -71,6 +100,12 @@ std::vector<PluginSettings::Note> PluginSettings::init(SettingsFile schema, cons
         const std::string variable = setting_environment_name(plugin_id, r.name);
         const auto text = environment ? environment(variable) : process_environment(variable);
         if (!text) continue;
+        if (shared.contains(variable)) {
+            warnings_.push_back(variable + " is the variable of " + shared.at(variable) +
+                                ", so it cannot say which one it sets; ignored");
+            notes.push_back({ANVIL_LOG_WARNING, warnings_.back()});
+            continue;
+        }
         const std::string key = std::string(plugin_id) + "." + r.module;
         warnings_.push_back(variable + ": " + r.name + " is a retired setting, replaced by the switch of module " + key +
                             " (enabled_modules or disabled_modules in anvil.toml); ignored");

@@ -82,6 +82,12 @@ int main(int argc, char** argv) {
         CHECK(!in("^1.2.3", "2.0.0-beta.1") && !in("<2.0.0", "2.0.0-rc.1") && !in("<2", "2.0.0-rc.1"));
         CHECK(in("^1.2.3", "1.5.0-beta.1") && in("<2.0.0", "1.9.9-rc.1") && in(">=1.0.0", "1.0.1-rc.1"));
         CHECK(in("*", "2.0.0-beta.1"));
+        // A range can name a prerelease with all three parts (K6, #545).
+        CHECK(in(">=2.0.0-beta.2", "2.0.0-beta.10") && !in(">=2.0.0-beta.2", "2.0.0-beta.1") && in(">=2.0.0-beta.2", "2.0.0"));
+        CHECK(in("^2.0.0-rc.1", "2.0.0-rc.1") && in("^2.0.0-rc.1", "2.3.0") && !in("^2.0.0-rc.1", "3.0.0"));
+        CHECK(in("<2.0.0-rc.1", "2.0.0-beta.3") && !in("<2.0.0-rc.1", "2.0.0") && in("=1.2.3-rc.1", "1.2.3-rc.1"));
+        CHECK(in(">=1.0.0+build.5", "1.0.0"));
+        CHECK(!VersionRange::parse(">=2.0-beta.1").has_value() && !VersionRange::parse(">=2.0.0-").has_value());
     });
 
     manifest_tests();

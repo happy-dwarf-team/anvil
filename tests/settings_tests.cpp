@@ -926,5 +926,32 @@ void settings_tests() {
               notes[0].message == "setting budget_mb = 512 from ANVIL_ENV_TEST_BUDGET_MB (environment)");
     });
 
+    run("settings: a variable two settings map to sets neither (K5, #545)", [] {
+        // ram-prefetch's budget_mb and ram's prefetch_budget_mb are both ANVIL_RAM_PREFETCH_BUDGET_MB.
+        const SettingsFile mine = schema();
+        const SettingsFileResult other = parse_settings_text(
+            "[setting.prefetch_budget_mb]\ntype = \"int\"\ndefault = 100\nmin = 1\nmax = 9999\nlabel = \"Budget\"\n");
+        CHECK(other.file.has_value());
+        if (!other.file) return;
+        const SharedVariables shared = shared_environment_names({{"ram-prefetch", &mine}, {"ram", &*other.file}});
+        CHECK(shared.size() == 1 && shared.contains("ANVIL_RAM_PREFETCH_BUDGET_MB") &&
+              shared.at("ANVIL_RAM_PREFETCH_BUDGET_MB") == "ram-prefetch.budget_mb and ram.prefetch_budget_mb");
+        CHECK(shared_environment_names({{"ram-prefetch", &mine}, {"other", &*other.file}}).empty());
+
+        const auto env = environment({{"ANVIL_RAM_PREFETCH_BUDGET_MB", "512"}, {"ANVIL_RAM_PREFETCH_MODE", "off"}});
+        PluginSettings a;
+        const auto notes = a.init(schema(), scratch("shared") / "none.toml", "ram-prefetch", env, shared);
+        CHECK(a.get_int(1) == 1024 && notes.size() == 2);
+        if (notes.size() == 2) {
+            CHECK(notes[0].level == ANVIL_LOG_WARNING &&
+                  notes[0].message == "ANVIL_RAM_PREFETCH_BUDGET_MB is the variable of ram-prefetch.budget_mb and "
+                                      "ram.prefetch_budget_mb, so it cannot say which one it sets; ignored");
+            CHECK(notes[1].message == "setting mode = \"off\" from ANVIL_RAM_PREFETCH_MODE (environment)");
+        }
+        PluginSettings b;
+        b.init(*other.file, scratch("shared") / "none2.toml", "ram", env, shared);
+        CHECK(b.get_int(0) == 100 && b.warnings().size() == 1);
+    });
+
     module_settings_tests();
 }

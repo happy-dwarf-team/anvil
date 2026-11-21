@@ -27,13 +27,17 @@ public:
     Sha256& operator=(const Sha256&) = delete;
 
     bool update(const void* data, size_t size) {
-        return hash_ != nullptr &&
-               BCryptHashData(hash_, static_cast<PUCHAR>(const_cast<void*>(data)), static_cast<ULONG>(size), 0) == 0;
+        if (hash_ == nullptr ||
+            BCryptHashData(hash_, static_cast<PUCHAR>(const_cast<void*>(data)), static_cast<ULONG>(size), 0) != 0) {
+            failed_ = true;
+        }
+        return !failed_;
     }
-    // Lower-case hex; "" on failure.
+    // Lower-case hex; "" on failure, also of any update before (T6, #545):
+    // a hash of part of the bytes is never a hash.
     std::string finish() {
         uint8_t digest[32] = {};
-        if (hash_ == nullptr || BCryptFinishHash(hash_, digest, sizeof(digest), 0) != 0) return {};
+        if (hash_ == nullptr || failed_ || BCryptFinishHash(hash_, digest, sizeof(digest), 0) != 0) return {};
         char hex[65] = {};
         for (int i = 0; i < 32; ++i) std::snprintf(hex + i * 2, 3, "%02x", digest[i]);
         return hex;
@@ -42,6 +46,7 @@ public:
 private:
     BCRYPT_ALG_HANDLE algorithm_ = nullptr;
     BCRYPT_HASH_HANDLE hash_ = nullptr;
+    bool failed_ = false;
 };
 
 // UTF-8 with forward slashes. generic_u8string() throws on a name that is not

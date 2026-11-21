@@ -118,10 +118,11 @@ std::string sha256_file(const std::filesystem::path& file) {
     std::string result = sha256_of([&](BCRYPT_HASH_HANDLE hash) {
         std::vector<uint8_t> buffer(1 << 20);
         DWORD read = 0;
-        while (ReadFile(handle, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) && read > 0) {
+        BOOL ok = FALSE;
+        while ((ok = ReadFile(handle, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr)) && read > 0) {
             if (BCryptHashData(hash, buffer.data(), read, 0) != 0) return false;
         }
-        return true;
+        return ok != FALSE;  // a read that fails midway is no hash of the file (T6, #545)
     });
     CloseHandle(handle);
     return result;

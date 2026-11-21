@@ -88,6 +88,16 @@ PluginSet::PluginSet(std::vector<ResolvedPlugin> resolved, std::vector<Skipped> 
         if (owners_.size() <= handle.owner) owners_.resize(static_cast<size_t>(handle.owner) + 1, nullptr);
         owners_[handle.owner] = &handle;
     };
+    // Variables two settings map to, over every plugin with a schema (K5, #545).
+    std::vector<PluginSchema> schemas;
+    for (const ResolvedPlugin& r : resolved) {
+        if (r.settings) schemas.push_back({r.manifest.id, &*r.settings});
+    }
+    for (const Skipped& s : skipped) {
+        if (s.manifest && s.manifest->id == s.id && s.settings) schemas.push_back({s.id, &*s.settings});
+    }
+    const SharedVariables shared = shared_environment_names(schemas);
+    schemas.clear();  // the schemas move into the records below
     for (ResolvedPlugin& r : resolved) {
         PluginRecord& p = records_.emplace_back(PluginRecord::Key{});
         p.manifest_ = std::move(r.manifest);
@@ -106,7 +116,7 @@ PluginSet::PluginSet(std::vector<ResolvedPlugin> resolved, std::vector<Skipped> 
         // The player's values and the ANVIL_<ID>_<NAME> overrides, before any plugin loads.
         if (r.settings) {
             const auto notes = p.settings_.init(std::move(*r.settings), r.data_dir / "settings.toml", p.manifest_.id,
-                                                deps_.environment);
+                                                deps_.environment, shared);
             for (const auto& note : notes) log(note.level, p.manifest_.id, note.message);
         }
         deps_.policy->add(p.manifest_, handle->owner);
@@ -157,7 +167,8 @@ PluginSet::PluginSet(std::vector<ResolvedPlugin> resolved, std::vector<Skipped> 
                 p.modules_.push_back(std::move(slot));
             }
             if (s.settings) {
-                p.settings_.init(std::move(*s.settings), s.data_dir / "settings.toml", p.manifest_.id, deps_.environment);
+                p.settings_.init(std::move(*s.settings), s.data_dir / "settings.toml", p.manifest_.id, deps_.environment,
+                                 shared);
                 p.settings_.save_only();
             }
         } else {

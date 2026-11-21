@@ -7,6 +7,7 @@
 #include <atomic>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -15,6 +16,17 @@
 #include <vector>
 
 namespace anvil {
+
+// ANVIL_<ID>_<NAME> variables that more than one setting maps to, as '-' and
+// '_' read the same (`foo-bar`'s `baz` and `foo`'s `bar_baz`, K5 in #545), each
+// with those settings ("foo-bar.baz and foo.bar_baz"). Such a variable sets
+// none of them.
+using SharedVariables = std::map<std::string, std::string>;
+struct PluginSchema {
+    std::string_view plugin_id;
+    const SettingsFile* schema = nullptr;
+};
+SharedVariables shared_environment_names(const std::vector<PluginSchema>& plugins);
 
 // The settings of one plugin while the game runs (design §11): the values the
 // plugin reads, the player's saved values and the subscriptions. Reads are
@@ -37,10 +49,11 @@ public:
     // Before the plugin loads: the defaults of `schema`, then the player's
     // values from `player_file` (anvil/data/<id>/settings.toml; an invalid one
     // keeps the default), then the ANVIL_<ID>_<NAME> variables (empty
-    // `environment`: the process environment). Returns what to log: every
-    // warning and every override. Called once.
+    // `environment`: the process environment); a variable in `shared` is
+    // ignored with a warning. Returns what to log: every warning and every
+    // override. Called once.
     std::vector<Note> init(SettingsFile schema, const std::filesystem::path& player_file, std::string_view plugin_id,
-                           const Environment& environment = {});
+                           const Environment& environment = {}, const SharedVariables& shared = {});
 
     // A plugin that is off at this start (ADR 0013): from here on a change
     // only saves the player's file (`applied` false), as for restart = true.
