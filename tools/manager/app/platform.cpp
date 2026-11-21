@@ -339,8 +339,13 @@ SendOutcome post_report(std::string body) {
     }
     DWORD status = 0;
     DWORD size = sizeof(status);
-    WinHttpQueryHeaders(handle, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
-                        &status, &size, WINHTTP_NO_HEADER_INDEX);
+    if (!WinHttpQueryHeaders(handle, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
+                             &status, &size, WINHTTP_NO_HEADER_INDEX)) {
+        // An answer without a status the Manager can read: status 0 with an
+        // empty error would say "The report was not sent: ." with no reason.
+        out.error = i18n::trf("no readable answer from bench.happydwarf.dev (error {0})", {std::to_string(GetLastError())});
+        return out;
+    }
     out.status = static_cast<int>(status);
     for (;;) {
         DWORD available = 0;

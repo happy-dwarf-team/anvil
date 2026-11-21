@@ -1195,6 +1195,8 @@ extern const Translation kFrench[] = {
      "pas de menu en 10 minutes"},
     {"no plugin involved",
      "sans plugin en cause"},
+    {"no readable answer from bench.happydwarf.dev (error {0})",
+     "aucune réponse lisible de bench.happydwarf.dev (erreur {0})"},
     {"no setting {0}",
      "aucun paramètre {0}"},
     {"no start record",

@@ -1196,6 +1196,8 @@ extern const Translation kTraditionalChinese[] = {
      "10 分鐘內未進入選單"},
     {"no plugin involved",
      "沒有涉及插件"},
+    {"no readable answer from bench.happydwarf.dev (error {0})",
+     "無法讀取 bench.happydwarf.dev 的回應（錯誤 {0}）"},
     {"no setting {0}",
      "沒有設定 {0}"},
     {"no start record",

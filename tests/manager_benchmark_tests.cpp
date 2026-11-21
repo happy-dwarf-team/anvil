@@ -839,6 +839,9 @@ void manager_runner_tests() {
         CHECK(send_outcome_text(SendOutcome{503, "{\"message\":\"x\",\"retry\":\"tomorrow\"}", ""}) == tomorrow);
         CHECK(send_outcome_text(SendOutcome{503, "{\"message\":\"x\",\"retry\":\"later\"}", ""}) == "The receiver is busy. Try again later.");
         CHECK(send_outcome_text(SendOutcome{429, "{\"retry\":true}", ""}) == "The receiver is busy. Try again later.");
+        // post_report's error when the answer's status cannot be read.
+        CHECK(send_outcome_text(SendOutcome{0, "", "no readable answer from bench.happydwarf.dev (error 12150)"}) ==
+              "The report was not sent: no readable answer from bench.happydwarf.dev (error 12150). You can copy it instead.");
         CHECK(send_outcome_text(SendOutcome{0, "", "cannot reach bench.happydwarf.dev (error 12007)"}) ==
               "The report was not sent: cannot reach bench.happydwarf.dev (error 12007). You can copy it instead.");
         CHECK(send_outcome_text(SendOutcome{404, "{\"message\":\"Not found.\"}", ""}) == "The receiver answered 404: Not found.");
