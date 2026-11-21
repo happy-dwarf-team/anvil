@@ -69,8 +69,11 @@ AnvilResult fake_begin(AnvilPlugin*) { return ANVIL_OK; }
 AnvilResult fake_commit(AnvilPlugin*) { return g_fake.commit; }
 void fake_abort(AnvilPlugin*) { ++g_fake.aborts; }
 
+AnvilGameInfo g_game{};
+
 AnvilHost make_host() {
     AnvilHost h{};
+    h.game = &g_game;
     h.size = sizeof(AnvilHost);
     h.api_version = ANVIL_API_VERSION;
     h.log = &fake_log;
@@ -275,6 +278,16 @@ int main() {
         hook.remove();
         kept.remove();
         CHECK(g_fake.removed == removed + 2);
+    });
+
+    run("game: the hash reads empty until the host sets it, and from an older host (S4, #545)", [&] {
+        g_game = {};
+        g_game.size = sizeof(AnvilGameInfo);
+        CHECK(h.game_sha256().empty());
+        g_game.sha256 = "9AD3EFE1";
+        CHECK(h.game_sha256() == "9AD3EFE1");
+        g_game.size = offsetof(AnvilGameInfo, sha256);
+        CHECK(h.game_sha256().empty());
     });
 
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
