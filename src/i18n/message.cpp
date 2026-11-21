@@ -16,6 +16,7 @@ const std::vector<Pattern> kPatterns = {
     // The resolver (design §10).
     {"disabled", "disabled in anvil.toml"},
     {"all_disabled", "anvil.toml has enabled = false: no plugins load"},
+    {"anvil_toml_broken", "anvil.toml cannot be read (line {0}): no plugins load until it is fixed"},
     {"benchmark_without", "left out by the start-up benchmark (ANVIL_BENCHMARK=without:{0})"},
     {"duplicate_id", "duplicate id; already provided by {0}"},
     {"api_mismatch", "built for plugin API {0}, Anvil provides API {1}"},

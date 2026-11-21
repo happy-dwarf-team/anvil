@@ -138,7 +138,9 @@ const PluginCheck* check_of(const PluginInventory& inventory, const StartPlan& p
 
 StartPlan plan_start(const PluginInventory& inventory, const PlayerChoices& choices, const StartConditions& conditions) {
     StartPlan plan;
-    plan.enabled = choices.anvil_toml.enabled && !conditions.anvil_disabled;
+    // A broken anvil.toml loads nothing (K3, #537): its lists are unknown.
+    const bool broken = !choices.anvil_toml.error.empty();
+    plan.enabled = choices.anvil_toml.enabled && !broken && !conditions.anvil_disabled;
     plan.safe_mode = plan.enabled && conditions.safe_mode;
     plan.lists = choices.anvil_toml;
     const bool writes = plan.enabled;  // a start that loads nothing writes nothing
@@ -260,7 +262,10 @@ StartPlan plan_start(const PluginInventory& inventory, const PlayerChoices& choi
     for (size_t i = 0; i < candidates.size(); ++i) by_folder.emplace(candidates[i].manifest.folder, i);
     if (!plan.enabled) {
         for (Candidate& c : candidates) {
-            set_skip(c.plugin, i18n::Message("all_disabled", {}), SkipKind::other, true);
+            set_skip(c.plugin,
+                     broken ? i18n::Message("anvil_toml_broken", {std::to_string(choices.anvil_toml.line)})
+                            : i18n::Message("all_disabled", {}),
+                     SkipKind::other, true);
             plan.skipped.push_back(std::move(c.plugin));
         }
     } else {

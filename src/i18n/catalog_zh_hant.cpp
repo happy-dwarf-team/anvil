@@ -1002,6 +1002,8 @@ extern const Translation kTraditionalChinese[] = {
      "anvil-game 會載入"},
     {"anvil.toml has enabled = false: no plugins load",
      "anvil.toml 中 enabled = false：不載入任何插件"},
+    {"anvil.toml cannot be read (line {0}): no plugins load until it is fixed",
+     "無法讀取 anvil.toml（第 {0} 行）：修正之前不載入任何插件"},
     {"anvil.toml says enabled = false: no plugin loads.",
      "anvil.toml 中設定了 enabled = false：不會載入任何插件。"},
     {"anvil.toml was not changed",

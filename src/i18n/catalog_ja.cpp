@@ -1002,6 +1002,8 @@ extern const Translation kJapanese[] = {
      "anvil-game は読み込まれます"},
     {"anvil.toml has enabled = false: no plugins load",
      "anvil.toml が enabled = false：プラグインは読み込まれません"},
+    {"anvil.toml cannot be read (line {0}): no plugins load until it is fixed",
+     "anvil.toml を読み込めません（{0} 行目）：修正されるまでプラグインは読み込まれません"},
     {"anvil.toml says enabled = false: no plugin loads.",
      "anvil.toml が enabled = false になっています。プラグインは読み込まれません。"},
     {"anvil.toml was not changed",

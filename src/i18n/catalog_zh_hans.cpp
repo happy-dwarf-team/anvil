@@ -1002,6 +1002,8 @@ extern const Translation kSimplifiedChinese[] = {
      "anvil-game 会加载"},
     {"anvil.toml has enabled = false: no plugins load",
      "anvil.toml 中 enabled = false：不加载任何插件"},
+    {"anvil.toml cannot be read (line {0}): no plugins load until it is fixed",
+     "无法读取 anvil.toml（第 {0} 行）：修复之前不加载任何插件"},
     {"anvil.toml says enabled = false: no plugin loads.",
      "anvil.toml 中设置了 enabled = false：不会加载任何插件。"},
     {"anvil.toml was not changed",

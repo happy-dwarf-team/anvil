@@ -1001,6 +1001,8 @@ extern const Translation kSpanish[] = {
      "anvil-game se carga"},
     {"anvil.toml has enabled = false: no plugins load",
      "anvil.toml tiene enabled = false: no se carga ningún plugin"},
+    {"anvil.toml cannot be read (line {0}): no plugins load until it is fixed",
+     "No se puede leer anvil.toml (línea {0}): no se carga ningún plugin hasta que se corrija"},
     {"anvil.toml says enabled = false: no plugin loads.",
      "anvil.toml indica enabled = false: no se carga ningún plugin."},
     {"anvil.toml was not changed",

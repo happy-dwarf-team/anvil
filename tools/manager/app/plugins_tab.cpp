@@ -263,7 +263,10 @@ void ManagerApp::draw_plugins_tab() {
     if (!plugins_) return;
     if (!report->problems.empty()) {
         begin_banner("problems", Tone::Bad);
-        for (const cli::Problem& problem : report->problems) wrapped(u8(fs::path(widen(problem.file)).filename()) + ": " + problem.message);
+        for (const cli::Problem& problem : report->problems) {
+            const std::string line = problem.line != 0 ? ":" + std::to_string(problem.line) : std::string();
+            wrapped(u8(fs::path(widen(problem.file)).filename()) + line + ": " + problem.message);
+        }
         end_banner(Tone::Bad);
     }
     if (!report->choices.anvil_toml.enabled) banner("disabled", Tone::Warn, tr("anvil.toml says enabled = false: no plugin loads."));
