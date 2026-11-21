@@ -306,15 +306,18 @@ bool keep_report(const fs::path& dir, const std::string& stamp, const std::strin
         file = dir / (stamp + "-" + std::to_string(i) + ".json");
     }
     if (!write_file_atomic(file, text, error)) return false;
-    // The stamps sort by time: everything before the newest kKeptReports goes.
+    // The stamps sort by time: everything before the newest kKeptReports goes. The new report
+    // stays whatever its stamp: local time repeats an hour when the clocks go back.
     std::vector<fs::path> reports;
     // increment(ec): the range-for's operator++ throws when the listing fails half way.
     for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
         std::error_code type;
-        if (it->is_regular_file(type) && it->path().extension() == ".json") reports.push_back(it->path());
+        if (it->is_regular_file(type) && it->path().extension() == ".json" && it->path().filename() != file.filename()) {
+            reports.push_back(it->path());
+        }
     }
     std::sort(reports.begin(), reports.end(), [](const fs::path& a, const fs::path& b) { return a.filename() > b.filename(); });
-    for (size_t i = kKeptReports; i < reports.size(); ++i) {
+    for (size_t i = kKeptReports - 1; i < reports.size(); ++i) {
         fs::remove(reports[i], ec);
         fs::remove(sent_marker(reports[i]), ec);
     }
