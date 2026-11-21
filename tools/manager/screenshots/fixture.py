@@ -191,4 +191,10 @@ label = "Move the map at the screen's edge"
 write(game / "anvil" / "data" / "camera" / "settings.toml", "zoom_speed = 1.5\n")
 write(user / "mod" / "fixture-mod.mod", 'name="Fixture mod"\npath="mod/fixture-mod"\n')
 write(user / "dlc_load.json", '{"enabled_mods":["mod/fixture-mod.mod"],"disabled_dlcs":[]}')
+
+# A kept benchmark report, the receiver's example, for the Benchmark page's list
+# and its Send line (--tab Benchmark --dialog send-<status>[-tomorrow]).
+repo = pathlib.Path(__file__).resolve().parents[3]
+write(game / "anvil" / "data" / "anvil" / "benchmarks" / "2026-10-26T10-00-00.json",
+      (repo / "services" / "bench-receiver" / "examples" / "report-format-1.json").read_text(encoding="utf-8"))
 print(game)

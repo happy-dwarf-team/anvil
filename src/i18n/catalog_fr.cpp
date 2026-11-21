@@ -819,6 +819,8 @@ extern const Translation kFrench[] = {
      "Le récepteur a répondu {0}."},
     {"The receiver answered {0}: {1}",
      "Le récepteur a répondu {0} : {1}"},
+    {"The receiver cannot take more reports today. Try again tomorrow.",
+     "Le récepteur ne peut plus accepter de rapports aujourd'hui. Réessayez demain."},
     {"The receiver is busy. Try again later.",
      "Le récepteur est occupé. Réessayez plus tard."},
     {"The receiver refused the report.",

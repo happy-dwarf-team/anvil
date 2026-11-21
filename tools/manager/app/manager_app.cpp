@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -361,6 +362,17 @@ bool ManagerApp::anvil_installed() const {
 
 void ManagerApp::draw() {
     poll();
+    if (shot_dialog_.starts_with("send-") && settled()) {
+        // send-<status>[-tomorrow]: the receiver's answer under the Send button.
+        const std::string rest = shot_dialog_.substr(5);
+        const bool tomorrow = rest.ends_with("-tomorrow");
+        SendOutcome outcome;
+        outcome.status = std::atoi(rest.c_str());
+        outcome.body = tomorrow ? R"({"message":"","retry":"tomorrow"})" : R"({"message":""})";
+        page_ = "Benchmark";
+        benchmark_.show_send_outcome(game_, outcome);
+        shot_dialog_.clear();
+    }
     if (!shot_dialog_.empty() && settled() && snapshot_ && snapshot_->installation && package_) {
         const bool uninstall = shot_dialog_ == "uninstall";
         if (!uninstall || snapshot_->installation->installed()) start_plan(uninstall);

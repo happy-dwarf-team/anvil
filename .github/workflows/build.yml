@@ -307,6 +307,16 @@ jobs:
               '--lang', 'en', '--scale', 100, '--tab', 'Anvil', '--dialog', $dialog)
             if ($manager.ExitCode -ne 0) { throw "AnvilManager.exe --screenshot --dialog $dialog failed ($($manager.ExitCode))" }
           }
+          # The Benchmark page's Send line for the receiver's busy and daily-limit answers,
+          # in English, German and Japanese.
+          foreach ($lang in 'en', 'de', 'ja') {
+            foreach ($dialog in 'send-429', 'send-429-tomorrow') {
+              $manager = Start-Process build/tools/manager/Release/AnvilManager.exe -Wait -PassThru -ArgumentList @(
+                '--screenshot', "manager-screenshots/$lang-100", '--game', "`"$game`"", '--build', 'eu4-1.37.5-steam-win64',
+                '--lang', $lang, '--scale', 100, '--tab', 'Benchmark', '--dialog', $dialog)
+              if ($manager.ExitCode -ne 0) { throw "AnvilManager.exe --screenshot --dialog $dialog $lang failed ($($manager.ExitCode))" }
+            }
+          }
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

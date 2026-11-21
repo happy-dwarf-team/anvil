@@ -43,6 +43,10 @@ public:
     bool busy() const { return runner_ != nullptr || prepared_.valid() || sending_.valid(); }
     // The game folder changed: back to the setup screen.
     void reset();
+    // For the screenshot mode: the newest kept report of `game` on its preview,
+    // scrolled to the Send line, which shows `outcome` as if Send had ended so.
+    // False when no kept report can be opened.
+    bool show_send_outcome(const std::filesystem::path& game, const SendOutcome& outcome);
 
 private:
     enum class Screen { Setup, Running, Result, Preview };
@@ -107,6 +111,7 @@ private:
     std::future<SendOutcome> sending_;
     std::string send_outcome_;
     bool send_failed_ = false;
+    bool scroll_to_send_ = false;  // the screenshot mode's Send line
 };
 
 }  // namespace anvil::manager

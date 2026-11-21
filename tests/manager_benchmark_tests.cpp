@@ -832,6 +832,13 @@ void manager_runner_tests() {
         CHECK(send_outcome_text(SendOutcome{413, "not json", ""}) == "The receiver refused the report.");
         CHECK(send_outcome_text(SendOutcome{429, "{\"message\":\"Too many\"}", ""}) == "The receiver is busy. Try again later.");
         CHECK(send_outcome_text(SendOutcome{503, "", ""}) == "The receiver is busy. Try again later.");
+        // A daily limit used up (anvil#539): this address's (429) or all senders' (503).
+        const std::string tomorrow = "The receiver cannot take more reports today. Try again tomorrow.";
+        CHECK(send_outcome_text(SendOutcome{429, "{\"message\":\"This address has sent all the reports it can today.\",\"retry\":\"tomorrow\"}", ""}) ==
+              tomorrow);
+        CHECK(send_outcome_text(SendOutcome{503, "{\"message\":\"x\",\"retry\":\"tomorrow\"}", ""}) == tomorrow);
+        CHECK(send_outcome_text(SendOutcome{503, "{\"message\":\"x\",\"retry\":\"later\"}", ""}) == "The receiver is busy. Try again later.");
+        CHECK(send_outcome_text(SendOutcome{429, "{\"retry\":true}", ""}) == "The receiver is busy. Try again later.");
         CHECK(send_outcome_text(SendOutcome{0, "", "cannot reach bench.happydwarf.dev (error 12007)"}) ==
               "The report was not sent: cannot reach bench.happydwarf.dev (error 12007). You can copy it instead.");
         CHECK(send_outcome_text(SendOutcome{404, "{\"message\":\"Not found.\"}", ""}) == "The receiver answered 404: Not found.");

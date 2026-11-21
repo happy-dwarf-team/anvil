@@ -136,6 +136,10 @@ describe("check 4: per day", () => {
     await env.DB.prepare("INSERT INTO daily_counts (day, received) VALUES (?1, 2000)").bind(today()).run();
     const response = await post(report());
     expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      message: "The receiver has taken all the reports it can today. Try again tomorrow.",
+      retry: "tomorrow",
+    });
   });
 
   it("counts new reports only", async () => {

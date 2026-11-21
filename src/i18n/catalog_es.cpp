@@ -819,6 +819,8 @@ extern const Translation kSpanish[] = {
      "El receptor respondió {0}."},
     {"The receiver answered {0}: {1}",
      "El receptor respondió {0}: {1}"},
+    {"The receiver cannot take more reports today. Try again tomorrow.",
+     "El receptor no puede aceptar más informes hoy. Inténtalo mañana."},
     {"The receiver is busy. Try again later.",
      "El receptor está ocupado. Inténtalo más tarde."},
     {"The receiver refused the report.",

@@ -25,6 +25,10 @@ struct SendOutcome {
 // The receiver's {"message": "..."}; "" when the body is not one.
 std::string receiver_message(std::string_view body);
 
+// The receiver's {"retry": "tomorrow"} with a 429 or 503: a daily limit is
+// used up (this address's or all senders'), not a passing load.
+bool receiver_retry_tomorrow(std::string_view body);
+
 // 201 or 200: the report is on the server; Send becomes a disabled "Sent".
 inline bool send_accepted(const SendOutcome& outcome) { return outcome.status == 201 || outcome.status == 200; }
 

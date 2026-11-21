@@ -54,8 +54,10 @@ this folder, and changes here that do not touch the Manager use a hidden type
    arrived" for one that came in another request at the same time, whose
    reservation is given back.
 
-Every response is `{"message": "…"}`; the Manager shows the message for 413
-and 422 and "Try again later" for 429 and 503. The numbers are `vars` and the
+Every response is `{"message": "…"}`, with `"retry": "tomorrow"` added when a
+daily limit refused the report (this sender's 429, all senders' 503). The
+Manager shows the message for 413 and 422, "Try again tomorrow" for a
+`retry` of `tomorrow`, and "Try again later" for any other 429 and 503. The numbers are `vars` and the
 `ratelimits` entry in `wrangler.jsonc`. The Worker logs one line per request
 with status, format, size and, for check 4, the limit that refused it
 (`sender`, `day` or `total`); invocation logs are off, so no IP, body or series

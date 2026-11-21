@@ -466,6 +466,28 @@ void BenchmarkTab::show_report(Json report, fs::path file) {
     screen_ = Screen::Result;
 }
 
+bool BenchmarkTab::show_send_outcome(const fs::path& game, const SendOutcome& outcome) {
+    game_ = game;  // so that the first draw does not go back to the setup screen
+    for (const KeptReport& k : kept_reports(benchmarks_dir(game))) {
+        if (!k.readable) continue;
+        std::string error;
+        const auto text = read_text_file(k.file, 1 << 20);
+        auto doc = text ? parse_json(*text, error) : std::nullopt;
+        if (!doc) continue;
+        from_series_ = false;
+        labels_.clear();
+        show_report(std::move(*doc), k.file);
+        report_text_ = *text;
+        send_outcome_ = send_outcome_text(outcome);
+        send_failed_ = !send_accepted(outcome);
+        sent_ = sent_ || send_accepted(outcome);
+        screen_ = Screen::Preview;
+        scroll_to_send_ = true;
+        return true;
+    }
+    return false;
+}
+
 void BenchmarkTab::switch_workshop_ids(bool include) {
     include_ids_ = include;
     set_workshop_ids(*report_, include ? workshop_ids_ : std::nullopt);
@@ -878,6 +900,9 @@ void BenchmarkTab::draw_send() {
         if (send_failed_) banner("send", Tone::Bad, send_outcome_);
         else state_row(::anvil::ui::Glyph::On, send_outcome_);
     }
+    // Every frame, not once: the page's height settles over a few frames, and
+    // the screenshot mode, the only one that sets it, ends after them.
+    if (scroll_to_send_) ImGui::SetScrollHereY(1.0f);
     if (!copy_outcome_.empty()) weak(copy_outcome_);
     ImGui::Spacing();
     weak_wrapped(trf("Send uploads this report to bench.happydwarf.dev, run on Cloudflare. Cloudflare sees your IP "

@@ -819,6 +819,8 @@ extern const Translation kGerman[] = {
      "Der Empfänger antwortete {0}."},
     {"The receiver answered {0}: {1}",
      "Der Empfänger antwortete {0}: {1}"},
+    {"The receiver cannot take more reports today. Try again tomorrow.",
+     "Der Empfänger nimmt heute keine Berichte mehr an. Versuche es morgen erneut."},
     {"The receiver is busy. Try again later.",
      "Der Empfänger ist ausgelastet. Versuche es später erneut."},
     {"The receiver refused the report.",

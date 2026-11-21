@@ -820,6 +820,8 @@ extern const Translation kTraditionalChinese[] = {
      "接收端回應了 {0}。"},
     {"The receiver answered {0}: {1}",
      "接收端回應了 {0}：{1}"},
+    {"The receiver cannot take more reports today. Try again tomorrow.",
+     "接收端本日無法再接收報告。請明天再試。"},
     {"The receiver is busy. Try again later.",
      "接收端正忙。請稍後再試。"},
     {"The receiver refused the report.",
