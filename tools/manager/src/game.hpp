@@ -12,6 +12,23 @@ namespace anvil::manager {
 inline constexpr const char* kSteamAppId = "236850";  // Europa Universalis IV
 inline constexpr const wchar_t* kSteamLaunchUrl = L"steam://rungameid/236850";
 
+// How "Play EU4" hands kSteamLaunchUrl on when the Manager runs under Wine
+// (Proton). Under Proton, ShellExecute of the URL flashes a console and starts
+// nothing (#494); the likely cause, not yet confirmed on Linux, is that the
+// prefix's steam:// handler is Proton's steam.exe stand-in, not Linux Steam.
+enum class WineSteamRoute {
+    Winebrowser,  // winebrowser.exe: Wine's way to the Linux side (xdg-open), as Proton opens a game's https links
+    XdgOpen,      // start.exe /unix /usr/bin/xdg-open: the Linux program, by its path
+    Shell,        // ShellExecute, as on Windows (the prefix's own steam:// handler)
+};
+
+// The route from the ANVIL_MANAGER_WINE_STEAM variable ("winebrowser",
+// "xdg-open", "shell", any case); Winebrowser when it is empty or unknown.
+WineSteamRoute wine_steam_route(std::wstring_view variable);
+
+// The command line that opens kSteamLaunchUrl on `route` (empty for Shell).
+std::wstring wine_steam_command(WineSteamRoute route);
+
 // Valve's KeyValues text (libraryfolders.vdf, appmanifest_*.acf): a key with
 // a quoted string value or a { } block of further keys. Keys keep their
 // order; lookups ignore case, as Steam does.

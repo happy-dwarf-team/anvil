@@ -269,6 +269,14 @@ int main(int argc, char** argv) {
         CHECK(steam_starts_instead({}, temp.dir / "Copy").empty());  // no Steam: nothing to say
         make_game(temp.dir / "Copy");
         if (!games.empty()) CHECK(same_file(steam_starts_instead(games, temp.dir / "Copy"), games[0]));
+        // Play under Wine (#494): winebrowser hands steam:// to Linux; the variable picks another route.
+        CHECK(wine_steam_route(L"") == WineSteamRoute::Winebrowser);
+        CHECK(wine_steam_route(L"unknown") == WineSteamRoute::Winebrowser);
+        CHECK(wine_steam_route(L"XDG-Open") == WineSteamRoute::XdgOpen);
+        CHECK(wine_steam_route(L"shell") == WineSteamRoute::Shell);
+        CHECK(wine_steam_command(WineSteamRoute::Winebrowser) == L"winebrowser.exe \"steam://rungameid/236850\"");
+        CHECK(wine_steam_command(WineSteamRoute::XdgOpen) == L"start.exe /unix /usr/bin/xdg-open \"steam://rungameid/236850\"");
+        CHECK(wine_steam_command(WineSteamRoute::Shell).empty());
         // An installdir that would leave steamapps/common is not followed.
         write(library / "steamapps" / "appmanifest_236850.acf", "\"AppState\" { \"installdir\" \"..\\\\..\" }");
         CHECK(find_steam_games(steam).size() == 1);
