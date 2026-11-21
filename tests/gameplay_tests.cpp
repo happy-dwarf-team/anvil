@@ -249,6 +249,33 @@ void gameplay_tests() {
         CHECK(w.patched(0x400) && !policy.suspended(late));
     });
 
+    run("gameplay: a suspension that leaves a change in the game keeps the plugin acting (anvil#545 Y2)", [] {
+        World w;
+        GameplayPolicy policy(*w.changes, w.bus, {}, w.sink());
+        policy.subscribe();
+        const OwnerId owner = w.plugin("stuck", 0x400);
+        policy.add(gameplay("stuck"), owner);
+        // A suspension that takes every change out: out of the game.
+        w.session(ANVIL_GAME_SESSION_STARTED, false, true);
+        CHECK(policy.suspended(owner) && policy.out_of_game(owner) && !w.patched(0x400));
+        w.session(ANVIL_GAME_SESSION_ENDED, false, true);
+        CHECK(!policy.suspended(owner) && !policy.out_of_game(owner) && w.patched(0x400));
+        // The page cannot be written now (decommitted): the patch stays in.
+        CHECK(VirtualFree(w.base, 0x1000, MEM_DECOMMIT) != 0);
+        w.session(ANVIL_GAME_SESSION_STARTED, false, true);
+        CHECK(policy.suspended(owner) && !policy.out_of_game(owner));
+        CHECK(w.changes->count(owner) == 1 && w.changes->suspended_count(owner) == 0);
+        CHECK(w.logged("it still counts in the plugin-set hash"));
+        CHECK(w.events.size() == 3 && w.events.back() == "stuck:anvil.suspended");  // told, as before
+        // Back as it was, so the session's end and the teardown can write.
+        CHECK(VirtualAlloc(w.base, 0x1000, MEM_COMMIT, PAGE_EXECUTE_READWRITE) == w.base);
+        std::memset(w.base, 0xCC, 0x1000);
+        w.base[0x400] = w.base[0x401] = 0x90;
+        w.session(ANVIL_GAME_SESSION_ENDED, false, true);
+        CHECK(!policy.suspended(owner) && w.patched(0x400));
+        if (g_failures != 0) w.dump();
+    });
+
     run("gameplay: a plugin's anvil.suspended and anvil.resumed handlers may ask the policy", [] {
         // As anvil.control's plugin_of does: the policy's lock is released before
         // the events (held, the same thread could not take it again, and a thread

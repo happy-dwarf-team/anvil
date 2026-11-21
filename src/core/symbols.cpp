@@ -186,6 +186,23 @@ uint32_t get_u32(const toml::node& node, std::string_view key) {
     return static_cast<uint32_t>(value->get());
 }
 
+// A value's `is`: a non-negative integer, or a string "0x..." of up to 16 hex
+// digits for a size-8 value TOML's signed integers cannot hold (2^63 or more).
+uint64_t get_is(const toml::node& node, const std::string& key) {
+    if (const auto* value = node.as_integer()) {
+        if (value->get() < 0) throw Fail{key + " must be a non-negative integer, or a string \"0x...\" for 2^63 or more"};
+        return static_cast<uint64_t>(value->get());
+    }
+    if (const auto* text = node.as_string()) {
+        const std::string& s = text->get();
+        if (s.size() > 2 && s.size() <= 18 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') &&
+            std::all_of(s.begin() + 2, s.end(), [](char c) { return std::isxdigit(static_cast<unsigned char>(c)) != 0; })) {
+            return std::stoull(s.substr(2), nullptr, 16);
+        }
+    }
+    throw Fail{key + " must be a non-negative integer, or a string \"0x...\" of up to 16 hex digits"};
+}
+
 std::string get_string(const toml::node& node, std::string_view key, bool allow_empty = false) {
     const auto* value = node.as_string();
     if (value == nullptr) throw Fail{std::string(key) + " must be a string"};
@@ -215,9 +232,7 @@ SymbolValue parse_value(const std::string& name, const toml::node& node) {
         } else if (key == "type") {
             v.type = get_string(*item, where + ".type");
         } else if (key == "is") {
-            const auto is = item->value_exact<int64_t>();
-            if (!is || *is < 0) throw Fail{where + ".is must be a non-negative integer"};
-            v.is = static_cast<uint64_t>(*is);
+            v.is = get_is(*item, where + ".is");
         }
     }
     if (!has_at) throw Fail{where + ": missing 'at'"};

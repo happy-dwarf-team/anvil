@@ -34,7 +34,9 @@ set(SAFETYHOOK_FETCH_ZYDIS ON CACHE BOOL "" FORCE)
 FetchContent_Declare(safetyhook
     GIT_REPOSITORY https://github.com/cursey/safetyhook.git
     GIT_TAG v0.7.0
-    GIT_SHALLOW TRUE)
+    GIT_SHALLOW TRUE
+    # The trap handler continues only execute faults (anvil#545 C5).
+    PATCH_COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/patch-safetyhook.cmake)
 FetchContent_MakeAvailable(tomlplusplus safetyhook)
 
 # anvil_messages: the player's messages by code (why a plugin is skipped),

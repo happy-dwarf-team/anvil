@@ -512,7 +512,8 @@ void Control::status(AnvilControlStatus& out) const {
         // affects gameplay and acts now (ADR 0011): "<plugin>.<module> <version>",
         // with the values of its settings that count (ADR 0013).
         const auto acting = [&](const AnvilPlugin& h) {
-            return h.affects_gameplay && (sources_.policy == nullptr || !sources_.policy->suspended(h.owner));
+            // Out of the game only when none of its changes stayed in (anvil#545 Y2).
+            return h.affects_gameplay && (sources_.policy == nullptr || !sources_.policy->out_of_game(h.owner));
         };
         const auto in_multiplayer = [&](const Manifest& m) {
             return m.affects_gameplay && suspension_reason(m, SessionMode{false, true}, opt_ins).empty();
