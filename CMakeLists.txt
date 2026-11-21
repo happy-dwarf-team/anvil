@@ -491,8 +491,9 @@ if(ANVIL_BUILD_TESTS)
     add_dependencies(anvil_log_throttle_tests anvil_log_throttle)
     add_test(NAME anvil_log_throttle_tests COMMAND anvil_log_throttle_tests ${CMAKE_BINARY_DIR}/plugin)
 
-    # anvil_net's cancel_all against a silent local listener on 127.0.0.1:443;
-    # no request leaves the machine (tests/net_tests.cpp).
+    # anvil_net's request limits (anvil#540) on given times, then its deadline,
+    # stall limit, WinHTTP timeouts and cancel_all against a silent local
+    # listener on 127.0.0.1:443; no request leaves the machine (tests/net_tests.cpp).
     add_executable(anvil_net_tests tests/net_tests.cpp)
     target_link_libraries(anvil_net_tests PRIVATE anvil_net ws2_32)
     target_compile_definitions(anvil_net_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
