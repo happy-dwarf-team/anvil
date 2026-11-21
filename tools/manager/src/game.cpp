@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cwctype>
 
 namespace anvil::manager {
 namespace {
@@ -227,6 +228,23 @@ fs::path steam_starts_instead(const std::vector<fs::path>& steam_games, const fs
         if (same_file(game, game_dir)) return {};
     }
     return steam_games.front();  // the library that lists the game comes first
+}
+
+WineSteamRoute wine_steam_route(std::wstring_view variable) {
+    std::wstring value(variable);
+    for (wchar_t& c : value) c = static_cast<wchar_t>(std::towlower(c));
+    if (value == L"xdg-open") return WineSteamRoute::XdgOpen;
+    if (value == L"shell") return WineSteamRoute::Shell;
+    return WineSteamRoute::Winebrowser;
+}
+
+std::wstring wine_steam_command(WineSteamRoute route) {
+    switch (route) {
+        case WineSteamRoute::Winebrowser: return std::wstring(L"winebrowser.exe \"") + kSteamLaunchUrl + L"\"";
+        case WineSteamRoute::XdgOpen: return std::wstring(L"start.exe /unix /usr/bin/xdg-open \"") + kSteamLaunchUrl + L"\"";
+        case WineSteamRoute::Shell: break;
+    }
+    return {};
 }
 
 fs::path steam_root_from_registry() {
