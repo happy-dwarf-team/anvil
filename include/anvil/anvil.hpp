@@ -526,6 +526,16 @@ public:
     }
 
     const AnvilGameInfo& game() const { return *c_api().game; }
+    // eu4.exe's SHA-256 (upper-case hex); empty until the host has verified it,
+    // off the critical path, or from a host that does not give it. The host sets
+    // it from another thread, so read it here rather than from game().sha256.
+    std::string_view game_sha256() const {
+        const AnvilGameInfo& g = game();
+        if (g.size < offsetof(AnvilGameInfo, sha256) + sizeof(g.sha256)) return {};
+        const char* const text =
+            std::atomic_ref<const char*>(const_cast<const char*&>(g.sha256)).load(std::memory_order_acquire);
+        return text != nullptr ? std::string_view(text) : std::string_view();
+    }
     std::string_view anvil_version() const { return c_api().anvil_version; }
     std::filesystem::path plugin_dir() const { return c_api().plugin_dir(self()); }
     std::filesystem::path data_dir() const { return c_api().data_dir(self()); }
