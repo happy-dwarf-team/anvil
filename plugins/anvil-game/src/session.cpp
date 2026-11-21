@@ -78,21 +78,28 @@ DateEvents DateTracker::update(bool running, std::uint64_t session, std::int32_t
     return out;
 }
 
+bool same_war(const WarSeen& a, const WarSeen& b) {
+    const auto same_tag = [](const AnvilGameTag& x, const AnvilGameTag& y) {
+        return std::char_traits<char>::compare(x.text, y.text, sizeof(x.text)) == 0;
+    };
+    return a.id == b.id && a.start == b.start && same_tag(a.attacker, b.attacker) && same_tag(a.defender, b.defender);
+}
+
 WarTracker::Changes WarTracker::update(std::uint64_t session, std::vector<WarSeen> seen) {
     Changes out;
     const bool same = known_ && session == session_;
     if (same) {
-        const auto has = [](const std::vector<WarSeen>& list, std::uint64_t id) {
+        const auto has = [](const std::vector<WarSeen>& list, const WarSeen& war) {
             for (const WarSeen& w : list) {
-                if (w.id == id) return true;
+                if (same_war(w, war)) return true;
             }
             return false;
         };
         for (const WarSeen& w : wars_) {
-            if (!has(seen, w.id)) out.ended.push_back(w);
+            if (!has(seen, w)) out.ended.push_back(w);
         }
         for (const WarSeen& w : seen) {
-            if (!has(wars_, w.id)) out.started.push_back(w);
+            if (!has(wars_, w)) out.started.push_back(w);
         }
     }
     known_ = true;

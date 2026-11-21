@@ -712,6 +712,22 @@ build."eu4-1.37.5-steam-win64" = { rva = 0xD89170 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0xD87920 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0xD87920 }
 
+[symbol.war_start]
+# mov rcx,[rcx+128h]; mov r11,rdx; test rcx,rcx; je end; mov rdx,[rcx]; mov rcx,[rcx+10h];
+# mov r10d,[rdx+10h]; lea r9d,[r10-29C55C0h]; test r9d,r9d
+bytes = """
+48 8B 89 28 01 00 00 4C 8B DA 48 85 C9 0F 84 B9 00 00 00 48 8B 11 48 8B 49 10
+44 8B 52 10 45 8D 8A 40 AA 63 FD 45 85 C9
+"""
+memory = "code"
+values.history = { at = 3, size = 4 }
+values.next = { at = 25, size = 1 }
+values.date = { at = 29, size = 1 }
+note = "CWar::GetStartDate: the war's history list, its first node at +0x128, a node's entry at +0 and next at +0x10, an entry's date at +0x10; the first entry dated after year 1 is the start, else 1 January of year 1"
+build."eu4-1.37.5-steam-win64" = { rva = 0xD8FEE0 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0xD8E690 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0xD8E690 }
+
 # --- modifiers ---
 # The game's function is called and nothing else: it answers 0 for a modifier
 # whose DLC is off, through a transformer per definition. It only reads.

@@ -17,6 +17,7 @@ constexpr std::int32_t kMaxBucketTags = 4096;  // likewise a bucket
 constexpr std::size_t kMaxText = 65536;        // likewise a string
 constexpr std::int32_t kMaxWars = 4096;        // likewise the running wars
 constexpr std::size_t kMaxWarSide = 1024;      // likewise one side of a war
+constexpr std::int32_t kMaxWarHistory = 100000;  // likewise a war's history list
 constexpr std::int64_t kMaxModifiers = 65536;  // likewise the definitions
 
 bool read_raw(std::uintptr_t address, void* out, std::size_t size) {
@@ -457,6 +458,29 @@ AnvilResult read_war_side(const WorldLayout& l, std::uint64_t id, std::uint32_t 
         if (!read(at, tag)) return ANVIL_ERROR_INTERNAL;
         out.push_back(tag_text(tag, l));
     }
+    return ANVIL_OK;
+}
+
+AnvilResult read_war_start(const WorldLayout& l, std::uint64_t id, std::int32_t& hours) {
+    if (l.war_history == 0) return ANVIL_ERROR_NOT_DECLARED;
+    if (const AnvilResult r = war_at(l, id); r != ANVIL_OK) return r;
+    std::uintptr_t node = 0;
+    if (!read(id + l.war_history, node)) return ANVIL_ERROR_INTERNAL;
+    for (std::int32_t n = 0; node != 0; ++n) {
+        if (n >= kMaxWarHistory) return ANVIL_ERROR_INTERNAL;  // a loop
+        std::uintptr_t entry = 0, next = 0;
+        std::int32_t date = 0;
+        if (!read(node, entry) || entry == 0 || !read(entry + l.war_history_date, date) ||
+            !read(node + l.war_history_next, next)) {
+            return ANVIL_ERROR_INTERNAL;
+        }
+        if (decode_date(date).year > 1) {
+            hours = date;
+            return ANVIL_OK;
+        }
+        node = next;
+    }
+    hours = kUnsetDate;  // the game's answer for a war without a dated entry
     return ANVIL_OK;
 }
 

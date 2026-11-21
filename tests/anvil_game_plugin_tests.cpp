@@ -1385,6 +1385,55 @@ int main(int argc, char** argv) {
         CHECK(c.started.empty() && c.ended.empty());
     });
 
+    run("anvil-game: a new war at a reused address (anvil#538)", [] {
+        const auto tag = [](const char* text) {
+            AnvilGameTag t{};
+            std::memcpy(t.text, text, 3);
+            return t;
+        };
+        const auto war = [&](uint64_t id, std::int32_t start, const char* attacker, const char* defender,
+                             const char* name) {
+            anvil_game::WarSeen w;
+            w.id = id;
+            w.start = start;
+            w.attacker = tag(attacker);
+            w.defender = tag(defender);
+            w.name = name;
+            return w;
+        };
+        const std::int32_t day = 24;
+        const std::int32_t start = anvil_game::kUnsetDate + 1718 * 365 * day;
+        anvil_game::WarTracker t;
+        auto c = t.update(1, {war(0x1000, start, "RUS", "SWE", "old")});  // the baseline
+        CHECK(c.started.empty() && c.ended.empty());
+        c = t.update(1, {war(0x1000, start, "RUS", "SWE", "old")});  // the same war the next day
+        CHECK(c.started.empty() && c.ended.empty());
+
+        // The same address and sides, another start date: the old war ended, a new one started.
+        c = t.update(1, {war(0x1000, start + 30 * day, "RUS", "SWE", "new")});
+        CHECK(c.ended.size() == 1 && c.ended[0].name == "old" && c.ended[0].start == start);
+        CHECK(c.started.size() == 1 && c.started[0].name == "new" && c.started[0].id == 0x1000);
+
+        // The same address and start date, another attacker; then another defender.
+        c = t.update(1, {war(0x1000, start + 30 * day, "POL", "SWE", "attacker")});
+        CHECK(c.ended.size() == 1 && c.ended[0].name == "new" && c.started.size() == 1 &&
+              c.started[0].name == "attacker");
+        c = t.update(1, {war(0x1000, start + 30 * day, "POL", "DAN", "defender")});
+        CHECK(c.ended.size() == 1 && c.ended[0].name == "attacker" && c.started.size() == 1 &&
+              c.started[0].name == "defender");
+
+        // Only the name changed: the same war, nothing reported.
+        c = t.update(1, {war(0x1000, start + 30 * day, "POL", "DAN", "renamed")});
+        CHECK(c.started.empty() && c.ended.empty());
+
+        const anvil_game::WarSeen a = war(0x1000, start, "RUS", "SWE", "a");
+        CHECK(anvil_game::same_war(a, war(0x1000, start, "RUS", "SWE", "b")));
+        CHECK(!anvil_game::same_war(a, war(0x2000, start, "RUS", "SWE", "a")));
+        CHECK(!anvil_game::same_war(a, war(0x1000, start + day, "RUS", "SWE", "a")));
+        CHECK(!anvil_game::same_war(a, war(0x1000, start, "SWE", "SWE", "a")));
+        CHECK(!anvil_game::same_war(a, war(0x1000, start, "RUS", "RUS", "a")));
+    });
+
     run("anvil-game: the work queue", [] {
         anvil_game::WorkQueue q;
         static std::vector<int> ran;
@@ -2005,7 +2054,7 @@ int main(int argc, char** argv) {
         start.add(gp_toml);
         start.add(plugin_toml("other"));
         start.make();
-        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 185);
+        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 186);
         AnvilPlugin* p = start.load(ANVIL_GAME_ID);
         CHECK(p != nullptr);
         if (p == nullptr) return;
@@ -3864,6 +3913,35 @@ int main(int argc, char** argv) {
         game.set_date(k31Dec + 4 * kDay);
         frame(game.app, 1);
         CHECK(campaign.size() == 5 && campaign[4] == "war ended Small TUR RUS");
+
+        // A new war at the Great War's address (anvil#538): its history now
+        // dates it, so the next day ends the old war and starts the new one.
+        auto* great = *reinterpret_cast<uint8_t**>(*reinterpret_cast<uintptr_t*>(game.root + 0x1E30));
+        alignas(8) static uint8_t entry[0x48] = {};
+        alignas(8) static uintptr_t node[3] = {};
+        FakeWorld::set(entry, 0x10, int32_t{k31Dec + 4 * kDay});
+        node[0] = reinterpret_cast<uintptr_t>(entry);
+        FakeWorld::set(great, 0x128, reinterpret_cast<uintptr_t>(node));
+        std::memcpy(great + 0x28, "Third War", 9);
+        campaign.clear();
+        game.set_date(k31Dec + 5 * kDay);
+        frame(game.app, 1);
+        CHECK((campaign == std::vector<std::string>{"day 1 1720.1.5", "war ended Great War RUS TUR",
+                                                    "war started Third War RUS TUR"}));
+        game.set_date(k31Dec + 6 * kDay);
+        frame(game.app, 1);
+        CHECK(campaign.size() == 4);  // the same war the next day
+        // An entry of year 1 does not date a war: the game's GetStartDate skips it.
+        FakeWorld::set(entry, 0x10, int32_t{anvil_game::kUnsetDate});
+        std::memcpy(great + 0x28, "Great War", 9);
+        game.set_date(k31Dec + 7 * kDay);
+        frame(game.app, 1);
+        CHECK(campaign.size() == 7 && campaign[5] == "war ended Third War RUS TUR" &&
+              campaign[6] == "war started Great War RUS TUR");
+        FakeWorld::set(great, 0x128, uintptr_t{0});
+        game.set_date(k31Dec + 8 * kDay);
+        frame(game.app, 1);
+        CHECK(campaign.size() == 8);  // no history at all: the same start date, nothing told
 
         // The player's country: formed, observed, then a new session starts a new baseline.
         campaign.clear();
