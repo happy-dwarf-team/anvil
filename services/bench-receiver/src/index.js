@@ -4,14 +4,22 @@
 // past the retention period.
 
 import { checkReport, repeatsKey } from "./report.js";
+import { release, reserve, senderTag } from "./quota.js";
 import { deleteExpired } from "./retention.js";
 
 export default {
   async fetch(request, env) {
     const outcome = await receive(request, env);
-    // One line per request: status, format and size; never the IP, the body
-    // or the series id.
-    console.log(JSON.stringify({ status: outcome.status, format: outcome.format ?? null, bytes: outcome.bytes ?? null }));
+    // One line per request: status, format, size and the limit that refused
+    // it; never the IP, the body or the series id.
+    console.log(
+      JSON.stringify({
+        status: outcome.status,
+        format: outcome.format ?? null,
+        bytes: outcome.bytes ?? null,
+        limit: outcome.limit,
+      }),
+    );
     const headers = { "content-type": "application/json; charset=utf-8" };
     if (outcome.status === 405) headers.allow = "POST";
     return new Response(JSON.stringify({ message: outcome.message }), { status: outcome.status, headers });
@@ -28,6 +36,9 @@ function config(env) {
     maxBodyBytes: Number(env.MAX_BODY_BYTES),
     dailyLimit: Number(env.DAILY_LIMIT),
     dailyBytesLimit: Number(env.DAILY_BYTES_LIMIT),
+    senderDailyLimit: Number(env.SENDER_DAILY_LIMIT),
+    senderDailyBytesLimit: Number(env.SENDER_DAILY_BYTES_LIMIT),
+    totalBytesLimit: Number(env.TOTAL_BYTES_LIMIT),
     retentionMonths: Number(env.RETENTION_MONTHS),
     minStartMs: Number(env.MIN_START_MS),
     maxStartMs: Number(env.MAX_START_MS),
@@ -53,54 +64,68 @@ async function receive(request, env) {
   const size = bytes.byteLength;
 
   // 2. Per IP. The address stays in the rate limiter's counters only.
-  const { success } = await env.RATE_LIMITER.limit({ key: request.headers.get("cf-connecting-ip") ?? "unknown" });
+  const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
+  const { success } = await env.RATE_LIMITER.limit({ key: ip });
   if (!success) return { status: 429, message: "Too many reports from this address. Try again later.", bytes: size };
+
+  // 3. Validation, before the quota, so that a refused report takes nothing
+  // from it.
+  let body, report;
+  try {
+    body = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+    report = JSON.parse(body);
+  } catch {
+    return { status: 422, message: "The report is not UTF-8 JSON.", bytes: size };
+  }
+  // The body is stored as sent and read with json_extract, so what is
+  // checked must be all it holds.
+  if (repeatsKey(body, report)) {
+    return { status: 422, message: "The report names a key twice in one object.", bytes: size };
+  }
+  const checked = checkReport(report, limits);
+  if (!checked.ok) return { status: 422, message: checked.message, format: checked.format, bytes: size };
+  const format = checked.format;
+  const repeat = { status: 200, message: "This report has already arrived.", format, bytes: size };
 
   const day = new Date().toISOString().slice(0, 10);
   try {
-    // 3. Across all senders, per UTC day.
-    const today = await env.DB.prepare("SELECT received, bytes FROM daily_counts WHERE day = ?1").bind(day).first();
-    if ((today?.received ?? 0) >= limits.dailyLimit || (today?.bytes ?? 0) >= limits.dailyBytesLimit) {
-      return { status: 503, message: "The receiver has taken all the reports it can today. Try again tomorrow.", bytes: size };
-    }
+    // A repeat takes nothing from the quota either.
+    const known = await env.DB.prepare("SELECT 1 AS known FROM reports WHERE series_id = ?1")
+      .bind(report.series_id)
+      .first();
+    if (known) return repeat;
 
-    // 4. Validation.
-    let body, report;
-    try {
-      body = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-      report = JSON.parse(body);
-    } catch {
-      return { status: 422, message: "The report is not UTF-8 JSON.", bytes: size };
-    }
-    // The body is stored as sent and read with json_extract, so what is
-    // checked must be all it holds.
-    if (repeatsKey(body, report)) {
-      return { status: 422, message: "The report names a key twice in one object.", bytes: size };
-    }
-    const checked = checkReport(report, limits);
-    if (!checked.ok) return { status: 422, message: checked.message, format: checked.format, bytes: size };
+    // 4. This sender's quota and all senders' limits for the day, and the
+    // stored total, taken in one statement before the insert.
+    const sender = await senderTag(env.QUOTA_KEY, ip, day);
+    const refused = await reserve(env.DB, { day, sender, size, limits });
+    if (refused) return { ...REFUSED[refused], format, bytes: size, limit: refused };
 
     // 5. Store the body byte for byte, once per series.
     const insert = await env.DB.prepare(
       "INSERT OR IGNORE INTO reports (series_id, format, received_day, body) VALUES (?1, ?2, ?3, ?4)",
     )
-      .bind(report.series_id, checked.format, day, body)
+      .bind(report.series_id, format, day, body)
       .run();
     if (insert.meta.changes === 0) {
-      return { status: 200, message: "This report has already arrived.", format: checked.format, bytes: size };
+      // The same series arrived in another request after the look-up.
+      await release(env.DB, { day, sender, size });
+      return repeat;
     }
-    await env.DB.prepare(
-      "INSERT INTO daily_counts (day, received, bytes) VALUES (?1, 1, ?2) " +
-        "ON CONFLICT (day) DO UPDATE SET received = received + 1, bytes = bytes + ?2",
-    )
-      .bind(day, size)
-      .run();
-    return { status: 201, message: "Received. Thank you.", format: checked.format, bytes: size };
+    return { status: 201, message: "Received. Thank you.", format, bytes: size };
   } catch {
-    // D1 unavailable or over its daily limits.
-    return { status: 503, message: "The receiver cannot store reports right now. Try again later.", bytes: size };
+    // D1 unavailable or over its daily limits, or QUOTA_KEY not set. A report
+    // taken from the quota and then not stored stays counted, which errs on
+    // the side of refusing.
+    return { status: 503, message: "The receiver cannot store reports right now. Try again later.", format, bytes: size };
   }
 }
+
+const REFUSED = {
+  sender: { status: 429, message: "This address has sent all the reports it can today. Try again tomorrow." },
+  day: { status: 503, message: "The receiver has taken all the reports it can today. Try again tomorrow." },
+  total: { status: 503, message: "The receiver has no room for more reports. Try again later." },
+};
 
 function isJson(contentType) {
   if (!contentType) return false;
