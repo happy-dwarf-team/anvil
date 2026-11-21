@@ -206,7 +206,37 @@ bool copy_to_clipboard(HWND owner, std::string_view text) {
     return ok;
 }
 
+namespace {
+
+// Wine's ntdll exports wine_get_version, Windows' does not (as src/core/platform.cpp detects Wine).
+bool under_wine() {
+    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    return ntdll != nullptr && GetProcAddress(ntdll, "wine_get_version") != nullptr;
+}
+
+// Starts `command` without a console window; true when the process started.
+bool start_command(std::wstring command) {
+    STARTUPINFOW startup{sizeof(startup)};
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup,
+                        &process)) {
+        return false;
+    }
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return true;
+}
+
+}  // namespace
+
 bool launch_game(const fs::path& gog_program) {
+    if (gog_program.empty() && under_wine()) {
+        // ShellExecute of steam:// starts nothing under Proton (#494, WineSteamRoute in game.hpp): hand it to Linux.
+        wchar_t value[64] = {};
+        const DWORD n = GetEnvironmentVariableW(L"ANVIL_MANAGER_WINE_STEAM", value, static_cast<DWORD>(std::size(value)));
+        const WineSteamRoute route = wine_steam_route(n > 0 && n < std::size(value) ? std::wstring_view(value, n) : L"");
+        if (const std::wstring command = wine_steam_command(route); !command.empty()) return start_command(command);
+    }
     const HINSTANCE started = gog_program.empty()
                                   ? ShellExecuteW(nullptr, L"open", kSteamLaunchUrl, nullptr, nullptr, SW_SHOWNORMAL)
                                   : ShellExecuteW(nullptr, L"open", gog_program.c_str(), nullptr,
