@@ -115,7 +115,14 @@ std::optional<VersionRange> VersionRange::parse(std::string_view text) {
         else if (item.starts_with("^") || item.starts_with("~")) { sugar = item[0]; item.remove_prefix(1); }
         item = trim(item);
         int parts = 0;
-        auto base = parse_partial(item, parts);
+        // A prerelease ("-beta.1") or build ("+…") needs all three parts: ">=2.0.0-beta.1" (K6, #545).
+        std::optional<Version> base;
+        if (item.find_first_of("-+") != std::string_view::npos) {
+            base = Version::parse(item);
+            parts = 3;
+        } else {
+            base = parse_partial(item, parts);
+        }
         if (!base) return std::nullopt;
         if (sugar != 0) {
             Version upper = *base;
