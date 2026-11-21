@@ -24,7 +24,11 @@ bool has_instruction_boundaries(const Symbol& symbol, MemoryKind section_kind);
 //     instructions, and a hook's stolen bytes lie inside what was verified;
 //   - the stolen bytes (the instructions that start in the first
 //     kHookJumpSize bytes) contain no JRCXZ, JECXZ or LOOP/LOOPE/LOOPNE,
-//     which SafetyHook cannot relocate (design §8.3).
+//     which SafetyHook cannot relocate (design §8.3), and no short jcc or jmp
+//     that is not the last of them: SafetyHook widens it in its copy, so a
+//     thread it moves between the code and the copy past it lands inside an
+//     instruction (anvil#535);
+//   - at least one of the stolen bytes is a fixed byte, not "??" (anvil#536).
 // Returns the first problem, or an empty string.
 std::string check_instruction_boundaries(const Symbol& symbol, uint32_t rva, const ImageReader& reader);
 

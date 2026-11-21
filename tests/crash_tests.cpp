@@ -559,19 +559,19 @@ int main(int argc, char** argv) {
         CHECK(r.attribute(trampoline + 3, at));
         CHECK(at.original == image.at(0x103));
 
-        // A short jz in the stolen bytes is 4 bytes longer in the copy: the
-        // nop after it is at +6 there and names +2 of the game's code.
-        image.put(0x200, {0x74, 0x01, 0x90, 0x90, 0x90, 0x90, 0xC3});
+        // A short jz, the last stolen instruction, is 4 bytes longer in the
+        // copy: any offset inside its 6 bytes there names the jz itself.
+        image.put(0x200, {0x90, 0x90, 0x90, 0x74, 0x01, 0x90, 0xC3});
         Fn next_wide = nullptr;
         CHECK(r.hook_function(a, in_image(image.at(0x200)), reinterpret_cast<void*>(&detour_a), slot(next_wide)) ==
               ChangeStatus::Ok);
         const uintptr_t wide = stub_target(reinterpret_cast<void*>(next_wide));
-        CHECK(r.attribute(wide + 3, at));
-        CHECK(at.role == AddressRole::Trampoline && at.original == image.at(0x200));
-        CHECK(r.attribute(wide + 6, at));
+        CHECK(r.attribute(wide + 2, at));
         CHECK(at.role == AddressRole::Trampoline && at.original == image.at(0x202));
+        CHECK(r.attribute(wide + 3, at));
+        CHECK(at.role == AddressRole::Trampoline && at.original == image.at(0x203));
         CHECK(r.attribute(wide + 8, at));
-        CHECK(at.role == AddressRole::Trampoline && at.original == image.at(0x204));
+        CHECK(at.role == AddressRole::Trampoline && at.original == image.at(0x203));
 
         // Outside everything.
         CHECK(r.attribute(image.at(0x400), at));

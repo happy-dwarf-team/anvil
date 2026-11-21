@@ -44,7 +44,8 @@ typedef enum AnvilResult {
     ANVIL_ERROR_NOT_DECLARED = 2,   /* unknown symbol/setting, or a raw pointer into eu4.exe */
     ANVIL_ERROR_WRONG_KIND = 3,     /* e.g. swap_pointer on a function symbol */
     ANVIL_ERROR_CONFLICT = 4,       /* overlaps another change at a different address */
-    ANVIL_ERROR_UNSAFE_SITE = 5,    /* stolen bytes contain JRCXZ / LOOP*, not whole instructions, < 5 declared bytes */
+    ANVIL_ERROR_UNSAFE_SITE = 5,    /* stolen bytes: JRCXZ / LOOP*, a short branch before their end, not whole
+                                       instructions, all "??", or past the declared bytes; < 5 declared bytes */
     ANVIL_ERROR_BYTES_MISMATCH = 6, /* the expected bytes or pointer differ from the original ones */
     ANVIL_ERROR_OUT_OF_MEMORY = 7,
     ANVIL_ERROR_WRONG_PHASE = 8,    /* e.g. begin_group inside anvil_plugin_load */

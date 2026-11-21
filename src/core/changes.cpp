@@ -360,6 +360,7 @@ ChangeStatus stolen_length(const uint8_t* code, size_t available, size_t& length
     }
     struct Short {
         size_t at;
+        size_t end;
         int64_t target;
     };
     std::vector<Short> shorts;
@@ -383,7 +384,7 @@ ChangeStatus stolen_length(const uint8_t* code, size_t available, size_t& length
         }
         if (widening(instruction) != 0) {
             const int64_t end = static_cast<int64_t>(at + instruction.length);
-            shorts.push_back({at, end + static_cast<int64_t>(instruction.raw.imm[0].value.s)});
+            shorts.push_back({at, at + instruction.length, end + static_cast<int64_t>(instruction.raw.imm[0].value.s)});
         }
         at += instruction.length;
     }
@@ -396,6 +397,17 @@ ChangeStatus stolen_length(const uint8_t* code, size_t available, size_t& length
         if (backward || across) {
             detail = "the stolen bytes hold a short branch at +" + hex(s.at) + " to +" +
                      hex(static_cast<uintptr_t>(s.target)) + " inside them";
+            return ChangeStatus::UnsafeSite;
+        }
+    }
+    // SafetyHook moves a thread it finds in the stolen bytes or the trampoline
+    // while it enables or disables the hook (a load during play, a gameplay
+    // suspension) by the same offset; past a widened branch the copy runs
+    // longer, so such a thread would land inside an instruction (anvil#535).
+    for (const Short& s : shorts) {
+        if (s.end < at) {
+            detail = "the stolen bytes hold a short branch at +" + hex(s.at) +
+                     " that is not their last instruction; hook the code at or after it instead";
             return ChangeStatus::UnsafeSite;
         }
     }
@@ -1109,6 +1121,29 @@ ChangeStatus ChangeRegistry::enable(std::vector<ChangeId> ids) {
     return ChangeStatus::Ok;
 }
 
+// The bytes a hook at a symbol overwrites and SafetyHook copies (anvil#536):
+// the declared bytes cover them all, so each was compared with the shipped
+// code (SafetyHook's 14-byte form copies more than the 5-byte one), and at
+// least one of them is fixed, so the jump never lands on code that only "??"
+// bytes matched. Raw addresses and requests without expected bytes have
+// nothing declared to compare.
+ChangeStatus ChangeRegistry::check_stolen(OwnerId owner, const ChangeTarget& target, size_t stolen,
+                                          const std::string& label) {
+    if (!target.inside_image || target.expected_size == 0 || target.expected == nullptr) return ChangeStatus::Ok;
+    if (target.expected_size < stolen) {
+        return refuse(owner, ChangeStatus::UnsafeSite,
+                      label + ": the hook copies " + std::to_string(stolen) + " bytes, past the " +
+                          std::to_string(target.expected_size) + " declared; declare them all");
+    }
+    if (target.mask == nullptr) return ChangeStatus::Ok;
+    for (size_t i = 0; i < stolen; ++i) {
+        if (target.mask[i] == 0xFF) return ChangeStatus::Ok;
+    }
+    return refuse(owner, ChangeStatus::UnsafeSite,
+                  label + ": the " + std::to_string(stolen) +
+                      " bytes the hook overwrites are all \"??\"; declare at least one of them as a fixed byte");
+}
+
 // The code site at target.address, created on first use: one SafetyHook hook
 // whose stolen bytes are checked for overlaps and unsafe instructions. `span`
 // is what a block replacement owns from the address. A redirected call at the
@@ -1134,6 +1169,7 @@ ChangeStatus ChangeRegistry::code_site(OwnerId owner, const ChangeTarget& target
                           label + ": the hook's jump (" + std::to_string(site->footprint) +
                               " B) is longer than the block");
         }
+        if (const ChangeStatus s = check_stolen(owner, target, site->footprint, label); s != ChangeStatus::Ok) return s;
         if (partner != nullptr && site->call_stub == nullptr) partner = nullptr;  // reported as an overlap
         if (const ChangeStatus s = check_overlap(owner, site, site->address, std::max(extent(*site), span), kind,
                                                  label, partner);
@@ -1157,6 +1193,7 @@ ChangeStatus ChangeRegistry::code_site(OwnerId owner, const ChangeTarget& target
             return refuse(owner, ChangeStatus::UnsafeSite,
                           label + ": the hook's jump (" + std::to_string(length) + " B) is longer than the block");
         }
+        if (const ChangeStatus s = check_stolen(owner, target, length, label); s != ChangeStatus::Ok) return s;
         if (const ChangeStatus s =
                 check_overlap(owner, nullptr, target.address, std::max(length, span), kind, label, partner);
             s != ChangeStatus::Ok) {
@@ -1181,7 +1218,10 @@ ChangeStatus ChangeRegistry::code_site(OwnerId owner, const ChangeTarget& target
                 s = refuse(owner, ChangeStatus::UnsafeSite,
                            label + ": the hook's jump (" + std::to_string(stolen) + " B) is longer than the call");
             } else {
-                s = check_overlap(owner, nullptr, target.address, std::max(stolen, span), kind, label, partner);
+                s = check_stolen(owner, target, stolen, label);
+                if (s == ChangeStatus::Ok) {
+                    s = check_overlap(owner, nullptr, target.address, std::max(stolen, span), kind, label, partner);
+                }
             }
             if (s != ChangeStatus::Ok) {
                 (void)hook.release();  // never free a trampoline
