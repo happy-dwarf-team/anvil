@@ -4,7 +4,7 @@
 
 use std::ffi::{c_char, c_void, CStr};
 use std::ptr;
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use crate::sys::*;
@@ -67,20 +67,45 @@ unsafe extern "C" fn fake_hook_function(
         return ANVIL_ERROR_NOT_DECLARED;
     }
     let original: unsafe extern "C" fn(i32) -> i32 = fake_original;
+    let other: unsafe extern "C" fn(i32) -> i32 = fake_other;
     if symbol == 98 {
-        // As the core does when enabling fails: `next` was written, then cleared.
+        // As the core does when enabling fails: `next` was written, then put
+        // back (Anvil after 1.25.0) or cleared (1.25.0 and older).
         unsafe {
-            *next = original as *mut c_void;
-            *next = ptr::null_mut();
+            let before = *next;
+            *next = other as *mut c_void;
+            if let Some(during) = *DURING.lock().unwrap_or_else(|e| e.into_inner()) {
+                during();
+            }
+            *next = if OLD_CORE.load(Ordering::Relaxed) {
+                ptr::null_mut()
+            } else {
+                before
+            };
         }
         return ANVIL_ERROR_CONFLICT;
     }
     unsafe {
-        *next = original as *mut c_void;
+        *next = if symbol == 97 { other } else { original } as *mut c_void;
+        // A game thread may enter the detour once the core enabled the change,
+        // before the request returns.
+        if let Some(during) = *DURING.lock().unwrap_or_else(|e| e.into_inner()) {
+            during();
+        }
         *out = NEXT_CHANGE.fetch_add(1, Ordering::Relaxed) as *mut AnvilChange;
     }
     ANVIL_OK
 }
+
+unsafe extern "C" fn fake_other(x: i32) -> i32 {
+    x + 2
+}
+
+/// The fake core of Anvil 1.25.0 and older: a failed request writes NULL
+/// into a function hook's `next`.
+static OLD_CORE: AtomicBool = AtomicBool::new(false);
+/// Runs inside a fake hook request, after `next` was written.
+static DURING: Mutex<Option<fn()>> = Mutex::new(None);
 
 unsafe extern "C" fn fake_mid_hook(
     _: *mut AnvilPlugin,
@@ -1106,6 +1131,8 @@ static FAKE_WORLD_FULL: Shared<AnvilGameWorldService> = Shared({
 fn fake_host() -> (MutexGuard<'static, ()>, &'static AnvilHost) {
     let guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     FULL_WORLD.store(false, Ordering::Relaxed);
+    OLD_CORE.store(false, Ordering::Relaxed);
+    *DURING.lock().unwrap_or_else(|e| e.into_inner()) = None;
     WITH_GAME.store(false, Ordering::Relaxed);
     *RECORDED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Recorded::default());
     let mut table: AnvilHost = unsafe { std::mem::zeroed() };
@@ -1228,21 +1255,71 @@ fn a_failed_request_on_a_reused_hook_leaves_next_to_a_thread_still_in_the_old_de
     unsafe extern "C" fn detour(x: i32) -> i32 {
         unsafe { HOOK.next().unwrap()(x) * 10 }
     }
+    // On Anvil 1.25.0 (the core clears the cell) and on a later one (it puts
+    // the cell back).
+    for (version, old_core) in [(c"1.25.0", true), (c"1.26.0", false)] {
+        let (_guard, table) = fake_host();
+        let mut versioned = *table;
+        versioned.anvil_version = version.as_ptr();
+        OLD_CORE.store(old_core, Ordering::Relaxed);
+        assert_eq!(load::<Quiet>(Box::leak(Box::new(versioned))), ANVIL_OK);
+        let host = Host::current().unwrap();
+        assert_eq!(host.restores_next(), !old_core);
+        unsafe { host.hook(&HOOK, 1, detour) }.unwrap();
+        HOOK.remove().unwrap();
+        // The hook is reused and Anvil refuses the new change, after it wrote `next`.
+        let refused = unsafe { host.hook(&HOOK, 98, detour) }.unwrap_err();
+        assert_eq!(refused.code(), ErrorCode::Conflict);
+        assert!(!HOOK.is_active());
+        // A thread still inside the removed change's detour passes on as before.
+        assert_eq!(unsafe { detour(4) }, 50, "{version:?}");
+        // The hook takes a change again.
+        unsafe { host.hook(&HOOK, 1, detour) }.unwrap();
+        assert!(HOOK.is_active());
+        HOOK.remove().unwrap();
+    }
+}
+
+#[test]
+fn a_reused_hook_has_its_new_next_as_soon_as_the_change_is_enabled() {
+    static HOOK: FunctionHook<unsafe extern "C" fn(i32) -> i32> = FunctionHook::new();
+    static SEEN: AtomicUsize = AtomicUsize::new(0);
+    fn enter_detour() {
+        SEEN.store(HOOK.next().map_or(0, |f| f as usize), Ordering::Relaxed);
+    }
+    let other: unsafe extern "C" fn(i32) -> i32 = fake_other;
     let (_guard, table) = fake_host();
     assert_eq!(load::<Quiet>(table), ANVIL_OK);
     let host = Host::current().unwrap();
-    unsafe { host.hook(&HOOK, 1, detour) }.unwrap();
+    unsafe { host.hook(&HOOK, 1, fake_original) }.unwrap();
     HOOK.remove().unwrap();
-    // The hook is reused and Anvil refuses the new change, after it wrote `next`.
-    let refused = unsafe { host.hook(&HOOK, 98, detour) }.unwrap_err();
-    assert_eq!(refused.code(), ErrorCode::Conflict);
-    assert!(!HOOK.is_active());
-    // A thread still inside the removed change's detour passes on as before.
-    assert_eq!(unsafe { detour(4) }, 50);
-    // The hook takes a change again.
-    unsafe { host.hook(&HOOK, 1, detour) }.unwrap();
-    assert!(HOOK.is_active());
+    // A game thread enters the detour while the request on the reused hook
+    // runs: it reads the new change's next, not the removed one's.
+    *DURING.lock().unwrap() = Some(enter_detour);
+    unsafe { host.hook(&HOOK, 97, fake_original) }.unwrap();
+    assert_eq!(SEEN.load(Ordering::Relaxed), other as usize);
+    assert_eq!(unsafe { HOOK.next().unwrap()(1) }, 3);
     HOOK.remove().unwrap();
+}
+
+#[test]
+fn restores_next_needs_an_anvil_after_1_25_0() {
+    use crate::host::restores_next;
+    for old in [
+        "", "1", "1.25", "1.25.0", "1.24.9", "1.9.99", "0.99.0", "x.y.z", "1.25.x",
+    ] {
+        assert!(!restores_next(old), "{old}");
+    }
+    for new in [
+        "1.25.1",
+        "1.26.0",
+        "1.26.0-beta.1",
+        "2.0.0",
+        "1.100.0",
+        "9.9.9",
+    ] {
+        assert!(restores_next(new), "{new}");
+    }
 }
 
 #[test]

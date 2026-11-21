@@ -193,7 +193,8 @@ impl Drop for Claim {
 /// A function hook, call redirect or import replacement, and the rest of its
 /// chain. It lives in a `static`, so the detour (a plain function the game
 /// calls) reaches `next`, and Anvil can write `next` into it before the change
-/// is enabled:
+/// is enabled (on a hook reused after [`remove`](FunctionHook::remove), only
+/// on an Anvil newer than 1.25.0):
 ///
 /// ```ignore
 /// static SPEED_OBJECT: anvil::FunctionHook<sym::SpeedObjectFn> = anvil::FunctionHook::new();
@@ -250,13 +251,14 @@ impl<F: FnPtr> FunctionHook<F> {
     }
 
     /// Where Anvil writes `next` during a request (it writes it before it
-    /// enables the change, and a failed request writes NULL): the hook's own
-    /// cell while it is empty, so a detour the game enters as soon as the
-    /// change is enabled finds `next`; on a reused hook `local`, so a failed
-    /// request leaves the removed change's chain for a thread still inside
-    /// its detour.
-    pub(crate) fn next_cell(&self, local: &mut *mut c_void) -> *mut *mut c_void {
-        if self.next.load(Ordering::Acquire).is_null() {
+    /// enables the change): the hook's own cell, so a detour the game enters
+    /// as soon as the change is enabled finds `next`. On a reused hook that
+    /// holds to an Anvil that restores the cell when a request fails
+    /// (`restores`); an older one writes NULL there, so the reused hook gets
+    /// `local` and a failed request leaves the removed change's chain for a
+    /// thread still inside its detour.
+    pub(crate) fn next_cell(&self, local: &mut *mut c_void, restores: bool) -> *mut *mut c_void {
+        if restores || self.next.load(Ordering::Acquire).is_null() {
             self.next.as_ptr()
         } else {
             local
