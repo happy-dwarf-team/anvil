@@ -67,8 +67,8 @@ const std::wstring& agent() {
 }
 
 std::optional<std::string> https_get(const wchar_t* host, const wchar_t* path, const wchar_t* headers, size_t limit,
-                                     const std::string& name, std::string& error) {
-    return net::https_get(host, path, headers, limit, name, agent(), error);
+                                     const net::Timeouts& timeouts, const std::string& name, std::string& error) {
+    return net::https_get(host, path, headers, limit, timeouts, name, agent(), error);
 }
 
 }  // namespace
@@ -278,7 +278,8 @@ std::optional<Catalog> load_embedded_catalog(std::string& error) {
 
 CatalogFetch fetch_catalog() {
     CatalogFetch out;
-    const auto body = https_get(kCatalogHost, kCatalogPath, nullptr, kMaxCatalogBytes, "GitHub", out.error);
+    const auto body = https_get(kCatalogHost, kCatalogPath, nullptr, kMaxCatalogBytes, net::small_request_timeouts(), "GitHub",
+                                out.error);
     if (!body) return out;
     out.catalog = parse_catalog(*body, out.error);
     return out;
@@ -291,7 +292,8 @@ ZipDownload download_pinned_zip(const CatalogPlugin& plugin) {
         out.error = "not an https link";
         return out;
     }
-    const auto body = https_get(host.c_str(), path.c_str(), nullptr, plugin.zip.size, "GitHub", out.error);
+    const auto body = https_get(host.c_str(), path.c_str(), nullptr, plugin.zip.size, net::download_timeouts(), "GitHub",
+                                out.error);
     if (!body) return out;
     std::vector<uint8_t> bytes(body->begin(), body->end());
     out.error = check_pinned_zip(plugin, bytes);
@@ -301,21 +303,28 @@ ZipDownload download_pinned_zip(const CatalogPlugin& plugin) {
 
 SendOutcome post_report(std::string body) {
     SendOutcome out;
+    const net::Timeouts timeouts = net::small_request_timeouts();
     Internet session{WinHttpOpen(agent().c_str(), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
                                  WINHTTP_NO_PROXY_BYPASS, 0)};
+    if (session.handle != nullptr && !net::set_timeouts(session.handle, timeouts)) {
+        out.error = i18n::trf("cannot reach bench.happydwarf.dev (error {0})", {std::to_string(GetLastError())});
+        return out;
+    }
     Internet connection{session.handle != nullptr ? WinHttpConnect(session.handle, kReceiverHost, INTERNET_DEFAULT_HTTPS_PORT, 0)
                                                   : nullptr};
-    const net::Request request{connection.handle != nullptr
-                                   ? WinHttpOpenRequest(connection.handle, L"POST", kReceiverPath, nullptr,
-                                                        WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)
-                                   : nullptr};
+    net::Request request{connection.handle != nullptr
+                             ? WinHttpOpenRequest(connection.handle, L"POST", kReceiverPath, nullptr, WINHTTP_NO_REFERER,
+                                                  WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)
+                             : nullptr};
+    net::Watchdog watchdog(request, timeouts);
     const HINTERNET handle = request.handle();
     const wchar_t* headers = L"Content-Type: application/json\r\n";
     if (handle == nullptr ||
         !WinHttpSendRequest(handle, headers, static_cast<DWORD>(-1L), body.data(), static_cast<DWORD>(body.size()),
                             static_cast<DWORD>(body.size()), 0) ||
         !WinHttpReceiveResponse(handle, nullptr)) {
-        out.error = i18n::trf("cannot reach bench.happydwarf.dev (error {0})", {std::to_string(GetLastError())});
+        const DWORD code = watchdog.fired() ? ERROR_WINHTTP_TIMEOUT : GetLastError();
+        out.error = i18n::trf("cannot reach bench.happydwarf.dev (error {0})", {std::to_string(code)});
         return out;
     }
     DWORD status = 0;
@@ -332,6 +341,7 @@ SendOutcome post_report(std::string body) {
         DWORD read = 0;
         if (!WinHttpReadData(handle, out.body.data() + at, available, &read)) break;
         out.body.resize(at + read);
+        if (read > 0) watchdog.progress();
     }
     return out;
 }

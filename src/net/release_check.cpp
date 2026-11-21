@@ -68,7 +68,7 @@ ReleaseCheck fetch_latest_release(const std::wstring& agent) {
     ReleaseCheck out;
     const auto body = https_get(kReleaseApiHost, kReleaseApiPath,
                                 L"Accept: application/vnd.github+json\r\nX-GitHub-Api-Version: 2022-11-28\r\n", 1u << 20,
-                                "GitHub", agent, out.error, &out.english_error);
+                                small_request_timeouts(), "GitHub", agent, out.error, &out.english_error);
     if (!body) return out;
     out.release = parse_release(*body);
     if (!out.release) {
