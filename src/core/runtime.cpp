@@ -497,14 +497,10 @@ void startup_impl(const std::filesystem::path& game_dir) {
     // through the registry, so bytes a plugin has already changed read in
     // their original form (design §7). The game's own choice of user folder:
     // -userdir first (a private profile, as Etch's live game has).
-    std::filesystem::path user_dir = eu4_user_dir(game_dir);
-    if (const auto named = user_dir_argument(GetCommandLineW())) {
-        std::error_code ec;
-        if (std::filesystem::is_directory(*named, ec)) {
-            user_dir = *named;
-            log_info("EU4's user folder from -userdir: " + narrow(user_dir.wstring()));
-        }
-    }
+    // A -userdir folder that does not exist yet is this start's, with an empty playset (T2, #542).
+    const StartUserDir start_dir = start_user_dir(game_dir, GetCommandLineW());
+    const std::filesystem::path user_dir = start_dir.dir;
+    if (!start_dir.line.empty()) log_info(start_dir.line);
     {
         const OriginalImageReader image(*g_runtime->changes, identity->image_base);
         g_runtime->inventory = std::make_unique<PluginInventory>(

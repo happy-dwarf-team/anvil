@@ -23,6 +23,18 @@ std::filesystem::path eu4_user_dir(const std::filesystem::path& game_dir);
 // ` continue=`.
 std::optional<std::filesystem::path> user_dir_argument(std::wstring_view command_line);
 
+// The user folder a start reads its playset from: the folder -userdir names,
+// whether it exists or not, else eu4_user_dir. A -userdir folder that does not
+// exist yet (the first start of a new private profile) is that start's folder
+// with an empty playset, never userdir.txt's or Documents' (T2, #542); `line`
+// is the anvil.log line to write ("" when there is nothing to say).
+struct StartUserDir {
+    std::filesystem::path dir;
+    bool from_argument = false;
+    std::string line;
+};
+StartUserDir start_user_dir(const std::filesystem::path& game_dir, std::wstring_view command_line);
+
 // One mod of the playset, from its descriptor (`<user dir>/mod/<x>.mod`).
 struct PlaysetMod {
     std::string descriptor;  // as dlc_load.json lists it, e.g. "mod/ugc_123.mod": the mod's identity in trust.toml
