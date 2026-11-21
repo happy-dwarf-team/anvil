@@ -137,7 +137,10 @@ std::size_t write_note(const ProvinceLayout& layout, std::uintptr_t image_base, 
                      "(anvil#426).\n");
         }
     }
-    if (idea_return != 0 && on_stack(read, crash.rsp, crash.stack_high, idea_return)) {
+    // A missing idea is a null pointer, so the merge reads a field just past 0. The return address alone
+    // could be a stale copy left on the stack by an earlier call.
+    if (idea_return != 0 && crash.access_violation && !crash.write && crash.address < kNullReach &&
+        on_stack(read, crash.rsp, crash.stack_high, idea_return)) {
         text.put("The stack holds a return address of the loop that adds up a country's idea modifiers (eu4.exe+")
             .hex(idea_return - image_base)
             .put(", CalcTechAndIdeaModifiers).\n");

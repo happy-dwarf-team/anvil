@@ -29,6 +29,10 @@ inline constexpr std::int64_t kReach = 65536;
 // How much of the crashed thread's stack the note looks through, from rsp up.
 inline constexpr std::size_t kStackBytes = 256 * 1024;
 
+// The idea-loop hint needs a read below this address: a field of the null idea
+// past the group's end (anvil#426 read 0x10).
+inline constexpr std::uintptr_t kNullReach = 0x10000;
+
 struct Crash {
     bool access_violation = false;
     bool write = false;           // the access violation wrote, rather than read or ran
@@ -49,7 +53,8 @@ ProvinceEntry province_entry(std::uintptr_t array, std::int64_t count, std::uint
 
 // The note: lines of text, each ended by '\n', into `out`; returns the bytes
 // written (0: nothing to say). `idea_return` is the return address of the
-// call in CalcTechAndIdeaModifiers' idea loop, 0 when unknown. It allocates
+// call in CalcTechAndIdeaModifiers' idea loop, 0 when unknown; its hint needs
+// that address on the stack and a read below kNullReach. It allocates
 // nothing, takes no lock and reads only through `read`.
 std::size_t write_note(const ProvinceLayout& layout, std::uintptr_t image_base, std::uintptr_t idea_return,
                        const Crash& crash, Reader read, char* out, std::size_t capacity);

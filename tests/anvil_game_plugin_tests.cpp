@@ -1533,6 +1533,20 @@ int main(int argc, char** argv) {
         CHECK(text.find("The stack holds a return address of the loop that adds up a country's idea modifiers "
                         "(eu4.exe+0x930FE4, CalcTechAndIdeaModifiers).\n") == 0);
         CHECK(text.find("active_idea_groups") != std::string::npos);
+        // Only a read just past 0, the null idea's field: a stale copy of the address on the stack under
+        // another crash says nothing.
+        for (const std::uintptr_t a : {ch::kNullReach, std::uintptr_t{0x7FF600001234}}) {
+            s.address = a;
+            CHECK(note(s, base, idea).empty());
+        }
+        s.address = 0x10;
+        s.write = true;
+        CHECK(note(s, base, idea).empty());
+        s.write = false;
+        s.access_violation = false;
+        CHECK(note(s, base, idea).empty());
+        s.access_violation = true;
+        CHECK(!note(s, base, idea).empty());
         stack[2500] = 0;
         CHECK(note(s, base, idea).empty());
         // Below rsp it does not count, and an unknown address looks for nothing.
