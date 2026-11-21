@@ -118,10 +118,17 @@ ManagerSettings load_manager_settings() {
     return settings;
 }
 
+namespace {
+std::string g_settings_error;  // the UI thread's
+}  // namespace
+
+const std::string& manager_settings_error() { return g_settings_error; }
+
 bool save_manager_settings(const ManagerSettings& settings, std::string& error) {
     const fs::path file = settings_file();
     if (file.empty()) {
         error = "no local application data folder";
+        g_settings_error = error;
         return false;
     }
     toml::table table;
@@ -133,7 +140,9 @@ bool save_manager_settings(const ManagerSettings& settings, std::string& error) 
     text << "# Anvil Manager's settings. The game folder it manages, whether it asks GitHub for new releases and\n"
             "# the first arm of the last start-up benchmark series.\n"
          << table << "\n";
-    return write_file_atomic(file, text.str(), error);
+    const bool saved = write_file_atomic(file, text.str(), error);
+    g_settings_error = saved ? std::string() : error;
+    return saved;
 }
 
 std::optional<fs::path> pick_folder(HWND owner, const fs::path& start) {
@@ -242,8 +251,9 @@ int run_remove_after_exit(const fs::path& exe, DWORD pid) {
     if (_wcsicmp(exe.filename().c_str(), L"AnvilManager.exe") != 0) return 2;
     std::error_code ec;
     if (!fs::is_regular_file(exe.parent_path() / "eu4.exe", ec)) return 2;
+    // As long as it takes: the Manager closes only when the player dismisses its Done dialog.
     if (const HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid)) {
-        WaitForSingleObject(process, 60000);
+        WaitForSingleObject(process, INFINITE);
         CloseHandle(process);
     }
     for (int attempt = 0; attempt < 20; ++attempt) {

@@ -227,7 +227,8 @@ void BenchmarkTab::draw_setup(const BenchmarkContext& context) {
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16);
         if (ImGui::BeginCombo("##compare", plugin_.c_str())) {
             for (const ComparablePlugin& p : plugins) {
-                const std::string label = p.id + " " + p.version + (p.source == "workshop" ? " (Workshop)" : "");
+                const std::string name = p.id + " " + p.version;
+                const std::string label = p.source == "workshop" ? trf("{0} (Workshop)", {name}) : name;
                 if (ImGui::Selectable(label.c_str(), p.id == plugin_)) plugin_ = p.id;
             }
             ImGui::EndCombo();
@@ -314,7 +315,11 @@ void BenchmarkTab::draw_kept(const BenchmarkContext& context) {
         ImGui::TableNextColumn();
         ImGui::TextUnformatted(k.readable ? (k.compared + " " + k.version).c_str() : tr("(not readable)"));
         ImGui::TableNextColumn();
-        ImGui::TextUnformatted(!k.readable ? "" : k.state == "complete" ? tr("complete") : trf("stopped: {0}", {k.stop_reason}).c_str());
+        ImGui::TextUnformatted(!k.readable ? "" : k.state == "complete" ? tr("complete") : tr("stopped"));
+        // The reason in words; the table keeps one word.
+        if (k.readable && k.state != "complete" && !k.stop_reason.empty() && ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", stop_reason_text(k.stop_reason).c_str());
+        }
         ImGui::TableNextColumn();
         ImGui::TextUnformatted(k.sent ? tr("sent") : "");
         ImGui::TableNextColumn();

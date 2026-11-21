@@ -20,6 +20,7 @@
 #include "start_menu.hpp"
 #include "test_image.hpp"
 #include "test_support.hpp"
+#include "i18n/translate.hpp"
 #include "zip.hpp"
 
 #include <windows.h>
@@ -216,6 +217,14 @@ int main(int argc, char** argv) {
         CHECK(remove_tree(temp.dir / "tree") == 0);
         CHECK(!fs::exists(temp.dir / "tree") && read(temp.dir / "outside" / "keep.txt") == "keep");
         CHECK(remove_tree(temp.dir / "missing") == 0);
+    });
+
+    run("--game: a relative folder is made absolute against the current one (MU7)", [] {
+        CHECK(absolute_folder("eu4-copy").is_absolute());
+        CHECK(absolute_folder("eu4-copy") == (fs::current_path() / "eu4-copy").lexically_normal());
+        CHECK(absolute_folder("a/../eu4-copy") == (fs::current_path() / "eu4-copy").lexically_normal());
+        CHECK(absolute_folder("C:/Games/EU4") == fs::path("C:/Games/EU4").lexically_normal());
+        CHECK(absolute_folder("").empty());
     });
 
     run("steam: libraryfolders.vdf in both formats, app manifests, game folders", [] {
@@ -1336,6 +1345,13 @@ int main(int argc, char** argv) {
         bad.value = "\"many\"";
         CHECK(!apply_setting_edit(source, bad, error) && contains(error, "unknown value"));
         CHECK(source.values[0].integer == 20);
+        // MU5: the refusal is shown to the player, in the Manager's language.
+        anvil::i18n::set_language(anvil::i18n::Language::Polish);
+        CHECK(!apply_setting_edit(source, bad, error) && contains(error, "nieznana warto"));
+        anvil::ui::Edit missing = undo[0];
+        missing.setting = "nope";
+        CHECK(!apply_setting_edit(source, missing, error) && contains(error, "brak ustawienia nope"));
+        anvil::i18n::set_language(anvil::i18n::Language::English);
     });
 
     run("crashes tab: a report not yet readable whole is read again after the next refresh", [] {

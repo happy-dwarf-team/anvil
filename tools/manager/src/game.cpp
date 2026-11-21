@@ -252,6 +252,13 @@ fs::path gog_program(const fs::path& game_dir) {
     return game_dir / (fs::is_regular_file(game_dir / "dowser.exe", ec) ? "dowser.exe" : "eu4.exe");
 }
 
+fs::path absolute_folder(const fs::path& given) {
+    if (given.empty()) return given;
+    std::error_code ec;
+    const fs::path absolute = fs::absolute(given, ec);
+    return ec ? given : absolute.lexically_normal();
+}
+
 GameFolder inspect_game_folder(const fs::path& dir) {
     GameFolder out;
     out.dir = dir;

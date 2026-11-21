@@ -12,8 +12,9 @@ namespace anvil {
 // §12), read back at a later start: by the core for safe mode and the
 // overlay, and outside the game by the Manager.
 
-// The report names (file names without extension), newest first: they sort
-// by time.
+// The report names (file names without extension), newest first: by the
+// files' creation time, then by name (the names are local time, which repeats
+// an hour when the clocks go back).
 std::vector<std::string> crash_report_names(const std::filesystem::path& crash_dir);
 
 // What a report says about the crash, from its JSON (format 1). A partial

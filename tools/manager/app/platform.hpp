@@ -31,6 +31,9 @@ struct ManagerSettings {
 };
 ManagerSettings load_manager_settings();
 bool save_manager_settings(const ManagerSettings& settings, std::string& error);
+// The error of the last save_manager_settings, "" when it worked (the Manager
+// shows it on every page: an unsaved answer would be asked again).
+const std::string& manager_settings_error();
 
 // Windows' own pickers; nullopt when the player cancels.
 std::optional<std::filesystem::path> pick_folder(HWND owner, const std::filesystem::path& start);
@@ -50,8 +53,8 @@ bool launch_game(const std::filesystem::path& gog_program);
 bool restart_elevated(const std::filesystem::path& game_dir);
 
 // After an uninstall that ran from <EU4>\AnvilManager.exe: a copy of the
-// Manager in the temporary folder waits for this process to end, then
-// removes `exe`. The copy is removed at the next start of a Manager.
+// Manager in the temporary folder waits for this process to end (without a
+// time limit), then removes `exe`. The copy is removed at the next start of a Manager.
 bool remove_after_exit(const std::filesystem::path& exe);
 // That copy's work: `--remove-after-exit <exe> <pid>`. Only a file named
 // AnvilManager.exe next to an eu4.exe is removed.

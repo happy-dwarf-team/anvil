@@ -58,6 +58,11 @@ std::optional<std::filesystem::path> find_gog_game(std::string* version = nullpt
 // Paradox launcher's start, or eu4.exe in a folder without it.
 std::filesystem::path gog_program(const std::filesystem::path& game_dir);
 
+// A folder from the command line (--game), absolute against the current
+// folder: it is saved in manager.toml and passed to the elevated restart,
+// which starts in another folder. `given` itself when that fails.
+std::filesystem::path absolute_folder(const std::filesystem::path& given);
+
 // What the Manager knows about a game folder before it acts on it.
 struct GameFolder {
     std::filesystem::path dir;

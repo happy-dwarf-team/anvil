@@ -216,7 +216,7 @@ void apply_last_start(PluginsSnapshot& snapshot, const LastStart& last) {
 
 bool apply_setting_edit(PluginSource& source, const mui::Edit& edit, std::string& error) {
     if (!source.schema) {
-        error = "no settings";
+        error = i18n::tr("the plugin has no settings");
         return false;
     }
     for (const Setting& setting : source.schema->settings) {
@@ -233,10 +233,10 @@ bool apply_setting_edit(PluginSource& source, const mui::Edit& edit, std::string
             value = *parsed.values[setting.id];
             return true;
         }
-        error = "unknown value " + edit.value + " for " + setting.name;
+        error = i18n::trf("unknown value {0} for {1}", {edit.value, setting.name});
         return false;
     }
-    error = "no setting " + edit.setting;
+    error = i18n::trf("no setting {0}", {edit.setting});
     return false;
 }
 
