@@ -326,6 +326,21 @@ signature = "const char* ()"
         CHECK(contains(parse_error("build = \"b\"\n[symbol.s\n"), "symbols.toml:"));
     });
 
+    run("symbols: a size-8 value's is can be 2^63 or more as a hex string (anvil#545 Y4)", [] {
+        const std::string mov = "rva = 0x1010\nmemory = \"code\"\nbytes = \"48 B8 00 00 00 00 00 00 00 80\"\n";
+        const SymbolFile big = symbols(with_symbol(mov + "values.imm = { at = 2, size = 8, is = \"0x8000000000000000\" }\n"));
+        CHECK(big.symbols.size() == 1 && big.symbols[0].values.size() == 1 &&
+              big.symbols[0].values[0].is == std::optional<uint64_t>(0x8000000000000000ull));
+        const SymbolFile max = symbols(with_symbol(mov + "values.imm = { at = 2, size = 8, is = \"0XFFFFFFFFFFFFFFFF\" }\n"));
+        CHECK(max.symbols.size() == 1 && max.symbols[0].values[0].is == std::optional<uint64_t>(~0ull));
+        const SymbolFile small = symbols(with_symbol(mov + "values.imm = { at = 2, size = 8, is = 0x80 }\n"));
+        CHECK(small.symbols.size() == 1 && small.symbols[0].values[0].is == std::optional<uint64_t>(0x80));
+        for (const char* wrong : {"-1", "\"0x\"", "\"12\"", "\"0x10000000000000000\"", "\"0x12g4\"", "1.5"}) {
+            CHECK(contains(parse_error(with_symbol(mov + "values.imm = { at = 2, size = 8, is = " + wrong + " }\n")),
+                           "values.imm.is must be a non-negative integer"));
+        }
+    });
+
     run("symbols: values must lie on fixed bytes", [] {
         const std::string load = "rva = 0x1010\nmemory = \"code\"\nbytes = \"48 8B 05 ?? ?? ?? ?? 8B 98 D0 1D 00 00\"\n";
         CHECK(contains(parse_error(with_symbol(load + "values.root = { at = 3, rip_relative = 7 }\n")),

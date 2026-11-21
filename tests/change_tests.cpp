@@ -137,9 +137,58 @@ int shipped_fn(int x) { return x + 1; }
 int swapped_a(int x) { g_trace += 'a'; return reinterpret_cast<Fn>(g_prev_a)(x) + 100; }
 int swapped_b(int x) { g_trace += 'b'; return reinterpret_cast<Fn>(g_prev_b)(x) * 2; }
 
+// Writes one byte at `target`: 1 when the write faulted and the fault reached
+// this frame's handler, 0 when it went through.
+DWORD WINAPI write_one_byte(void* target) {
+    __try {
+        *static_cast<volatile uint8_t*>(target) = 0xCC;
+        return 0;
+    } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
+        return 1;
+    }
+}
+
+// The write on a thread of its own, bounded: "spun" when it neither finished
+// nor faulted within 5 s (the thread is then ended).
+std::string write_fault_outcome(void* target) {
+    HANDLE thread = CreateThread(nullptr, 0, &write_one_byte, target, 0, nullptr);
+    if (thread == nullptr) return "no thread";
+    std::string outcome = "spun";
+    if (WaitForSingleObject(thread, 5000) == WAIT_OBJECT_0) {
+        DWORD code = 2;
+        GetExitCodeThread(thread, &code);
+        outcome = code == 1 ? "faulted" : "written";
+    } else {
+        TerminateThread(thread, 3);
+    }
+    CloseHandle(thread);
+    return outcome;
+}
+
 }  // namespace
 
 void change_tests() {
+    run("changes: a real write fault on a hooked page reaches the handlers (anvil#545 C5)", [] {
+        Scratch s(0x1000);
+        s.put(0x40, kAddOne);
+        ChangeRegistry reg(s.at(0), 0x1000);
+        const OwnerId a = reg.add_owner("a");
+        ChangeId ha = 0;
+        CHECK(reg.hook_function(a, in_image(s.at(0x40), kAddOne), reinterpret_cast<void*>(&detour_a), slot(g_next_a),
+                                &ha) == ChangeStatus::Ok);
+        // The page is read-only code again, as the game's is: SafetyHook's trap
+        // for it stays, and a write there must fault, not spin in its handler.
+        DWORD old = 0;
+        CHECK(VirtualProtect(s.base, 0x1000, PAGE_EXECUTE_READ, &old) != 0);
+        CHECK(write_fault_outcome(s.base + 0x800) == "faulted");  // on the trapped page
+        CHECK(write_fault_outcome(s.base + 0x41) == "faulted");   // in the hook's own bytes
+        CHECK(VirtualProtect(s.base, 0x1000, PAGE_EXECUTE_READWRITE, &old) != 0);
+        const auto f = reinterpret_cast<Fn>(s.base + 0x40);
+        g_trace.clear();
+        CHECK(f(1) == 102 && g_trace == "a");  // the hook still runs
+        CHECK(reg.remove(a, ha) == ChangeStatus::Ok);
+    });
+
     run("changes: function hook chain in load order with its own next per link", [] {
         Scratch s(0x1000);
         s.put(0x40, kAddOne);
@@ -967,6 +1016,14 @@ void change_tests() {
         const std::vector<uint8_t> block = {0x83, 0xC0, 0x02, 0x83, 0xC0, 0x04};  // add eax, 2; add eax, 4
         Probe pb{'B', 0, 0, 1000};
         ChangeId hb = 0;
+        // Longer than a block replacement may take: refused with the reason (anvil#545 Y4).
+        CHECK(reg.replace_block(b, in_image(s.at(0x43)), 4097, 0, &probe, &pb, &hb) == ChangeStatus::InvalidArgument);
+        CHECK(!refusals.empty() && refusals.back() == "block replacement rva 0x43 (4097 B): longer than the 4096 bytes a "
+                                                      "block replacement may take");
+        const uint8_t nops[1] = {0x90};
+        CHECK(reg.patch_bytes(b, in_image(s.at(0x43)), nops, 4097, &hb) == ChangeStatus::InvalidArgument);
+        CHECK(refusals.back() == "byte patch rva 0x43 (4097 B): longer than the 4096 bytes a byte patch may take");
+        CHECK(reg.describe(b).empty() && hb == 0);
         CHECK(reg.replace_block(b, in_image(s.at(0x43), block), 6, 0, &probe, &pb, &hb) == ChangeStatus::Ok);
         CHECK(traced(f, 0) == 1009 && g_trace == "B");  // 1 + 1000 + 8
         CHECK(reg.describe(b) == std::vector<std::string>{"block replacement rva 0x43 (6 B)"});

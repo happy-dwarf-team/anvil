@@ -70,6 +70,11 @@ public:
 
     std::optional<SessionMode> session() const;
     bool suspended(OwnerId owner) const;  // by this policy
+    // Suspended by this policy with none of its changes left in the game. A
+    // suspension that could not take a change out (its memory could not be
+    // written) leaves the plugin suspended, told so, and still acting: the
+    // plugin-set hash counts it (anvil#545 Y2).
+    bool out_of_game(OwnerId owner) const;
 
 private:
     struct Entry {

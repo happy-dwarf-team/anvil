@@ -108,7 +108,8 @@ void GameplayPolicy::apply(Entry& e, const std::string& reason, Events& events) 
     log_(ANVIL_LOG_INFO, e.manifest.id,
          "suspended: " + reason + "; " + std::to_string(out) + " change(s) out of the game");
     if (status != ChangeStatus::Ok) {
-        log_(ANVIL_LOG_WARNING, e.manifest.id, "suspend: some of its changes could not be taken out (see above)");
+        log_(ANVIL_LOG_WARNING, e.manifest.id,
+             "suspend: some of its changes could not be taken out (see above); it still counts in the plugin-set hash");
     }
 }
 
@@ -210,6 +211,14 @@ bool GameplayPolicy::suspended(OwnerId owner) const {
     std::lock_guard lock(mutex_);
     for (const Entry& e : entries_) {
         if (e.owner == owner) return e.suspended;
+    }
+    return false;
+}
+
+bool GameplayPolicy::out_of_game(OwnerId owner) const {
+    std::lock_guard lock(mutex_);
+    for (const Entry& e : entries_) {
+        if (e.owner == owner) return e.suspended && changes_.count(owner) == 0;
     }
     return false;
 }

@@ -125,6 +125,10 @@ struct AddressAttribution {
 //  - the core can suspend all changes of an owner and resume them (§8.4);
 //  - executable memory (stubs, trampolines) is never freed.
 // Addresses are absolute; the host converts RVAs and symbols.
+// The most bytes a block replacement or a byte patch may take; symbols.toml
+// allows longer symbols (kMaxSymbolBytes), which are refused with a message.
+inline constexpr size_t kMaxChangeBytes = 4096;
+
 class ChangeRegistry {
 public:
     ChangeRegistry(uintptr_t image_base, uint32_t image_size);

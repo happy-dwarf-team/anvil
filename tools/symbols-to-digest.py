@@ -90,7 +90,9 @@ def convert(text):
             number = constant(symbols[name], value) if value else None
             if number is not None and "is =" not in match.group(5):
                 body = match.group(5).rstrip()
-                line = f"{match.group(1)}{match.group(2)}{match.group(4)}{body}, is = 0x{number:X} {match.group(6)}"
+                # TOML integers are signed 64-bit: 2^63 or more is written as a hex string (anvil#545).
+                is_text = f"0x{number:X}" if number < 1 << 63 else f'"0x{number:X}"'
+                line = f"{match.group(1)}{match.group(2)}{match.group(4)}{body}, is = {is_text} {match.group(6)}"
         out.append(rewrite_bytes(line))
     return MULTILINE_BYTES.sub(rewrite_multiline, "\n".join(out))
 

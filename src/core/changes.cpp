@@ -1347,11 +1347,16 @@ ChangeStatus ChangeRegistry::mid_hook(OwnerId owner, const ChangeTarget& target,
 
 ChangeStatus ChangeRegistry::replace_block(OwnerId owner, const ChangeTarget& target, size_t size, uintptr_t resume,
                                            AnvilCpuCallback callback, void* user, ChangeId* out) {
-    if (callback == nullptr || size > 4096) return ChangeStatus::InvalidArgument;
+    if (callback == nullptr) return ChangeStatus::InvalidArgument;
     if (!plugin_target_readable(target) || !plugin_handle_writable(out)) return ChangeStatus::InvalidArgument;
     std::lock_guard lock(mutex_);
     if (const ChangeStatus s = check_requester(owner); s != ChangeStatus::Ok) return s;
     const std::string label = "block replacement " + where(target.address) + " (" + std::to_string(size) + " B)";
+    // symbols.toml allows longer symbols, so the refusal says why (anvil#545 Y4).
+    if (size > kMaxChangeBytes) {
+        return refuse(owner, ChangeStatus::InvalidArgument,
+                      label + ": longer than the " + std::to_string(kMaxChangeBytes) + " bytes a block replacement may take");
+    }
     if (size < 5) {
         return refuse(owner, ChangeStatus::UnsafeSite, label + ": shorter than the hook's 5-byte jump");
     }
@@ -1443,13 +1448,16 @@ ChangeStatus ChangeRegistry::redirect_call(OwnerId owner, const ChangeTarget& ta
 
 ChangeStatus ChangeRegistry::patch_bytes(OwnerId owner, const ChangeTarget& target, const void* bytes, size_t size,
                                          ChangeId* out) {
-    if (bytes == nullptr || size == 0 || size > 4096) return ChangeStatus::InvalidArgument;
-    if (!plugin_target_readable(target) || !plugin_bytes_readable(bytes, size) || !plugin_handle_writable(out)) {
-        return ChangeStatus::InvalidArgument;
-    }
+    if (bytes == nullptr || size == 0) return ChangeStatus::InvalidArgument;
+    if (!plugin_target_readable(target) || !plugin_handle_writable(out)) return ChangeStatus::InvalidArgument;
     std::lock_guard lock(mutex_);
     if (const ChangeStatus s = check_requester(owner); s != ChangeStatus::Ok) return s;
     const std::string label = "byte patch " + where(target.address) + " (" + std::to_string(size) + " B)";
+    if (size > kMaxChangeBytes) {
+        return refuse(owner, ChangeStatus::InvalidArgument,
+                      label + ": longer than the " + std::to_string(kMaxChangeBytes) + " bytes a byte patch may take");
+    }
+    if (!plugin_bytes_readable(bytes, size)) return ChangeStatus::InvalidArgument;
     if (const ChangeStatus s = check_target(owner, target, size, "byte patch"); s != ChangeStatus::Ok) return s;
     const auto* data = static_cast<const uint8_t*>(bytes);
     // Identical byte patches share ownership (§8.3).
