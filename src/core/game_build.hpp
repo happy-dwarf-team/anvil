@@ -35,6 +35,8 @@ std::optional<PeIdentity> read_pe_identity(const void* image_base);
 const KnownBuild* find_known_build(const PeIdentity& identity);
 // Full-file match against the compiled-in table (`sha256` in upper-case hex).
 const KnownBuild* find_known_build_by_sha256(std::string_view sha256);
+// The row of a build id ("eu4-1.37.5-steam-win64"), nullptr for an id the table does not have.
+const KnownBuild* find_known_build_by_id(std::string_view id);
 
 // True when `game_dir` is a GOG install: GOG Galaxy and GOG's installers leave
 // goggame-2057001589.info there. It is the only sign that works for a build

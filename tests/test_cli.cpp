@@ -669,18 +669,34 @@ int main(int argc, char** argv) {
         const auto mismatch = fx.check(other, true);
         CHECK(mismatch.exit_code == kExitProblems && has_problem(mismatch, 1, "symbols.toml is for other-build, eu4.exe is test-build"));
         CHECK(mismatch.problems.size() == 1);
-        CHECK(contains(read(other / kLockFile), "result = \"problems\""));
-        const auto offline = fx.check(other, false);
-        CHECK(has_problem(offline, 8, "the last anvil check --exe (eu4.exe test-build) found problems"));
+        // A build the file does not declare is reported and writes no lock (anvil#545, CLI3).
+        CHECK(mismatch.lock.empty() && !fs::exists(other / kLockFile));
+        CHECK(has_problem(fx.check(other, false), 0, "symbols.lock is missing"));
 
         const fs::path unknown_exe = fx.root / "game" / "other.exe";
         TestImage image = boundary_image();
         image.put(0x10F0, {0xCC});
         const auto bytes = image.file();
         write(unknown_exe, std::string(bytes.begin(), bytes.end()));
-        const auto unknown = fx.check(fx.plugin("unknown", kGoodSymbols), true, unknown_exe);
+        const fs::path unknown_dir = fx.plugin("unknown", kGoodSymbols);
+        const auto unknown = fx.check(unknown_dir, true, unknown_exe);
         CHECK(has_problem(unknown, 1, "is not a game build this Anvil knows"));
-        CHECK(contains(read(fx.root / "unknown" / kLockFile), "build = \"unknown\""));
+        CHECK(unknown.lock.empty() && !fs::exists(unknown_dir / kLockFile));
+
+        // The lock of a clean check stays when the exe is of another build or one Anvil does not know.
+        CHECK(fx.check(unknown_dir, true).lock == "written");
+        const std::string lock = read(unknown_dir / kLockFile);
+        CHECK(fx.check(unknown_dir, true, unknown_exe).exit_code == kExitProblems);
+        CHECK(read(unknown_dir / kLockFile) == lock);
+        CheckOptions other_build;
+        other_build.plugin_dir = unknown_dir;
+        other_build.exe = unknown_exe;
+        other_build.build_of = [](std::string_view) -> const char* { return "other-build"; };
+        const auto undeclared = check_plugin(other_build);
+        CHECK(has_problem(undeclared, 1, "symbols.toml is for test-build, other.exe is other-build") && undeclared.lock.empty());
+        CHECK(read(unknown_dir / kLockFile) == lock);
+        const auto offline = fx.check(unknown_dir, false);
+        CHECK(offline.exit_code == kExitOk && offline.lock == "matches");
 
         const auto failing = fx.check(fx.plugin("failing", std::string(kGoodSymbols) +
                                                                 "\n[symbol.wrong]\nrva = 0x1000\nbytes = \"48 8B 82\"\nmemory = \"code\"\n"
@@ -689,6 +705,8 @@ int main(int argc, char** argv) {
         CHECK(failing.problems.size() == 2);
         CHECK(has_problem(failing, 43, "symbol wrong (rva 0x1000): byte +0x2 (rva 0x1002) expected 0x82, found 0x81"));
         CHECK(has_problem(failing, 48, "declared write memory, section .rdata is read"));
+        CHECK(failing.lock == "written" && contains(read(fx.root / "failing" / kLockFile), "result = \"problems\""));
+        CHECK(has_problem(fx.check(fx.root / "failing", false), 8, "the last anvil check --exe (eu4.exe test-build) found problems"));
 
         CHECK(fx.check(fx.plugin("no-exe", kGoodSymbols), true, fx.root / "nothing.exe").exit_code == kExitCannotCheck);
         write(fx.root / "game" / "text.exe", "MZ not a PE");

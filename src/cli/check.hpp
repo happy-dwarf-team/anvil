@@ -126,7 +126,7 @@ std::string github_escape(std::string_view text, bool property);
 // One anvil check --exe of symbols.lock.
 struct LockCheck {
     std::string exe_sha256;    // of the eu4.exe it was checked against
-    std::string build;         // that eu4.exe's build id, or "unknown"
+    std::string build;         // that eu4.exe's build id ("unknown" from an older Anvil)
     bool ok = false;           // result = "ok" | "problems"
     uint32_t result_line = 0;  // of `result`, when parsed
 };

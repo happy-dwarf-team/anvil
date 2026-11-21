@@ -347,15 +347,7 @@ int run_port(const std::vector<std::wstring>& args) {
         return usage_error("port needs --from, --to and --build");
     }
     options.symbols = positional[0];
-    PortReport report;
-    if (const std::string problem = port_build_problem(options); !problem.empty()) {
-        report.build = options.build;
-        report.exit_code = kExitCannotCheck;
-        report.cannot_port = problem;
-    } else {
-        report = port_symbols(options);
-        report.build_known = !options.unknown_build;
-    }
+    const PortReport report = run_port(options);
     std::fputs(format_port_report(report, options.symbols, format).c_str(), stdout);
     return report.exit_code;
 }
