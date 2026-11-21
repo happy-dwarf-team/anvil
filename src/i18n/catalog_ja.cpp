@@ -1196,6 +1196,8 @@ extern const Translation kJapanese[] = {
      "10 分以内にメニューなし"},
     {"no plugin involved",
      "関係したプラグインなし"},
+    {"no readable answer from bench.happydwarf.dev (error {0})",
+     "bench.happydwarf.dev からの応答を読み取れません（エラー {0}）"},
     {"no setting {0}",
      "設定 {0} はありません"},
     {"no start record",

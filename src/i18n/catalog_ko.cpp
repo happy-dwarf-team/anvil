@@ -1196,6 +1196,8 @@ extern const Translation kKorean[] = {
      "10분 안에 메뉴 없음"},
     {"no plugin involved",
      "관련 플러그인 없음"},
+    {"no readable answer from bench.happydwarf.dev (error {0})",
+     "bench.happydwarf.dev의 응답을 읽을 수 없습니다(오류 {0})"},
     {"no setting {0}",
      "설정 {0}이(가) 없습니다"},
     {"no start record",

@@ -1196,6 +1196,8 @@ extern const Translation kSimplifiedChinese[] = {
      "10 分钟内未进入菜单"},
     {"no plugin involved",
      "没有涉及插件"},
+    {"no readable answer from bench.happydwarf.dev (error {0})",
+     "无法读取 bench.happydwarf.dev 的响应（错误 {0}）"},
     {"no setting {0}",
      "没有设置 {0}"},
     {"no start record",
