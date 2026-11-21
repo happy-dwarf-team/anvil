@@ -701,6 +701,12 @@ void ManagerApp::draw_anvil_tab() {
     ImGui::Spacing();
     begin_banner("state", tone);
     wrapped(state);
+    if (inst.dll != Installation::Dll::Foreign && !inst.legacy.empty()) {
+        // A replace that was interrupted (M2, #541): installing finishes it.
+        wrapped(trf("{0} is installed in this folder. Anvil replaces it: its files move to {1}, and "
+                    "uninstalling Anvil can put them back.",
+                    {inst.legacy_name(), kLegacyBackup}));
+    }
     if (inst.dll == Installation::Dll::Anvil && inst.dll_version != version && newer_installed) {
         wrapped(trf("The installed Anvil is newer: installing this one would go back to {0}. "
                     "Use the Manager of the newer release instead.",

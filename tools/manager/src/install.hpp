@@ -58,15 +58,21 @@ const char* legacy_patch_name(LegacyPatch::Kind kind);  // "EU4DLL", "EU4 Unicod
 // so removing everything of Anvil keeps it.
 inline constexpr const char* kLegacyBackup = "anvil-legacy-backup";
 
+// The file a replace writes into its backup folder once everything it moves
+// is there (M2, #541). A folder without it is an interrupted replace: the
+// next install moves what is left of the patch into it.
+inline constexpr const char* kBackupComplete = ".anvil-complete";
+
 // A folder of anvil-legacy-backup/: what one replace moved there, laid out as
 // in the game folder.
 struct LegacyBackup {
     std::string folder;              // "anvil-legacy-backup/eu4dll-2026-11-09"
     std::string name;                // what it holds: "EU4DLL", "EU4DLL + EU4 Unicode Patch", "version.dll"
-    std::vector<std::string> files;  // below the folder: "version.dll", "plugins/plugin64.dll"
+    std::vector<std::string> files;  // below the folder: "version.dll", "plugins/plugin64.dll" (not the marker)
     // Of `files`, those whose place in the game folder holds another file
     // (Anvil's version.dll not counted: uninstalling removes it).
     std::vector<std::string> taken;
+    bool complete = false;  // it has kBackupComplete
 };
 
 // What a game folder holds, compared with the package.
@@ -74,9 +80,13 @@ struct Installation {
     enum class Dll { Missing, Anvil, Foreign };
     Dll dll = Dll::Missing;
     std::string dll_version;      // Anvil's version.dll: its ProductVersion
-    // With a foreign version.dll: the legacy text patches its folder has
-    // (EU4DLL first); empty for a proxy Anvil does not know.
+    // With a foreign version.dll, or an `unfinished` backup: the legacy text
+    // patches its folder has (EU4DLL first); empty for a proxy Anvil does not know.
     std::vector<LegacyPatch> legacy;
+    // The newest backup folder ("eu4dll-2026-11-09") when it has no
+    // kBackupComplete and version.dll is not foreign: a replace was
+    // interrupted, and the next install finishes it there. Empty: none.
+    std::string unfinished;
     // Files below <EU4>/plugins that no recognized patch has; they stay.
     std::vector<std::string> other_plugins;
     std::vector<std::string> backup_folders;  // the folders of anvil-legacy-backup/, by name
@@ -111,6 +121,7 @@ struct Step {
         RemoveIfEmpty,  // a folder, when nothing is left in it
         RemoveManager,  // <EU4>/AnvilManager.exe, possibly the running exe
         Move,           // a file or folder to `to`, creating its folder; never over something
+        Mark,           // an empty file (kBackupComplete), creating its folder
     };
     Kind kind = Kind::Write;
     std::string path;  // relative to the game folder, '/'-separated
@@ -135,7 +146,9 @@ struct Plan {
 // overwritten: it moves first, with the patch's files, to a new folder
 // anvil-legacy-backup/<patch>-<date>, so the game is vanilla from the first
 // step; a <EU4>/plugins left empty goes. `date` ("2026-11-09") names the
-// folder; empty: today.
+// folder; empty: today. The moves end with the folder's kBackupComplete. An
+// `unfinished` backup is finished instead of starting a new one: what is
+// left of the patch moves into it, then its marker (M2, #541).
 Plan plan_install(const Package& package, const Installation& installation, const std::filesystem::path& game_dir,
                   const std::filesystem::path& manager_exe, bool replace_foreign_dll, std::string date = {});
 
