@@ -4,6 +4,7 @@
 #include "core/mod_plugins.hpp"
 #include "core/plugin_inventory.hpp"
 #include "core/safe_mode.hpp"
+#include "core/semver.hpp"
 #include "core/start_plan.hpp"
 
 #include <filesystem>
@@ -23,7 +24,21 @@ struct GameOptions {
     // The build id of an eu4.exe by its SHA-256, or nullptr when it is unknown.
     // Empty: the table compiled into Anvil.
     std::function<const char*(std::string_view sha256)> build_of;
+    // --host-version: the Anvil version the plugins' `anvil` ranges are
+    // checked against. nullopt: the installed <game_dir>/version.dll's, or
+    // this build's when the folder has no Anvil version.dll (issue #544).
+    std::optional<Version> host_version;
 };
+
+// Where the report's host version comes from.
+enum class HostVersionSource {
+    Option,      // GameOptions::host_version (--host-version)
+    VersionDll,  // the version resource of <game>/version.dll, Anvil's
+    Tool,        // this build's own version: the folder has no Anvil version.dll
+};
+
+// "option", "version.dll" or "tool", as the JSON says it.
+const char* host_source_name(HostVersionSource source);
 
 // One folder of anvil/plugins, by PluginInventory::local.
 struct GamePlugin {
@@ -82,6 +97,12 @@ struct GameReport {
     std::string exe_name = "eu4.exe";
     std::string exe_sha256;
     std::string exe_build;     // empty: not a game build this Anvil knows
+    // The Anvil version the plan checks each plugin's `anvil` range against,
+    // as the loader installed in the folder does; empty when the folder
+    // cannot be checked. With Tool, `host_note` says why version.dll gave none.
+    std::string host_version;
+    HostVersionSource host_source = HostVersionSource::Tool;
+    std::string host_note;
     std::vector<Problem> problems;  // anvil.toml, dlc_load.json, trust.toml
     // What the folder and its playset hold, the player's choices as saved,
     // and the plan of the next start as a normal start (no safe mode, no

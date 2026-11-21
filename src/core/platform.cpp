@@ -195,6 +195,20 @@ VersionResource module_version_resource(HMODULE module) {
     return parse_version_resource(LockResource(loaded), SizeofResource(module, info));
 }
 
+std::optional<DllProduct> read_dll_product(const std::filesystem::path& dll) {
+    const HMODULE module = LoadLibraryExW(dll.c_str(), nullptr, LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE);
+    if (module == nullptr) return std::nullopt;
+    const VersionResource resource = module_version_resource(module);
+    FreeLibrary(module);
+    const auto string_of = [&](const char* key) {
+        const auto it = resource.strings.find(key);
+        return it == resource.strings.end() ? std::string() : it->second;
+    };
+    DllProduct product{string_of("ProductName"), string_of("ProductVersion")};
+    if (product.name.empty()) return std::nullopt;
+    return product;
+}
+
 std::optional<std::string> find_dxvk_version(std::string_view bytes) {
     static constexpr std::string_view kPrefix("DXVK: \0", 7);
     for (size_t at = bytes.find(kPrefix); at != std::string_view::npos; at = bytes.find(kPrefix, at + 1)) {

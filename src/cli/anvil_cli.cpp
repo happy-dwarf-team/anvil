@@ -50,13 +50,16 @@ void print_usage(std::FILE* out) {
                "      symbols.lock matches symbols.toml. A text without a translation is a warning;\n"
                "      with --complete-translations, an error.\n"
                "  check --game <EU4 folder> [--format text|json|github] [--user-dir <folder>]\n"
+               "       [--host-version <x.y.z>]\n"
                "      check every plugin in <folder>/anvil/plugins against <folder>/eu4.exe (nothing is\n"
                "      written), then resolve them as the game does at start-up: the load order, what is\n"
                "      skipped and why (anvil.toml, API, build, conflicts, dependencies), and warnings\n"
                "      for plugins whose code ranges overlap. Plugins in the mods that dlc_load.json in\n"
                "      EU4's user folder enables (--user-dir, or the folder the game uses) are listed as\n"
                "      approved, update pending, pending, in conflict, shadowed or invalid; the approved\n"
-               "      ones take part in the resolution.\n"
+               "      ones take part in the resolution. Each plugin's anvil range is checked against the\n"
+               "      Anvil installed in the folder (its version.dll), or this anvil check's own version\n"
+               "      when the folder has none; --host-version checks it against another.\n"
                "  port <symbols.toml> --from <old eu4.exe> --to <new eu4.exe> --build <new id> [--out <file>]\n"
                "       [--from-build <id>] [--unknown-build] [--format text|json|github]\n"
                "      place every symbol in a new build of the game: reads each symbol's bytes from the old\n"
@@ -244,6 +247,7 @@ int run_check(const std::vector<std::wstring>& args) {
     Format format = Format::Text;
     std::optional<std::wstring> game;
     std::optional<std::wstring> user_dir;
+    std::optional<anvil::Version> host_version;
     std::vector<std::wstring> positional;
     for (size_t i = 2; i < args.size(); ++i) {
         if (is_option(args[i], L"--game")) {
@@ -252,6 +256,10 @@ int run_check(const std::vector<std::wstring>& args) {
         } else if (is_option(args[i], L"--user-dir")) {
             user_dir = option_value(args, i, L"--user-dir");
             if (!user_dir || user_dir->empty()) return usage_error("check: --user-dir needs EU4's user folder");
+        } else if (is_option(args[i], L"--host-version")) {
+            const auto text = option_value(args, i, L"--host-version");
+            host_version = text ? anvil::Version::parse(utf8(*text)) : std::nullopt;
+            if (!host_version) return usage_error("check: --host-version needs an Anvil version (x.y.z)");
         } else if (is_option(args[i], L"--exe")) {
             const auto exe = option_value(args, i, L"--exe");
             if (!exe || exe->empty()) return usage_error("check: --exe needs the path of eu4.exe");
@@ -270,6 +278,7 @@ int run_check(const std::vector<std::wstring>& args) {
         }
     }
     if (user_dir && !game) return usage_error("check: --user-dir goes with --game");
+    if (host_version && !game) return usage_error("check: --host-version goes with --game");
     if (game) {
         if (!positional.empty() || !options.exe.empty() || options.complete_translations) {
             return usage_error("check: --game takes the EU4 folder only (not a <plugin-dir> or --exe)");
@@ -277,6 +286,7 @@ int run_check(const std::vector<std::wstring>& args) {
         GameOptions game_options;
         game_options.game_dir = *game;
         if (user_dir) game_options.user_dir = *user_dir;
+        game_options.host_version = host_version;
         const GameReport report = check_game(game_options);
         const std::string text = format_game_report(report, format);
         std::fputs(text.c_str(), format == Format::Text && report.exit_code == kExitCannotCheck && report.plugins.empty()
