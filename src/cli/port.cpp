@@ -358,14 +358,24 @@ bool valid_build_id(std::string_view id) {
 
 }  // namespace
 
-std::string port_build_problem(const PortOptions& options) {
+std::string port_build_problem(const PortOptions& options) { return port_build_problem(options, sha256_file(options.to)); }
+
+std::string port_build_problem(const PortOptions& options, std::string_view to_sha256) {
+    const KnownBuild* known = to_sha256.empty() ? nullptr : find_known_build_by_sha256(to_sha256);
     if (options.unknown_build) {
-        if (valid_build_id(options.build)) return {};
-        return "--build must have the form eu4-<version>-<store>-win64, as eu4-1.37.5.2-gog-win64 has";
+        if (!valid_build_id(options.build)) {
+            return "--build must have the form eu4-<version>-<store>-win64, as eu4-1.37.5.2-gog-win64 has";
+        }
+        if (to_sha256.empty()) return {};  // port_symbols says why it cannot read the file
+        // An id from the table is held to its hash even so: it would put that
+        // build's name on another build's addresses.
+        const KnownBuild* named = find_known_build_by_id(options.build);
+        if (named == nullptr || named == known) return {};
+        return "--build " + options.build + " is a build this Anvil knows, and --to is " +
+               (known != nullptr ? std::string(known->id) : std::string("not that build")) +
+               ": --unknown-build is for an id the table of builds does not have";
     }
-    const std::string sha256 = sha256_file(options.to);
-    if (sha256.empty()) return {};  // port_symbols says why it cannot read the file
-    const KnownBuild* known = find_known_build_by_sha256(sha256);
+    if (to_sha256.empty()) return {};  // port_symbols says why it cannot read the file
     if (known == nullptr) {
         return "--to is not a build this Anvil knows, so a plugin ported to it cannot load: add its row to the table of "
                "builds and use that anvil.exe, or pass --unknown-build to port it before that";
@@ -601,6 +611,22 @@ PortReport port_symbols(const PortOptions& options) {
     return report;
 }
 
+PortReport run_port(const PortOptions& options) {
+    const std::string to_sha256 = sha256_file(options.to);
+    if (const std::string problem = port_build_problem(options, to_sha256); !problem.empty()) {
+        PortReport report;
+        report.build = options.build;
+        report.exit_code = kExitCannotCheck;
+        report.cannot_port = problem;
+        return report;
+    }
+    PortReport report = port_symbols(options);
+    const KnownBuild* known = to_sha256.empty() ? nullptr : find_known_build_by_sha256(to_sha256);
+    if (known != nullptr) report.to_build = known->id;
+    report.build_known = known != nullptr && options.build == known->id;
+    return report;
+}
+
 std::string format_port_report(const PortReport& report, const std::filesystem::path& symbols, Format format) {
     const auto optional_hex = [](const std::optional<uint32_t>& value) { return value ? json_string(hex(*value)) : std::string("null"); };
     if (format == Format::Json) {
@@ -609,6 +635,7 @@ std::string format_port_report(const PortReport& report, const std::filesystem::
         out += "  \"result\": \"" + std::string(result) + "\",\n  \"exit_code\": " + std::to_string(report.exit_code) + ",\n";
         if (!report.cannot_port.empty()) out += "  \"cannot_port\": " + json_string(report.cannot_port) + ",\n";
         out += "  \"from_build\": " + json_string(report.from_build) + ",\n  \"build\": " + json_string(report.build) + ",\n";
+        out += "  \"to_build\": " + (report.to_build.empty() ? std::string("null") : json_string(report.to_build)) + ",\n";
         out += "  \"functions\": " + std::to_string(report.functions) + ",\n";
         out += "  \"functions_paired\": " + std::to_string(report.functions_paired) + ",\n";
         out += "  \"functions_changed\": " + std::to_string(report.functions_changed) + ",\n";
@@ -672,7 +699,12 @@ std::string format_port_report(const PortReport& report, const std::filesystem::
         out += std::to_string(values) + " value(s) differ in the new build and lose their `is`: anvil gen reads them when the game loads, "
                                         "so code that uses one as a constant stops compiling.\n";
     }
-    if (report.written && report.manual.empty()) {
+    const bool trial = !report.to_build.empty() && report.to_build != report.build;
+    if (trial) {
+        out += "--to is " + report.to_build + ", which this Anvil knows: a file that declares " + report.build +
+               " does not load on it.\n";
+    }
+    if (report.written && report.manual.empty() && !trial) {
         out += report.build_known ? "Next: anvil check <plugin-dir> --exe <the new eu4.exe>.\n"
                                   : "Next: anvil check <plugin-dir> --exe <the new eu4.exe>, once this Anvil knows the build.\n";
     }

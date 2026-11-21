@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace anvil::cli {
@@ -56,17 +57,25 @@ struct PortReport {
     std::vector<ManualSymbol> manual;
     bool written = false;
     bool build_known = false;  // this Anvil knows the new build, so `anvil check` can run now
+    std::string to_build;      // the table's id for --to, "" when it has none
 };
 
 // What is wrong with --build and --to, "" when nothing is. A file with an id
 // the table of builds does not have never loads, so the id comes from the
-// table; --unknown-build leaves the table out, for a build it does not have yet
-// or a trial on a pair of known builds, and the id must then have the form of one.
+// table; --unknown-build takes an id the table does not have, for a build it
+// does not have yet or a trial on a pair of known builds, and the id must then
+// have the form of one. An id the table has is held to --to's hash even then.
 std::string port_build_problem(const PortOptions& options);
+// The same for a --to whose SHA-256 is `to_sha256` ("" when it cannot be read).
+std::string port_build_problem(const PortOptions& options, std::string_view to_sha256);
 
 // `anvil port` (design §16): carries symbols.toml over to a new game build.
 // Reads both eu4.exe files and writes only options.out.
 PortReport port_symbols(const PortOptions& options);
+
+// What `anvil port` runs: port_build_problem, then port_symbols, with what the
+// table of builds says of --to.
+PortReport run_port(const PortOptions& options);
 
 std::string format_port_report(const PortReport& report, const std::filesystem::path& symbols, Format format);
 

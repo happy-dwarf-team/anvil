@@ -430,6 +430,50 @@ void port_tests() {
         CHECK(port_build_problem(options).empty());
     });
 
+    run("port: --unknown-build holds an id of the table to the hash of --to (anvil#545, CLI4)", [&] {
+        const KnownBuild* steam = find_known_build_by_id("eu4-1.37.5-steam-win64");
+        const KnownBuild* gog = find_known_build_by_id("eu4-1.37.5.2-gog-win64");
+        CHECK(steam != nullptr && gog != nullptr && find_known_build_by_id("eu4-9.9.9-steam-win64") == nullptr);
+        if (steam == nullptr || gog == nullptr) return;
+        PortOptions options;
+        options.symbols = fx.symbols;
+        options.from = fx.old_exe;
+        options.to = fx.new_exe;
+        options.unknown_build = true;
+        // --to is the GOG build: the Steam id would put Steam's name on GOG's addresses.
+        options.build = steam->id;
+        const std::string wrong = port_build_problem(options, gog->sha256);
+        CHECK(contains(wrong, "--build eu4-1.37.5-steam-win64 is a build this Anvil knows, and --to is eu4-1.37.5.2-gog-win64"));
+        // A --to the table does not have cannot be a build it has.
+        CHECK(contains(port_build_problem(options, sha256_file(fx.new_exe)), "and --to is not that build"));
+        CHECK(contains(port_build_problem(options), "and --to is not that build"));
+        // Its own id, and an id of a trial that the table does not have, still go.
+        options.build = gog->id;
+        CHECK(port_build_problem(options, gog->sha256).empty());
+        options.build = "eu4-0.0.0-test-win64";
+        CHECK(port_build_problem(options, gog->sha256).empty());
+        // Without the flag nothing changed: the id is the table's for --to.
+        options.unknown_build = false;
+        CHECK(contains(port_build_problem(options, gog->sha256), "--to is eu4-1.37.5.2-gog-win64, not eu4-0.0.0-test-win64"));
+        options.build = gog->id;
+        CHECK(port_build_problem(options, gog->sha256).empty());
+
+        // The report of a trial on a known --to says the file does not load there, and gives no "Next".
+        PortReport report;
+        report.from_build = steam->id;
+        report.build = "eu4-0.0.0-test-win64";
+        report.to_build = gog->id;
+        report.written = true;
+        const std::string text = format_port_report(report, fx.symbols, Format::Text);
+        CHECK(contains(text, "--to is eu4-1.37.5.2-gog-win64, which this Anvil knows: a file that declares "
+                             "eu4-0.0.0-test-win64 does not load on it."));
+        CHECK(!contains(text, "Next:"));
+        CHECK(contains(format_port_report(report, fx.symbols, Format::Json), "\"to_build\": \"eu4-1.37.5.2-gog-win64\""));
+        report.build = gog->id;
+        report.build_known = true;
+        CHECK(contains(format_port_report(report, fx.symbols, Format::Text), "Next: anvil check <plugin-dir> --exe <the new eu4.exe>.\n"));
+    });
+
     run("port reads a malformed new build only within its bytes", [&] {
         const auto port_to = [&](const std::vector<uint8_t>& bytes, const char* name) {
             const fs::path exe = fx.root / name / "eu4.exe";

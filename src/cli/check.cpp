@@ -174,6 +174,9 @@ void exe_checks(const CheckOptions& options, const SymbolFile& file, const Plugi
     }
 
     if (!options.write_lock) return;
+    // A check of a build symbols.toml does not declare, or of an exe this Anvil
+    // does not know, belongs to no build: the lock is left alone, whatever its format.
+    if (!check.build_declared) return;
     std::string symbols_text;
     if (!read_file(options.plugin_dir / utf8_path(report.manifest->symbols), symbols_text)) {
         report.exit_code = kExitCannotCheck;
@@ -187,12 +190,10 @@ void exe_checks(const CheckOptions& options, const SymbolFile& file, const Plugi
     lock.format = file.builds_listed ? 2 : 1;
     lock.tool = tool_name();
     lock.symbols_sha256 = symbols_digest(symbols_text);
-    const LockCheck lock_check{report.exe_sha256, report.exe_build.empty() ? "unknown" : report.exe_build, exe_ok};
+    const LockCheck lock_check{report.exe_sha256, report.exe_build, exe_ok};
     if (lock.format == 1) {
         lock.checks.push_back(lock_check);
     } else {
-        // A check of a build symbols.toml does not declare belongs to no build: the lock is left alone.
-        if (!check.build_declared) return;
         // The other builds' checks stay while symbols.toml is the same.
         std::optional<SymbolsLock> previous;
         if (has_existing) previous = parse_lock(existing).lock;

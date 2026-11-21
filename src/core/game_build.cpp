@@ -60,6 +60,13 @@ const KnownBuild* find_known_build_by_sha256(std::string_view sha256) {
     return nullptr;
 }
 
+const KnownBuild* find_known_build_by_id(std::string_view id) {
+    for (const auto& b : kKnownBuilds) {
+        if (id == b.id) return &b;
+    }
+    return nullptr;
+}
+
 bool is_gog_folder(const std::filesystem::path& game_dir) {
     const DWORD attributes = GetFileAttributesW((game_dir / L"goggame-2057001589.info").c_str());
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
