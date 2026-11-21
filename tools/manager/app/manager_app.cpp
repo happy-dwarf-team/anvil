@@ -363,12 +363,18 @@ bool ManagerApp::anvil_installed() const {
 void ManagerApp::draw() {
     poll();
     if (shot_dialog_.starts_with("send-") && settled()) {
-        // send-<status>[-tomorrow]: the receiver's answer under the Send button.
+        // send-<status>[-tomorrow]: the receiver's answer under the Send button;
+        // send-unreadable: post_report's error for an answer whose status it cannot read.
         const std::string rest = shot_dialog_.substr(5);
         const bool tomorrow = rest.ends_with("-tomorrow");
         SendOutcome outcome;
-        outcome.status = std::atoi(rest.c_str());
-        outcome.body = tomorrow ? R"({"message":"","retry":"tomorrow"})" : R"({"message":""})";
+        if (rest == "unreadable") {
+            // 12150: ERROR_WINHTTP_HEADER_NOT_FOUND.
+            outcome.error = trf("no readable answer from bench.happydwarf.dev (error {0})", {"12150"});
+        } else {
+            outcome.status = std::atoi(rest.c_str());
+            outcome.body = tomorrow ? R"({"message":"","retry":"tomorrow"})" : R"({"message":""})";
+        }
         page_ = "Benchmark";
         benchmark_.show_send_outcome(game_, outcome);
         shot_dialog_.clear();
