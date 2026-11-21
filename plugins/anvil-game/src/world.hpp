@@ -82,6 +82,11 @@ struct WorldLayout {
     std::uint32_t war_attackers_end = 0;
     std::uint32_t war_defenders = 0;
     std::uint32_t war_defenders_end = 0;
+    // The war's start date, as CWar::GetStartDate finds it: `war_history` 0
+    // when absent on this build.
+    std::uint32_t war_history = 0;       // war: the first node of its history list
+    std::uint32_t war_history_next = 0;  // a node: the next one (its entry is at +0)
+    std::uint32_t war_history_date = 0;  // an entry: its date, int32 hours
 
     // Modifiers: `modifier_value` 0 when absent on this build.
     std::uintptr_t modifier_value = 0;    // the address of the game's value function
@@ -312,6 +317,10 @@ AnvilResult read_war_ids(const WorldLayout& l, std::vector<std::uint64_t>& out);
 AnvilResult read_war(const WorldLayout& l, std::uint64_t id, AnvilGameWar& out);
 AnvilResult read_war_name(const WorldLayout& l, std::uint64_t id, std::string& utf8);
 AnvilResult read_war_side(const WorldLayout& l, std::uint64_t id, std::uint32_t side, std::vector<AnvilGameTag>& out);
+// The war's start date in hours, as the game's CWar::GetStartDate gives it: the
+// first history entry dated after year 1, else 1 January of year 1.
+// ANVIL_ERROR_NOT_DECLARED when the build has no start date symbol.
+AnvilResult read_war_start(const WorldLayout& l, std::uint64_t id, std::int32_t& hours);
 
 AnvilResult read_modifier_id(const WorldLayout& l, std::string_view key, std::int32_t& id);
 AnvilResult read_country_modifier(const WorldLayout& l, std::string_view tag, std::int32_t id, std::int32_t& value);

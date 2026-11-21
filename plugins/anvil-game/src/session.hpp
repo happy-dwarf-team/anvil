@@ -75,13 +75,20 @@ private:
 // A running war as the tracker keeps it, for the event when it ends.
 struct WarSeen {
     std::uint64_t id = 0;
-    AnvilGameTag attacker{};
-    AnvilGameTag defender{};
+    AnvilGameTag attacker{};  // the original attacker
+    AnvilGameTag defender{};  // the original defender
+    std::int32_t start = 0;   // the start date (hours, as the root's date); 0 when not read
     std::string name;
 };
 
+// Whether two entries are the same war: the id is the war's address, which a
+// later war may reuse, so the start date and the original sides must match too.
+bool same_war(const WarSeen& a, const WarSeen& b);
+
 // Compares the running wars day by day. The first list of a session is the
-// baseline; a war is reported once when it appears and once when it goes.
+// baseline; a war is reported once when it appears and once when it goes. A
+// war at the address of one that is gone (another start date, attacker or
+// defender) is the old war's end and the new war's start.
 class WarTracker {
 public:
     struct Changes {
@@ -92,7 +99,8 @@ public:
     Changes update(std::uint64_t session, std::vector<WarSeen> seen);
     // Whether this session has its baseline.
     bool known(std::uint64_t session) const { return known_ && session == session_; }
-    // Whether the tracker already knows this war, so its details need no reading.
+    // The war the tracker keeps at this address, if any; it is the same war
+    // only when same_war() says so, and then its name needs no reading.
     const WarSeen* find(std::uint64_t session, std::uint64_t id) const;
 
 private:

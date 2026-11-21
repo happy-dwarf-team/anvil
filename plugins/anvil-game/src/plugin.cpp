@@ -259,27 +259,30 @@ void publish_player(std::uint64_t session) {
     publish(ANVIL_GAME_EVENT_PLAYER, &change);
 }
 
-// The running wars of this day; those already seen keep what was read when they
-// began. A read that fails skips the day, so nothing looks ended.
+// The running wars of this day. Each war's address, start date and original
+// sides are read every day, since a later war may reuse the address; a war
+// already seen keeps the name read when it began. A read that fails skips the
+// day, so nothing looks ended.
 void publish_wars(std::uint64_t session) {
     std::vector<std::uint64_t> ids;
     if (anvil_game::read_war_ids(g_world, ids) != ANVIL_OK) return;
     std::vector<WarSeen> seen;
     seen.reserve(ids.size());
     for (const std::uint64_t id : ids) {
-        if (const WarSeen* known = g_wars.find(session, id)) {
-            seen.push_back(*known);
-            continue;
-        }
         AnvilGameWar war{};
         WarSeen entry;
-        if (anvil_game::read_war(g_world, id, war) != ANVIL_OK ||
-            anvil_game::read_war_name(g_world, id, entry.name) != ANVIL_OK) {
-            return;
-        }
+        if (anvil_game::read_war(g_world, id, war) != ANVIL_OK) return;
+        const AnvilResult start = anvil_game::read_war_start(g_world, id, entry.start);
+        if (start != ANVIL_OK && start != ANVIL_ERROR_NOT_DECLARED) return;
         entry.id = id;
         entry.attacker = war.attacker;
         entry.defender = war.defender;
+        const WarSeen* known = g_wars.find(session, id);
+        if (known != nullptr && anvil_game::same_war(*known, entry)) {
+            entry.name = known->name;
+        } else if (anvil_game::read_war_name(g_world, id, entry.name) != ANVIL_OK) {
+            return;
+        }
         seen.push_back(std::move(entry));
     }
     const WarTracker::Changes changes = g_wars.update(session, std::move(seen));
@@ -1759,6 +1762,11 @@ void load_world(anvil::Host& host) {
         l.war_attackers_end = sym::war_attackers.end;
         l.war_defenders = sym::war_defenders.begin;
         l.war_defenders_end = sym::war_defenders.end;
+        if (host.present(sym::war_start)) {
+            l.war_history = sym::war_start.history;
+            l.war_history_next = sym::war_start.next;
+            l.war_history_date = sym::war_start.date;
+        }
     }
     if (host.present(sym::modifier_value) && host.present(sym::modifier_definitions) &&
         host.present(sym::country_modifiers) && host.present(sym::country_modifier_total) &&
