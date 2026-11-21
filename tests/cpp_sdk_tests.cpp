@@ -26,18 +26,21 @@ struct Fake {
     int removed = 0;
     AnvilResult commit = ANVIL_OK;
     int aborts = 0;
+    bool old_core = true;          // Anvil 1.25.0 and older: a failed request writes NULL into next
     std::function<void()> during;  // runs inside the request
 } g_fake;
 
 AnvilChange* handle_of(int n) { return reinterpret_cast<AnvilChange*>(static_cast<uintptr_t>(0x1000 + n)); }
 
 // As the core's add_link: `next` gets the stub before the enable; a failed
-// enable writes NULL over it.
+// enable puts back what the cell held (Anvil after 1.25.0, anvil#534) or
+// writes NULL over it (1.25.0 and older).
 AnvilResult fake_hook_at(AnvilPlugin*, void*, const void*, size_t, void*, void** next, AnvilChange** out) {
+    void* const before = *next;
     *next = g_fake.next_value;
     if (g_fake.during) g_fake.during();
     if (g_fake.answer != ANVIL_OK) {
-        *next = nullptr;
+        *next = g_fake.old_core ? nullptr : before;
         if (out != nullptr) *out = nullptr;
         return g_fake.answer;
     }
@@ -90,8 +93,15 @@ const anvil::Slot kSlot{0};
 
 }  // namespace
 
+AnvilHost make_new_host() {
+    AnvilHost h = make_host();
+    h.anvil_version = "1.26.0";
+    return h;
+}
+
 int main() {
-    static const AnvilHost host = make_host();
+    static const AnvilHost host = make_host();  // no version: treated as 1.25.0 or older
+    static const AnvilHost new_host = make_new_host();
     anvil::detail::g_host.store(&host);
     anvil::detail::g_self.store(reinterpret_cast<AnvilPlugin*>(&g_fake));
     const anvil::Host h;
@@ -99,29 +109,66 @@ int main() {
     void* const address = &fakes[0];
 
     run("hook: a failed request on a reused hook leaves next as the removed change had it", [&] {
+        for (const bool old_core : {true, false}) {
+            g_fake = {};
+            g_fake.old_core = old_core;
+            anvil::detail::g_host.store(old_core ? &host : &new_host);
+            anvil::FunctionHook<int(int)> hook;
+            h.hook_at(hook, address, &detour);
+            CHECK(hook.active() && hook.next_pointer() == &game_fn && hook.next(1) == 2);
+            hook.remove();
+            CHECK(!hook.active() && g_fake.removed == 1);
+            // A thread still inside the removed detour calls next(): it must stay the old chain.
+            g_fake.answer = ANVIL_ERROR_INTERNAL;
+            g_fake.next_value = reinterpret_cast<void*>(&other_fn);
+            bool threw = false;
+            try {
+                h.hook_at(hook, address, &detour);
+            } catch (const anvil::Error& e) {
+                threw = e.result() == ANVIL_ERROR_INTERNAL;
+            }
+            CHECK(threw);
+            CHECK(hook.next_pointer() == &game_fn && hook.next(1) == 2);
+            CHECK(!hook.active());
+            // Free again: a later request succeeds and takes its own next.
+            g_fake.answer = ANVIL_OK;
+            h.hook_at(hook, address, &detour);
+            CHECK(hook.active() && hook.next_pointer() == &other_fn);
+            hook.remove();
+        }
+        anvil::detail::g_host.store(&host);
+    });
+
+    run("hook: a reused hook has its new next as soon as the change is enabled (Anvil after 1.25.0)", [&] {
         g_fake = {};
+        g_fake.old_core = false;
+        anvil::detail::g_host.store(&new_host);
         anvil::FunctionHook<int(int)> hook;
         h.hook_at(hook, address, &detour);
-        CHECK(hook.active() && hook.next_pointer() == &game_fn && hook.next(1) == 2);
         hook.remove();
-        CHECK(!hook.active() && g_fake.removed == 1);
-        // A thread still inside the removed detour calls next(): it must stay the old chain.
-        g_fake.answer = ANVIL_ERROR_INTERNAL;
+        // A game thread enters the detour while the request on the reused hook
+        // runs: it reads the new change's next, not the removed one's.
         g_fake.next_value = reinterpret_cast<void*>(&other_fn);
-        bool threw = false;
-        try {
-            h.hook_at(hook, address, &detour);
-        } catch (const anvil::Error& e) {
-            threw = e.result() == ANVIL_ERROR_INTERNAL;
-        }
-        CHECK(threw);
-        CHECK(hook.next_pointer() == &game_fn && hook.next(1) == 2);
-        CHECK(!hook.active());
-        // Free again: a later request succeeds and takes its own next.
-        g_fake.answer = ANVIL_OK;
+        Fn seen = nullptr;
+        g_fake.during = [&] { seen = hook.next_pointer(); };
         h.hook_at(hook, address, &detour);
-        CHECK(hook.active() && hook.next_pointer() == &other_fn);
+        CHECK(seen == &other_fn && hook.next_pointer() == &other_fn && hook.active());
         hook.remove();
+        anvil::detail::g_host.store(&host);
+    });
+
+    run("restores_next: Anvil after 1.25.0", [&] {
+        AnvilHost v = make_host();
+        for (const char* old : {"", "1", "1.25", "1.25.0", "1.24.9", "1.9.99", "0.99.0", "x.y.z", "1.25.x"}) {
+            v.anvil_version = old;
+            CHECK(!anvil::detail::restores_next(v));
+        }
+        for (const char* later : {"1.25.1", "1.26.0", "1.26.0-beta.1", "2.0.0", "1.100.0"}) {
+            v.anvil_version = later;
+            CHECK(anvil::detail::restores_next(v));
+        }
+        v.anvil_version = nullptr;
+        CHECK(!anvil::detail::restores_next(v));
     });
 
     run("hook: a detour the game enters as soon as a first change is enabled already has next", [&] {

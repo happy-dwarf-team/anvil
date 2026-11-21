@@ -1055,11 +1055,11 @@ ChangeStatus ChangeRegistry::add_link(OwnerId owner, Site& site, ChangeKind kind
     });
     site.links.insert(position, link);
     changes_.push_back(std::move(change));
-    // A swap's cell may be one an earlier, removed swap of the plugin still
-    // points: a thread inside that value's code reads it. A failed request
-    // puts back what it held rather than NULL.
-    void* const held_before =
-        kind == ChangeKind::PointerSwap && next != nullptr ? *reinterpret_cast<void* volatile*>(next) : nullptr;
+    // The cell may be one an earlier, removed change of the plugin still
+    // points (a swap's previous, or the next of a reused hook object, which
+    // the SDKs pass as the cell): a thread inside that change's code reads
+    // it. A failed request puts back what it held rather than NULL.
+    void* const held_before = next != nullptr ? *reinterpret_cast<void* volatile*>(next) : nullptr;
     if (chains(kind)) point(*link, successor(site, *link));
     // The cell may be the plugin's hook object itself (the SDKs pass it while
     // it is empty), which its detour reads atomically: written atomically too.
@@ -1074,11 +1074,7 @@ ChangeStatus ChangeRegistry::add_link(OwnerId owner, Site& site, ChangeKind kind
     o.staged.clear();
     const ChangeStatus status = enable(std::move(single));
     if (status != ChangeStatus::Ok) {
-        if (kind == ChangeKind::PointerSwap && next != nullptr) {
-            InterlockedExchangePointer(reinterpret_cast<void* volatile*>(next), held_before);
-        } else if (next != nullptr) {
-            InterlockedExchangePointer(reinterpret_cast<void* volatile*>(next), nullptr);
-        }
+        if (next != nullptr) InterlockedExchangePointer(reinterpret_cast<void* volatile*>(next), held_before);
         if (out != nullptr) *out = 0;
     }
     return status;

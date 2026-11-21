@@ -313,6 +313,14 @@ impl Host {
         unsafe { static_str(version) }.unwrap_or("")
     }
 
+    /// Whether a failed request leaves a hook's `next` cell as it was: Anvil
+    /// after 1.25.0 puts the cell's value back for every kind of change;
+    /// 1.25.0 and older write NULL into it for a function hook, call redirect
+    /// or import replacement.
+    pub(crate) fn restores_next(&self) -> bool {
+        restores_next(self.anvil_version())
+    }
+
     /// The running game executable.
     pub fn game(&self) -> GameInfo {
         let game = field!(self.table, AnvilHost, game).unwrap_or(ptr::null());
@@ -420,8 +428,8 @@ impl Host {
         let call = function!(self.table, AnvilHost, hook_function)?;
         let mut change: *mut AnvilChange = ptr::null_mut();
         let mut next: *mut c_void = ptr::null_mut();
-        let cell = hook.next_cell(&mut next);
-        // SAFETY: Anvil writes `cell` (the hook's empty cell or a local) during the call only; the caller vouches that the
+        let cell = hook.next_cell(&mut next, self.restores_next());
+        // SAFETY: Anvil writes `cell` (the hook's own cell or a local) during the call only; the caller vouches that the
         // detour has the symbol's declared type.
         let result = unsafe { call(self.plugin, symbol, detour.into_raw(), cell, &mut change) };
         check(result, || format!("hook_function symbol {symbol}"))?;
@@ -496,7 +504,7 @@ impl Host {
         let call = function!(self.table, AnvilHost, redirect_call)?;
         let mut change: *mut AnvilChange = ptr::null_mut();
         let mut next: *mut c_void = ptr::null_mut();
-        let cell = hook.next_cell(&mut next);
+        let cell = hook.next_cell(&mut next, self.restores_next());
         // SAFETY: a declared symbol; the caller vouches for the type.
         let result = unsafe { call(self.plugin, call_site, target.into_raw(), cell, &mut change) };
         check(result, || format!("redirect_call symbol {call_site}"))?;
@@ -566,7 +574,7 @@ impl Host {
         let (module_c, function_c) = (c_string(module), c_string(function));
         let mut change: *mut AnvilChange = ptr::null_mut();
         let mut next: *mut c_void = ptr::null_mut();
-        let cell = hook.next_cell(&mut next);
+        let cell = hook.next_cell(&mut next, self.restores_next());
         // SAFETY: NUL-terminated names; the caller vouches for the type.
         let result = unsafe {
             call(
@@ -600,7 +608,7 @@ impl Host {
         let call = function!(self.table, AnvilHost, hook_function_at)?;
         let mut change: *mut AnvilChange = ptr::null_mut();
         let mut next: *mut c_void = ptr::null_mut();
-        let cell = hook.next_cell(&mut next);
+        let cell = hook.next_cell(&mut next, self.restores_next());
         // SAFETY: the caller's contract; the bytes are read during the call.
         let result = unsafe {
             call(
@@ -976,4 +984,24 @@ fn bytes_or_null(bytes: &[u8]) -> *const c_void {
     } else {
         bytes.as_ptr().cast()
     }
+}
+
+/// See [`Host::restores_next`]: a version above 1.25.0 (a prerelease of a
+/// later version counts as that version).
+pub(crate) fn restores_next(version: &str) -> bool {
+    let mut parts = version.splitn(3, '.');
+    let mut number = || -> Option<u64> {
+        let part = parts.next()?;
+        let digits = part
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(part.len());
+        if digits == 0 || digits > 7 {
+            return None;
+        }
+        part[..digits].parse().ok()
+    };
+    let (Some(major), Some(minor), Some(patch)) = (number(), number(), number()) else {
+        return false;
+    };
+    (major, minor, patch) > (1, 25, 0)
 }

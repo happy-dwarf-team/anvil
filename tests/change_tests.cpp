@@ -766,6 +766,47 @@ void change_tests() {
         g_prev_a = nullptr;
     });
 
+    run("changes: a chained request whose code cannot be written leaves next as it was", [] {
+        // As above for code: a read-only view, so enabling the change fails
+        // after Anvil wrote the new link's next into the cell. The cell is the
+        // next of a reused hook object, which a thread inside the removed
+        // change's detour still reads (anvil#534). A call redirect, as its
+        // write is Anvil's own: SafetyHook's write of a function hook into such
+        // a page spins in its trap handler (C5, anvil#545).
+        HANDLE section = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 0x1000, nullptr);
+        CHECK(section != nullptr);
+        auto* const writer = static_cast<uint8_t*>(MapViewOfFile(section, FILE_MAP_WRITE, 0, 0, 0x1000));
+        auto* const reader = static_cast<uint8_t*>(MapViewOfFile(section, FILE_MAP_READ, 0, 0, 0x1000));
+        CHECK(writer != nullptr && reader != nullptr);
+        if (writer == nullptr || reader == nullptr) return;
+        std::memset(writer, 0xCC, 0x1000);
+        // sub rsp,28h; call +0x200; add rsp,28h; ret
+        const uint8_t caller[] = {0x48, 0x83, 0xEC, 0x28, 0xE8, 0, 0, 0, 0, 0x48, 0x83, 0xC4, 0x28, 0xC3};
+        std::memcpy(writer + 0x10, caller, sizeof(caller));
+        const int32_t rel = 0x200 - (0x14 + 5);
+        std::memcpy(writer + 0x15, &rel, sizeof(rel));
+        std::vector<uint8_t> shipped(reader, reader + 0x100);
+        const auto at = [&](size_t offset) { return reinterpret_cast<uintptr_t>(reader) + offset; };
+        ChangeRegistry reg(at(0), 0x1000);
+        const OwnerId a = reg.add_owner("a");
+        g_next_b = &detour_c;  // the removed change's chain
+        ChangeId hb = 7;
+        CHECK(reg.redirect_call(a, in_image(at(0x14)), at(0x200), reinterpret_cast<void*>(&detour_b), slot(g_next_b),
+                                &hb) == ChangeStatus::Internal);
+        CHECK(g_next_b == &detour_c && hb == 0);
+        // An empty cell stays empty.
+        g_next_b = nullptr;
+        CHECK(reg.redirect_call(a, in_image(at(0x14)), at(0x200), reinterpret_cast<void*>(&detour_b), slot(g_next_b),
+                                &hb) == ChangeStatus::Internal);
+        CHECK(g_next_b == nullptr && hb == 0);
+        CHECK(std::memcmp(reader, shipped.data(), shipped.size()) == 0);
+        CHECK(reg.chain_at(at(0x14)).empty());
+        UnmapViewOfFile(reader);
+        UnmapViewOfFile(writer);
+        CloseHandle(section);
+        g_next_b = nullptr;
+    });
+
     run("mid hooks: registers written in the callback are loaded on the way out", [] {
         Scratch s(0x1000);
         s.put(0x40, kSteps);
