@@ -407,6 +407,12 @@ public:
         }
         return std::string(out.text, strnlen(out.text, sizeof(out.text)));
     }
+    std::int32_t capital(const std::string& tag) override {
+        AnvilGameCountry c{};
+        c.size = sizeof(c);
+        if (g_world->country(tag.c_str(), &c) != ANVIL_OK) return 0;
+        return c.capital;
+    }
     static std::uint32_t key_of(files::Test test) {
         switch (test) {
             case files::Test::religion: return ANVIL_GAME_KEY_RELIGION;

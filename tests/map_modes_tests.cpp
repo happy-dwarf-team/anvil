@@ -445,6 +445,13 @@ public:
         const auto it = overlords.find(tag);
         return it == overlords.end() ? std::string() : it->second;
     }
+    // Capitals: RUS province 1, POL none.
+    std::map<std::string, std::int32_t> capitals{{"RUS", 1}};
+    std::int32_t capital(const std::string& tag) override {
+        ++country_reads;
+        const auto it = capitals.find(tag);
+        return it == capitals.end() ? 0 : it->second;
+    }
 
     // Religion and culture: 1 and 2 orthodox (2 Swedish), 3 catholic and
     // polish, 4 and 5 none; RUS orthodox and russian, POL catholic and polish.
@@ -537,9 +544,9 @@ void file_tests() {
         CHECK(one("m={label=M label=N rule={always=yes color={0 0 0} label=x}}").ends_with("label is given twice"));
         CHECK(one("m={label=M sprite=\"GFX x\" rule={always=yes color={0 0 0} label=x}}").find("sprite") != std::string::npos);
         CHECK(one("m={label=M rule={color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier, value, owned_by, controlled_by, core, occupied, subject, "
-                                                                                          "subject_of, religion, religion_group, culture, culture_group, trade_goods, area, region, superregion or continent"));
+                                                                                          "subject_of, religion, religion_group, culture, culture_group, trade_goods, area, region, superregion, continent or capital"));
         CHECK(one("m={label=M rule={flag=a variable=b color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier, value, owned_by, controlled_by, core, occupied, subject, "
-                                                                                          "subject_of, religion, religion_group, culture, culture_group, trade_goods, area, region, superregion or continent"));
+                                                                                          "subject_of, religion, religion_group, culture, culture_group, trade_goods, area, region, superregion, continent or capital"));
         CHECK(one("m={label=M rule={always=yes label=x}}").ends_with("a rule needs color = { r g b }"));
         CHECK(one("m={label=M rule={always=yes color={0 0 0}}}").ends_with("a rule needs a label of 1 to 64 bytes"));
         CHECK(one("m={label=M rule={always=yes color={0 0 256} label=x}}").find("0 to 255") != std::string::npos);
@@ -803,6 +810,28 @@ void file_tests() {
             "region is the province's: leave out owner = yes"));
         CHECK(parse_problems("m={label=M rule={continent=europe owner=yes color={0 0 0} label=x}}")[0].ends_with(
             "continent is the province's: leave out owner = yes"));
+    });
+
+    run("map mode files: capital = yes and no", [] {
+        std::vector<files::FileMode> modes;
+        CHECK(parse_problems("m={label=M rule={capital=yes color={1 0 0} label=Capital}"
+                             " rule={capital=no color={2 0 0} label=Other}}",
+                             &modes)
+                  .empty());
+        CHECK(modes[0].rules[0].test == files::Test::capital && modes[0].rules[0].yes &&
+              !modes[0].rules[1].yes);
+        TableWorld world;
+        world.country_reads = 0;
+        files::Evaluator e(modes[0], world);
+        const std::vector<std::uint32_t> colors = e.colors();
+        CHECK(colors[1] == 0x010000);  // RUS's capital
+        CHECK(colors[2] == 0x020000);  // RUS's, not its capital
+        CHECK(colors[3] == 0x020000);  // POL has none: every province of it is another
+        CHECK(colors[4] == ANVIL_MAP_NO_COLOR && colors[5] == ANVIL_MAP_NO_COLOR);  // no owner
+        CHECK(world.country_reads == 4);  // once per owner and rule
+        CHECK(parse_problems("m={label=M rule={capital=yes owner=yes color={0 0 0} label=x}}")[0].ends_with(
+            "capital is the province's: leave out owner = yes"));
+        CHECK(parse_problems("m={label=M rule={capital=RUS color={0 0 0} label=x}}").size() == 1);
     });
 
     run("map mode files: a scale colours between its two ends (anvil#580)", [] {

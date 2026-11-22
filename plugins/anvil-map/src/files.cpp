@@ -94,6 +94,7 @@ std::string key_of(Test test) {
         case Test::occupied: return "occupied";
         case Test::subject: return "subject";
         case Test::subject_of: return "subject_of";
+        case Test::capital: return "capital";
         case Test::trade_goods: return "trade_goods";
         case Test::area: return "area";
         case Test::region: return "region";
@@ -361,8 +362,8 @@ public:
                                               "russian, grain, scandinavia_region): " + r.name};
                 }
                 ++tests;
-            } else if (k == "occupied" || k == "subject") {
-                r.test = k == "occupied" ? Test::occupied : Test::subject;
+            } else if (k == "occupied" || k == "subject" || k == "capital") {
+                r.test = k == "occupied" ? Test::occupied : k == "subject" ? Test::subject : Test::capital;
                 r.name = k;
                 r.yes = yes_no(k.c_str());
                 ++tests;
@@ -406,7 +407,7 @@ public:
         if (tests != 1) {
             throw Fault{line, "a rule needs one of always, flag, variable, modifier, value, owned_by, controlled_by, "
                               "core, occupied, subject, subject_of, religion, religion_group, culture, "
-                              "culture_group, trade_goods, area, region, superregion or continent"};
+                              "culture_group, trade_goods, area, region, superregion, continent or capital"};
         }
         if (!has_color) throw Fault{line, "a rule needs color = { r g b }"};
         if (!has_label || r.label.empty() || r.label.size() > kLabelMax) {
@@ -431,7 +432,7 @@ public:
         }
         if ((r.test == Test::owned_by || r.test == Test::controlled_by || r.test == Test::core ||
              r.test == Test::core_of || r.test == Test::occupied || r.test == Test::trade_goods ||
-             is_place(r.test)) &&
+             r.test == Test::capital || is_place(r.test)) &&
             r.owner) {
             throw Fault{line, key_of(r.test) + " is the province's: leave out owner = yes"};
         }
@@ -581,7 +582,8 @@ bool is_yes_no(Test test) {
     return test == Test::flag || test == Test::owned_by || test == Test::core || test == Test::occupied ||
            test == Test::subject || test == Test::controlled_by || test == Test::core_of || test == Test::subject_of ||
            test == Test::religion || test == Test::culture || test == Test::trade_goods ||
-           test == Test::religion_group || test == Test::culture_group || is_place(test);
+           test == Test::religion_group || test == Test::culture_group || is_place(test) ||
+           test == Test::capital;
 }
 
 Evaluator::Evaluator(const FileMode& mode, World& world) : mode_(mode), world_(world) {
@@ -627,6 +629,9 @@ std::optional<std::int64_t> Evaluator::read_country(std::size_t i, const std::st
             break;
         case Test::subject_of:
             v = world_.overlord(tag) == r.name ? 1 : 0;
+            break;
+        case Test::capital:
+            v = world_.capital(tag);  // the province rule compares it, read once per owner
             break;
         case Test::religion:
         case Test::culture:
@@ -690,6 +695,13 @@ std::optional<std::int64_t> Evaluator::read(std::size_t i, std::int32_t province
             return world_.controller(province) == r.name ? 1 : 0;
         case Test::core_of:
             return world_.has_core(province, r.name) ? 1 : 0;
+        case Test::capital: {
+            if (!owner) owner = world_.owner(province);
+            if (owner->empty()) return std::nullopt;
+            const std::optional<std::int64_t> capital = read_country(i, *owner);
+            if (!capital) return std::nullopt;
+            return (*capital == province) == r.yes ? 1 : 0;
+        }
         case Test::religion:
         case Test::culture:
         case Test::trade_goods:
