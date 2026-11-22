@@ -2055,10 +2055,12 @@ const _: () = {
         "Offset of field: AnvilGameWorldService::province_triggered_modifier_keys",
     ][::core::mem::offset_of!(AnvilGameWorldService, province_triggered_modifier_keys)
         - 448usize];
-    ["Offset of field: AnvilGameWorldService::province_key"]
-        [::core::mem::offset_of!(AnvilGameWorldService, province_key) - 456usize];
-    ["Offset of field: AnvilGameWorldService::country_key"]
-        [::core::mem::offset_of!(AnvilGameWorldService, country_key) - 464usize];
+    [
+        "Offset of field: AnvilGameWorldService::province_key",
+    ][::core::mem::offset_of!(AnvilGameWorldService, province_key) - 456usize];
+    [
+        "Offset of field: AnvilGameWorldService::country_key",
+    ][::core::mem::offset_of!(AnvilGameWorldService, country_key) - 464usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
