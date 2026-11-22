@@ -413,6 +413,12 @@ public:
         if (g_world->country(tag.c_str(), &c) != ANVIL_OK) return 0;
         return c.capital;
     }
+    std::optional<bool> province_is(std::int32_t province, files::Test test) override {
+        AnvilGameProvince p{};
+        p.size = sizeof(p);
+        if (g_world->province(province, &p) != ANVIL_OK) return std::nullopt;
+        return (p.flags & (test == files::Test::hre ? ANVIL_GAME_PROVINCE_HRE : ANVIL_GAME_PROVINCE_CITY)) != 0;
+    }
     static std::uint32_t key_of(files::Test test) {
         switch (test) {
             case files::Test::religion: return ANVIL_GAME_KEY_RELIGION;
@@ -423,6 +429,7 @@ public:
             case files::Test::region: return ANVIL_GAME_KEY_REGION;
             case files::Test::superregion: return ANVIL_GAME_KEY_SUPERREGION;
             case files::Test::continent: return ANVIL_GAME_KEY_CONTINENT;
+            case files::Test::trade_node: return ANVIL_GAME_KEY_TRADE_NODE;
             default: return ANVIL_GAME_KEY_TRADE_GOODS;
         }
     }

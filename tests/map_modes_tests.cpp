@@ -452,6 +452,12 @@ public:
         const auto it = capitals.find(tag);
         return it == capitals.end() ? 0 : it->second;
     }
+    // 1 and 3 in the Empire, 1 and 2 cities; 6 unreadable.
+    std::set<std::int32_t> empire{1, 3}, cities{1, 2};
+    std::optional<bool> province_is(std::int32_t province, files::Test test) override {
+        if (province == 6) return std::nullopt;
+        return (test == files::Test::hre ? empire : cities).contains(province);
+    }
 
     // Religion and culture: 1 and 2 orthodox (2 Swedish), 3 catholic and
     // polish, 4 and 5 none; RUS orthodox and russian, POL catholic and polish.
@@ -467,7 +473,8 @@ public:
         {{1, files::Test::area}, "moskva_area"}, {{1, files::Test::region}, "russia_region"},
         {{2, files::Test::region}, "scandinavia_region"}, {{3, files::Test::region}, "poland_region"},
         {{1, files::Test::continent}, "europe"}, {{2, files::Test::continent}, "europe"},
-        {{3, files::Test::continent}, "europe"}, {{1, files::Test::superregion}, "eastern_europe_superregion"}};
+        {{3, files::Test::continent}, "europe"}, {{1, files::Test::superregion}, "eastern_europe_superregion"},
+        {{1, files::Test::trade_node}, "novgorod"}, {{3, files::Test::trade_node}, "krakow"}};
     std::map<std::pair<std::string, files::Test>, std::string> country_keys{
         {{"RUS", files::Test::religion}, "orthodox"}, {{"RUS", files::Test::culture}, "russian"},
         {{"POL", files::Test::religion}, "catholic"}, {{"POL", files::Test::culture}, "polish"},
@@ -544,9 +551,9 @@ void file_tests() {
         CHECK(one("m={label=M label=N rule={always=yes color={0 0 0} label=x}}").ends_with("label is given twice"));
         CHECK(one("m={label=M sprite=\"GFX x\" rule={always=yes color={0 0 0} label=x}}").find("sprite") != std::string::npos);
         CHECK(one("m={label=M rule={color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier, value, owned_by, controlled_by, core, occupied, subject, "
-                                                                                          "subject_of, religion, religion_group, culture, culture_group, trade_goods, area, region, superregion, continent or capital"));
+                                                                                          "subject_of, religion, religion_group, culture, culture_group, trade_goods, area, region, superregion, continent, trade_node, capital, hre or city"));
         CHECK(one("m={label=M rule={flag=a variable=b color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier, value, owned_by, controlled_by, core, occupied, subject, "
-                                                                                          "subject_of, religion, religion_group, culture, culture_group, trade_goods, area, region, superregion, continent or capital"));
+                                                                                          "subject_of, religion, religion_group, culture, culture_group, trade_goods, area, region, superregion, continent, trade_node, capital, hre or city"));
         CHECK(one("m={label=M rule={always=yes label=x}}").ends_with("a rule needs color = { r g b }"));
         CHECK(one("m={label=M rule={always=yes color={0 0 0}}}").ends_with("a rule needs a label of 1 to 64 bytes"));
         CHECK(one("m={label=M rule={always=yes color={0 0 256} label=x}}").find("0 to 255") != std::string::npos);
@@ -832,6 +839,40 @@ void file_tests() {
         CHECK(parse_problems("m={label=M rule={capital=yes owner=yes color={0 0 0} label=x}}")[0].ends_with(
             "capital is the province's: leave out owner = yes"));
         CHECK(parse_problems("m={label=M rule={capital=RUS color={0 0 0} label=x}}").size() == 1);
+    });
+
+    run("map mode files: hre, city and trade_node", [] {
+        std::vector<files::FileMode> modes;
+        CHECK(parse_problems("m={label=M rule={hre=yes color={1 0 0} label=Empire}"
+                             " rule={city=no color={2 0 0} label=Colony}"
+                             " rule={trade_node=novgorod color={3 0 0} label=Novgorod}}",
+                             &modes)
+                  .empty());
+        CHECK(modes[0].rules[0].test == files::Test::hre && modes[0].rules[1].test == files::Test::city &&
+              !modes[0].rules[1].yes && modes[0].rules[2].test == files::Test::trade_node &&
+              modes[0].rules[2].name == "novgorod");
+        TableWorld world;
+        world.limit = 7;
+        world.owners[6] = "RUS";
+        files::Evaluator e(modes[0], world);
+        const std::vector<std::uint32_t> colors = e.colors();
+        CHECK(colors[1] == 0x010000 && colors[3] == 0x010000);  // in the Empire
+        CHECK(colors[2] == ANVIL_MAP_NO_COLOR);  // RUS's city, outside the Empire and Novgorod's node
+        CHECK(colors[4] == ANVIL_MAP_NO_COLOR && colors[5] == ANVIL_MAP_NO_COLOR);  // no owner
+        CHECK(colors[6] == ANVIL_MAP_NO_COLOR);  // the game does not say, no node
+        std::vector<files::FileMode> node;
+        CHECK(parse_problems("m={label=M rule={trade_node=novgorod color={3 0 0} label=Novgorod}"
+                             " rule={city=yes color={4 0 0} label=City}}",
+                             &node)
+                  .empty());
+        files::Evaluator n(node[0], world);
+        const std::vector<std::uint32_t> by_node = n.colors();
+        CHECK(by_node[1] == 0x030000 && by_node[2] == 0x040000 && by_node[3] == ANVIL_MAP_NO_COLOR);
+        CHECK(parse_problems("m={label=M rule={hre=yes owner=yes color={0 0 0} label=x}}")[0].ends_with(
+            "hre is the province's: leave out owner = yes"));
+        CHECK(parse_problems("m={label=M rule={trade_node=baltic_sea owner=yes color={0 0 0} label=x}}")[0].ends_with(
+            "trade_node is the province's: leave out owner = yes"));
+        CHECK(parse_problems("m={label=M rule={city=maybe color={0 0 0} label=x}}").size() == 1);
     });
 
     run("map mode files: a scale colours between its two ends (anvil#580)", [] {

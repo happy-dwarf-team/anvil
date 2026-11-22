@@ -321,6 +321,8 @@ typedef struct AnvilGameWarChange {
 /* AnvilGameProvince.flags */
 #define ANVIL_GAME_PROVINCE_LAND 0x1u      /* not a sea or a lake */
 #define ANVIL_GAME_PROVINCE_WASTELAND 0x2u
+#define ANVIL_GAME_PROVINCE_HRE 0x4u       /* since anvil-game 1.26.0: part of the Holy Roman Empire */
+#define ANVIL_GAME_PROVINCE_CITY 0x8u      /* since anvil-game 1.26.0: a city, not a colony */
 
 /* AnvilGameCountry.flags */
 #define ANVIL_GAME_COUNTRY_OBSERVER 0x1u   /* the observer's pseudo-country */
@@ -565,6 +567,7 @@ typedef struct AnvilGameTimedModifier {
 #define ANVIL_GAME_KEY_REGION 6u         /* "scandinavia_region"; provinces only */
 #define ANVIL_GAME_KEY_SUPERREGION 7u    /* "europe_superregion"; provinces only */
 #define ANVIL_GAME_KEY_CONTINENT 8u      /* "europe"; provinces only */
+#define ANVIL_GAME_KEY_TRADE_NODE 9u     /* "baltic_sea"; provinces only */
 
 /* One relation. It comes in arrays and has no `size`, so it never grows within
  * version 1. */
@@ -897,7 +900,7 @@ typedef struct AnvilGameWorldService {
                                                     uint32_t *length);
     /* Since anvil-game 1.26.0. The script key of a province's religion,
      * culture, trade goods, the group of its religion or culture, or its
-     * area, region, superregion or continent (`key`, ANVIL_GAME_KEY_*), as
+     * area, region, superregion, continent or trade node (`key`, ANVIL_GAME_KEY_*), as
      * the game's files write it ("orthodox", "russian", "grain", "christian",
      * "uppland_area"), in UTF-8 with a NUL, as province_name gives its text.
      * ANVIL_ERROR_NOT_FOUND when the province has none (the sea, wasteland). ANVIL_ERROR_INVALID_ARGUMENT for another

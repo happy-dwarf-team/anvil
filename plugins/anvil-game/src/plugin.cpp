@@ -1732,7 +1732,8 @@ void load_world(anvil::Host& host) {
                          host.present(sym::province_controller) && host.present(sym::province_cores) &&
                          host.present(sym::province_name) && host.present(sym::player_country) &&
                          host.present(sym::tag_buckets) && host.present(sym::country_exists) &&
-                         host.present(sym::country_provinces);
+                         host.present(sym::country_provinces) && host.present(sym::province_is_city) &&
+                         host.present(sym::province_in_empire);
     if (!present) {
         host.info("the world's symbols are absent on this build: no service {}", ANVIL_GAME_WORLD_SERVICE);
         return;
@@ -1770,6 +1771,10 @@ void load_world(anvil::Host& host) {
     l.land_bit = sym::province_is_sea.land_bit;
     l.wasteland_flags = sym::province_is_wasteland.wasteland_flags;
     l.wasteland_bit = sym::province_is_wasteland.wasteland_bit;
+    l.city_flags = sym::province_is_city.city_flags;
+    l.city_bit = sym::province_is_city.city_bit;
+    l.empire_flags = sym::province_in_empire.empire_flags;
+    l.empire_bit = sym::province_in_empire.empire_bit;
     l.country_index_shift = sym::province_base_tax.country_index_shift;
     l.tag_kind = sym::player_country.player_kind - sym::player_country.player;
     l.tag_valid = sym::player_country.observed_valid - sym::player_country.observed;
@@ -1968,6 +1973,12 @@ void load_world(anvil::Host& host) {
         l.area_key = sym::area_key.key;
         l.place_region_key = sym::region_texts.key;
         l.continent_key = sym::continent_key.key;
+    }
+    if (host.present(sym::province_trade_node) && host.present(sym::trade_node_definition) &&
+        host.present(sym::trade_node_key)) {
+        l.province_trade_node = sym::province_trade_node.node;
+        l.trade_node_definition = sym::trade_node_definition.definition;
+        l.trade_node_key = sym::trade_node_key.key;
     }
     if (host.present(sym::selection_holder) && host.present(sym::selection_view) && host.present(sym::view_window) &&
         host.present(sym::province_view_province) && host.present(sym::dialog_window_part) &&
