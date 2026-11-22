@@ -417,6 +417,12 @@ public:
         AnvilGameProvince p{};
         p.size = sizeof(p);
         if (g_world->province(province, &p) != ANVIL_OK) return std::nullopt;
+        if (test == files::Test::coastal) {
+            if ((p.flags & ANVIL_GAME_PROVINCE_LAND) == 0 || (p.flags & ANVIL_GAME_PROVINCE_WASTELAND) != 0) {
+                return std::nullopt;
+            }
+            return (p.flags & ANVIL_GAME_PROVINCE_COASTAL) != 0;
+        }
         return (p.flags & (test == files::Test::hre ? ANVIL_GAME_PROVINCE_HRE : ANVIL_GAME_PROVINCE_CITY)) != 0;
     }
     static std::uint32_t key_of(files::Test test) {

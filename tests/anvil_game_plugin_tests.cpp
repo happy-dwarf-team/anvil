@@ -907,12 +907,12 @@ struct FakeWorld {
         set(province(1), 0x3E8, 8000);
         set(province(1), 0x3E0, 9500);
         map[1][0x228] = 1 << 3;
-        province(1)[0x958] = 1 << 4;  // a city, outside the Empire
+        province(1)[0x958] = 1 << 4;  // a city, outside the Empire, inland
         set_name(1, "Moskva");
         // A wasteland without an owner, with a long name in Windows-1252.
         set(province(2), 0x468, game_tag("---", 0, 0, 0));
         set(province(2), 0x470, game_tag("---", 0, 0, 0));
-        map[2][0x228] = 1 << 3;
+        map[2][0x228] = (1 << 3) | (1 << 6);  // coastal land
         map[2][0x229] = 1 << 3;
         province(2)[0x958] = 1 << 5;  // in the Empire, not a city
         set_name(2, long_name);
@@ -2204,7 +2204,7 @@ int main(int argc, char** argv) {
         start.add(gp_toml);
         start.add(plugin_toml("other"));
         start.make();
-        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 207);
+        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 208);
         AnvilPlugin* p = start.load(ANVIL_GAME_ID);
         CHECK(p != nullptr);
         if (p == nullptr) return;
@@ -2962,7 +2962,8 @@ int main(int argc, char** argv) {
             AnvilGameProvince waste{};
             waste.size = sizeof(waste);
             CHECK(world->province(2, &waste) == ANVIL_OK && waste.owner.text[0] == 0 &&
-                  waste.flags == (ANVIL_GAME_PROVINCE_LAND | ANVIL_GAME_PROVINCE_WASTELAND | ANVIL_GAME_PROVINCE_HRE));
+                  waste.flags == (ANVIL_GAME_PROVINCE_LAND | ANVIL_GAME_PROVINCE_WASTELAND | ANVIL_GAME_PROVINCE_HRE |
+                                  ANVIL_GAME_PROVINCE_COASTAL));
             CHECK(world->province(3, &waste) == ANVIL_OK && waste.flags == 0);
             CHECK(world->province(0, &waste) == ANVIL_ERROR_NOT_FOUND && world->province(4, &waste) == ANVIL_ERROR_NOT_FOUND);
             CHECK(world->province(1, nullptr) == ANVIL_ERROR_INVALID_ARGUMENT);

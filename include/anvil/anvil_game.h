@@ -323,6 +323,7 @@ typedef struct AnvilGameWarChange {
 #define ANVIL_GAME_PROVINCE_WASTELAND 0x2u
 #define ANVIL_GAME_PROVINCE_HRE 0x4u       /* since anvil-game 1.26.0: part of the Holy Roman Empire */
 #define ANVIL_GAME_PROVINCE_CITY 0x8u      /* since anvil-game 1.26.0: a city, not a colony */
+#define ANVIL_GAME_PROVINCE_COASTAL 0x10u  /* since anvil-game 1.26.0: land the game counts as coastal */
 
 /* AnvilGameCountry.flags */
 #define ANVIL_GAME_COUNTRY_OBSERVER 0x1u   /* the observer's pseudo-country */

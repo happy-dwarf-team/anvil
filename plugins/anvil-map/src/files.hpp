@@ -22,7 +22,7 @@ inline constexpr std::size_t kFileMax = 1u << 20;
 enum class Test { always, flag, variable, modifier, value, owned_by, core, occupied, subject, controlled_by, core_of,
                   subject_of, religion, culture, trade_goods,
                   religion_group, culture_group, area, region, superregion, continent, capital,
-                  hre, city, trade_node };
+                  hre, city, trade_node, coastal };
 // Tests that pass or not, with no number: they take no bounds and no scale.
 bool is_yes_no(Test test);
 
@@ -111,8 +111,9 @@ public:
     virtual std::string overlord(const std::string& tag) = 0;
     // The country's capital, a province ID; 0 for none.
     virtual std::int32_t capital(const std::string& tag) = 0;
-    // Whether the province is part of the Holy Roman Empire (Test::hre) or a
-    // city (Test::city); nullopt when the game does not say.
+    // Whether the province is part of the Holy Roman Empire (Test::hre), a
+    // city (Test::city) or coastal land (Test::coastal); nullopt when the game
+    // does not say, and for coastal when it is not land or is wasteland.
     virtual std::optional<bool> province_is(std::int32_t province, Test test) = 0;
     // The script key of the province's religion, culture or trade goods
     // (`test` is one of the three), or of the country's state religion or

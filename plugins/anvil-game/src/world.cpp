@@ -317,8 +317,9 @@ AnvilResult read_province(const WorldLayout& l, std::int32_t id, AnvilGameProvin
         !read(p + l.static_part, map_part) || map_part == 0) {
         return ANVIL_ERROR_INTERNAL;
     }
-    std::uint8_t land = 0, wasteland = 0, city = 0, empire = 0;
+    std::uint8_t land = 0, wasteland = 0, city = 0, empire = 0, coastal = 0;
     if (!read(map_part + l.land_flags, land) || !read(map_part + l.wasteland_flags, wasteland) ||
+        !read(map_part + l.coastal_flags, coastal) ||
         !read(p + l.city_flags, city) || !read(p + l.empire_flags, empire)) {
         return ANVIL_ERROR_INTERNAL;
     }
@@ -328,7 +329,8 @@ AnvilResult read_province(const WorldLayout& l, std::int32_t id, AnvilGameProvin
     out.flags = (((land >> l.land_bit) & 1) != 0 ? ANVIL_GAME_PROVINCE_LAND : 0u) |
                 (((wasteland >> l.wasteland_bit) & 1) != 0 ? ANVIL_GAME_PROVINCE_WASTELAND : 0u) |
                 (((city >> l.city_bit) & 1) != 0 ? ANVIL_GAME_PROVINCE_CITY : 0u) |
-                (((empire >> l.empire_bit) & 1) != 0 ? ANVIL_GAME_PROVINCE_HRE : 0u);
+                (((empire >> l.empire_bit) & 1) != 0 ? ANVIL_GAME_PROVINCE_HRE : 0u) |
+                ((coastal & l.coastal_mask) != 0 ? ANVIL_GAME_PROVINCE_COASTAL : 0u);
     return ANVIL_OK;
 }
 
