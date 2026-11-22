@@ -64,6 +64,7 @@ using anvil_game::DateEvents;
 using anvil_game::DateTracker;
 using anvil_game::SessionChanges;
 using anvil_game::SessionTracker;
+using anvil_game::LobbyTracker;
 using anvil_game::OosTracker;
 using anvil_game::PendingKey;
 using anvil_game::PendingTracker;
@@ -115,6 +116,13 @@ struct Layout {
     const std::uintptr_t* settings = nullptr;  // CSettings::_pInstance
     std::uint32_t scroll_speed = 0;       // settings+: float, the player's scroll speed
     anvil_game::CameraSpeed camera_speed;
+    // The multiplayer lobby (anvil#466): the application's session, the one the
+    // buttons post to; off when its symbols are absent or the check in a
+    // session found another path.
+    bool lobby = false;
+    std::uint32_t idler_app = 0;     // idler+: the application (Steam +0x330, GOG +0x328)
+    std::uint32_t app_session = 0;   // app+: CEU4Application::_pSession (+0x370)
+    std::uint32_t session_dummy = 0; // CSession+: byte, _bIsDummy (+0x55), single player's
 };
 
 Layout g_layout;
@@ -136,6 +144,8 @@ DateTracker g_dates;       // main thread only
 WarTracker g_wars;         // main thread only
 PendingTracker g_pending;  // main thread only
 OosTracker g_oos;          // main thread only
+LobbyTracker g_lobby;      // main thread only
+bool g_lobby_checked = false;  // the idler's application compared once, in the first running session
 // The flags as the service reports them to any thread.
 std::atomic<std::uint32_t> g_oos_flags{0};
 anvil_game::RestartRequests g_restart;
@@ -231,6 +241,36 @@ std::int64_t read_front_end_unguarded() {
 std::int64_t read_front_end() {
     __try {
         return read_front_end_unguarded();
+    } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER
+                                                                  : EXCEPTION_CONTINUE_SEARCH) {
+        return -1;
+    }
+}
+
+// The application's session (anvil#466), the one CFrontEnd::GetSession and
+// CInGameIdler::GetSession both return: none or single player's dummy, or a
+// real one (a multiplayer lobby, a client joining, a host alone).
+anvil_game::AppSession read_app_session(const std::uint8_t* app) {
+    if (!g_layout.lobby) return anvil_game::AppSession::unread;
+    __try {
+        const std::uintptr_t session = *reinterpret_cast<const volatile std::uintptr_t*>(app + g_layout.app_session);
+        if (session == 0) return anvil_game::AppSession::none_or_dummy;
+        return *reinterpret_cast<const volatile std::uint8_t*>(session + g_layout.session_dummy) != 0
+                   ? anvil_game::AppSession::none_or_dummy
+                   : anvil_game::AppSession::real;
+    } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER
+                                                                  : EXCEPTION_CONTINUE_SEARCH) {
+        return anvil_game::AppSession::unread;
+    }
+}
+
+// Whether the running session's idler names this application, as the lobby
+// read assumes (1 yes, 0 another object, -1 null or unreadable).
+int idler_names_app(std::uintptr_t idler, const std::uint8_t* app) {
+    __try {
+        const std::uintptr_t named = *reinterpret_cast<const volatile std::uintptr_t*>(idler + g_layout.idler_app);
+        if (named == 0) return -1;
+        return named == reinterpret_cast<std::uintptr_t>(app) ? 1 : 0;
     } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER
                                                                   : EXCEPTION_CONTINUE_SEARCH) {
         return -1;
@@ -411,6 +451,30 @@ void after_frame_body(std::uint8_t* app, std::uint64_t number) {
                       front_end >= 0 ? "front end state " + std::to_string(front_end) : std::string("no front end"));
         }
         publish(ANVIL_GAME_EVENT_MAIN_MENU, nullptr);
+    }
+    // The lobby (anvil#466): decided only on frames that show the front end.
+    if (g_layout.lobby && !g_lobby_checked && view.running && view.session != 0) {
+        const int names = idler_names_app(view.session, app);
+        if (names >= 0) g_lobby_checked = true;
+        if (names == 1) host.info("the session's idler names the frame's application: the lobby read holds");
+        if (names == 0) {
+            g_layout.lobby = false;
+            host.warn("the session's idler names another application than the frame's: no {} from now on",
+                      ANVIL_GAME_EVENT_LOBBY);
+            // A lobby entered on that read is left, so the policy does not keep it.
+            const LobbyTracker::Change left = g_lobby.update(true, anvil_game::AppSession::none_or_dummy);
+            if (left.changed) publish(ANVIL_GAME_EVENT_LOBBY, &left.event);
+        }
+    }
+    const LobbyTracker::Change lobby =
+        g_lobby.update(front_end >= 0, front_end >= 0 ? read_app_session(app) : anvil_game::AppSession::unread);
+    if (lobby.changed) {
+        if (lobby.event.change == ANVIL_GAME_LOBBY_ENTERED) {
+            host.info("multiplayer lobby entered (the application's session is not single player's)");
+        } else {
+            host.info("multiplayer lobby left");
+        }
+        publish(ANVIL_GAME_EVENT_LOBBY, &lobby.event);
     }
     std::size_t failed = 0;
     g_work.run(&failed);
@@ -2707,6 +2771,17 @@ struct AnvilGame : anvil::Plugin {
         } else {
             host.info("the restart symbols are absent on this build: restart() answers unsupported");
         }
+        // And for the lobby: the path of the commands' buttons and the post
+        // function's dummy check. Without them no lobby event comes, and the
+        // policy suspends from the session's start only.
+        if (host.present(sym::drill_button) && host.present(sym::command_post)) {
+            g_layout.idler_app = static_cast<std::uint32_t>(host.value(sym::drill_button, "game"));
+            g_layout.app_session = static_cast<std::uint32_t>(host.value(sym::drill_button, "session"));
+            g_layout.session_dummy = static_cast<std::uint32_t>(host.value(sym::command_post, "dummy"));
+            g_layout.lobby = true;
+        } else {
+            host.info("the lobby's symbols are absent on this build: no {}", ANVIL_GAME_EVENT_LOBBY);
+        }
 
         host.register_service(ANVIL_GAME_SERVICE, ANVIL_GAME_SERVICE_VERSION, kService);
         g_note_image_base = host.game().image_base;
@@ -2719,9 +2794,9 @@ struct AnvilGame : anvil::Plugin {
         load_camera(host);
         host.hook(g_frame, sym::frame, on_frame);
         host.hook(g_set_session, sym::set_session, on_set_session);
-        host.info("frame hook staged; events {}, {}, {}, {}; service {} v{}", ANVIL_GAME_EVENT_READY,
-                  ANVIL_GAME_EVENT_FRAME, ANVIL_GAME_EVENT_SESSION, ANVIL_GAME_EVENT_MAIN_MENU, ANVIL_GAME_SERVICE,
-                  ANVIL_GAME_SERVICE_VERSION);
+        host.info("frame hook staged; events {}, {}, {}, {}, {}; service {} v{}", ANVIL_GAME_EVENT_READY,
+                  ANVIL_GAME_EVENT_FRAME, ANVIL_GAME_EVENT_SESSION, ANVIL_GAME_EVENT_MAIN_MENU,
+                  ANVIL_GAME_EVENT_LOBBY, ANVIL_GAME_SERVICE, ANVIL_GAME_SERVICE_VERSION);
         // The core decides when (every participant done, or the limit); the
         // quit itself needs the main thread.
         if (anvil::Benchmark(host).active()) {

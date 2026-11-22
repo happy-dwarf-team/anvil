@@ -65,10 +65,19 @@ public:
     void session_ended();
     // ANVIL_GAME_EVENT_SESSION from anvil-game (an AnvilGameSession payload).
     void on_session_event(const void* payload);
-    // Subscribes on_session_event to the bus, as the core ("anvil").
+    // A multiplayer lobby (anvil#466): outside a session the policy suspends
+    // as in a multiplayer session; a session's own mode wins while it runs,
+    // and a session that ends with the lobby still entered goes back to it.
+    // Nothing else (session(), the settings lock) counts a lobby.
+    void lobby_entered();
+    void lobby_left();
+    // ANVIL_GAME_EVENT_LOBBY from anvil-game (an AnvilGameLobby payload).
+    void on_lobby_event(const void* payload);
+    // Subscribes on_session_event and on_lobby_event to the bus, as the core ("anvil").
     void subscribe();
 
     std::optional<SessionMode> session() const;
+    bool lobby() const;
     bool suspended(OwnerId owner) const;  // by this policy
     // Suspended by this policy with none of its changes left in the game. A
     // suspension that could not take a change out (its memory could not be
@@ -90,7 +99,12 @@ private:
     void apply(Entry& entry, const std::string& reason, Events& events);  // mutex_ held
     void release(Entry& entry, const char* why, Events& events);          // mutex_ held
     void tell(const Events& events);                                      // mutex_ not held
-    void session_started_locked(SessionMode mode, Events& events);       // mutex_ held
+    // The mode suspensions follow: the session's, else a lobby's (multiplayer), else none.
+    std::optional<SessionMode> mode_locked() const;  // mutex_ held
+    // Suspends or resumes each gameplay entry as `mode` asks; a resume gives
+    // `allows` as its reason. Returns the counts for the caller's log line.
+    std::string follow_locked(SessionMode mode, const char* allows, Events& events);  // mutex_ held
+    size_t resume_all_locked(const char* why, Events& events);                         // mutex_ held
 
     ChangeRegistry& changes_;
     ServiceBus& bus_;
@@ -98,6 +112,7 @@ private:
     LogSink log_;
     mutable std::mutex mutex_;
     std::optional<SessionMode> session_;
+    bool lobby_ = false;
     std::vector<Entry> entries_;
 };
 

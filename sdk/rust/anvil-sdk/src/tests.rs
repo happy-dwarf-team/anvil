@@ -1978,6 +1978,28 @@ fn world_reads_pending_events_and_statistics() {
 }
 
 #[test]
+fn lobby_payload_reads_its_change() {
+    let lobby = |change: u32| AnvilGameLobby {
+        size: std::mem::size_of::<AnvilGameLobby>() as u32,
+        change,
+    };
+    for (raw, expected) in [
+        (ANVIL_GAME_LOBBY_ENTERED as u32, game::LobbyChange::Entered),
+        (ANVIL_GAME_LOBBY_LEFT as u32, game::LobbyChange::Left),
+        (7, game::LobbyChange::Other(7)),
+    ] {
+        let l = lobby(raw);
+        let read = unsafe { game::LobbyChange::read(ptr::from_ref(&l).cast()) };
+        assert_eq!(read, Some(expected));
+    }
+    let short = AnvilGameLobby { size: 4, change: 1 };
+    assert_eq!(
+        unsafe { game::LobbyChange::read(ptr::from_ref(&short).cast()) },
+        None
+    );
+}
+
+#[test]
 fn input_binds_and_delivers_presses_through_its_adapter() {
     let (_guard, table) = fake_host();
     assert_eq!(load::<Quiet>(table), ANVIL_OK);
@@ -2245,6 +2267,7 @@ fn event_and_service_names_are_the_headers() {
         (game::YEAR.name(), ANVIL_GAME_EVENT_YEAR),
         (game::PLAYER.name(), ANVIL_GAME_EVENT_PLAYER),
         (game::PENDING_EVENT.name(), ANVIL_GAME_EVENT_PENDING),
+        (game::LOBBY.name(), ANVIL_GAME_EVENT_LOBBY),
         (crate::benchmark::QUIT.name(), ANVIL_BENCHMARK_EVENT_QUIT),
         (map::SHOWN.name(), ANVIL_MAP_EVENT_SHOWN),
         (map::HIDDEN.name(), ANVIL_MAP_EVENT_HIDDEN),

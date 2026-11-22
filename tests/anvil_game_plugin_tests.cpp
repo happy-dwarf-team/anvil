@@ -1251,6 +1251,21 @@ int main(int argc, char** argv) {
     }
     const std::filesystem::path plugins_dir = std::filesystem::absolute(argv[1]);
 
+    run("anvil-game: the lobby tracker (anvil#466)", [] {
+        using anvil_game::AppSession;
+        anvil_game::LobbyTracker t;
+        CHECK(!t.update(true, AppSession::none_or_dummy).changed && !t.entered());
+        CHECK(!t.update(false, AppSession::real).changed);  // not the front end: not decided
+        const auto in = t.update(true, AppSession::real);
+        CHECK(in.changed && in.event.size == sizeof(AnvilGameLobby) && in.event.change == ANVIL_GAME_LOBBY_ENTERED &&
+              t.entered());
+        CHECK(!t.update(true, AppSession::real).changed);                  // once per change
+        CHECK(!t.update(true, AppSession::unread).changed && t.entered());  // a fault keeps it
+        CHECK(!t.update(false, AppSession::none_or_dummy).changed && t.entered());  // a session runs
+        const auto out = t.update(true, AppSession::none_or_dummy);
+        CHECK(out.changed && out.event.change == ANVIL_GAME_LOBBY_LEFT && !t.entered());
+    });
+
     run("anvil-game: the session tracker", [] {
         anvil_game::SessionTracker t;
         anvil_game::SessionView none;
@@ -2175,7 +2190,7 @@ int main(int argc, char** argv) {
         CHECK(service != nullptr && service->size == sizeof(AnvilGameService) && ANVIL_GAME_HAS(service, date) &&
               ANVIL_GAME_HAS(service, main_menu));
         CHECK(contains(log, "anvil-game: frame hook staged; events anvil-game.ready, anvil-game.frame, "
-                            "anvil-game.session, anvil-game.main_menu; service anvil-game.game v1"));
+                            "anvil-game.session, anvil-game.main_menu, anvil-game.lobby; service anvil-game.game v1"));
         CHECK(contains(log, "anvil-game: service anvil-game.world v1; events anvil-game.day, anvil-game.month, "
                             "anvil-game.year, anvil-game.player, anvil-game.war, anvil-game.pending_event"));
         g_service = service;
@@ -2442,6 +2457,92 @@ int main(int argc, char** argv) {
         CHECK(service->main_menu() == 0);
     });
 
+    run("anvil-game: a multiplayer lobby from the application's session; the policy suspends in it (anvil#466)", [&] {
+        static std::vector<std::string> lobby;
+        bus.subscribe(
+            "listener", ANVIL_GAME_EVENT_LOBBY,
+            [](const char*, const void* payload, void*) {
+                const auto* l = static_cast<const AnvilGameLobby*>(payload);
+                lobby.push_back(l->size == sizeof(AnvilGameLobby) && l->change == ANVIL_GAME_LOBBY_ENTERED ? "entered"
+                                : l->size == sizeof(AnvilGameLobby) && l->change == ANVIL_GAME_LOBBY_LEFT  ? "left"
+                                                                                                           : "bad");
+            },
+            nullptr);
+        CHECK(contains(log, "anvil-game: frame hook staged; events anvil-game.ready, anvil-game.frame, "
+                            "anvil-game.session, anvil-game.main_menu, anvil-game.lobby; service anvil-game.game v1"));
+        // The session the commands post to, and single player's dummy flag (Steam's offsets).
+        alignas(16) static uint8_t app_session[0x880] = {};
+        const auto set_app_session = [&](const void* p) { FakeWorld::set(game.app, 0x370, reinterpret_cast<uintptr_t>(p)); };
+        app_session[0x55] = 1;
+        set_app_session(app_session);
+
+        // In a session, once: the idler's application (+0x330) is the frame's.
+        FakeWorld::set(game.session, 0x330, reinterpret_cast<uintptr_t>(game.app));
+        game.set_session(game.session);
+        frame(game.app, 1);
+        CHECK(contains(log, "anvil-game: the session's idler names the frame's application: the lobby read holds"));
+        FakeWorld::set(game.session, 0x330, uintptr_t{0});
+        // The front end with single player's dummy, then with no session: no lobby.
+        game.set_session(game.frontend);
+        frame(game.app, 1);
+        set_app_session(nullptr);
+        frame(game.app, 1);
+        CHECK(lobby.empty() && !policy.lobby() && !changes.suspended(gp));
+
+        // Hosting or joining: a real session on the front end. gp goes before any session.
+        app_session[0x55] = 0;
+        set_app_session(app_session);
+        heard.events.clear();
+        frame(game.app, 1);
+        CHECK((lobby == std::vector<std::string>{"entered"}) && heard.events.size() == 1);  // no session event
+        CHECK(contains(log, "anvil-game: multiplayer lobby entered (the application's session is not single player's)"));
+        CHECK(policy.lobby() && !policy.session() && changes.suspended(gp) && image.base[0x205000] != 0x90);
+        CHECK(contains(log, "anvil: multiplayer lobby entered: 1 gameplay plugin(s) or module(s) suspended, "
+                            "0 allowed by the player"));
+        CHECK(service->session(nullptr) == 0 && service->main_menu() == 1);  // the session's meaning is kept
+        frame(game.app, 1);
+        CHECK(lobby.size() == 1);
+        // A root between sessions (the game loading) and an unreadable application session change nothing.
+        game.set_session(nullptr);
+        frame(game.app, 1);
+        game.set_session(game.frontend);
+        set_app_session(reinterpret_cast<const void*>(uintptr_t{0x10}));
+        frame(game.app, 1);
+        set_app_session(app_session);
+        CHECK(lobby.size() == 1 && changes.suspended(gp));
+
+        // Start: a multiplayer session; gp stays out, and the dummy flag is not read in it.
+        g_multiplayer = true;
+        game.set_session(game.session);
+        heard.events.clear();
+        frame(game.app, 1);
+        CHECK(heard.events[0].starts_with("session started") && heard.events[0].ends_with("mp=1"));
+        CHECK(changes.suspended(gp) && lobby.size() == 1);
+        app_session[0x55] = 1;
+        frame(game.app, 1);
+        CHECK(lobby.size() == 1);
+        app_session[0x55] = 0;
+        // Its end, back in the lobby: still out.
+        game.set_session(game.frontend);
+        frame(game.app, 1);
+        CHECK(!policy.session() && policy.lobby() && changes.suspended(gp) && lobby.size() == 1);
+        CHECK(contains(log, "anvil: game session ended, the multiplayer lobby is still entered: 1 gameplay plugin(s) or "
+                            "module(s) suspended, 0 allowed by the player"));
+        // The lobby left: gp back.
+        app_session[0x55] = 1;
+        frame(game.app, 1);
+        CHECK((lobby == std::vector<std::string>{"entered", "left"}));
+        CHECK(!policy.lobby() && !changes.suspended(gp) && image.base[0x205000] == 0x90);
+        CHECK(contains(log, "anvil-game: multiplayer lobby left"));
+
+        // As the test before left it: a single-player game.
+        g_multiplayer = false;
+        set_app_session(nullptr);
+        game.set_session(game.session);
+        frame(game.app, 1);
+        CHECK(service->session(nullptr) == 1 && !changes.suspended(gp));
+    });
+
     run("anvil-game: restart() writes the game's own flags after the next frame (ADR 0012)", [&] {
         CHECK(ANVIL_GAME_HAS(service, restart));
         if (!ANVIL_GAME_HAS(service, restart)) return;
@@ -2470,7 +2571,7 @@ int main(int argc, char** argv) {
         CHECK(game.session[0x12E9] == 0);  // only queued
         frame(game.app, 1);
         CHECK(game.session[0x12E9] == 1 && flags(0));
-        CHECK(contains(log, "anvil-game: restart asked by an unknown caller: the game's Exit to Menu (session 11)"));
+        CHECK(contains(log, "anvil-game: restart asked by an unknown caller: the game's Exit to Menu (session 13)"));
 
         // A plugin that turns Exit to Menu into a return: the main menu, then after
         // 30 frames of it the application's flags, and the main loop stops.

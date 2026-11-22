@@ -1154,6 +1154,33 @@ typedef struct AnvilGameCameraService {
 #define ANVIL_GAME_CAMERA_HAS(service, field) \
     ((service)->size >= offsetof(AnvilGameCameraService, field) + sizeof((service)->field))
 
+/* --- Since anvil-game 1.27.0: the multiplayer lobby ------------------------
+ *
+ * Outside a session, the application's game session (CEU4Application's
+ * session, which the front end and the in-game idler both hand out) is single
+ * player's dummy, or a real one: a multiplayer lobby, a client joining a
+ * running game, or a host waiting alone. anvil-game reads it after each outer
+ * frame of the main loop while the front end is up and publishes
+ * ANVIL_GAME_EVENT_LOBBY when it changes: ENTERED when the session became a
+ * real one, LEFT when it is the dummy again. It is not read while a session
+ * runs, so a lobby that starts its game sends nothing: ANVIL_GAME_EVENT_SESSION
+ * says that, and the lobby is still entered when that session ends.
+ * ANVIL_GAME_EVENT_SESSION, session numbers and session() keep their meaning:
+ * a lobby is not a session. Anvil itself listens to it to suspend the changes
+ * of plugins with affects_gameplay = true in a lobby as in a multiplayer game
+ * (§13), before any plugin is told. Payload const AnvilGameLobby*. */
+#define ANVIL_GAME_EVENT_LOBBY "anvil-game.lobby"
+
+typedef enum AnvilGameLobbyChange {
+    ANVIL_GAME_LOBBY_ENTERED = 1,
+    ANVIL_GAME_LOBBY_LEFT = 2
+} AnvilGameLobbyChange;
+
+typedef struct AnvilGameLobby {
+    uint32_t size;   /* sizeof(AnvilGameLobby) as known by anvil-game */
+    uint32_t change; /* AnvilGameLobbyChange */
+} AnvilGameLobby;
+
 #ifdef __cplusplus
 }
 #endif

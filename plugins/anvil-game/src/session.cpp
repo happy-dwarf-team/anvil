@@ -197,4 +197,16 @@ SessionChanges SessionTracker::update(const SessionView& view) {
     return out;
 }
 
+LobbyTracker::Change LobbyTracker::update(bool front_end, AppSession session) {
+    Change out;
+    if (!front_end || session == AppSession::unread) return out;
+    const bool entered = session == AppSession::real;
+    if (entered == entered_) return out;
+    entered_ = entered;
+    out.changed = true;
+    out.event.size = sizeof(AnvilGameLobby);
+    out.event.change = entered ? ANVIL_GAME_LOBBY_ENTERED : ANVIL_GAME_LOBBY_LEFT;
+    return out;
+}
+
 }  // namespace anvil_game

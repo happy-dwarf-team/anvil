@@ -89,6 +89,12 @@ struct World {
         s.number = 1;
         bus.publish(ANVIL_GAME_EVENT_SESSION, &s);
     }
+    void lobby(uint32_t change) {
+        AnvilGameLobby l{};
+        l.size = sizeof(l);
+        l.change = change;
+        bus.publish(ANVIL_GAME_EVENT_LOBBY, &l);
+    }
     bool logged(const std::string& part) const {
         return std::any_of(log.begin(), log.end(), [&](const std::string& l) { return l.find(part) != std::string::npos; });
     }
@@ -344,6 +350,104 @@ void gameplay_tests() {
         CHECK(!policy.session());
         CHECK(w.logged("anvil: anvil-game.session without a valid payload: ignored"));
         CHECK(w.logged("anvil: anvil-game.session with unknown change 7: ignored"));
+    });
+
+    run("gameplay: a multiplayer lobby suspends as a multiplayer session, without churn into its game (anvil#466)", [] {
+        World w;
+        const OwnerId gp = w.plugin("gp", 0x100), mp = w.plugin("mp", 0x200), plain = w.plugin("plain", 0x300);
+        GameplayPolicy policy(*w.changes, w.bus, GameplayOptIns{{}, {"mp"}}, w.sink());
+        policy.subscribe();
+        policy.add(gameplay("gp"), gp);
+        policy.add(gameplay("mp", "allow_multiplayer = \"opt-in\"\n"), mp);
+        policy.add(manifest(plugin_toml("plain")), plain);
+
+        // Hosting or joining: gp out before any session, mp allowed, plain untouched.
+        w.lobby(ANVIL_GAME_LOBBY_ENTERED);
+        CHECK(policy.lobby() && !policy.session());
+        CHECK(!w.patched(0x100) && w.patched(0x200) && w.patched(0x300));
+        CHECK(w.events == std::vector<std::string>{"gp:anvil.suspended"});
+        CHECK(w.logged("gp: suspended: affects gameplay and its plugin.toml does not offer allow_multiplayer"));
+        CHECK(w.logged("mp: stays active: the player allows it in multiplayer"));
+        CHECK(w.logged("anvil: multiplayer lobby entered: 1 gameplay plugin(s) or module(s) suspended, 1 allowed by the player"));
+        // A second ENTERED is no change.
+        w.lobby(ANVIL_GAME_LOBBY_ENTERED);
+        CHECK(w.events.size() == 1);
+        // A plugin that loads now starts suspended.
+        const OwnerId late = w.changes->add_owner("late");
+        policy.add(gameplay("late"), late);
+        CHECK(policy.suspended(late) && w.changes->suspended(late));
+
+        // Start: the multiplayer session takes over, gp stays out without a resume in between.
+        w.session(ANVIL_GAME_SESSION_STARTED, false, true);
+        CHECK(!w.patched(0x100) && w.patched(0x200));
+        CHECK(w.events == std::vector<std::string>{"gp:anvil.suspended"});
+        // A lobby event while the session runs changes nothing.
+        w.lobby(ANVIL_GAME_LOBBY_LEFT);
+        CHECK(!policy.lobby() && !w.patched(0x100) && w.events.size() == 1);
+        w.lobby(ANVIL_GAME_LOBBY_ENTERED);
+        CHECK(policy.lobby() && w.events.size() == 1);
+
+        // The session ends with the lobby still entered: still suspended.
+        w.session(ANVIL_GAME_SESSION_ENDED, false, true);
+        CHECK(!policy.session() && !w.patched(0x100) && policy.suspended(late) && w.events.size() == 1);
+        CHECK(w.logged("anvil: game session ended, the multiplayer lobby is still entered: 2 gameplay plugin(s) or "
+                       "module(s) suspended, 1 allowed by the player"));
+        // The lobby left: everything back.
+        w.lobby(ANVIL_GAME_LOBBY_LEFT);
+        CHECK(!policy.lobby() && w.patched(0x100) && w.patched(0x200) && !policy.suspended(late));
+        CHECK((w.events == std::vector<std::string>{"gp:anvil.suspended", "gp:anvil.resumed"}));
+        CHECK(w.logged("gp: resumed: the multiplayer lobby was left; 1 change(s) back"));
+        CHECK(w.logged("anvil: multiplayer lobby left: 2 plugin(s) resumed"));
+        // LEFT without a lobby does nothing.
+        w.lobby(ANVIL_GAME_LOBBY_LEFT);
+        CHECK(w.events.size() == 2);
+        if (g_failures != 0) w.dump();
+    });
+
+    run("gameplay: a lobby whose game is not multiplayer for Anvil resumes at its start (a host alone, anvil#466)", [] {
+        World w;
+        const OwnerId gp = w.plugin("gp", 0x100), im = w.plugin("im", 0x200);
+        GameplayPolicy policy(*w.changes, w.bus, GameplayOptIns{{"im"}, {}}, w.sink());
+        policy.subscribe();
+        policy.add(gameplay("gp"), gp);
+        policy.add(gameplay("im", "allow_ironman = \"opt-in\"\n"), im);
+        w.lobby(ANVIL_GAME_LOBBY_ENTERED);
+        CHECK(!w.patched(0x100) && !w.patched(0x200));
+        // The session's own mode wins: a host alone is neither ironman nor multiplayer.
+        w.session(ANVIL_GAME_SESSION_STARTED, false, false);
+        CHECK(w.patched(0x100) && w.patched(0x200));
+        CHECK(w.logged("gp: resumed: the new session allows it; 1 change(s) back"));
+        // Its end goes back to the lobby's suspensions.
+        w.session(ANVIL_GAME_SESSION_ENDED, false, false);
+        CHECK(!w.patched(0x100) && !w.patched(0x200));
+        // An ironman session that ended into the lobby: im, allowed in ironman, goes out for the lobby.
+        w.lobby(ANVIL_GAME_LOBBY_LEFT);
+        w.session(ANVIL_GAME_SESSION_STARTED, true, false);
+        CHECK(!w.patched(0x100) && w.patched(0x200));
+        w.lobby(ANVIL_GAME_LOBBY_ENTERED);  // read only outside a session in the game; the policy waits for the end
+        CHECK(w.patched(0x200));
+        w.session(ANVIL_GAME_SESSION_ENDED, true, false);
+        CHECK(!w.patched(0x100) && !w.patched(0x200));
+        CHECK(w.logged("im: suspended: affects gameplay and its plugin.toml does not offer allow_multiplayer"));
+        if (g_failures != 0) w.dump();
+    });
+
+    run("gameplay: a lobby event without a valid payload is ignored (anvil#466)", [] {
+        World w;
+        GameplayPolicy policy(*w.changes, w.bus, {}, w.sink());
+        policy.subscribe();
+        w.bus.publish(ANVIL_GAME_EVENT_LOBBY, nullptr);
+        AnvilGameLobby small{};
+        small.size = 4;
+        small.change = ANVIL_GAME_LOBBY_ENTERED;
+        w.bus.publish(ANVIL_GAME_EVENT_LOBBY, &small);
+        AnvilGameLobby odd{};
+        odd.size = sizeof(odd);
+        odd.change = 7;
+        w.bus.publish(ANVIL_GAME_EVENT_LOBBY, &odd);
+        CHECK(!policy.lobby());
+        CHECK(w.logged("anvil: anvil-game.lobby without a valid payload: ignored"));
+        CHECK(w.logged("anvil: anvil-game.lobby with unknown change 7: ignored"));
     });
 
     run("gameplay: modules are suspended by their own flags (ADR 0011)", [] {
