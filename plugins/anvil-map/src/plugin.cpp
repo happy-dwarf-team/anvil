@@ -352,6 +352,83 @@ public:
         if (g_world->province_modifier(province, id, &value) != ANVIL_OK) return 0;
         return value;
     }
+    std::string owner(std::int32_t province) override {
+        AnvilGameProvince p{};
+        p.size = sizeof(p);
+        if (g_world->province(province, &p) != ANVIL_OK) return {};
+        return std::string(p.owner.text, strnlen(p.owner.text, sizeof(p.owner.text)));
+    }
+    bool country_has_flag(const std::string& tag, std::int32_t flag) override {
+        if (!ANVIL_GAME_WORLD_HAS(g_world, country_flags)) return false;
+        std::array<AnvilGameFlag, 64> some{};
+        std::uint32_t count = 0;
+        if (g_world->country_flags(tag.c_str(), some.data(), static_cast<std::uint32_t>(some.size()), &count) !=
+            ANVIL_OK) {
+            return false;
+        }
+        if (count <= some.size()) {
+            return std::any_of(some.begin(), some.begin() + count, [&](const AnvilGameFlag& f) { return f.id == flag; });
+        }
+        std::vector<AnvilGameFlag> all(count);
+        if (g_world->country_flags(tag.c_str(), all.data(), count, &count) != ANVIL_OK) return false;
+        count = std::min<std::uint32_t>(count, static_cast<std::uint32_t>(all.size()));
+        return std::any_of(all.begin(), all.begin() + count, [&](const AnvilGameFlag& f) { return f.id == flag; });
+    }
+    std::int64_t country_variable(const std::string& tag, const std::string& name) override {
+        std::int32_t value = 0;
+        if (!ANVIL_GAME_WORLD_HAS(g_world, country_variable) ||
+            g_world->country_variable(tag.c_str(), name.c_str(), &value) != ANVIL_OK) {
+            return 0;
+        }
+        return value;
+    }
+    std::int64_t country_modifier(const std::string& tag, std::int32_t id) override {
+        std::int32_t value = 0;
+        if (g_world->country_modifier(tag.c_str(), id, &value) != ANVIL_OK) return 0;
+        return value;
+    }
+    std::optional<std::int64_t> province_value(std::int32_t province, files::Value value) override {
+        AnvilGameProvince p{};
+        p.size = sizeof(p);
+        if (g_world->province(province, &p) != ANVIL_OK) return std::nullopt;
+        switch (value) {
+            case files::Value::base_tax:
+                return p.base_tax;
+            case files::Value::base_production:
+                return p.base_production;
+            case files::Value::base_manpower:
+                return p.base_manpower;
+            case files::Value::development:
+                return std::int64_t{p.base_tax} + p.base_production + p.base_manpower;
+            default:
+                return std::nullopt;
+        }
+    }
+    std::optional<std::int64_t> country_value(const std::string& tag, files::Value value) override {
+        AnvilGameCountry c{};
+        c.size = sizeof(c);
+        if (g_world->country(tag.c_str(), &c) != ANVIL_OK) return std::nullopt;
+        const auto field = [&](std::uint32_t bit, std::int32_t v) -> std::optional<std::int64_t> {
+            if ((c.values & bit) == 0) return std::nullopt;
+            return v;
+        };
+        switch (value) {
+            case files::Value::treasury:
+                return field(ANVIL_GAME_VALUE_TREASURY, c.treasury);
+            case files::Value::stability:
+                return field(ANVIL_GAME_VALUE_STABILITY, c.stability);
+            case files::Value::prestige:
+                return field(ANVIL_GAME_VALUE_PRESTIGE, c.prestige);
+            case files::Value::manpower:
+                return field(ANVIL_GAME_VALUE_MANPOWER, c.manpower);
+            case files::Value::monthly_income:
+                return field(ANVIL_GAME_VALUE_MONTHLY_INCOME, c.monthly_income);
+            case files::Value::provinces:
+                return std::int64_t{c.province_count} * 1000;
+            default:
+                return std::nullopt;
+        }
+    }
 };
 
 struct FileEntry {
@@ -371,29 +448,18 @@ FileEntry* file_entry(const AnvilMapMode* mode) {
     return nullptr;
 }
 
-// "7.5" for 7500.
-std::string decimal(std::int64_t value) {
-    const bool negative = value < 0;
-    const std::uint64_t v = negative ? 0 - static_cast<std::uint64_t>(value) : static_cast<std::uint64_t>(value);
-    std::string out = (negative ? "-" : "") + std::to_string(v / 1000);
-    if (const std::uint64_t f = v % 1000; f != 0) {
-        std::string digits = std::to_string(1000 + f).substr(1);
-        while (digits.back() == '0') digits.pop_back();
-        out += "." + digits;
-    }
-    return out;
-}
-
 // The tooltip of a mode from a file: the label of the rule the province
-// passes, with the value it read.
+// passes, with the value it read for a variable or a scale. An owner's
+// answers are those the colours were computed from.
 std::size_t file_describe(void* context, const AnvilMapMode*, std::int32_t province, char* text, std::size_t capacity) {
     auto* entry = static_cast<FileEntry*>(context);
     if (entry->evaluator == nullptr || capacity == 0) return 0;
-    const files::Rule* rule = entry->evaluator->match(province);
+    std::int64_t value = 0;
+    const files::Rule* rule = entry->evaluator->match(province, &value);
     if (rule == nullptr) return 0;
     std::string line = rule->label;
-    if (rule->test == files::Test::variable) {
-        line += " (" + rule->name + " " + decimal(g_game_world.variable(province, rule->name)) + ")";
+    if (rule->test == files::Test::variable || rule->test == files::Test::value || rule->scaled()) {
+        line += " (" + rule->name + " " + files::decimal(value) + ")";
     }
     const std::size_t n = std::min(line.size(), capacity - 1);
     std::memcpy(text, line.data(), n);
