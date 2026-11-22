@@ -1371,6 +1371,42 @@ impl World {
         )
     }
 
+    /// The script key of a province's area, such as `uppland_area`;
+    /// `NotFound` when it has none (anvil-game 1.26.0).
+    pub fn province_area(&self, province: i32) -> Result<String> {
+        self.province_key(province, crate::sys::ANVIL_GAME_KEY_AREA, "province_area")
+    }
+
+    /// The script key of a province's region, such as `scandinavia_region`;
+    /// `NotFound` when it has none (anvil-game 1.26.0).
+    pub fn province_region(&self, province: i32) -> Result<String> {
+        self.province_key(
+            province,
+            crate::sys::ANVIL_GAME_KEY_REGION,
+            "province_region",
+        )
+    }
+
+    /// The script key of a province's superregion, such as
+    /// `europe_superregion`; `NotFound` when it has none (anvil-game 1.26.0).
+    pub fn province_superregion(&self, province: i32) -> Result<String> {
+        self.province_key(
+            province,
+            crate::sys::ANVIL_GAME_KEY_SUPERREGION,
+            "province_superregion",
+        )
+    }
+
+    /// The script key of a province's continent, such as `europe`;
+    /// `NotFound` when it has none (anvil-game 1.26.0).
+    pub fn province_continent(&self, province: i32) -> Result<String> {
+        self.province_key(
+            province,
+            crate::sys::ANVIL_GAME_KEY_CONTINENT,
+            "province_continent",
+        )
+    }
+
     /// The script key of the group of a country's state religion; `NotFound`
     /// when it has none (anvil-game 1.26.0).
     pub fn country_religion_group(&self, tag: Tag) -> Result<String> {

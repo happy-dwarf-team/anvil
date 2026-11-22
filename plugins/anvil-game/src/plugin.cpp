@@ -1958,6 +1958,17 @@ void load_world(anvil::Host& host) {
             l.culture_group_key = sym::culture_group_key.key;
         }
     }
+    if (host.present(sym::province_is_sea) && host.present(sym::province_map_area) && host.present(sym::area_region) &&
+        host.present(sym::area_key) && host.present(sym::province_superregion) &&
+        host.present(sym::province_continent) && host.present(sym::continent_key) && host.present(sym::region_texts)) {
+        l.province_area = static_cast<std::uint32_t>(host.value(sym::province_map_area, "area"));
+        l.area_region = sym::area_region.region;
+        l.province_superregion = sym::province_superregion.superregion;
+        l.province_continent = sym::province_continent.continent;
+        l.area_key = sym::area_key.key;
+        l.place_region_key = sym::region_texts.key;
+        l.continent_key = sym::continent_key.key;
+    }
     if (host.present(sym::selection_holder) && host.present(sym::selection_view) && host.present(sym::view_window) &&
         host.present(sym::province_view_province) && host.present(sym::dialog_window_part) &&
         host.present(sym::widget_shown)) {
