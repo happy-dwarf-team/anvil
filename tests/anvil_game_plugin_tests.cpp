@@ -626,6 +626,11 @@ struct FakeWorld {
     // Their groups (1.26.0): christian and east_slavic.
     alignas(8) uint8_t christian[0x80] = {};
     alignas(8) uint8_t east_slavic[0x80] = {};
+    // Moskva's places (1.26.0): its area, region, superregion and continent.
+    alignas(8) uint8_t moskva_area[0xA0] = {};
+    alignas(8) uint8_t russia_region[0x108] = {};
+    alignas(8) uint8_t europe_superregion[0xA0] = {};
+    alignas(8) uint8_t europe[0x98] = {};
     alignas(8) uint8_t selection_object[0x20] = {};
     alignas(8) uint8_t province_view[0x1000] = {};
     alignas(8) uint8_t view_window[0x200] = {};
@@ -667,6 +672,14 @@ struct FakeWorld {
         set_key(east_slavic + 0x38, "east_slavic");
         set(orthodox, 0xD8, reinterpret_cast<uintptr_t>(christian));
         set(russian, 0x88, reinterpret_cast<uintptr_t>(east_slavic));
+        set_key(moskva_area + 0x48, "moskva_area");
+        set_key(russia_region + 0x10, "russia_region");
+        set_key(europe_superregion + 0x10, "eu_superregion");  // short: set_key keeps no long text
+        set_key(europe + 0x28, "europe");
+        set(moskva_area, 0x18, reinterpret_cast<uintptr_t>(russia_region));
+        set(map[1], 0x40, reinterpret_cast<uintptr_t>(moskva_area));
+        set(province(1), 0x558, reinterpret_cast<uintptr_t>(europe_superregion));
+        set(province(1), 0x560, reinterpret_cast<uintptr_t>(europe));
         set(province(1), 0x448, reinterpret_cast<uintptr_t>(orthodox));
         set(province(1), 0x440, reinterpret_cast<uintptr_t>(russian));
         set(province(1), 0x458, reinterpret_cast<uintptr_t>(grain));
@@ -2183,7 +2196,7 @@ int main(int argc, char** argv) {
         start.add(gp_toml);
         start.add(plugin_toml("other"));
         start.make();
-        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 197);
+        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 202);
         AnvilPlugin* p = start.load(ANVIL_GAME_ID);
         CHECK(p != nullptr);
         if (p == nullptr) return;
@@ -3596,7 +3609,30 @@ int main(int argc, char** argv) {
             CHECK(world->country_key("RUS", ANVIL_GAME_KEY_RELIGION_GROUP, key_text, sizeof key_text, &length) ==
                   ANVIL_ERROR_NOT_FOUND);
             FakeWorld::set(fake.orthodox, 0xD8, reinterpret_cast<uintptr_t>(fake.christian));
-            CHECK(world->province_key(1, 5, key_text, sizeof key_text, &length) == ANVIL_ERROR_INVALID_ARGUMENT);
+            // Places: area, region, superregion and continent, the province's only.
+            char place[32] = {};
+            CHECK(world->province_key(1, ANVIL_GAME_KEY_AREA, place, sizeof place, &length) == ANVIL_OK &&
+                  length == 11 && std::string(place) == "moskva_area");
+            CHECK(world->province_key(1, ANVIL_GAME_KEY_REGION, place, sizeof place, &length) == ANVIL_OK &&
+                  std::string(place) == "russia_region");
+            CHECK(world->province_key(1, ANVIL_GAME_KEY_SUPERREGION, place, sizeof place, &length) == ANVIL_OK &&
+                  std::string(place) == "eu_superregion");
+            CHECK(world->province_key(1, ANVIL_GAME_KEY_CONTINENT, place, sizeof place, &length) == ANVIL_OK &&
+                  length == 6 && std::string(place) == "europe");
+            CHECK(world->province_key(2, ANVIL_GAME_KEY_AREA, place, sizeof place, &length) == ANVIL_ERROR_NOT_FOUND &&
+                  world->province_key(2, ANVIL_GAME_KEY_REGION, place, sizeof place, &length) ==
+                      ANVIL_ERROR_NOT_FOUND &&
+                  world->province_key(2, ANVIL_GAME_KEY_CONTINENT, place, sizeof place, &length) ==
+                      ANVIL_ERROR_NOT_FOUND);
+            // An area without a region: NOT_FOUND for the region, the area still answers.
+            FakeWorld::set(fake.moskva_area, 0x18, uintptr_t{0});
+            CHECK(world->province_key(1, ANVIL_GAME_KEY_REGION, place, sizeof place, &length) ==
+                      ANVIL_ERROR_NOT_FOUND &&
+                  world->province_key(1, ANVIL_GAME_KEY_AREA, place, sizeof place, &length) == ANVIL_OK);
+            FakeWorld::set(fake.moskva_area, 0x18, reinterpret_cast<uintptr_t>(fake.russia_region));
+            CHECK(world->country_key("RUS", ANVIL_GAME_KEY_CONTINENT, place, sizeof place, &length) ==
+                  ANVIL_ERROR_INVALID_ARGUMENT);
+            CHECK(world->province_key(1, 9, key_text, sizeof key_text, &length) == ANVIL_ERROR_INVALID_ARGUMENT);
             CHECK(world->province_key(1, ANVIL_GAME_KEY_RELIGION, nullptr, 4, &length) ==
                   ANVIL_ERROR_INVALID_ARGUMENT);
             CHECK(world->country_key("RUS", ANVIL_GAME_KEY_RELIGION, key_text, sizeof key_text, &length) ==
@@ -3655,6 +3691,7 @@ int main(int argc, char** argv) {
               anvil_game::read_province_key(l, 1, ANVIL_GAME_KEY_RELIGION, text) == ANVIL_ERROR_NOT_DECLARED &&
               anvil_game::read_country_key(l, "RUS", ANVIL_GAME_KEY_CULTURE, text) == ANVIL_ERROR_NOT_DECLARED &&
               anvil_game::read_province_view(l, id) == ANVIL_ERROR_NOT_DECLARED);
+        CHECK(anvil_game::read_province_key(l, 1, ANVIL_GAME_KEY_AREA, text) == ANVIL_ERROR_NOT_DECLARED);
         // A port with the keys but not their groups: only the groups are NOT_DECLARED.
         l.religion_key = 0x90;
         CHECK(anvil_game::read_province_key(l, 1, ANVIL_GAME_KEY_RELIGION_GROUP, text) == ANVIL_ERROR_NOT_DECLARED &&

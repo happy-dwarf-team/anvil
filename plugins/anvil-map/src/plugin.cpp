@@ -413,6 +413,10 @@ public:
             case files::Test::culture: return ANVIL_GAME_KEY_CULTURE;
             case files::Test::religion_group: return ANVIL_GAME_KEY_RELIGION_GROUP;
             case files::Test::culture_group: return ANVIL_GAME_KEY_CULTURE_GROUP;
+            case files::Test::area: return ANVIL_GAME_KEY_AREA;
+            case files::Test::region: return ANVIL_GAME_KEY_REGION;
+            case files::Test::superregion: return ANVIL_GAME_KEY_SUPERREGION;
+            case files::Test::continent: return ANVIL_GAME_KEY_CONTINENT;
             default: return ANVIL_GAME_KEY_TRADE_GOODS;
         }
     }

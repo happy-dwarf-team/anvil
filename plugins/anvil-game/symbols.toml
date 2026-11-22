@@ -2636,6 +2636,63 @@ build."eu4-1.37.5-steam-win64" = { rva = 0x27CA39 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x27C9E9 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x27C9E9 }
 
+[symbol.area_region]
+# mov rax,[rcx+28h]; mov rax,[rax+40h]; test rax,rax; je; mov rax,[rax+18h]; ret; ret
+bytes = "48 8B 41 28 48 8B 40 40 48 85 C0 74 05 48 8B 40 18 C3 C3"
+memory = "code"
+values.region = { at = 16, size = 1 }
+note = "CProvince::GetRegion: the map area's _pRegion (+0x18), CRegion*; the map part and area offsets are province_map_area's"
+build."eu4-1.37.5-steam-win64" = { rva = 0xA1FFA0 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0xA1EF80 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0xA1EF80 }
+
+[symbol.area_key]
+# mov [rsp+8],rbx; mov [rsp+10h],rsi; push rdi; sub rsp,40h; ... (strlen of the key) add rcx,48h; call assign; ...
+bytes = """
+48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 40 48 83 7A 18 10 48 8B DA 48 8B F9 72 03 48 8B 12
+49 C7 C0 FF FF FF FF 49 FF C0 42 80 3C 02 00 75 F6 48 83 C1 48 E8 ?? ?? ?? ??
+48 83 7B 18 10 72 03 48 8B 1B 45 33 C9
+"""
+memory = "code"
+values.key = { at = 51, size = 1 }
+note = "CMapArea::SetKey: the script key to _Tag (+0x48), a std::string"
+build."eu4-1.37.5-steam-win64" = { rva = 0x88C580 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x88B7B0 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x88B7B0 }
+
+[symbol.province_superregion]
+# mov rax,[rcx+558h]; ret
+bytes = "48 8B 81 58 05 00 00 C3"
+memory = "code"
+values.superregion = { at = 3, size = 4 }
+note = "CProvince::GetSuperRegion: _pSuperRegion (+0x558), CSuperRegion*, a CRegionBase whose key is region_texts'"
+build."eu4-1.37.5-steam-win64" = { rva = 0x144460 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x144490 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x144490 }
+
+[symbol.province_continent]
+# mov rax,[rcx+560h]; ret
+bytes = "48 8B 81 60 05 00 00 C3"
+memory = "code"
+values.continent = { at = 3, size = 4 }
+note = "CProvince::GetContinent: _pContinent (+0x560), CContinent*"
+build."eu4-1.37.5-steam-win64" = { rva = 0x98790 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x987C0 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x987C0 }
+
+[symbol.continent_key]
+# lea rdx,[rcx+28h]; (an empty std::string there) ...; movups (the key moved in); ...; lea rbx,[rcx+48h]
+bytes = """
+48 8D 51 28 48 89 2A 48 89 6A 10 48 89 6A 18 0F 10 07 0F 11 02 0F 10 4F 10 0F 11 4A 10
+48 89 6F 10 48 C7 47 18 0F 00 00 00 40 88 2F 48 8D 59 48
+"""
+memory = "code"
+values.key = { at = 3, size = 1 }
+note = "CContinent::CContinent: the script key it is given is moved to _Tag (+0x28), a std::string"
+build."eu4-1.37.5-steam-win64" = { rva = 0x276A32 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x2769E2 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x2769E2 }
+
 [symbol.camera_of_session]
 memory = "code"
 values.frame_time = { at = 5, size = 4 }

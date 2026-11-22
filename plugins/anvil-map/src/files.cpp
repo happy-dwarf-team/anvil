@@ -10,8 +10,10 @@
 #include <cmath>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -65,6 +67,24 @@ struct Fault {
 };
 
 // The key a test is written with, for faults about where it reads.
+bool is_place(Test test) {
+    return test == Test::area || test == Test::region || test == Test::superregion || test == Test::continent;
+}
+
+// The tests whose value is one of the game's script keys.
+std::optional<Test> key_test(const std::string& k) {
+    static constexpr std::pair<std::string_view, Test> kKeys[] = {
+        {"religion", Test::religion},       {"culture", Test::culture},
+        {"trade_goods", Test::trade_goods}, {"religion_group", Test::religion_group},
+        {"culture_group", Test::culture_group}, {"area", Test::area},
+        {"region", Test::region},           {"superregion", Test::superregion},
+        {"continent", Test::continent}};
+    for (const auto& [name, test] : kKeys) {
+        if (k == name) return test;
+    }
+    return std::nullopt;
+}
+
 std::string key_of(Test test) {
     switch (test) {
         case Test::owned_by: return "owned_by";
@@ -75,6 +95,10 @@ std::string key_of(Test test) {
         case Test::subject: return "subject";
         case Test::subject_of: return "subject_of";
         case Test::trade_goods: return "trade_goods";
+        case Test::area: return "area";
+        case Test::region: return "region";
+        case Test::superregion: return "superregion";
+        case Test::continent: return "continent";
         default: return "this test";
     }
 }
@@ -324,13 +348,8 @@ public:
                     throw Fault{key.line, "core is yes, no or a country tag of three letters or digits: " + v};
                 }
                 ++tests;
-            } else if (k == "religion" || k == "culture" || k == "trade_goods" || k == "religion_group" ||
-                       k == "culture_group") {
-                r.test = k == "religion"         ? Test::religion
-                         : k == "culture"        ? Test::culture
-                         : k == "trade_goods"    ? Test::trade_goods
-                         : k == "religion_group" ? Test::religion_group
-                                                 : Test::culture_group;
+            } else if (const std::optional<Test> keyed = key_test(k)) {
+                r.test = *keyed;
                 r.name = text(k.c_str());
                 const bool key_like = !r.name.empty() && r.name.size() <= 128 &&
                                       std::all_of(r.name.begin(), r.name.end(), [](char ch) {
@@ -338,8 +357,8 @@ public:
                                                  (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' || ch == '.';
                                       });
                 if (!key_like) {
-                    throw Fault{key.line, k + " needs a script key as the game's files write it (orthodox, russian, "
-                                              "grain): " + r.name};
+                    throw Fault{key.line, k + " needs a script key as the game's files write it (orthodox, "
+                                              "russian, grain, scandinavia_region): " + r.name};
                 }
                 ++tests;
             } else if (k == "occupied" || k == "subject") {
@@ -387,7 +406,7 @@ public:
         if (tests != 1) {
             throw Fault{line, "a rule needs one of always, flag, variable, modifier, value, owned_by, controlled_by, "
                               "core, occupied, subject, subject_of, religion, religion_group, culture, "
-                              "culture_group or trade_goods"};
+                              "culture_group, trade_goods, area, region, superregion or continent"};
         }
         if (!has_color) throw Fault{line, "a rule needs color = { r g b }"};
         if (!has_label || r.label.empty() || r.label.size() > kLabelMax) {
@@ -411,7 +430,8 @@ public:
             throw Fault{line, key_of(r.test) + " is the owner's: write owner = yes"};
         }
         if ((r.test == Test::owned_by || r.test == Test::controlled_by || r.test == Test::core ||
-             r.test == Test::core_of || r.test == Test::occupied || r.test == Test::trade_goods) &&
+             r.test == Test::core_of || r.test == Test::occupied || r.test == Test::trade_goods ||
+             is_place(r.test)) &&
             r.owner) {
             throw Fault{line, key_of(r.test) + " is the province's: leave out owner = yes"};
         }
@@ -561,7 +581,7 @@ bool is_yes_no(Test test) {
     return test == Test::flag || test == Test::owned_by || test == Test::core || test == Test::occupied ||
            test == Test::subject || test == Test::controlled_by || test == Test::core_of || test == Test::subject_of ||
            test == Test::religion || test == Test::culture || test == Test::trade_goods ||
-           test == Test::religion_group || test == Test::culture_group;
+           test == Test::religion_group || test == Test::culture_group || is_place(test);
 }
 
 Evaluator::Evaluator(const FileMode& mode, World& world) : mode_(mode), world_(world) {
@@ -617,6 +637,10 @@ std::optional<std::int64_t> Evaluator::read_country(std::size_t i, const std::st
             break;
         }
         case Test::trade_goods:
+        case Test::area:
+        case Test::region:
+        case Test::superregion:
+        case Test::continent:
         case Test::owned_by:
         case Test::controlled_by:
         case Test::core:
@@ -670,7 +694,11 @@ std::optional<std::int64_t> Evaluator::read(std::size_t i, std::int32_t province
         case Test::culture:
         case Test::trade_goods:
         case Test::religion_group:
-        case Test::culture_group: {
+        case Test::culture_group:
+        case Test::area:
+        case Test::region:
+        case Test::superregion:
+        case Test::continent: {
             const std::string key = world_.province_key(province, r.test);
             if (key.empty()) return std::nullopt;
             return key == r.name ? 1 : 0;
