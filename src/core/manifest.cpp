@@ -1,10 +1,13 @@
 #include "manifest.hpp"
 
+#include "plugin_hash.hpp"
+
 #include <anvil/anvil_plugin.h>
 #include <toml++/toml.hpp>
 
 #include <algorithm>
 #include <fstream>
+#include <functional>
 #include <set>
 #include <sstream>
 #include <tuple>
@@ -461,6 +464,29 @@ ManifestResult parse_manifest_text(std::string_view text, const std::filesystem:
     return parse_manifest(text, folder, lines);
 }
 
+namespace {
+
+// plugin.toml's text, parsed; the files it names must exist as `exists` says.
+ManifestResult finish_manifest(std::string text, const std::filesystem::path& folder,
+                               const std::function<bool(const std::filesystem::path&)>& exists) {
+    if (text.starts_with("\xEF\xBB\xBF")) text.erase(0, 3);
+    FileKeyLines lines;
+    ManifestResult result = parse_manifest(text, folder, lines);
+    if (!result.manifest) return result;
+    for (const auto& [key, relative, line] : {std::tuple{"symbols", &result.manifest->symbols, lines.symbols},
+                                              std::tuple{"settings", &result.manifest->settings, lines.settings}}) {
+        if (relative->empty()) continue;
+        const std::u8string name(relative->begin(), relative->end());  // plugin.toml is UTF-8
+        if (!exists(std::filesystem::path(name))) {
+            return {std::nullopt,
+                    std::string("plugin.toml: ") + key + " file '" + *relative + "' not found in the plugin folder", line};
+        }
+    }
+    return result;
+}
+
+}  // namespace
+
 ManifestResult load_manifest(const std::filesystem::path& folder) {
     std::error_code size_error;
     const std::uintmax_t size = std::filesystem::file_size(folder / "plugin.toml", size_error);
@@ -471,22 +497,22 @@ ManifestResult load_manifest(const std::filesystem::path& folder) {
     }
     std::ostringstream content;
     content << file.rdbuf();
-    std::string text = content.str();
-    if (text.starts_with("\xEF\xBB\xBF")) text.erase(0, 3);
-    FileKeyLines lines;
-    ManifestResult result = parse_manifest(text, folder, lines);
-    if (!result.manifest) return result;
-    for (const auto& [key, relative, line] : {std::tuple{"symbols", &result.manifest->symbols, lines.symbols},
-                                              std::tuple{"settings", &result.manifest->settings, lines.settings}}) {
-        if (relative->empty()) continue;
-        const std::u8string name(relative->begin(), relative->end());  // plugin.toml is UTF-8
+    return finish_manifest(content.str(), folder, [&](const std::filesystem::path& relative) {
         std::error_code ec;
-        if (!std::filesystem::is_regular_file(folder / std::filesystem::path(name), ec)) {
-            return {std::nullopt,
-                    std::string("plugin.toml: ") + key + " file '" + *relative + "' not found in the plugin folder", line};
-        }
+        return std::filesystem::is_regular_file(folder / relative, ec);
+    });
+}
+
+ManifestResult load_manifest(const HeldFolder& folder) {
+    std::string text;
+    switch (folder.read("plugin.toml", kMaxManifestBytes, text)) {
+    case HeldFolder::Read::ok: break;
+    case HeldFolder::Read::missing: return {std::nullopt, "plugin.toml not found"};
+    case HeldFolder::Read::too_large: return {std::nullopt, "plugin.toml is larger than 1 MB"};
+    case HeldFolder::Read::unreadable: return {std::nullopt, "cannot read plugin.toml"};
     }
-    return result;
+    return finish_manifest(std::move(text), folder.folder(),
+                           [&](const std::filesystem::path& relative) { return folder.contains(relative); });
 }
 
 }  // namespace anvil

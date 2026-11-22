@@ -169,7 +169,7 @@ std::string trust_warning(const TrustFile& trust) {
            "): no plugin from a mod is approved until it is fixed or removed";
 }
 
-ModDiscovery find_mod_plugins(const fs::path& user_dir) {
+ModDiscovery find_mod_plugins(const fs::path& user_dir, const WhileHeld& while_held) {
     ModDiscovery d;
     d.playset = read_playset(user_dir);
     if (!d.playset.error.empty()) d.warnings.push_back(d.playset.error + "; no plugins from mods are loaded");
@@ -186,10 +186,12 @@ ModDiscovery find_mod_plugins(const fs::path& user_dir) {
             p.id = narrow(folder.filename().wstring());
             p.mod = mod;
             p.folder = folder;
+            // The hash first, with the files held: what is read below is what it covers.
+            const HeldFolder held(folder);
             if (!is_valid_plugin_id(p.id)) {
                 set_problem(p, i18n::Message("bad_folder_id", {}));
             } else {
-                const ManifestResult parsed = load_manifest(folder);
+                const ManifestResult parsed = held.ok() ? load_manifest(held) : load_manifest(folder);
                 if (!parsed.manifest) {
                     set_problem(p, "plugin.toml: " + parsed.error);
                 } else if (parsed.manifest->id != p.id) {
@@ -199,9 +201,9 @@ ModDiscovery find_mod_plugins(const fs::path& user_dir) {
                 }
                 p.manifest = parsed.manifest;
             }
-            const FolderHash hashed = hash_plugin_folder(folder);
-            p.hash = hashed.sha256;
-            if (!hashed.error.empty() && p.problem.empty()) set_problem(p, hashed.error);
+            p.hash = held.hash().sha256;
+            if (!held.ok() && p.problem.empty()) set_problem(p, held.hash().error);
+            if (while_held) while_held(p, held);
             d.plugins.push_back(std::move(p));
         }
     }

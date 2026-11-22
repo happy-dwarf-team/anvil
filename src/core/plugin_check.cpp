@@ -2,6 +2,7 @@
 
 #include "discovery.hpp"
 #include "log.hpp"
+#include "plugin_hash.hpp"
 
 #include <algorithm>
 #include <fstream>
@@ -35,6 +36,31 @@ std::string without_prefix(std::string message, std::string_view prefix) {
     if (message.starts_with(prefix)) message.erase(0, prefix.size());
     return message;
 }
+
+// Where a check reads the plugin's files: the disk, or a held folder's
+// hashed bytes (T3, #545).
+struct Source {
+    const std::filesystem::path& folder;
+    const HeldFolder* held = nullptr;
+
+    bool has_manifest() const {
+        if (held != nullptr) return held->contains("plugin.toml");
+        std::error_code ec;
+        return std::filesystem::is_regular_file(folder / "plugin.toml", ec);
+    }
+    ManifestResult manifest() const { return held != nullptr ? load_manifest(*held) : load_manifest(folder); }
+    bool read(const std::filesystem::path& relative, std::string& out) const {
+        if (held == nullptr) return read_file(folder / relative, out);
+        if (held->read(relative, kMaxPluginTomlBytes, out) != HeldFolder::Read::ok) return false;
+        if (out.starts_with("\xEF\xBB\xBF")) out.erase(0, 3);
+        return true;
+    }
+    i18n::Message entry_missing(const Manifest& m) const {
+        if (held == nullptr) return missing_entry_reason(m);
+        const std::u8string entry(m.entry.begin(), m.entry.end());  // plugin.toml is UTF-8
+        return held->contains(std::filesystem::path(entry)) ? i18n::Message() : i18n::Message("entry_missing", {m.entry});
+    }
+};
 
 // A problem of a symbol in the selected build: at its table for that build, if it has one.
 uint32_t line_in_build(const Symbol& s) { return s.placement_line != 0 ? s.placement_line : s.line; }
@@ -90,29 +116,30 @@ GameImage game_image(const ImageReader& reader, const char* build_id, i18n::Mess
     return game;
 }
 
-PluginCheck check_plugin_folder(const std::filesystem::path& folder, const GameImage& game) {
+namespace {
+
+PluginCheck check_source(const Source& source, const GameImage& game) {
     PluginCheck check;
-    std::error_code ec;
-    if (!std::filesystem::is_regular_file(folder / "plugin.toml", ec)) {
+    if (!source.has_manifest()) {
         check.manifest_missing = true;
-        check.manifest = load_manifest(folder);
+        check.manifest = source.manifest();
         check.problems.push_back({"plugin.toml", 0, "plugin.toml not found"});
         check.skip = i18n::Message(check.manifest.error);
         return check;
     }
-    check.manifest = load_manifest(folder);
+    check.manifest = source.manifest();
     if (!check.manifest.manifest) {
         check.problems.push_back({"plugin.toml", check.manifest.line, without_prefix(check.manifest.error, "plugin.toml: ")});
         check.skip = i18n::Message(check.manifest.error);
         return check;
     }
     const Manifest& m = *check.manifest.manifest;
-    check.entry_missing = missing_entry_reason(m);
+    check.entry_missing = source.entry_missing(m);
     if (!m.symbols.empty()) {
         const std::filesystem::path relative = utf8_path(m.symbols);
         const std::string name = generic_utf8(relative);
         std::string text;
-        if (!read_file(folder / relative, text)) {
+        if (!source.read(relative, text)) {
             // The plugin cannot load, but its settings.toml is still read: the
             // player's values and retired settings of a plugin that does not
             // load are kept and moved (ADR 0013).
@@ -132,7 +159,7 @@ PluginCheck check_plugin_folder(const std::filesystem::path& folder, const GameI
         const std::filesystem::path relative = utf8_path(m.settings);
         const std::string name = generic_utf8(relative);
         std::string text;
-        if (!read_file(folder / relative, text)) {
+        if (!source.read(relative, text)) {
             if (check.unreadable.empty()) check.unreadable = name;
             set_skip(check, i18n::Message("cannot_read", {name}));
             return check;
@@ -157,6 +184,16 @@ PluginCheck check_plugin_folder(const std::filesystem::path& folder, const GameI
     };
     std::stable_sort(check.problems.begin(), check.problems.end(), by_place);
     return check;
+}
+
+}  // namespace
+
+PluginCheck check_plugin_folder(const std::filesystem::path& folder, const GameImage& game) {
+    return check_source(Source{folder, nullptr}, game);
+}
+
+PluginCheck check_plugin_folder(const HeldFolder& folder, const GameImage& game) {
+    return check_source(Source{folder.folder(), folder.ok() ? &folder : nullptr}, game);
 }
 
 }  // namespace anvil

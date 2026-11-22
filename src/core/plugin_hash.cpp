@@ -174,6 +174,50 @@ FolderHash hash_plugin_folder(const fs::path& folder, FileLocks* locks) {
     return result;
 }
 
+HeldFolder::HeldFolder(const fs::path& folder) : folder_(folder), hash_(hash_plugin_folder(folder, &locks_)) {
+    if (!hash_.error.empty()) locks_.release();
+}
+
+long long HeldFolder::find(const fs::path& relative) const {
+    if (!ok() || relative.empty() || relative.is_absolute() || relative.has_root_name()) return -1;
+    const fs::path normal = relative.lexically_normal();
+    if (normal.empty() || *normal.begin() == "..") return -1;
+    std::string name = narrow(normal.generic_wstring());
+    for (char& c : name) {
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    }
+    const auto it = std::lower_bound(hash_.files.begin(), hash_.files.end(), name,
+                                     [](const HashedFile& f, const std::string& n) { return f.relative < n; });
+    if (it == hash_.files.end() || it->relative != name) return -1;
+    return it - hash_.files.begin();
+}
+
+bool HeldFolder::contains(const fs::path& relative) const { return find(relative) >= 0; }
+
+HeldFolder::Read HeldFolder::read(const fs::path& relative, uint64_t max_bytes, std::string& out) const {
+    out.clear();
+    const long long index = find(relative);
+    if (index < 0) return Read::missing;
+    const HashedFile& file = hash_.files[static_cast<size_t>(index)];
+    if (file.size > max_bytes) return Read::too_large;
+    const HANDLE handle = locks_.at(static_cast<size_t>(index));
+    LARGE_INTEGER start{};
+    if (handle == INVALID_HANDLE_VALUE || !SetFilePointerEx(handle, start, nullptr, FILE_BEGIN)) return Read::unreadable;
+    // The size the hash read: nobody could write the file since.
+    out.resize(static_cast<size_t>(file.size));
+    size_t done = 0;
+    while (done < out.size()) {
+        DWORD read = 0;
+        const DWORD want = static_cast<DWORD>(std::min<size_t>(out.size() - done, 1u << 20));
+        if (!ReadFile(handle, out.data() + done, want, &read, nullptr) || read == 0) {
+            out.clear();
+            return Read::unreadable;
+        }
+        done += read;
+    }
+    return Read::ok;
+}
+
 std::string short_hash(const std::string& sha256) { return sha256.size() > 8 ? sha256.substr(0, 8) + "…" : sha256; }
 
 }  // namespace anvil

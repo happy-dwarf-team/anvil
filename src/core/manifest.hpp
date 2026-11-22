@@ -101,6 +101,11 @@ ManifestResult parse_manifest_text(std::string_view text, const std::filesystem:
 // (`symbols`, `settings`) exist in the folder.
 ManifestResult load_manifest(const std::filesystem::path& folder);
 
+// The same from a held folder's bytes (T3, #545): plugin.toml as its hash
+// read it, and the files it names must be among the hashed ones.
+class HeldFolder;
+ManifestResult load_manifest(const HeldFolder& folder);
+
 bool is_valid_plugin_id(std::string_view id);
 
 // The largest plugin.toml, and the largest symbols.toml or settings.toml, that
