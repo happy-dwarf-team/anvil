@@ -276,6 +276,11 @@ struct WorldLayout {
     std::uint32_t religion_key = 0;         // religion: std::string
     std::uint32_t culture_key = 0;          // culture: std::string
     std::uint32_t trade_goods_key = 0;      // trade goods: std::string
+    // Their groups: `religion_group_key` 0 when absent.
+    std::uint32_t religion_group = 0;       // religion: CReligionGroup*
+    std::uint32_t culture_group = 0;        // culture: CCultureGroup*
+    std::uint32_t religion_group_key = 0;   // religion group: std::string
+    std::uint32_t culture_group_key = 0;    // culture group: std::string
 };
 
 // A relation, its dates still the game's hours.

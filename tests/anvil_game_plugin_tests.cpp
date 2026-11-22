@@ -623,6 +623,9 @@ struct FakeWorld {
     alignas(8) uint8_t orthodox[0x100] = {};
     alignas(8) uint8_t russian[0x100] = {};
     alignas(8) uint8_t grain[0x80] = {};
+    // Their groups (1.26.0): christian and east_slavic.
+    alignas(8) uint8_t christian[0x80] = {};
+    alignas(8) uint8_t east_slavic[0x80] = {};
     alignas(8) uint8_t selection_object[0x20] = {};
     alignas(8) uint8_t province_view[0x1000] = {};
     alignas(8) uint8_t view_window[0x200] = {};
@@ -660,6 +663,10 @@ struct FakeWorld {
         set_key(orthodox + 0x90, "orthodox");
         set_key(russian + 0x48, "russian");
         set_key(grain + 0x18, "grain");
+        set_key(christian + 0x18, "christian");
+        set_key(east_slavic + 0x38, "east_slavic");
+        set(orthodox, 0xD8, reinterpret_cast<uintptr_t>(christian));
+        set(russian, 0x88, reinterpret_cast<uintptr_t>(east_slavic));
         set(province(1), 0x448, reinterpret_cast<uintptr_t>(orthodox));
         set(province(1), 0x440, reinterpret_cast<uintptr_t>(russian));
         set(province(1), 0x458, reinterpret_cast<uintptr_t>(grain));
@@ -2176,7 +2183,7 @@ int main(int argc, char** argv) {
         start.add(gp_toml);
         start.add(plugin_toml("other"));
         start.make();
-        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 193);
+        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 197);
         AnvilPlugin* p = start.load(ANVIL_GAME_ID);
         CHECK(p != nullptr);
         if (p == nullptr) return;
@@ -3570,7 +3577,26 @@ int main(int argc, char** argv) {
                   ANVIL_ERROR_NOT_FOUND);
             CHECK(world->province_key(4, ANVIL_GAME_KEY_RELIGION, key_text, sizeof key_text, &length) ==
                   ANVIL_ERROR_NOT_FOUND);
-            CHECK(world->province_key(1, 3, key_text, sizeof key_text, &length) == ANVIL_ERROR_INVALID_ARGUMENT);
+            CHECK(world->province_key(1, ANVIL_GAME_KEY_RELIGION_GROUP, key_text, sizeof key_text, &length) ==
+                      ANVIL_OK &&
+                  length == 9 && std::string(key_text) == "christian");
+            CHECK(world->province_key(1, ANVIL_GAME_KEY_CULTURE_GROUP, key_text, sizeof key_text, &length) ==
+                      ANVIL_OK &&
+                  length == 11 && std::string(key_text) == "east_slavic");
+            CHECK(world->province_key(2, ANVIL_GAME_KEY_CULTURE_GROUP, key_text, sizeof key_text, &length) ==
+                  ANVIL_ERROR_NOT_FOUND);
+            CHECK(world->country_key("RUS", ANVIL_GAME_KEY_RELIGION_GROUP, key_text, sizeof key_text, &length) ==
+                      ANVIL_OK &&
+                  std::string(key_text) == "christian");
+            CHECK(world->country_key("RUS", ANVIL_GAME_KEY_CULTURE_GROUP, key_text, sizeof key_text, &length) ==
+                      ANVIL_OK &&
+                  std::string(key_text) == "east_slavic");
+            // A religion without a group: NOT_FOUND.
+            FakeWorld::set(fake.orthodox, 0xD8, uintptr_t{0});
+            CHECK(world->country_key("RUS", ANVIL_GAME_KEY_RELIGION_GROUP, key_text, sizeof key_text, &length) ==
+                  ANVIL_ERROR_NOT_FOUND);
+            FakeWorld::set(fake.orthodox, 0xD8, reinterpret_cast<uintptr_t>(fake.christian));
+            CHECK(world->province_key(1, 5, key_text, sizeof key_text, &length) == ANVIL_ERROR_INVALID_ARGUMENT);
             CHECK(world->province_key(1, ANVIL_GAME_KEY_RELIGION, nullptr, 4, &length) ==
                   ANVIL_ERROR_INVALID_ARGUMENT);
             CHECK(world->country_key("RUS", ANVIL_GAME_KEY_RELIGION, key_text, sizeof key_text, &length) ==
@@ -3629,6 +3655,11 @@ int main(int argc, char** argv) {
               anvil_game::read_province_key(l, 1, ANVIL_GAME_KEY_RELIGION, text) == ANVIL_ERROR_NOT_DECLARED &&
               anvil_game::read_country_key(l, "RUS", ANVIL_GAME_KEY_CULTURE, text) == ANVIL_ERROR_NOT_DECLARED &&
               anvil_game::read_province_view(l, id) == ANVIL_ERROR_NOT_DECLARED);
+        // A port with the keys but not their groups: only the groups are NOT_DECLARED.
+        l.religion_key = 0x90;
+        CHECK(anvil_game::read_province_key(l, 1, ANVIL_GAME_KEY_RELIGION_GROUP, text) == ANVIL_ERROR_NOT_DECLARED &&
+              anvil_game::read_country_key(l, "RUS", ANVIL_GAME_KEY_CULTURE_GROUP, text) ==
+                  ANVIL_ERROR_NOT_DECLARED);
     });
 
     run("anvil-game.world: the selected province, the province and the unit under a point", [&] {

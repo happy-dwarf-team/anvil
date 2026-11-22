@@ -20,7 +20,8 @@ inline constexpr std::size_t kFileMax = 1u << 20;
 
 // What a rule reads of a province.
 enum class Test { always, flag, variable, modifier, value, owned_by, core, occupied, subject, controlled_by, core_of,
-                  subject_of, religion, culture, trade_goods };
+                  subject_of, religion, culture, trade_goods,
+                  religion_group, culture_group };
 // Tests that pass or not, with no number: they take no bounds and no scale.
 bool is_yes_no(Test test);
 

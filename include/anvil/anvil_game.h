@@ -556,9 +556,11 @@ typedef struct AnvilGameTimedModifier {
 /* Since anvil-game 1.26.0. The `key` of province_key and country_key: which of
  * the game's database objects to name, by its script key as the game's files
  * write it. */
-#define ANVIL_GAME_KEY_RELIGION 0u    /* "orthodox"; a country's state religion */
-#define ANVIL_GAME_KEY_CULTURE 1u     /* "russian"; a country's primary culture */
-#define ANVIL_GAME_KEY_TRADE_GOODS 2u /* "grain"; provinces only */
+#define ANVIL_GAME_KEY_RELIGION 0u       /* "orthodox"; a country's state religion */
+#define ANVIL_GAME_KEY_CULTURE 1u        /* "russian"; a country's primary culture */
+#define ANVIL_GAME_KEY_TRADE_GOODS 2u    /* "grain"; provinces only */
+#define ANVIL_GAME_KEY_RELIGION_GROUP 3u /* "christian"; the religion's group */
+#define ANVIL_GAME_KEY_CULTURE_GROUP 4u  /* "east_slavic"; the culture's group */
 
 /* One relation. It comes in arrays and has no `size`, so it never grows within
  * version 1. */
@@ -890,16 +892,18 @@ typedef struct AnvilGameWorldService {
     AnvilResult (*province_triggered_modifier_keys)(int32_t province, char *keys, uint32_t capacity,
                                                     uint32_t *length);
     /* Since anvil-game 1.26.0. The script key of a province's religion,
-     * culture or trade goods (`key`, ANVIL_GAME_KEY_*), as the game's files
-     * write it ("orthodox", "russian", "grain"), in UTF-8 with a NUL, as
+     * culture, trade goods or the group of its religion or culture (`key`,
+     * ANVIL_GAME_KEY_*), as the game's files write it ("orthodox",
+     * "russian", "grain", "christian"), in UTF-8 with a NUL, as
      * province_name gives its text. ANVIL_ERROR_NOT_FOUND when the province
      * has none (the sea, wasteland). ANVIL_ERROR_INVALID_ARGUMENT for another
      * key. ANVIL_ERROR_NOT_DECLARED when a port declared these symbols
      * absent. */
     AnvilResult (*province_key)(int32_t province, uint32_t key, char *utf8, uint32_t capacity, uint32_t *length);
     /* Since anvil-game 1.26.0. The same for a country: its state religion
-     * (ANVIL_GAME_KEY_RELIGION) or primary culture (ANVIL_GAME_KEY_CULTURE).
-     * ANVIL_ERROR_NOT_FOUND when it has none (a country that does not exist
+     * (ANVIL_GAME_KEY_RELIGION) or primary culture (ANVIL_GAME_KEY_CULTURE)
+     * and their groups. ANVIL_ERROR_NOT_DECLARED for the two groups alone
+     * when a port declared only their symbols absent. ANVIL_ERROR_NOT_FOUND when it has none (a country that does not exist
      * now may have none). ANVIL_ERROR_INVALID_ARGUMENT for another key,
      * ANVIL_GAME_KEY_TRADE_GOODS included. */
     AnvilResult (*country_key)(const char *tag, uint32_t key, char *utf8, uint32_t capacity, uint32_t *length);

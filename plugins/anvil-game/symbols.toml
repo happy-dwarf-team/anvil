@@ -2596,6 +2596,46 @@ build."eu4-1.37.5-steam-win64" = { rva = 0xA7AF6F }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0xA79EEF }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0xA79EEF }
 
+[symbol.religion_group_of]
+# mov rcx,[rax+0F30h]; cmp [rcx+0D8h],r9; jne; mov al,1; add rsp,20h; pop rbx; ret
+bytes = "48 8B 88 30 0F 00 00 4C 39 89 D8 00 00 00 75 08 B0 01 48 83 C4 20 5B C3"
+memory = "code"
+values.group = { at = 10, size = 4 }
+note = "CReligionGroupTrigger::Evaluate: a religion's _pGroup (+0xD8), CReligionGroup*"
+build."eu4-1.37.5-steam-win64" = { rva = 0xC0B3CB }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0xC09B7B }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0xC09B7B }
+
+[symbol.culture_group_of]
+# mov rcx,[rax+1228h]; test rcx,rcx; je; cmp [rcx+88h],r9; jne
+bytes = "48 8B 88 28 12 00 00 48 85 C9 74 ?? 4C 39 89 88 00 00 00 75 ??"
+memory = "code"
+values.group = { at = 15, size = 4 }
+note = "CCultureGroupTrigger::Evaluate: a culture's _pGroup (+0x88), CCultureGroup*"
+build."eu4-1.37.5-steam-win64" = { rva = 0xC04B47 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0xC032F7 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0xC032F7 }
+
+[symbol.religion_group_key]
+# mov [rcx+14h],r13b; lea rbx,[rcx+18h]; cmp qword [rdx+18h],10h; jb; mov rdx,[rdx]; mov [rbx],r13
+bytes = "44 88 69 14 48 8D 59 18 48 83 7A 18 10 72 03 48 8B 12 4C 89 2B"
+memory = "code"
+values.key = { at = 7, size = 1 }
+note = "CReligionGroup::CReligionGroup: the script key it is given goes to _Tag (+0x18), a std::string"
+build."eu4-1.37.5-steam-win64" = { rva = 0xA7AC78 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0xA79BF8 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0xA79BF8 }
+
+[symbol.culture_group_key]
+# mov [rcx],rax; lea rsi,[rcx+38h]; cmp qword [rdx+18h],10h; jb; mov rdx,[rdx]; mov [rsi],r15
+bytes = "48 89 01 48 8D 71 38 48 83 7A 18 10 72 03 48 8B 12 4C 89 3E"
+memory = "code"
+values.key = { at = 6, size = 1 }
+note = "CCultureGroup::CCultureGroup: the script key it is given goes to _Tag (+0x38), a std::string"
+build."eu4-1.37.5-steam-win64" = { rva = 0x27CA39 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x27C9E9 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x27C9E9 }
+
 [symbol.camera_of_session]
 memory = "code"
 values.frame_time = { at = 5, size = 4 }
