@@ -55,7 +55,7 @@ pub enum Row<'a> {
     /// A line.
     Separator,
     /// A square of `color` (`0x00RRGGBB`) before `label`, and `value` beside
-    /// it when there is one. Since anvil-overlay 1.27.0: an older overlay
+    /// it when there is one. Since anvil-overlay 1.26.0: an older overlay
     /// refuses the rows with `InvalidArgument`.
     Swatch {
         /// The colour, `0x00RRGGBB`.
@@ -86,7 +86,7 @@ impl<'a> Row<'a> {
         Self::Button { label, id }
     }
 
-    /// A colour square before a label (anvil-overlay 1.27.0).
+    /// A colour square before a label (anvil-overlay 1.26.0).
     pub const fn swatch(color: u32, label: &'a str) -> Self {
         Self::Swatch {
             color,
