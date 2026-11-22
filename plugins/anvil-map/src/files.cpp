@@ -154,6 +154,18 @@ private:
     int depth_ = 0;
 };
 
+struct ValueName {
+    std::string_view name;
+    Value value;
+};
+constexpr ValueName kValues[] = {
+    {"base_tax", Value::base_tax},       {"base_production", Value::base_production},
+    {"base_manpower", Value::base_manpower}, {"development", Value::development},
+    {"treasury", Value::treasury},       {"stability", Value::stability},
+    {"prestige", Value::prestige},       {"manpower", Value::manpower},
+    {"monthly_income", Value::monthly_income}, {"provinces", Value::provinces},
+};
+
 bool name_char(char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-'; }
 bool sprite_char(char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; }
 
@@ -252,6 +264,18 @@ public:
                 if (!yes_no("always")) throw Fault{key.line, "always = no never passes: leave the rule out"};
                 r.test = Test::always;
                 ++tests;
+            } else if (k == "value") {
+                r.test = Test::value;
+                r.name = text("value");
+                const auto* found = std::find_if(std::begin(kValues), std::end(kValues),
+                                                 [&](const ValueName& v) { return v.name == r.name; });
+                if (found == std::end(kValues)) {
+                    throw Fault{key.line, "value is one of development, base_tax, base_production, base_manpower, and "
+                                          "with owner = yes treasury, stability, prestige, manpower, monthly_income, "
+                                          "provinces: " + r.name};
+                }
+                r.value = found->value;
+                ++tests;
             } else if (k == "flag" || k == "variable" || k == "modifier") {
                 r.test = k == "flag" ? Test::flag : k == "variable" ? Test::variable : Test::modifier;
                 r.name = text(k.c_str());
@@ -289,20 +313,24 @@ public:
                 throw Fault{key.line, "a rule has no key " + k};
             }
         }
-        if (tests != 1) throw Fault{line, "a rule needs one of always, flag, variable or modifier"};
+        if (tests != 1) throw Fault{line, "a rule needs one of always, flag, variable, modifier or value"};
         if (!has_color) throw Fault{line, "a rule needs color = { r g b }"};
         if (!has_label || r.label.empty() || r.label.size() > kLabelMax) {
             throw Fault{line, "a rule needs a label of 1 to 64 bytes"};
         }
         const bool bounded = r.at_least || r.at_most || r.above || r.below;
         if (bounded && (r.test == Test::always || r.test == Test::flag)) {
-            throw Fault{line, "at_least, at_most, above and below go with a variable or a modifier"};
+            throw Fault{line, "at_least, at_most, above and below go with a variable, a modifier or a value"};
         }
         if (r.low.has_value() != has_high_color) {
             throw Fault{line, "scale = { low high } and high_color = { r g b } go together"};
         }
         if (r.low && (r.test == Test::always || r.test == Test::flag)) {
-            throw Fault{line, "a scale goes with a variable or a modifier"};
+            throw Fault{line, "a scale goes with a variable, a modifier or a value"};
+        }
+        if (r.test == Test::value && is_country_value(r.value) != r.owner) {
+            throw Fault{line, r.owner ? r.name + " is the province's: leave out owner = yes"
+                                      : r.name + " is the owner's: write owner = yes"};
         }
         return r;
     }
@@ -415,6 +443,11 @@ bool in_bounds(const Rule& rule, std::int64_t value) {
            (!rule.above || value > *rule.above) && (!rule.below || value < *rule.below);
 }
 
+bool is_country_value(Value value) {
+    return value != Value::base_tax && value != Value::base_production && value != Value::base_manpower &&
+           value != Value::development;
+}
+
 std::uint32_t color_at(const Rule& rule, std::int64_t value) {
     if (!rule.scaled()) return rule.color;
     const double span = static_cast<double>(*rule.high - *rule.low);
@@ -476,6 +509,9 @@ std::optional<std::int64_t> Evaluator::read_country(std::size_t i, const std::st
         case Test::modifier:
             if (ids_[i]) v = world_.country_modifier(tag, *ids_[i]);
             break;
+        case Test::value:
+            v = world_.country_value(tag, r.value);
+            break;
     }
     reads.done[i] = true;
     reads.value[i] = v;
@@ -500,6 +536,8 @@ std::optional<std::int64_t> Evaluator::read(std::size_t i, std::int32_t province
         case Test::modifier:
             if (!ids_[i]) return std::nullopt;
             return world_.modifier(province, *ids_[i]);
+        case Test::value:
+            return world_.province_value(province, r.value);
     }
     return std::nullopt;
 }

@@ -19,11 +19,18 @@ inline constexpr std::size_t kRulesMax = 64;
 inline constexpr std::size_t kFileMax = 1u << 20;
 
 // What a rule reads of a province.
-enum class Test { always, flag, variable, modifier };
+enum class Test { always, flag, variable, modifier, value };
+
+// The game's own values a `value` rule reads, x 1000: the first four are the
+// province's, the others its owner's (owner = yes).
+enum class Value { base_tax, base_production, base_manpower, development, treasury, stability, prestige, manpower,
+                   monthly_income, provinces };
+bool is_country_value(Value value);
 
 struct Rule {
     Test test = Test::always;
-    std::string name;    // the flag, variable or modifier key
+    std::string name;    // the flag, variable or modifier key, or the value's name
+    Value value = Value::development;  // for Test::value
     bool owner = false;  // read from the province's owner, not the province
     // Bounds x 1000, as the game keeps values; none set: the value is not 0.
     std::optional<std::int64_t> at_least, at_most, above, below;
@@ -86,6 +93,9 @@ public:
     virtual bool country_has_flag(const std::string& tag, std::int32_t flag) = 0;
     virtual std::int64_t country_variable(const std::string& tag, const std::string& name) = 0;
     virtual std::int64_t country_modifier(const std::string& tag, std::int32_t id) = 0;
+    // x 1000; nullopt when the game does not give it.
+    virtual std::optional<std::int64_t> province_value(std::int32_t province, Value value) = 0;
+    virtual std::optional<std::int64_t> country_value(const std::string& tag, Value value) = 0;
 };
 
 // A mode's rules with the game's ids for this computation. A country's

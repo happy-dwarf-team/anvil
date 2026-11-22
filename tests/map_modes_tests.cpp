@@ -411,6 +411,21 @@ public:
         const auto it = country_modifiers.find({tag, id});
         return it == country_modifiers.end() ? 0 : it->second;
     }
+
+    // Development x 1000 by province; treasury x 1000 by tag (POL's not given).
+    std::map<std::int32_t, std::int64_t> development{{1, 3000}, {2, 12000}, {3, 30000}};
+    std::map<std::string, std::int64_t> treasury{{"RUS", 150000}};
+    std::optional<std::int64_t> province_value(std::int32_t province, files::Value value) override {
+        if (value != files::Value::development) return std::nullopt;
+        const auto it = development.find(province);
+        return it == development.end() ? std::optional<std::int64_t>(0) : it->second;
+    }
+    std::optional<std::int64_t> country_value(const std::string& tag, files::Value value) override {
+        ++country_reads;
+        if (value != files::Value::treasury) return std::nullopt;
+        const auto it = treasury.find(tag);
+        return it == treasury.end() ? std::nullopt : std::optional<std::int64_t>(it->second);
+    }
 };
 
 constexpr const char* kHolySites = R"(# The example of docs/spec/map-mode-files-v1.md
@@ -472,13 +487,13 @@ void file_tests() {
         CHECK(one("m={label=M colour=1 rule={always=yes color={0 0 0} label=x}}").ends_with("a mode has no key colour"));
         CHECK(one("m={label=M label=N rule={always=yes color={0 0 0} label=x}}").ends_with("label is given twice"));
         CHECK(one("m={label=M sprite=\"GFX x\" rule={always=yes color={0 0 0} label=x}}").find("sprite") != std::string::npos);
-        CHECK(one("m={label=M rule={color={0 0 0} label=x}}").ends_with("one of always, flag, variable or modifier"));
-        CHECK(one("m={label=M rule={flag=a variable=b color={0 0 0} label=x}}").ends_with("one of always, flag, variable or modifier"));
+        CHECK(one("m={label=M rule={color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier or value"));
+        CHECK(one("m={label=M rule={flag=a variable=b color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier or value"));
         CHECK(one("m={label=M rule={always=yes label=x}}").ends_with("a rule needs color = { r g b }"));
         CHECK(one("m={label=M rule={always=yes color={0 0 0}}}").ends_with("a rule needs a label of 1 to 64 bytes"));
         CHECK(one("m={label=M rule={always=yes color={0 0 256} label=x}}").find("0 to 255") != std::string::npos);
         CHECK(one("m={label=M rule={always=yes color={0 0} label=x}}").find("0 to 255") != std::string::npos);
-        CHECK(one("m={label=M rule={flag=f at_least=1 color={0 0 0} label=x}}").ends_with("go with a variable or a modifier"));
+        CHECK(one("m={label=M rule={flag=f at_least=1 color={0 0 0} label=x}}").ends_with("go with a variable, a modifier or a value"));
         CHECK(one("m={label=M rule={variable=v at_least=1.2345 color={0 0 0} label=x}}").find("three decimals") != std::string::npos);
         CHECK(one("m={label=M rule={variable=v at_least=x color={0 0 0} label=x}}").find("three decimals") != std::string::npos);
         CHECK(one("m={label=M rule={variable=v at_least=1 at_least=2 color={0 0 0} label=x}}").ends_with("at_least is given twice"));
@@ -605,7 +620,41 @@ void file_tests() {
         CHECK(one("m={label=M rule={variable=v high_color={0 0 0} color={0 0 0} label=x}}").ends_with("go together"));
         CHECK(one("m={label=M rule={variable=v scale={1 1} color={0 0 0} high_color={0 0 0} label=x}}").ends_with("low below high"));
         CHECK(one("m={label=M rule={variable=v scale={1} color={0 0 0} high_color={0 0 0} label=x}}").find("three decimals") != std::string::npos);
-        CHECK(one("m={label=M rule={flag=f scale={0 1} color={0 0 0} high_color={0 0 0} label=x}}").ends_with("a scale goes with a variable or a modifier"));
+        CHECK(one("m={label=M rule={flag=f scale={0 1} color={0 0 0} high_color={0 0 0} label=x}}").ends_with("a scale goes with a variable, a modifier or a value"));
+    });
+
+    run("map mode files: value reads the game's own numbers of a province or its owner (anvil#580)", [] {
+        std::vector<files::FileMode> modes;
+        CHECK(parse_problems("m={label=M rule={value=development at_least=0 scale={0 30} color={0 0 0} "
+                             "high_color={0 0 240} label=Development}}",
+                             &modes)
+                  .empty());
+        CHECK(modes[0].rules[0].test == files::Test::value && modes[0].rules[0].value == files::Value::development);
+        TableWorld world;
+        files::Evaluator e(modes[0], world);
+        std::vector<std::uint32_t> colors = e.colors();
+        CHECK(colors[1] == 0x000018 && colors[2] == 0x000060 && colors[3] == 0x0000F0);  // 3, 12, 30 of 30
+        CHECK(colors[4] == 0x000000);  // 0 passes at_least = 0
+        std::int64_t value = 0;
+        CHECK(e.match(2, &value) != nullptr && value == 12000);
+
+        // The owner's treasury: RUS has 150, POL's is not given (the rule cannot pass).
+        CHECK(parse_problems("m={label=M rule={value=treasury owner=yes at_least=100 color={9 9 9} label=Rich}}", &modes).empty());
+        files::Evaluator rich(modes[0], world);
+        colors = rich.colors();
+        CHECK(colors[1] == 0x090909 && colors[2] == 0x090909 && colors[3] == ANVIL_MAP_NO_COLOR && colors[4] == ANVIL_MAP_NO_COLOR);
+
+        CHECK(parse_problems("m={label=M rule={value=treasury color={0 0 0} label=x}}").size() == 1);
+        CHECK(parse_problems("m={label=M rule={value=treasury color={0 0 0} label=x}}")[0].ends_with("treasury is the owner's: write owner = yes"));
+        CHECK(parse_problems("m={label=M rule={value=development owner=yes color={0 0 0} label=x}}")[0].ends_with(
+            "development is the province's: leave out owner = yes"));
+        CHECK(parse_problems("m={label=M rule={value=gold color={0 0 0} label=x}}")[0].ends_with(": gold"));
+        for (const char* v : {"base_tax", "base_production", "base_manpower", "development"}) {
+            CHECK(parse_problems(std::string("m={label=M rule={value=") + v + " color={0 0 0} label=x}}").empty());
+        }
+        for (const char* v : {"treasury", "stability", "prestige", "manpower", "monthly_income", "provinces"}) {
+            CHECK(parse_problems(std::string("m={label=M rule={value=") + v + " owner=yes color={0 0 0} label=x}}").empty());
+        }
     });
 
     run("map mode files: a scale's legend gives both ends, its label cut to fit (anvil#580)", [] {

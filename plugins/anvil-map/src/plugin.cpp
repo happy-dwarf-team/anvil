@@ -387,6 +387,48 @@ public:
         if (g_world->country_modifier(tag.c_str(), id, &value) != ANVIL_OK) return 0;
         return value;
     }
+    std::optional<std::int64_t> province_value(std::int32_t province, files::Value value) override {
+        AnvilGameProvince p{};
+        p.size = sizeof(p);
+        if (g_world->province(province, &p) != ANVIL_OK) return std::nullopt;
+        switch (value) {
+            case files::Value::base_tax:
+                return p.base_tax;
+            case files::Value::base_production:
+                return p.base_production;
+            case files::Value::base_manpower:
+                return p.base_manpower;
+            case files::Value::development:
+                return std::int64_t{p.base_tax} + p.base_production + p.base_manpower;
+            default:
+                return std::nullopt;
+        }
+    }
+    std::optional<std::int64_t> country_value(const std::string& tag, files::Value value) override {
+        AnvilGameCountry c{};
+        c.size = sizeof(c);
+        if (g_world->country(tag.c_str(), &c) != ANVIL_OK) return std::nullopt;
+        const auto field = [&](std::uint32_t bit, std::int32_t v) -> std::optional<std::int64_t> {
+            if ((c.values & bit) == 0) return std::nullopt;
+            return v;
+        };
+        switch (value) {
+            case files::Value::treasury:
+                return field(ANVIL_GAME_VALUE_TREASURY, c.treasury);
+            case files::Value::stability:
+                return field(ANVIL_GAME_VALUE_STABILITY, c.stability);
+            case files::Value::prestige:
+                return field(ANVIL_GAME_VALUE_PRESTIGE, c.prestige);
+            case files::Value::manpower:
+                return field(ANVIL_GAME_VALUE_MANPOWER, c.manpower);
+            case files::Value::monthly_income:
+                return field(ANVIL_GAME_VALUE_MONTHLY_INCOME, c.monthly_income);
+            case files::Value::provinces:
+                return std::int64_t{c.province_count} * 1000;
+            default:
+                return std::nullopt;
+        }
+    }
 };
 
 struct FileEntry {
@@ -416,7 +458,7 @@ std::size_t file_describe(void* context, const AnvilMapMode*, std::int32_t provi
     const files::Rule* rule = entry->evaluator->match(province, &value);
     if (rule == nullptr) return 0;
     std::string line = rule->label;
-    if (rule->test == files::Test::variable || rule->scaled()) {
+    if (rule->test == files::Test::variable || rule->test == files::Test::value || rule->scaled()) {
         line += " (" + rule->name + " " + files::decimal(value) + ")";
     }
     const std::size_t n = std::min(line.size(), capacity - 1);

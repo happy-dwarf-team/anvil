@@ -4,7 +4,7 @@ Status: anvil-map 1.26.0 ([#577](https://github.com/happy-dwarf-team/anvil/issue
 
 ## 1. Scope
 
-A mod defines map modes in text files, without a plugin of its own and without C++. Each mode is a button on the minimap's list, a colour for each province from a list of rules, a line in the province's tooltip and a legend in Anvil's overlay. The rules read what the game keeps on a province or on its owner: a flag, a variable, a modifier. A rule gives one colour, or a scale between two colours.
+A mod defines map modes in text files, without a plugin of its own and without C++. Each mode is a button on the minimap's list, a colour for each province from a list of rules, a line in the province's tooltip and a legend in Anvil's overlay. The rules read what the game keeps on a province or on its owner: a flag, a variable, a modifier, or one of the game's own values such as development or the treasury. A rule gives one colour, or a scale between two colours.
 
 What it does not do in v1: no other scope than the province and its owner (no overlord, no area), no scripted triggers, no localisation keys for texts, no scale with more than two colours. A mode that needs those is a plugin on `anvil-map.modes`.
 
@@ -57,14 +57,15 @@ holy_sites = {
 | `flag` | a province flag's name: the province passes while it has the flag (what `has_province_flag` sees) |
 | `variable` | a province variable's name: the province passes while its value is within the bounds |
 | `modifier` | a modifier's key as the game's files write it (`local_missionary_strength`): the province's own value of it, not its owner's |
-| `owner` | `yes` or `no` (default): with `yes` the `flag`, `variable` or `modifier` is the province's owner's (`has_country_flag`, a country variable, the country's modifier value), and `always = yes owner = yes` passes every owned province. A province without an owner never passes such a rule |
-| `at_least`, `at_most`, `above`, `below` | a number with at most three decimals; for `variable` and `modifier` only |
+| `value` | one of the game's own numbers: the province's `development`, `base_tax`, `base_production` or `base_manpower`; with `owner = yes` the owner's `treasury`, `stability`, `prestige`, `manpower` (in thousands of men, as the game shows it), `monthly_income` (before expenses, as of the last monthly update) or `provinces` (how many it owns) |
+| `owner` | `yes` or `no` (default): with `yes` the `flag`, `variable`, `modifier` or `value` is the province's owner's (`has_country_flag`, a country variable, the country's modifier value), and `always = yes owner = yes` passes every owned province. A province without an owner never passes such a rule |
+| `at_least`, `at_most`, `above`, `below` | a number with at most three decimals; for `variable`, `modifier` and `value` only |
 | `color` | `{ r g b }`, each 0 to 255; required. With a `scale`, the colour at its low end |
-| `scale` | `{ low high }`, two numbers with at most three decimals, `low` below `high`; for `variable` and `modifier` only, and only with `high_color` |
+| `scale` | `{ low high }`, two numbers with at most three decimals, `low` below `high`; for `variable`, `modifier` and `value` only, and only with `high_color` |
 | `high_color` | `{ r g b }`: the colour at the scale's high end; only with `scale` |
 | `label` | text, 1 to 64 bytes; required: the tooltip's line and the legend's entry |
 
-A rule has exactly one of `always`, `flag`, `variable` and `modifier`. With no bound, a `variable` or `modifier` rule passes when the value is not 0. With bounds, all of them hold together (`at_least = 1 below = 5` is 1 ≤ value < 5). A variable the province or country does not have is 0, as for the game's triggers. Numbers are compared as the game keeps them, in thousandths.
+A rule has exactly one of `always`, `flag`, `variable`, `modifier` and `value`. A `value` of the owner needs `owner = yes`, and one of the province refuses it. With no bound, a `variable`, `modifier` or `value` rule passes when the value is not 0. With bounds, all of them hold together (`at_least = 1 below = 5` is 1 ≤ value < 5). A variable the province or country does not have is 0, as for the game's triggers. Numbers are compared as the game keeps them, in thousandths.
 
 A scale does not change whether a rule passes; it only gives the colour: `color` at `low` and below, `high_color` at `high` and above, and each of red, green and blue linear between them. Write `at_least = 0` (or the scale's low end) to let a value of 0 take the low colour.
 
@@ -72,6 +73,10 @@ A scale does not change whether a rule passes; it only gives the colour: `color`
 prosperity = {
     label = "Prosperity"
     rule = { variable = my_prosperity owner = yes at_least = 0 scale = { 0 100 } color = { 60 30 30 } high_color = { 40 200 80 } label = "Prosperity" }
+}
+development = {
+    label = "Development"
+    rule = { value = development above = 0 scale = { 3 30 } color = { 240 240 200 } high_color = { 160 0 0 } label = "Development" }
 }
 ```
 
@@ -82,7 +87,7 @@ prosperity = {
 - A pass over the map reads each province's flags, variable or modifier through `anvil-game.world`: about as much as one read per rule a province reaches. An owner's answers are read once per country and computation, however many provinces it owns.
 - A flag's name is looked up at each computation, so a flag that no effect had set when the mode was shown first counts from the next month on.
 - A `modifier` key the game does not know is logged once (`the game has no modifier …; its rule never passes`), and its rule never passes.
-- The tooltip of a province gives the label of the rule it passes; for a `variable` rule and a rule with a scale also the value, as `Faith 5 or more (my_faith 7.5)`. A province that passes no rule has no line. An owner's value is the one the colours were computed from.
+- The tooltip of a province gives the label of the rule it passes; for a `variable` or `value` rule and a rule with a scale also the value, as `Faith 5 or more (my_faith 7.5)`. A province that passes no rule has no line. An owner's value is the one the colours were computed from.
 
 ## 5. The legend
 
@@ -102,3 +107,4 @@ Under the lab's game lock, in a test profile with a test mod that has `anvil/map
 4. The tooltip's line for a province that passes a rule, and none for one that does not.
 5. A faulty file: its line in `anvil.log`, the other modes still there.
 6. A rule with `owner = yes` on a country modifier colours every province of a country alike, and a scale colours between its two colours, with both ends in the legend.
+7. A `value = development` scale, and an owner's `value` (`treasury`), with the value in the tooltip.
