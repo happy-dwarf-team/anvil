@@ -4,7 +4,7 @@ Status: anvil-map 1.26.0 ([#577](https://github.com/happy-dwarf-team/anvil/issue
 
 ## 1. Scope
 
-A mod defines map modes in text files, without a plugin of its own and without C++. Each mode is a button on the minimap's list, a colour for each province from a list of rules, a line in the province's tooltip and a legend in Anvil's overlay. The rules read what the game keeps on a province or on its owner: a flag, a variable, a modifier, one of the game's own values such as development or the treasury, who owns and controls the province, the owner's cores and whether the owner is a subject. A rule gives one colour, or a scale between two colours.
+A mod defines map modes in text files, without a plugin of its own and without C++. Each mode is a button on the minimap's list, a colour for each province from a list of rules, a line in the province's tooltip and a legend in Anvil's overlay. The rules read what the game keeps on a province or on its owner: a flag, a variable, a modifier, one of the game's own values such as development or the treasury, who owns and controls the province, whose cores it has and whether the owner is a subject, and whose. A rule gives one colour, or a scale between two colours.
 
 What it does not do in v1: no other scope than the province and its owner (no reads of the overlord's own values, no area), no scripted triggers, no localisation keys for texts, no scale with more than two colours. A mode that needs those is a plugin on `anvil-map.modes`.
 
@@ -59,9 +59,11 @@ holy_sites = {
 | `variable` | a province variable's name: the province passes while its value is within the bounds |
 | `modifier` | a modifier's key as the game's files write it (`local_missionary_strength`): the province's own value of it, not its owner's |
 | `owned_by` | a country tag (`RUS`, case ignored): the province passes while that country owns it |
-| `core` | `yes`: the owner has a core on the province; `no`: it has none. An unowned province passes neither |
+| `controlled_by` | a country tag: the province passes while that country controls it (its owner, or an occupier) |
+| `core` | `yes`: the owner has a core on the province; `no`: it has none. An unowned province passes neither. A country tag instead: that country has a core on it, owner or not (`core = RUS`) |
 | `occupied` | `yes`: another country (or rebels) controls the province; `no`: its owner does. An unowned province passes neither |
 | `subject` | with `owner = yes`: `yes` when the owner has an overlord (any kind of subject), `no` when it has none |
+| `subject_of` | with `owner = yes`, a country tag: the owner's overlord is that country |
 | `value` | one of the game's own numbers: the province's `development`, `base_tax`, `base_production` or `base_manpower`; with `owner = yes` the owner's `treasury`, `stability`, `prestige`, `manpower` (in thousands of men, as the game shows it), `monthly_income` (before expenses, as of the last monthly update) or `provinces` (how many it owns) |
 | `owner` | `yes` or `no` (default): with `yes` the `flag`, `variable`, `modifier` or `value` is the province's owner's (`has_country_flag`, a country variable, the country's modifier value), and `always = yes owner = yes` passes every owned province. A province without an owner never passes such a rule |
 | `at_least`, `at_most`, `above`, `below` | a number with at most three decimals; for `variable`, `modifier` and `value` only |
@@ -70,7 +72,7 @@ holy_sites = {
 | `high_color` | `{ r g b }`: the colour at the scale's high end; only with `scale` |
 | `label` | text, 1 to 64 bytes; required: the tooltip's line and the legend's entry |
 
-A rule has exactly one of `always`, `flag`, `variable`, `modifier`, `value`, `owned_by`, `core`, `occupied` and `subject`. A `value` of the owner and `subject` need `owner = yes`; a `value` of the province, `owned_by`, `core` and `occupied` refuse it. `owned_by`, `core`, `occupied` and `subject`, like `flag`, take no bounds and no scale. With no bound, a `variable`, `modifier` or `value` rule passes when the value is not 0. With bounds, all of them hold together (`at_least = 1 below = 5` is 1 ≤ value < 5). A variable the province or country does not have is 0, as for the game's triggers. Numbers are compared as the game keeps them, in thousandths.
+A rule has exactly one of `always`, `flag`, `variable`, `modifier`, `value`, `owned_by`, `controlled_by`, `core`, `occupied`, `subject` and `subject_of`. A `value` of the owner, `subject` and `subject_of` need `owner = yes`; a `value` of the province, `owned_by`, `controlled_by`, `core` and `occupied` refuse it. These seven tests, like `flag`, take no bounds and no scale. With no bound, a `variable`, `modifier` or `value` rule passes when the value is not 0. With bounds, all of them hold together (`at_least = 1 below = 5` is 1 ≤ value < 5). A variable the province or country does not have is 0, as for the game's triggers. Numbers are compared as the game keeps them, in thousandths.
 
 A scale does not change whether a rule passes; it only gives the colour: `color` at `low` and below, `high_color` at `high` and above, and each of red, green and blue linear between them. Write `at_least = 0` (or the scale's low end) to let a value of 0 take the low colour.
 
@@ -88,6 +90,13 @@ cores = {
     rule = { occupied = yes color = { 200 40 40 } label = "Occupied" }
     rule = { core = no color = { 230 160 0 } label = "Owned without a core" }
     rule = { subject = yes owner = yes color = { 120 120 200 } label = "A subject's" }
+}
+russian_sphere = {
+    label = "Russia's sphere"
+    rule = { owned_by = RUS color = { 40 160 40 } label = "Russia's" }
+    rule = { subject_of = RUS owner = yes color = { 120 200 120 } label = "Russia's subjects'" }
+    rule = { controlled_by = RUS color = { 200 40 40 } label = "Held by Russia" }
+    rule = { core = RUS color = { 230 160 0 } label = "Russia's claims" }
 }
 ```
 
@@ -121,3 +130,4 @@ Under the lab's game lock, in a test profile with a test mod that has `anvil/map
 7. A `value = development` scale, and an owner's `value` (`treasury`), with the value in the tooltip.
 8. While the game runs, a changed colour and bound in a file show after picking another mode and the mode again, with the log's line; a changed label and a new mode are logged as waiting for a restart.
 9. `owned_by`, `core = no`, `occupied = yes` and `subject = yes owner = yes` on a save with an occupation and a subject.
+10. `controlled_by`, `core = TAG` on a province another country owns, and `subject_of` on the same save.

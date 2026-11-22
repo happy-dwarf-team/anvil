@@ -506,8 +506,8 @@ void file_tests() {
         CHECK(one("m={label=M colour=1 rule={always=yes color={0 0 0} label=x}}").ends_with("a mode has no key colour"));
         CHECK(one("m={label=M label=N rule={always=yes color={0 0 0} label=x}}").ends_with("label is given twice"));
         CHECK(one("m={label=M sprite=\"GFX x\" rule={always=yes color={0 0 0} label=x}}").find("sprite") != std::string::npos);
-        CHECK(one("m={label=M rule={color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier, value, owned_by, core, occupied or subject"));
-        CHECK(one("m={label=M rule={flag=a variable=b color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier, value, owned_by, core, occupied or subject"));
+        CHECK(one("m={label=M rule={color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier, value, owned_by, controlled_by, core, occupied, subject or subject_of"));
+        CHECK(one("m={label=M rule={flag=a variable=b color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier, value, owned_by, controlled_by, core, occupied, subject or subject_of"));
         CHECK(one("m={label=M rule={always=yes label=x}}").ends_with("a rule needs color = { r g b }"));
         CHECK(one("m={label=M rule={always=yes color={0 0 0}}}").ends_with("a rule needs a label of 1 to 64 bytes"));
         CHECK(one("m={label=M rule={always=yes color={0 0 256} label=x}}").find("0 to 255") != std::string::npos);
@@ -646,6 +646,48 @@ void file_tests() {
                              "label=x}}")[0]
                   .ends_with("a scale goes with a variable, a modifier or a value"));
         CHECK(parse_problems("m={label=M rule={core=maybe color={0 0 0} label=x}}").size() == 1);
+    });
+
+    run("map mode files: controlled_by, core = TAG and subject_of", [] {
+        std::vector<files::FileMode> modes;
+        CHECK(parse_problems("m={label=M"
+                             " rule={controlled_by=swe color={1 0 0} label=Swedish}"
+                             " rule={subject_of=RUS owner=yes color={2 0 0} label=Vassal}"
+                             " rule={core=RUS color={3 0 0} label=Claimed}}",
+                             &modes)
+                  .empty());
+        CHECK(modes.size() == 1 && modes[0].rules[0].name == "SWE" && modes[0].rules[2].test == files::Test::core_of);
+        TableWorld world;
+        files::Evaluator e(modes[0], world);
+        const std::vector<std::uint32_t> colors = e.colors();
+        CHECK(colors[1] == 0x030000);  // RUS's core
+        CHECK(colors[2] == 0x010000);  // held by SWE
+        CHECK(colors[3] == 0x020000);  // POL's, RUS's subject (RUS's core too: the first rule wins)
+        CHECK(colors[4] == ANVIL_MAP_NO_COLOR && colors[5] == ANVIL_MAP_NO_COLOR);
+
+        // core = TAG needs no owner and names any country; subject_of another overlord passes nothing.
+        CHECK(parse_problems("m={label=M rule={core=pol color={1 0 0} label=P}}"
+                             " n={label=N rule={subject_of=SWE owner=yes color={1 0 0} label=S}}",
+                             &modes)
+                  .empty());
+        files::Evaluator pol(modes[0], world);
+        CHECK(pol.match(3) != nullptr && pol.match(1) == nullptr && pol.match(4) == nullptr);
+        files::Evaluator swe(modes[1], world);
+        CHECK(swe.match(1) == nullptr && swe.match(3) == nullptr);
+
+        // Faults.
+        CHECK(parse_problems("m={label=M rule={controlled_by=SWED color={0 0 0} label=x}}")[0].ends_with(
+            "controlled_by needs a country tag of three letters or digits: SWED"));
+        CHECK(parse_problems("m={label=M rule={core=maybe color={0 0 0} label=x}}")[0].ends_with(
+            "core is yes, no or a country tag of three letters or digits: maybe"));
+        CHECK(parse_problems("m={label=M rule={subject_of=RUS color={0 0 0} label=x}}")[0].ends_with(
+            "subject_of is the owner's: write owner = yes"));
+        CHECK(parse_problems("m={label=M rule={core=RUS owner=yes color={0 0 0} label=x}}")[0].ends_with(
+            "core is the province's: leave out owner = yes"));
+        CHECK(parse_problems("m={label=M rule={owned_by=RUS owner=yes color={0 0 0} label=x}}")[0].ends_with(
+            "owned_by is the province's: leave out owner = yes"));
+        CHECK(parse_problems("m={label=M rule={controlled_by=SWE above=1 color={0 0 0} label=x}}")[0].ends_with(
+            "at_least, at_most, above and below go with a variable, a modifier or a value"));
     });
 
     run("map mode files: a scale colours between its two ends (anvil#580)", [] {
