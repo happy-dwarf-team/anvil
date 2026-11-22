@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -22,12 +23,19 @@ enum class Test { always, flag, variable, modifier };
 
 struct Rule {
     Test test = Test::always;
-    std::string name;  // the flag, variable or modifier key
+    std::string name;    // the flag, variable or modifier key
+    bool owner = false;  // read from the province's owner, not the province
     // Bounds x 1000, as the game keeps values; none set: the value is not 0.
     std::optional<std::int64_t> at_least, at_most, above, below;
-    std::uint32_t color = 0;  // 0x00RRGGBB
-    std::string label;        // UTF-8
+    std::uint32_t color = 0;  // 0x00RRGGBB; with a scale, the colour at its low end
+    // A colour scale (x 1000): color at low and below, high_color at high and
+    // above, each channel linear between them.
+    std::optional<std::int64_t> low, high;
+    std::uint32_t high_color = 0;
+    std::string label;  // UTF-8
     int line = 0;
+
+    bool scaled() const { return low.has_value(); }
 };
 
 struct FileMode {
@@ -52,6 +60,13 @@ void parse(std::string_view text, std::string_view source, std::vector<FileMode>
 // Whether `value` (x 1000) passes the rule's bounds.
 bool in_bounds(const Rule& rule, std::int64_t value);
 
+// The colour of a province the rule passes with `value` (x 1000): the rule's
+// colour, or for a scale the colour at that point of it.
+std::uint32_t color_at(const Rule& rule, std::int64_t value);
+
+// "7.5" for 7500.
+std::string decimal(std::int64_t value);
+
 // The world as the rules read it; the plugin's answers come from
 // anvil-game.world, the tests' from a table.
 class World {
@@ -66,14 +81,22 @@ public:
     // x 1000; a variable the province lacks is 0, as for the game's triggers.
     virtual std::int64_t variable(std::int32_t province, const std::string& name) = 0;
     virtual std::int64_t modifier(std::int32_t province, std::int32_t id) = 0;
+    // The province's owner's tag; empty for none.
+    virtual std::string owner(std::int32_t province) = 0;
+    virtual bool country_has_flag(const std::string& tag, std::int32_t flag) = 0;
+    virtual std::int64_t country_variable(const std::string& tag, const std::string& name) = 0;
+    virtual std::int64_t country_modifier(const std::string& tag, std::int32_t id) = 0;
 };
 
-// A mode's rules with the game's ids for this computation.
+// A mode's rules with the game's ids for this computation. A country's
+// answers are read once per evaluator (cached by tag), so a computation reads
+// each owner once per rule however many provinces it has.
 class Evaluator {
 public:
     Evaluator(const FileMode& mode, World& world);
-    // The first rule the province passes, or null.
-    const Rule* match(std::int32_t province);
+    // The first rule the province passes, or null; `value` gets what the rule
+    // read (x 1000; 1 for a flag or always).
+    const Rule* match(std::int32_t province, std::int64_t* value = nullptr);
     // colors[i] for province i: the first matching rule's colour, else
     // ANVIL_MAP_NO_COLOR. Sized to the province limit.
     std::vector<std::uint32_t> colors();
@@ -81,14 +104,28 @@ public:
     const std::vector<std::string>& unknown() const { return unknown_; }
 
 private:
+    // A country's answers, per rule, read when a rule first needs them.
+    struct CountryReads {
+        std::vector<std::optional<std::int64_t>> value;
+        std::vector<bool> done;
+    };
+
+    // What rule i reads of a province, or nullopt when it cannot pass (an id
+    // the game lacks, no owner for an owner rule). `owner` caches the
+    // province's owner for the rules after the first that asks.
+    std::optional<std::int64_t> read(std::size_t i, std::int32_t province, std::optional<std::string>& owner);
+    std::optional<std::int64_t> read_country(std::size_t i, const std::string& tag);
+
     const FileMode& mode_;
     World& world_;
     std::vector<std::optional<std::int32_t>> ids_;  // per rule
     std::vector<std::string> unknown_;
+    std::map<std::string, CountryReads> countries_;  // by tag
 };
 
 // The legend of a mode: each rule's colour and label once, in rule order, at
-// most ANVIL_MAP_LEGEND_MAX.
+// most ANVIL_MAP_LEGEND_MAX; a scale gives "<label> <low>" in its colour and
+// "<label> <high>" in its high colour.
 struct LegendItem {
     std::uint32_t color;
     std::string label;

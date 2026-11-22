@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <map>
 #include <set>
@@ -239,6 +240,8 @@ public:
         int tests = 0;
         bool has_color = false;
         bool has_label = false;
+        bool has_owner = false;
+        bool has_high_color = false;
         for (;;) {
             const Token key = lex_.next();
             if (key.kind == Token::close) break;
@@ -259,6 +262,21 @@ public:
                     k == "at_least" ? r.at_least : k == "at_most" ? r.at_most : k == "above" ? r.above : r.below;
                 if (bound) throw Fault{key.line, k + " is given twice"};
                 bound = number(k.c_str());
+            } else if (k == "owner") {
+                if (has_owner) throw Fault{key.line, "owner is given twice"};
+                r.owner = yes_no("owner");
+                has_owner = true;
+            } else if (k == "scale") {
+                if (r.low) throw Fault{key.line, "scale is given twice"};
+                expect(Token::open, "{ low high } after scale =");
+                r.low = number("scale");
+                r.high = number("scale");
+                expect(Token::close, "} after the two numbers of a scale");
+                if (*r.low >= *r.high) throw Fault{key.line, "scale = { low high } needs low below high"};
+            } else if (k == "high_color") {
+                if (has_high_color) throw Fault{key.line, "high_color is given twice"};
+                r.high_color = color();
+                has_high_color = true;
             } else if (k == "color") {
                 if (has_color) throw Fault{key.line, "color is given twice"};
                 r.color = color();
@@ -279,6 +297,12 @@ public:
         const bool bounded = r.at_least || r.at_most || r.above || r.below;
         if (bounded && (r.test == Test::always || r.test == Test::flag)) {
             throw Fault{line, "at_least, at_most, above and below go with a variable or a modifier"};
+        }
+        if (r.low.has_value() != has_high_color) {
+            throw Fault{line, "scale = { low high } and high_color = { r g b } go together"};
+        }
+        if (r.low && (r.test == Test::always || r.test == Test::flag)) {
+            throw Fault{line, "a scale goes with a variable or a modifier"};
         }
         return r;
     }
@@ -391,6 +415,32 @@ bool in_bounds(const Rule& rule, std::int64_t value) {
            (!rule.above || value > *rule.above) && (!rule.below || value < *rule.below);
 }
 
+std::uint32_t color_at(const Rule& rule, std::int64_t value) {
+    if (!rule.scaled()) return rule.color;
+    const double span = static_cast<double>(*rule.high - *rule.low);
+    const double at = std::clamp(static_cast<double>(value - *rule.low) / span, 0.0, 1.0);
+    std::uint32_t out = 0;
+    for (int shift = 16; shift >= 0; shift -= 8) {
+        const double from = static_cast<double>((rule.color >> shift) & 0xFFu);
+        const double to = static_cast<double>((rule.high_color >> shift) & 0xFFu);
+        const auto channel = static_cast<std::uint32_t>(std::lround(from + (to - from) * at));
+        out |= std::min<std::uint32_t>(channel, 255u) << shift;
+    }
+    return out;
+}
+
+std::string decimal(std::int64_t value) {
+    const bool negative = value < 0;
+    const std::uint64_t v = negative ? 0 - static_cast<std::uint64_t>(value) : static_cast<std::uint64_t>(value);
+    std::string out = (negative ? "-" : "") + std::to_string(v / 1000);
+    if (const std::uint64_t f = v % 1000; f != 0) {
+        std::string digits = std::to_string(1000 + f).substr(1);
+        while (digits.back() == '0') digits.pop_back();
+        out += "." + digits;
+    }
+    return out;
+}
+
 Evaluator::Evaluator(const FileMode& mode, World& world) : mode_(mode), world_(world) {
     ids_.reserve(mode.rules.size());
     for (const Rule& r : mode.rules) {
@@ -404,22 +454,66 @@ Evaluator::Evaluator(const FileMode& mode, World& world) : mode_(mode), world_(w
     }
 }
 
-const Rule* Evaluator::match(std::int32_t province) {
+std::optional<std::int64_t> Evaluator::read_country(std::size_t i, const std::string& tag) {
+    CountryReads& reads = countries_[tag];
+    if (reads.done.empty()) {
+        reads.value.resize(mode_.rules.size());
+        reads.done.resize(mode_.rules.size());
+    }
+    if (reads.done[i]) return reads.value[i];
+    const Rule& r = mode_.rules[i];
+    std::optional<std::int64_t> v;
+    switch (r.test) {
+        case Test::always:
+            v = 1;
+            break;
+        case Test::flag:
+            if (ids_[i]) v = world_.country_has_flag(tag, *ids_[i]) ? 1 : 0;
+            break;
+        case Test::variable:
+            v = world_.country_variable(tag, r.name);
+            break;
+        case Test::modifier:
+            if (ids_[i]) v = world_.country_modifier(tag, *ids_[i]);
+            break;
+    }
+    reads.done[i] = true;
+    reads.value[i] = v;
+    return v;
+}
+
+std::optional<std::int64_t> Evaluator::read(std::size_t i, std::int32_t province, std::optional<std::string>& owner) {
+    const Rule& r = mode_.rules[i];
+    if (r.owner) {
+        if (!owner) owner = world_.owner(province);
+        if (owner->empty()) return std::nullopt;
+        return read_country(i, *owner);
+    }
+    switch (r.test) {
+        case Test::always:
+            return 1;
+        case Test::flag:
+            if (!ids_[i]) return std::nullopt;
+            return world_.has_flag(province, *ids_[i]) ? 1 : 0;
+        case Test::variable:
+            return world_.variable(province, r.name);
+        case Test::modifier:
+            if (!ids_[i]) return std::nullopt;
+            return world_.modifier(province, *ids_[i]);
+    }
+    return std::nullopt;
+}
+
+const Rule* Evaluator::match(std::int32_t province, std::int64_t* value) {
+    std::optional<std::string> owner;
     for (std::size_t i = 0; i < mode_.rules.size(); ++i) {
         const Rule& r = mode_.rules[i];
-        switch (r.test) {
-            case Test::always:
-                return &r;
-            case Test::flag:
-                if (ids_[i] && world_.has_flag(province, *ids_[i])) return &r;
-                break;
-            case Test::variable:
-                if (in_bounds(r, world_.variable(province, r.name))) return &r;
-                break;
-            case Test::modifier:
-                if (ids_[i] && in_bounds(r, world_.modifier(province, *ids_[i]))) return &r;
-                break;
-        }
+        const std::optional<std::int64_t> v = read(i, province, owner);
+        if (!v) continue;
+        const bool passes = r.test == Test::always || (r.test == Test::flag ? *v != 0 : in_bounds(r, *v));
+        if (!passes) continue;
+        if (value != nullptr) *value = *v;
+        return &r;
     }
     return nullptr;
 }
@@ -428,18 +522,40 @@ std::vector<std::uint32_t> Evaluator::colors() {
     const std::int32_t limit = world_.province_limit();
     std::vector<std::uint32_t> out(limit > 0 ? static_cast<std::size_t>(limit) : 0, ANVIL_MAP_NO_COLOR);
     for (std::int32_t p = 1; p < limit; ++p) {
-        if (const Rule* r = match(p)) out[static_cast<std::size_t>(p)] = r->color;
+        std::int64_t value = 0;
+        if (const Rule* r = match(p, &value)) out[static_cast<std::size_t>(p)] = color_at(*r, value);
     }
     return out;
 }
 
+namespace {
+
+// `label` and then " <value>", the label cut at a character so the whole
+// stays within a legend label's 64 bytes.
+std::string with_value(const std::string& label, std::int64_t value) {
+    const std::string tail = " " + decimal(value);
+    std::size_t keep = std::min(label.size(), kLabelMax - tail.size());
+    while (keep > 0 && keep < label.size() && (static_cast<unsigned char>(label[keep]) & 0xC0) == 0x80) --keep;
+    return label.substr(0, keep) + tail;
+}
+
+}  // namespace
+
 std::vector<LegendItem> legend_of(const FileMode& mode) {
     std::vector<LegendItem> out;
-    for (const Rule& r : mode.rules) {
+    const auto add = [&](std::uint32_t color, std::string label) {
         const bool seen = std::any_of(out.begin(), out.end(), [&](const LegendItem& i) {
-            return i.color == r.color && i.label == r.label;
+            return i.color == color && i.label == label;
         });
-        if (!seen && out.size() < ANVIL_MAP_LEGEND_MAX) out.push_back({r.color, r.label});
+        if (!seen && out.size() < ANVIL_MAP_LEGEND_MAX) out.push_back({color, std::move(label)});
+    };
+    for (const Rule& r : mode.rules) {
+        if (r.scaled()) {
+            add(r.color, with_value(r.label, *r.low));
+            add(r.high_color, with_value(r.label, *r.high));
+        } else {
+            add(r.color, r.label);
+        }
     }
     return out;
 }

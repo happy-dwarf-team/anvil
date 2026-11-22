@@ -385,6 +385,32 @@ public:
         const auto it = modifiers.find({province, id});
         return it == modifiers.end() ? 0 : it->second;
     }
+
+    // Owners: 1 and 2 are RUS's, 3 is POL's, 4 and 5 have none.
+    std::map<std::int32_t, std::string> owners{{1, "RUS"}, {2, "RUS"}, {3, "POL"}};
+    std::set<std::pair<std::string, std::int32_t>> country_flags{{"POL", 3}};
+    std::map<std::pair<std::string, std::string>, std::int64_t> country_variables{{{"RUS", "my_faith"}, 2500}};
+    std::map<std::pair<std::string, std::int32_t>, std::int64_t> country_modifiers{{{"RUS", 40}, 500}};
+    int country_reads = 0;
+
+    std::string owner(std::int32_t province) override {
+        const auto it = owners.find(province);
+        return it == owners.end() ? std::string() : it->second;
+    }
+    bool country_has_flag(const std::string& tag, std::int32_t flag) override {
+        ++country_reads;
+        return country_flags.contains({tag, flag});
+    }
+    std::int64_t country_variable(const std::string& tag, const std::string& name) override {
+        ++country_reads;
+        const auto it = country_variables.find({tag, name});
+        return it == country_variables.end() ? 0 : it->second;
+    }
+    std::int64_t country_modifier(const std::string& tag, std::int32_t id) override {
+        ++country_reads;
+        const auto it = country_modifiers.find({tag, id});
+        return it == country_modifiers.end() ? 0 : it->second;
+    }
 };
 
 constexpr const char* kHolySites = R"(# The example of docs/spec/map-mode-files-v1.md
@@ -507,6 +533,104 @@ void file_tests() {
         CHECK(later.unknown().size() == 1 && later.unknown()[0] == "local_missionary_strength");
         // Province 2's flag is not seen; its my_faith 9 passes the next rule.
         CHECK(later.match(2) == &modes[0].rules[1] && later.match(5) == nullptr && later.match(3) == &modes[0].rules[1]);
+    });
+
+    run("map mode files: owner = yes reads the province's owner, once per country (anvil#580)", [] {
+        std::vector<files::FileMode> modes;
+        CHECK(parse_problems("m={label=M"
+                             " rule={flag=my_holy_site owner=yes color={1 0 0} label=Flag}"
+                             " rule={variable=my_faith owner=yes at_least=2 color={2 0 0} label=Faith}"
+                             " rule={always=yes owner=yes color={3 0 0} label=Owned}}",
+                             &modes)
+                  .empty());
+        CHECK(modes.size() == 1 && modes[0].rules[0].owner && modes[0].rules[2].owner);
+        TableWorld world;
+        files::Evaluator e(modes[0], world);
+        const std::vector<std::uint32_t> colors = e.colors();
+        CHECK(colors[1] == 0x020000 && colors[2] == 0x020000);  // RUS's my_faith 2.5, not the province's flag
+        CHECK(colors[3] == 0x010000);                           // POL's flag
+        CHECK(colors[4] == ANVIL_MAP_NO_COLOR && colors[5] == ANVIL_MAP_NO_COLOR);  // no owner
+        // RUS: flag and variable; POL: flag. Province 2 read nothing of RUS again.
+        CHECK(world.country_reads == 3);
+        std::int64_t value = 0;
+        CHECK(e.match(1, &value) == &modes[0].rules[1] && value == 2500);
+        CHECK(world.country_reads == 3);  // the tooltip reads what the colours read
+
+        // owner = no is the province itself; owner is given once.
+        CHECK(parse_problems("m={label=M rule={flag=my_holy_site owner=no color={1 0 0} label=F}}", &modes).empty());
+        files::Evaluator own(modes[0], world);
+        CHECK(own.match(2) == &modes[0].rules[0] && own.match(3) == nullptr);
+        CHECK(parse_problems("m={label=M rule={always=yes owner=yes owner=no color={0 0 0} label=x}}").size() == 1);
+    });
+
+    run("map mode files: a scale colours between its two ends (anvil#580)", [] {
+        std::vector<files::FileMode> modes;
+        CHECK(parse_problems("m={label=M rule={variable=v at_least=0 scale={0 10} color={0 100 200} "
+                             "high_color={200 100 0} label=Faith}}",
+                             &modes)
+                  .empty());
+        const files::Rule& r = modes[0].rules[0];
+        CHECK(r.scaled() && r.low == 0 && r.high == 10000 && r.high_color == 0xC86400);
+        CHECK(files::color_at(r, -5000) == 0x0064C8);  // below the low end
+        CHECK(files::color_at(r, 0) == 0x0064C8);
+        CHECK(files::color_at(r, 5000) == 0x646464);   // the middle
+        CHECK(files::color_at(r, 2500) == 0x326496);   // 50, 100, 150
+        CHECK(files::color_at(r, 10000) == 0xC86400 && files::color_at(r, 99000) == 0xC86400);
+        files::Rule plain;
+        plain.color = 0x123456;
+        CHECK(files::color_at(plain, 7000) == 0x123456);
+
+        TableWorld world;
+        world.variables[{1, "v"}] = 5000;
+        world.variables[{2, "v"}] = 0;
+        world.variables[{3, "v"}] = -1;
+        files::Evaluator e(modes[0], world);
+        const std::vector<std::uint32_t> colors = e.colors();
+        CHECK(colors[1] == 0x646464 && colors[2] == 0x0064C8);  // at_least = 0 lets 0 in
+        CHECK(colors[3] == ANVIL_MAP_NO_COLOR);                 // -0.001 fails the bound
+
+        // A scale on the owner's modifier: RUS has local_missionary_strength 0.5.
+        CHECK(parse_problems("m={label=M rule={modifier=local_missionary_strength owner=yes scale={0 1} "
+                             "color={0 0 0} high_color={100 200 250} label=Missions}}",
+                             &modes)
+                  .empty());
+        files::Evaluator owned(modes[0], world);
+        CHECK(owned.colors()[1] == 0x32647D);  // 50, 100, 125
+
+        const auto one = [&](std::string_view text) {
+            const std::vector<std::string> p = parse_problems(text);
+            return p.size() == 1 ? p[0] : std::string("(") + std::to_string(p.size()) + ")";
+        };
+        CHECK(one("m={label=M rule={variable=v scale={0 1} color={0 0 0} label=x}}").ends_with("go together"));
+        CHECK(one("m={label=M rule={variable=v high_color={0 0 0} color={0 0 0} label=x}}").ends_with("go together"));
+        CHECK(one("m={label=M rule={variable=v scale={1 1} color={0 0 0} high_color={0 0 0} label=x}}").ends_with("low below high"));
+        CHECK(one("m={label=M rule={variable=v scale={1} color={0 0 0} high_color={0 0 0} label=x}}").find("three decimals") != std::string::npos);
+        CHECK(one("m={label=M rule={flag=f scale={0 1} color={0 0 0} high_color={0 0 0} label=x}}").ends_with("a scale goes with a variable or a modifier"));
+    });
+
+    run("map mode files: a scale's legend gives both ends, its label cut to fit (anvil#580)", [] {
+        std::vector<files::FileMode> modes;
+        CHECK(parse_problems("m={label=M rule={variable=v scale={0 12.5} color={1 1 1} high_color={2 2 2} label=Faith} "
+                             "rule={always=yes color={3 3 3} label=Rest}}",
+                             &modes)
+                  .empty());
+        std::vector<files::LegendItem> legend = files::legend_of(modes[0]);
+        CHECK(legend.size() == 3);
+        if (legend.size() == 3) {
+            CHECK(legend[0].color == 0x010101 && legend[0].label == "Faith 0");
+            CHECK(legend[1].color == 0x020202 && legend[1].label == "Faith 12.5");
+            CHECK(legend[2].label == "Rest");
+        }
+        // 31 two-byte letters (62 bytes): " 12.5" leaves room for 29 of them, not half of one.
+        std::string label;
+        for (int i = 0; i < 31; ++i) label += "\xC5\x82";
+        CHECK(parse_problems("m={label=M rule={variable=v scale={0 12.5} color={1 1 1} high_color={2 2 2} label=\"" +
+                                 label + "\"}}",
+                             &modes)
+                  .empty());
+        legend = files::legend_of(modes[0]);
+        CHECK(legend.size() == 2 && legend[1].label.size() == 58 + 5 && legend[1].label.ends_with("\xC5\x82 12.5"));
+        CHECK(files::decimal(-1500) == "-1.5" && files::decimal(12500) == "12.5" && files::decimal(3000) == "3");
     });
 
     run("map mode files: a legend lists each colour and label once", [] {
