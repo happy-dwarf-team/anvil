@@ -121,6 +121,14 @@ typedef struct AnvilMapModeChange {
     const char *id;            /* the mode's id */
 } AnvilMapModeChange;
 
+/* One entry of a legend (set_legend). */
+#define ANVIL_MAP_LEGEND_MAX 32u
+typedef struct AnvilMapLegendEntry {
+    uint32_t color;    /* ANVIL_MAP_RGB(...); ANVIL_MAP_NO_COLOR is refused */
+    uint32_t reserved;
+    const char *label; /* UTF-8, 1 to 64 bytes */
+} AnvilMapLegendEntry;
+
 typedef struct AnvilMapModesService {
     uint32_t size; /* sizeof(AnvilMapModesService) as known by anvil-map */
 
@@ -173,7 +181,23 @@ typedef struct AnvilMapModesService {
      * ANVIL_ERROR_UNSUPPORTED: anvil-map runs without its hooks (another
      * loader of map modes). */
     AnvilResult (*show)(const AnvilMapMode *mode);
+
+    /* Since anvil-map 1.27.0; check with ANVIL_MAP_HAS(service, set_legend). */
+    /* Gives `mode` a legend: what its colours mean, in the given order. While
+     * the mode is shown, anvil-map shows the legend in a window of Anvil's
+     * overlay (anvil-overlay.panel), titled with the mode's label, and hides
+     * it when the mode is hidden; the player may close it, and it comes back
+     * the next time the mode is shown. Without the overlay nothing is drawn.
+     * The entries are copied; count 0 removes the legend. Pass
+     * entry_size = sizeof(AnvilMapLegendEntry). Callable from any thread at
+     * any time; the legend lasts for the process, across sessions.
+     * ANVIL_ERROR_INVALID_ARGUMENT: NULL or not a mode of register_mode, more
+     * than ANVIL_MAP_LEGEND_MAX entries, a small entry_size, a colour that is
+     * not ANVIL_MAP_RGB(...), a label that is not UTF-8 of 1 to 64 bytes. */
+    AnvilResult (*set_legend)(const AnvilMapMode *mode, const AnvilMapLegendEntry *entries, uint32_t count,
+                              uint32_t entry_size);
 } AnvilMapModesService;
+
 
 /* Nonzero when `service` provides `field`. */
 #define ANVIL_MAP_HAS(service, field) \

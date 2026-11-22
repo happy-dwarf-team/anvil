@@ -3,6 +3,7 @@
 // are tried in the game (docs/spec/map-modes-v1.md §9).
 #include "test_support.hpp"
 
+#include "../plugins/anvil-map/src/files.hpp"
 #include "../plugins/anvil-map/src/modes.hpp"
 #include "../plugins/anvil-map/src/text.hpp"
 
@@ -10,6 +11,11 @@
 
 #include <atomic>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <map>
+#include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -290,6 +296,271 @@ void text_tests() {
     });
 }
 
+void legend_tests() {
+    run("map modes: a legend is checked and copied (set_legend)", [] {
+        std::vector<LegendEntry> out;
+        std::string why;
+        std::string label = "Holy site";
+        const AnvilMapLegendEntry two[] = {{ANVIL_MAP_RGB(224, 176, 0), 0, label.c_str()},
+                                           {ANVIL_MAP_RGB(128, 64, 192), 0, "Faith 5 or more"}};
+        CHECK(make_legend(two, 2, sizeof(AnvilMapLegendEntry), out, why) == ANVIL_OK);
+        label = "changed";
+        CHECK(out.size() == 2 && out[0].label == "Holy site" && out[0].color == 0xE0B000 && out[1].color == 0x8040C0);
+        CHECK(make_legend(nullptr, 0, 0, out, why) == ANVIL_OK && out.empty());  // removes it
+
+        // Bad legends change nothing.
+        CHECK(make_legend(two, 2, sizeof(AnvilMapLegendEntry), out, why) == ANVIL_OK);
+        const AnvilMapLegendEntry no_color[] = {{ANVIL_MAP_NO_COLOR, 0, "x"}};
+        const AnvilMapLegendEntry no_label[] = {{0, 0, nullptr}};
+        const AnvilMapLegendEntry empty[] = {{0, 0, ""}};
+        const AnvilMapLegendEntry bad_utf8[] = {{0, 0, "\xFF"}};
+        const std::string long_label(kLabelMax + 1, 'x');
+        const AnvilMapLegendEntry too_long[] = {{0, 0, long_label.c_str()}};
+        CHECK(make_legend(no_color, 1, sizeof(AnvilMapLegendEntry), out, why) == ANVIL_ERROR_INVALID_ARGUMENT);
+        CHECK(make_legend(no_label, 1, sizeof(AnvilMapLegendEntry), out, why) == ANVIL_ERROR_INVALID_ARGUMENT);
+        CHECK(make_legend(empty, 1, sizeof(AnvilMapLegendEntry), out, why) == ANVIL_ERROR_INVALID_ARGUMENT);
+        CHECK(make_legend(bad_utf8, 1, sizeof(AnvilMapLegendEntry), out, why) == ANVIL_ERROR_INVALID_ARGUMENT);
+        CHECK(make_legend(too_long, 1, sizeof(AnvilMapLegendEntry), out, why) == ANVIL_ERROR_INVALID_ARGUMENT);
+        CHECK(make_legend(nullptr, 1, sizeof(AnvilMapLegendEntry), out, why) == ANVIL_ERROR_INVALID_ARGUMENT);
+        CHECK(make_legend(two, 2, 8, out, why) == ANVIL_ERROR_INVALID_ARGUMENT);
+        std::vector<AnvilMapLegendEntry> many(ANVIL_MAP_LEGEND_MAX + 1, AnvilMapLegendEntry{0, 0, "x"});
+        CHECK(make_legend(many.data(), ANVIL_MAP_LEGEND_MAX + 1, sizeof(AnvilMapLegendEntry), out, why) ==
+              ANVIL_ERROR_INVALID_ARGUMENT);
+        CHECK(make_legend(many.data(), ANVIL_MAP_LEGEND_MAX, sizeof(AnvilMapLegendEntry), out, why) == ANVIL_OK &&
+              out.size() == ANVIL_MAP_LEGEND_MAX);
+
+        // A newer entry: a longer stride reads the fields it knows.
+        struct Newer {
+            AnvilMapLegendEntry entry;
+            std::uint64_t extra;
+        } newer[2] = {{{1, 0, "a"}, 9}, {{2, 0, "b"}, 9}};
+        CHECK(make_legend(&newer[0].entry, 2, sizeof(Newer), out, why) == ANVIL_OK && out[1].label == "b" &&
+              out[1].color == 2);
+    });
+
+    run("map modes: a mode keeps its legend and counts each change", [] {
+        Registry registry;
+        AnvilMapModeInfo i = info("p.legend", "Holy sites");
+        const AnvilMapMode* mode = nullptr;
+        std::string why;
+        CHECK(registry.add(&i, false, &mode, why) == ANVIL_OK && mode->label_utf8 == "Holy sites");
+        auto* m = const_cast<AnvilMapMode*>(mode);
+        CHECK(m->legend_generation.load() == 0 && legend_of(*m).empty());
+        set_legend(*m, {{0xE0B000, "Holy site"}});
+        CHECK(m->legend_generation.load() == 1 && legend_of(*m).size() == 1 && legend_of(*m)[0].label == "Holy site");
+        registry.clear_session();  // a legend lasts across sessions
+        CHECK(legend_of(*m).size() == 1);
+        set_legend(*m, {});
+        CHECK(m->legend_generation.load() == 2 && legend_of(*m).empty());
+    });
+}
+
+// A world of a few provinces for the rules.
+class TableWorld final : public files::World {
+public:
+    std::int32_t limit = 6;
+    std::map<std::string, std::int32_t> flag_ids{{"my_holy_site", 3}};
+    std::map<std::string, std::int32_t> modifier_ids{{"local_missionary_strength", 40}};
+    std::set<std::pair<std::int32_t, std::int32_t>> flags{{2, 3}};
+    std::map<std::pair<std::int32_t, std::string>, std::int64_t> variables{{{3, "my_faith"}, 5000}, {{4, "my_faith"}, 4999}};
+    std::map<std::pair<std::int32_t, std::int32_t>, std::int64_t> modifiers{{{5, 40}, 20}};
+    int flag_lookups = 0;
+
+    std::int32_t province_limit() override { return limit; }
+    std::optional<std::int32_t> flag_id(const std::string& name) override {
+        ++flag_lookups;
+        const auto it = flag_ids.find(name);
+        return it == flag_ids.end() ? std::nullopt : std::optional<std::int32_t>(it->second);
+    }
+    std::optional<std::int32_t> modifier_id(const std::string& key) override {
+        const auto it = modifier_ids.find(key);
+        return it == modifier_ids.end() ? std::nullopt : std::optional<std::int32_t>(it->second);
+    }
+    bool has_flag(std::int32_t province, std::int32_t flag) override { return flags.contains({province, flag}); }
+    std::int64_t variable(std::int32_t province, const std::string& name) override {
+        const auto it = variables.find({province, name});
+        return it == variables.end() ? 0 : it->second;
+    }
+    std::int64_t modifier(std::int32_t province, std::int32_t id) override {
+        const auto it = modifiers.find({province, id});
+        return it == modifiers.end() ? 0 : it->second;
+    }
+};
+
+constexpr const char* kHolySites = R"(# The example of docs/spec/map-mode-files-v1.md
+holy_sites = {
+    label = "Holy sites"
+    description = "Where the faith is strong"
+    tab = 4
+    sprite = GFX_mapmode_religion
+    rule = { flag = my_holy_site color = { 224 176 0 } label = "Holy site" }
+    rule = { variable = my_faith at_least = 5 color = { 128 64 192 } label = "Faith 5 or more" }
+    rule = { modifier = local_missionary_strength above = 0.01 color = { 64 128 255 } label = "Missionaries" }
+}
+)";
+
+std::vector<std::string> parse_problems(std::string_view text, std::vector<files::FileMode>* modes = nullptr) {
+    std::vector<files::FileMode> out;
+    std::vector<std::string> problems;
+    files::parse(text, "mod/anvil/map_modes/t.txt", out, problems);
+    if (modes != nullptr) *modes = std::move(out);
+    return problems;
+}
+
+void file_tests() {
+    run("map mode files: a mode and its rules are read from the game's script syntax", [] {
+        std::vector<files::FileMode> modes;
+        CHECK(parse_problems(kHolySites, &modes).empty() && modes.size() == 1);
+        const files::FileMode& m = modes[0];
+        CHECK(m.name == "holy_sites" && m.label == "Holy sites" && m.description == "Where the faith is strong");
+        CHECK(m.tab == 4 && m.sprite == "GFX_mapmode_religion" && m.legend && m.line == 2);
+        CHECK(m.source == "mod/anvil/map_modes/t.txt" && m.rules.size() == 3);
+        CHECK(m.rules[0].test == files::Test::flag && m.rules[0].name == "my_holy_site" && m.rules[0].color == 0xE0B000);
+        CHECK(m.rules[1].test == files::Test::variable && m.rules[1].at_least == 5000 && !m.rules[1].above);
+        CHECK(m.rules[2].test == files::Test::modifier && m.rules[2].above == 10 && m.rules[2].line == 9);
+
+        // Words for texts, a mode without a legend, a catch-all rule.
+        CHECK(parse_problems("plain={label=Plain legend=no rule={always=yes color={1 2 3} label=All}}", &modes).empty());
+        CHECK(modes.size() == 1 && modes[0].label == "Plain" && !modes[0].legend && modes[0].tab == 0);
+        CHECK(modes[0].rules[0].test == files::Test::always && modes[0].rules[0].color == 0x010203);
+    });
+
+    run("map mode files: Windows-1252 text is read as the game's script files are", [] {
+        std::vector<files::FileMode> modes;
+        CHECK(parse_problems("k={label=\"Krak\xF3w \x80\" rule={always=yes color={0 0 0} label=x}}", &modes).empty());
+        CHECK(modes.size() == 1 && modes[0].label == "Krak\xC3\xB3w \xE2\x82\xAC");
+        CHECK(parse_problems("\xEF\xBB\xBFk={label=\"Krak\xC3\xB3w\" rule={always=yes color={0 0 0} label=x}}", &modes).empty());
+        CHECK(modes.size() == 1 && modes[0].label == "Krak\xC3\xB3w");
+    });
+
+    run("map mode files: a fault leaves out its mode and names the line; the next mode is read", [] {
+        std::vector<files::FileMode> modes;
+        const auto one = [&](std::string_view text) {
+            const std::vector<std::string> p = parse_problems(text, &modes);
+            return p.size() == 1 && modes.empty() ? p[0] : std::string("(") + std::to_string(p.size()) + ")";
+        };
+        CHECK(one("m={label=M}") == "mod/anvil/map_modes/t.txt:1: m has no rule");
+        CHECK(one("m={rule={always=yes color={0 0 0} label=x}}").ends_with("m needs a label of 1 to 64 bytes"));
+        CHECK(one("Mode={label=M rule={always=yes color={0 0 0} label=x}}").find("[a-z0-9_-]") != std::string::npos);
+        CHECK(one("m={label=M\n tab=5 rule={always=yes color={0 0 0} label=x}}") == "mod/anvil/map_modes/t.txt:2: tab is 1, 2, 3 or 4");
+        CHECK(one("m={label=M colour=1 rule={always=yes color={0 0 0} label=x}}").ends_with("a mode has no key colour"));
+        CHECK(one("m={label=M label=N rule={always=yes color={0 0 0} label=x}}").ends_with("label is given twice"));
+        CHECK(one("m={label=M sprite=\"GFX x\" rule={always=yes color={0 0 0} label=x}}").find("sprite") != std::string::npos);
+        CHECK(one("m={label=M rule={color={0 0 0} label=x}}").ends_with("one of always, flag, variable or modifier"));
+        CHECK(one("m={label=M rule={flag=a variable=b color={0 0 0} label=x}}").ends_with("one of always, flag, variable or modifier"));
+        CHECK(one("m={label=M rule={always=yes label=x}}").ends_with("a rule needs color = { r g b }"));
+        CHECK(one("m={label=M rule={always=yes color={0 0 0}}}").ends_with("a rule needs a label of 1 to 64 bytes"));
+        CHECK(one("m={label=M rule={always=yes color={0 0 256} label=x}}").find("0 to 255") != std::string::npos);
+        CHECK(one("m={label=M rule={always=yes color={0 0} label=x}}").find("0 to 255") != std::string::npos);
+        CHECK(one("m={label=M rule={flag=f at_least=1 color={0 0 0} label=x}}").ends_with("go with a variable or a modifier"));
+        CHECK(one("m={label=M rule={variable=v at_least=1.2345 color={0 0 0} label=x}}").find("three decimals") != std::string::npos);
+        CHECK(one("m={label=M rule={variable=v at_least=x color={0 0 0} label=x}}").find("three decimals") != std::string::npos);
+        CHECK(one("m={label=M rule={variable=v at_least=1 at_least=2 color={0 0 0} label=x}}").ends_with("at_least is given twice"));
+        CHECK(one("m={label=M rule={variable >= 5 color={0 0 0} label=x}}").find("at_least") != std::string::npos);
+        CHECK(one("m={label=\"M rule={always=yes color={0 0 0} label=x}}").ends_with("a quoted text has no end"));
+        CHECK(one("m={label=M rule={always=no color={0 0 0} label=x}}").find("never passes") != std::string::npos);
+
+        // After a fault the parser goes on behind its block.
+        const std::vector<std::string> p = parse_problems(
+            "bad = { label = B rule = { nope = { deep = 1 } } }\n"
+            "good = { label = G rule = { always = yes color = { 0 0 0 } label = x } }",
+            &modes);
+        CHECK(p.size() == 1 && p[0] == "mod/anvil/map_modes/t.txt:1: a rule has no key nope");
+        CHECK(modes.size() == 1 && modes[0].name == "good");
+    });
+
+    run("map mode files: numbers are x 1000 and the bounds hold together", [] {
+        std::vector<files::FileMode> modes;
+        CHECK(parse_problems("m={label=M rule={variable=v at_least=-1.5 below=2 color={0 0 0} label=x}}", &modes).empty());
+        const files::Rule& r = modes[0].rules[0];
+        CHECK(r.at_least == -1500 && r.below == 2000);
+        CHECK(files::in_bounds(r, -1500) && files::in_bounds(r, 1999) && !files::in_bounds(r, 2000) && !files::in_bounds(r, -1501));
+        files::Rule plain;
+        CHECK(files::in_bounds(plain, 1) && files::in_bounds(plain, -1) && !files::in_bounds(plain, 0));  // not 0
+        files::Rule at_most;
+        at_most.at_most = 0;
+        at_most.above = -1000;
+        CHECK(files::in_bounds(at_most, 0) && files::in_bounds(at_most, -999) && !files::in_bounds(at_most, -1000));
+    });
+
+    run("map mode files: the first rule a province passes gives its colour", [] {
+        std::vector<files::FileMode> modes;
+        CHECK(parse_problems(kHolySites, &modes).empty());
+        TableWorld world;
+        files::Evaluator e(modes[0], world);
+        CHECK(e.unknown().empty());
+        const std::vector<std::uint32_t> colors = e.colors();
+        CHECK(colors.size() == 6 && colors[0] == ANVIL_MAP_NO_COLOR);
+        CHECK(colors[1] == ANVIL_MAP_NO_COLOR);       // nothing passes: the political colour
+        CHECK(colors[2] == 0xE0B000);                 // the flag
+        CHECK(colors[3] == 0x8040C0);                 // my_faith 5
+        CHECK(colors[4] == ANVIL_MAP_NO_COLOR);       // my_faith 4.999
+        CHECK(colors[5] == 0x4080FF);                 // the modifier above 0.01
+        world.variables[{2, "my_faith"}] = 9000;      // the flag's rule comes first
+        CHECK(e.colors()[2] == 0xE0B000 && e.match(2) == &modes[0].rules[0] && e.match(1) == nullptr);
+        CHECK(world.flag_lookups == 1);               // ids once per computation
+
+        // A flag no effect has set yet, and a modifier the game lacks.
+        world.flag_ids.clear();
+        world.modifier_ids.clear();
+        files::Evaluator later(modes[0], world);
+        CHECK(later.unknown().size() == 1 && later.unknown()[0] == "local_missionary_strength");
+        // Province 2's flag is not seen; its my_faith 9 passes the next rule.
+        CHECK(later.match(2) == &modes[0].rules[1] && later.match(5) == nullptr && later.match(3) == &modes[0].rules[1]);
+    });
+
+    run("map mode files: a legend lists each colour and label once", [] {
+        std::vector<files::FileMode> modes;
+        CHECK(parse_problems("m={label=M rule={flag=a color={1 1 1} label=A} rule={flag=b color={1 1 1} label=A} "
+                             "rule={flag=c color={2 2 2} label=A}}",
+                             &modes)
+                  .empty());
+        const std::vector<files::LegendItem> legend = files::legend_of(modes[0]);
+        CHECK(legend.size() == 2 && legend[0].color == 0x010101 && legend[1].color == 0x020202);
+    });
+
+    run("map mode files: the playset's mods give their files in load order", [] {
+        CHECK(files::enabled_mods(R"({"enabled_mods":["mod/a.mod", "mod/ugc_2.mod"],"disabled_dlcs":[]})") ==
+              std::vector<std::string>({"mod/a.mod", "mod/ugc_2.mod"}));
+        CHECK(files::enabled_mods("{}").empty());
+        CHECK(files::mod_value("name=\"A mod\"\npath = \"C:/mods/a\"\n", "path") == "C:/mods/a");
+        CHECK(files::mod_value("replace_path=\"x\"\n", "path").empty());
+
+        const std::filesystem::path user = std::filesystem::temp_directory_path() /
+                                           ("anvil-map-files-" + std::to_string(GetCurrentProcessId()));
+        std::filesystem::remove_all(user);
+        const auto write = [](const std::filesystem::path& p, std::string_view text) {
+            std::filesystem::create_directories(p.parent_path());
+            std::ofstream(p, std::ios::binary) << text;
+        };
+        write(user / "dlc_load.json", R"({"enabled_mods":["mod/a.mod","mod/z.mod","mod/b.mod"]})");
+        write(user / "mod/a.mod", "name=\"First\"\npath=\"mod/first\"\n");
+        write(user / "mod/z.mod", "name=\"Zipped\"\narchive=\"mod/z.zip\"\n");
+        write(user / "mod/b.mod", "name=\"Second\"\npath=\"" + (user / "second").generic_string() + "\"\n");
+        write(user / "mod/first/anvil/map_modes/shared.txt", "old={label=Old rule={always=yes color={0 0 0} label=x}}");
+        write(user / "mod/first/anvil/map_modes/own.txt", "mine={label=Mine rule={always=yes color={0 0 0} label=x}}");
+        write(user / "mod/first/anvil/map_modes/notes.md", "not read");
+        write(user / "second/anvil/map_modes/Shared.TXT", "new={label=New rule={always=yes color={0 0 0} label=x}}");
+        write(user / "second/anvil/map_modes/z.txt", "mine={label=Again rule={always=yes color={0 0 0} label=x}}");
+
+        std::vector<std::string> problems;
+        const std::vector<files::Found> found = files::playset_files(user, problems);
+        CHECK(problems.size() == 1 && problems[0] == "Zipped: a zipped mod; its anvil/map_modes files are not read");
+        CHECK(found.size() == 3);
+        if (found.size() == 3) {
+            CHECK(found[0].source == "First/anvil/map_modes/own.txt");
+            CHECK(found[1].source == "Second/anvil/map_modes/Shared.TXT");  // replaced the first mod's
+            CHECK(found[2].source == "Second/anvil/map_modes/z.txt");
+        }
+        problems.clear();
+        const std::vector<files::FileMode> modes = files::load(found, problems);
+        CHECK(modes.size() == 2 && modes[0].name == "mine" && modes[1].name == "new");
+        CHECK(problems.size() == 1 && problems[0] == "Second/anvil/map_modes/z.txt:1: mine is defined in an earlier "
+                                                     "file; this one is left out");
+        std::filesystem::remove_all(user);
+    });
+}
+
 }  // namespace
 
 int main() {
@@ -298,6 +569,8 @@ int main() {
     color_tests();
     show_tests();
     text_tests();
+    legend_tests();
+    file_tests();
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

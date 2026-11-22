@@ -73,11 +73,17 @@ AnvilResult PanelStore::set_rows(AnvilPanel* panel, const AnvilPanelRow* rows, s
     bool cjk = false;
     for (std::uint32_t i = 0; i < count; ++i) {
         const auto* row = reinterpret_cast<const AnvilPanelRow*>(reinterpret_cast<const char*>(rows) + i * std::size_t{row_size});
-        if (row->kind < ANVIL_PANEL_TEXT || row->kind > ANVIL_PANEL_SEPARATOR) return ANVIL_ERROR_INVALID_ARGUMENT;
+        if (row->kind < ANVIL_PANEL_TEXT || row->kind > ANVIL_PANEL_SWATCH) return ANVIL_ERROR_INVALID_ARGUMENT;
+        // A swatch's colour is behind the first rows' fields.
+        if (row->kind == ANVIL_PANEL_SWATCH &&
+            (row_size < offsetof(AnvilPanelRow, color) + sizeof(row->color) || (row->color >> 24) != 0)) {
+            return ANVIL_ERROR_INVALID_ARGUMENT;
+        }
         if (row->kind != ANVIL_PANEL_SEPARATOR && row->label == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
         AnvilPanel::Row& to = copy.emplace_back();
         to.kind = row->kind;
         to.id = row->id;
+        if (row->kind == ANVIL_PANEL_SWATCH) to.color = row->color;
         if (row->kind == ANVIL_PANEL_SEPARATOR) continue;
         const std::size_t label = strnlen_s(row->label, kMaxText + 1);
         const std::size_t value = row->value != nullptr ? strnlen_s(row->value, kMaxText + 1) : 0;

@@ -1,0 +1,122 @@
+// anvil-map: map modes a mod defines in files, without C++
+// (docs/spec/map-mode-files-v1.md). A mod's anvil/map_modes/*.txt, in the
+// game's script syntax, names modes and the rules that colour a province;
+// anvil-map registers each as its own plugin mode and computes the colours
+// while the mode is shown.
+#pragma once
+
+#include <cstdint>
+#include <filesystem>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace anvil_map::files {
+
+inline constexpr std::size_t kRulesMax = 64;
+inline constexpr std::size_t kFileMax = 1u << 20;
+
+// What a rule reads of a province.
+enum class Test { always, flag, variable, modifier };
+
+struct Rule {
+    Test test = Test::always;
+    std::string name;  // the flag, variable or modifier key
+    // Bounds x 1000, as the game keeps values; none set: the value is not 0.
+    std::optional<std::int64_t> at_least, at_most, above, below;
+    std::uint32_t color = 0;  // 0x00RRGGBB
+    std::string label;        // UTF-8
+    int line = 0;
+};
+
+struct FileMode {
+    std::string name;         // [a-z0-9_-]{1,32}; the id is anvil-map.<name>
+    std::string label;        // UTF-8, 1 to 64 bytes
+    std::string description;  // UTF-8, at most 512 bytes
+    std::string sprite;       // empty: the generic one
+    std::uint32_t tab = 0;    // 0 to 4
+    bool legend = true;
+    std::vector<Rule> rules;
+    std::string source;  // "<mod>/anvil/map_modes/<file>", for messages
+    int line = 0;
+};
+
+// Parses one file. Appends the modes it defines without a fault to `out` and
+// a line "<source>:<line>: <what>" for each fault to `problems`; a mode with a
+// fault is left out whole. Text that is not UTF-8 is read as Windows-1252,
+// the encoding of the game's own script files.
+void parse(std::string_view text, std::string_view source, std::vector<FileMode>& out,
+           std::vector<std::string>& problems);
+
+// Whether `value` (x 1000) passes the rule's bounds.
+bool in_bounds(const Rule& rule, std::int64_t value);
+
+// The world as the rules read it; the plugin's answers come from
+// anvil-game.world, the tests' from a table.
+class World {
+public:
+    virtual ~World() = default;
+    virtual std::int32_t province_limit() = 0;
+    // The ids the game gives a flag name or a modifier key; nullopt while the
+    // game has none (a flag no effect has set yet, an unknown modifier).
+    virtual std::optional<std::int32_t> flag_id(const std::string& name) = 0;
+    virtual std::optional<std::int32_t> modifier_id(const std::string& key) = 0;
+    virtual bool has_flag(std::int32_t province, std::int32_t flag) = 0;
+    // x 1000; a variable the province lacks is 0, as for the game's triggers.
+    virtual std::int64_t variable(std::int32_t province, const std::string& name) = 0;
+    virtual std::int64_t modifier(std::int32_t province, std::int32_t id) = 0;
+};
+
+// A mode's rules with the game's ids for this computation.
+class Evaluator {
+public:
+    Evaluator(const FileMode& mode, World& world);
+    // The first rule the province passes, or null.
+    const Rule* match(std::int32_t province);
+    // colors[i] for province i: the first matching rule's colour, else
+    // ANVIL_MAP_NO_COLOR. Sized to the province limit.
+    std::vector<std::uint32_t> colors();
+    // Modifier keys the game does not know (each rule with one never passes).
+    const std::vector<std::string>& unknown() const { return unknown_; }
+
+private:
+    const FileMode& mode_;
+    World& world_;
+    std::vector<std::optional<std::int32_t>> ids_;  // per rule
+    std::vector<std::string> unknown_;
+};
+
+// The legend of a mode: each rule's colour and label once, in rule order, at
+// most ANVIL_MAP_LEGEND_MAX.
+struct LegendItem {
+    std::uint32_t color;
+    std::string label;
+};
+std::vector<LegendItem> legend_of(const FileMode& mode);
+
+// ---- the playset ---------------------------------------------------------------
+
+// The entries of "enabled_mods" in dlc_load.json, in order ("mod/ugc_1.mod").
+std::vector<std::string> enabled_mods(std::string_view dlc_load_json);
+// The first key="value" of `key` in a .mod file; empty when it has none.
+std::string mod_value(std::string_view mod_text, std::string_view key);
+
+// One mode file found in the playset.
+struct Found {
+    std::filesystem::path path;
+    std::string source;  // "<mod name>/anvil/map_modes/<file>"
+};
+
+// The mode files of the playset in the user folder `user`: each enabled
+// mod's anvil/map_modes/*.txt, mods in load order and each mod's files by
+// name. A file of the same name in a later mod replaces an earlier one, as
+// the game's files do. A mod without a folder `path` (a zip archive) is
+// skipped with a line in `problems`.
+std::vector<Found> playset_files(const std::filesystem::path& user, std::vector<std::string>& problems);
+
+// Reads and parses every file of `found`. A mode whose name an earlier file
+// already took is left out with a line in `problems`.
+std::vector<FileMode> load(const std::vector<Found>& found, std::vector<std::string>& problems);
+
+}  // namespace anvil_map::files

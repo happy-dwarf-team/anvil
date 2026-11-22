@@ -97,6 +97,23 @@ int main() {
         CHECK(store.set_rows(&stranger, rows, 4, sizeof(AnvilPanelRow)) == ANVIL_ERROR_INVALID_ARGUMENT);
         CHECK(store.show(&stranger, true) == ANVIL_ERROR_INVALID_ARGUMENT && !store.shown(&stranger));
 
+        // A swatch: a colour square before its label (since 1.27.0); a row of
+        // the older size has no colour to read.
+        AnvilPanelRow swatch{ANVIL_PANEL_SWATCH, 0, "Holy site", "3", 0};
+        swatch.color = 0xE0B000;
+        CHECK(store.set_rows(panel, &swatch, 1, sizeof(AnvilPanelRow)) == ANVIL_OK);
+        store.each([](AnvilPanel& p) {
+            CHECK(p.rows.size() == 1 && p.rows[0].kind == ANVIL_PANEL_SWATCH && p.rows[0].color == 0xE0B000);
+            CHECK(p.rows[0].label == "Holy site" && p.rows[0].has_value && p.rows[0].value == "3");
+        });
+        CHECK(store.set_rows(panel, &swatch, 1, offsetof(AnvilPanelRow, color)) == ANVIL_ERROR_INVALID_ARGUMENT);
+        swatch.color = ANVIL_PANEL_SWATCH == 4 ? 0xFF000000u : 0;
+        CHECK(store.set_rows(panel, &swatch, 1, sizeof(AnvilPanelRow)) == ANVIL_ERROR_INVALID_ARGUMENT);
+        const AnvilPanelRow old_text[] = {{ANVIL_PANEL_TEXT, 0, "older", nullptr, 0}};
+        CHECK(store.set_rows(panel, old_text, 1, offsetof(AnvilPanelRow, color)) == ANVIL_OK);  // 32 bytes, as before
+        store.each([](AnvilPanel& p) { CHECK(p.rows.size() == 1 && p.rows[0].color == 0); });
+        CHECK(store.set_rows(panel, rows, 4, sizeof(AnvilPanelRow)) == ANVIL_OK);
+
         // A newer row: a longer stride reads the fields it knows.
         struct Newer {
             AnvilPanelRow row;
