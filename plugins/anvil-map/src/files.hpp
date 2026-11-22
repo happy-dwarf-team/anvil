@@ -19,7 +19,9 @@ inline constexpr std::size_t kRulesMax = 64;
 inline constexpr std::size_t kFileMax = 1u << 20;
 
 // What a rule reads of a province.
-enum class Test { always, flag, variable, modifier, value };
+enum class Test { always, flag, variable, modifier, value, owned_by, core, occupied, subject };
+// Tests that pass or not, with no number: they take no bounds and no scale.
+bool is_yes_no(Test test);
 
 // The game's own values a `value` rule reads, x 1000: the first four are the
 // province's, the others its owner's (owner = yes).
@@ -29,9 +31,10 @@ bool is_country_value(Value value);
 
 struct Rule {
     Test test = Test::always;
-    std::string name;    // the flag, variable or modifier key, or the value's name
+    std::string name;    // the flag, variable or modifier key, the value's name, or owned_by's tag
     Value value = Value::development;  // for Test::value
     bool owner = false;  // read from the province's owner, not the province
+    bool yes = true;     // core, occupied, subject: = yes or = no
     // Bounds x 1000, as the game keeps values; none set: the value is not 0.
     std::optional<std::int64_t> at_least, at_most, above, below;
     std::uint32_t color = 0;  // 0x00RRGGBB; with a scale, the colour at its low end
@@ -96,6 +99,12 @@ public:
     // x 1000; nullopt when the game does not give it.
     virtual std::optional<std::int64_t> province_value(std::int32_t province, Value value) = 0;
     virtual std::optional<std::int64_t> country_value(const std::string& tag, Value value) = 0;
+    // The province's controller's tag; empty for none.
+    virtual std::string controller(std::int32_t province) = 0;
+    // Whether `tag` has a core on the province.
+    virtual bool has_core(std::int32_t province, const std::string& tag) = 0;
+    // The country's overlord's tag; empty for none.
+    virtual std::string overlord(const std::string& tag) = 0;
 };
 
 // A mode's rules with the game's ids for this computation. A country's
@@ -105,7 +114,7 @@ class Evaluator {
 public:
     Evaluator(const FileMode& mode, World& world);
     // The first rule the province passes, or null; `value` gets what the rule
-    // read (x 1000; 1 for a flag or always).
+    // read (x 1000; 1 for always and a test that passes or not).
     const Rule* match(std::int32_t province, std::int64_t* value = nullptr);
     // colors[i] for province i: the first matching rule's colour, else
     // ANVIL_MAP_NO_COLOR. Sized to the province limit.
