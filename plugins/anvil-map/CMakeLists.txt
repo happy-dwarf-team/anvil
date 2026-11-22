@@ -7,4 +7,4 @@ if(NOT COMMAND anvil_add_plugin)
     find_package(AnvilPlugin REQUIRED)
 endif()
 
-anvil_add_plugin(anvil_map SOURCES src/plugin.cpp src/modes.cpp src/text.cpp)
+anvil_add_plugin(anvil_map SOURCES src/plugin.cpp src/modes.cpp src/text.cpp src/files.cpp)

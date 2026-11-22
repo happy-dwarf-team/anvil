@@ -24,7 +24,7 @@ use crate::event::{read_sized, Event, Payload};
 use crate::host::Host;
 use crate::panic::run_callback;
 use crate::sys::{
-    AnvilMapMode, AnvilMapModeChange, AnvilMapModeInfo, AnvilMapModesService,
+    AnvilMapLegendEntry, AnvilMapMode, AnvilMapModeChange, AnvilMapModeInfo, AnvilMapModesService,
     ANVIL_MAP_MODES_SERVICE_VERSION, ANVIL_MAP_NO_COLOR, ANVIL_MAP_TAB_1, ANVIL_MAP_TAB_2,
     ANVIL_MAP_TAB_3, ANVIL_MAP_TAB_4, ANVIL_MAP_TAB_DEFAULT,
 };
@@ -39,6 +39,9 @@ pub const VERSION: u32 = ANVIL_MAP_MODES_SERVICE_VERSION;
 /// The colour that leaves a province as the political map mode shows it
 /// (sea, wasteland and empty land look as players know them).
 pub const NO_COLOR: u32 = ANVIL_MAP_NO_COLOR;
+
+/// The most entries a legend holds ([`MapModes::set_legend`]).
+pub const LEGEND_MAX: usize = crate::sys::ANVIL_MAP_LEGEND_MAX as usize;
 
 /// A colour, `0x00RRGGBB`.
 pub const fn rgb(r: u8, g: u8, b: u8) -> u32 {
@@ -363,5 +366,45 @@ impl MapModes {
         let f = function!(self.table, AnvilMapModesService, show)?;
         // SAFETY: the service's function with its mode.
         check(unsafe { f(mode.as_raw()) }, || "map mode show")
+    }
+
+    /// Gives `mode` a legend: each colour (see [`rgb`]) and what it means,
+    /// in order, at most [`LEGEND_MAX`]. anvil-map shows it in a window of
+    /// Anvil's overlay while the mode is shown; an empty slice removes it.
+    /// Any thread, any time; it lasts across sessions. `InvalidArgument` for
+    /// too many entries, [`NO_COLOR`], or a label that is empty or longer
+    /// than 64 bytes; `Unsupported` with an anvil-map before 1.27.0.
+    pub fn set_legend(&self, mode: Mode, entries: &[(u32, &str)]) -> Result<()> {
+        let f = function!(self.table, AnvilMapModesService, set_legend)?;
+        let count = u32::try_from(entries.len()).map_err(|_| {
+            Error::new(
+                ErrorCode::InvalidArgument,
+                "map mode set_legend: too many entries",
+            )
+        })?;
+        // A NUL inside a label is dropped, as in every text of the SDK.
+        let labels: Vec<_> = entries.iter().map(|(_, label)| c_string(label)).collect();
+        let raw: Vec<AnvilMapLegendEntry> = entries
+            .iter()
+            .zip(&labels)
+            .map(|((color, _), label)| AnvilMapLegendEntry {
+                color: *color,
+                reserved: 0,
+                label: label.as_ptr(),
+            })
+            .collect();
+        // SAFETY: `count` entries whose labels live until the call returns;
+        // anvil-map copies them.
+        check(
+            unsafe {
+                f(
+                    mode.as_raw(),
+                    raw.as_ptr(),
+                    count,
+                    std::mem::size_of::<AnvilMapLegendEntry>() as u32,
+                )
+            },
+            || "map mode set_legend",
+        )
     }
 }

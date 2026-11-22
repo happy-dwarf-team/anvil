@@ -93,6 +93,7 @@ AnvilResult Registry::add(const AnvilMapModeInfo* info, bool utf8_game, const An
     auto* mode = new AnvilMapMode;
     mode->id = std::string(id);
     mode->label = game_text(label, utf8_game);
+    mode->label_utf8 = std::string(label);
     mode->description = game_text(description, utf8_game);
     mode->sprite = std::string(sprite);
     mode->tab = info->tab == ANVIL_MAP_TAB_DEFAULT ? kTabs : info->tab;
@@ -173,6 +174,53 @@ void set_colors(AnvilMapMode& mode, std::shared_ptr<const Colors> colors) {
         mode.colors = std::move(colors);
     }
     mode.generation.fetch_add(1, std::memory_order_acq_rel);
+}
+
+AnvilResult make_legend(const AnvilMapLegendEntry* entries, std::uint32_t count, std::uint32_t entry_size,
+                        std::vector<LegendEntry>& out, std::string& why) {
+    if (entries == nullptr && count != 0) {
+        why = "entries is NULL";
+        return ANVIL_ERROR_INVALID_ARGUMENT;
+    }
+    if (count > ANVIL_MAP_LEGEND_MAX) {
+        why = "more than 32 entries";
+        return ANVIL_ERROR_INVALID_ARGUMENT;
+    }
+    if (count != 0 && entry_size < offsetof(AnvilMapLegendEntry, label) + sizeof(entries->label)) {
+        why = "entry_size is too small";
+        return ANVIL_ERROR_INVALID_ARGUMENT;
+    }
+    std::vector<LegendEntry> legend;
+    legend.reserve(count);
+    for (std::uint32_t i = 0; i < count; ++i) {
+        const auto* e = reinterpret_cast<const AnvilMapLegendEntry*>(reinterpret_cast<const char*>(entries) +
+                                                                     std::size_t{i} * entry_size);
+        if ((e->color >> 24) != 0) {
+            why = "entry " + std::to_string(i) + ": the colour is not ANVIL_MAP_RGB(...)";
+            return ANVIL_ERROR_INVALID_ARGUMENT;
+        }
+        std::string_view label;
+        if (e->label == nullptr || !bounded(e->label, kLabelMax, label) || label.empty() || !valid_utf8(label)) {
+            why = "entry " + std::to_string(i) + ": the label is not UTF-8 of 1 to 64 bytes";
+            return ANVIL_ERROR_INVALID_ARGUMENT;
+        }
+        legend.push_back({e->color, std::string(label)});
+    }
+    out = std::move(legend);
+    return ANVIL_OK;
+}
+
+void set_legend(AnvilMapMode& mode, std::vector<LegendEntry> legend) {
+    {
+        const std::lock_guard lock(mode.legend_mutex);
+        mode.legend = std::move(legend);
+    }
+    mode.legend_generation.fetch_add(1, std::memory_order_acq_rel);
+}
+
+std::vector<LegendEntry> legend_of(AnvilMapMode& mode) {
+    const std::lock_guard lock(mode.legend_mutex);
+    return mode.legend;
 }
 
 std::string kept_text(AnvilMapMode& mode, std::int32_t province) {

@@ -182,6 +182,7 @@ ModDiscovery find_mod_plugins(const fs::path& user_dir, const WhileHeld& while_h
         const fs::path plugins_dir = mod.folder / "anvil";
         if (!is_folder(plugins_dir)) continue;
         for (const fs::path& folder : plugin_folders(plugins_dir)) {
+            if (is_mod_data_folder(narrow(folder.filename().wstring()))) continue;
             ModPlugin p;
             p.id = narrow(folder.filename().wstring());
             p.mod = mod;

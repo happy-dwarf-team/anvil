@@ -706,6 +706,22 @@ void draw_plugin_panel(AnvilPanel& panel) {
                 ImGui::Separator();
             } else if (row.kind == ANVIL_PANEL_BUTTON) {
                 if (ImGui::Button(row.label.c_str())) queue_click(panel, row.id);
+            } else if (row.kind == ANVIL_PANEL_SWATCH) {
+                // A square of the colour, as tall as the text, then the label.
+                const ImVec4 color(static_cast<float>((row.color >> 16) & 0xFF) / 255.0f,
+                                   static_cast<float>((row.color >> 8) & 0xFF) / 255.0f,
+                                   static_cast<float>(row.color & 0xFF) / 255.0f, 1.0f);
+                const float side = ImGui::GetTextLineHeight();
+                ImGui::ColorButton("##swatch", color,
+                                   ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker |
+                                       ImGuiColorEditFlags_NoDragDrop | ImGuiColorEditFlags_NoBorder,
+                                   ImVec2(side, side));
+                ImGui::SameLine();
+                ImGui::TextUnformatted(row.label.c_str());
+                if (row.has_value) {
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("%s", row.value.c_str());
+                }
             } else if (!row.has_value) {
                 ImGui::TextUnformatted(row.label.c_str());
             } else {

@@ -290,6 +290,22 @@ void plugin_inventory_tests() {
         fs::remove_all(dir);
     });
 
+    run("plugin inventory: a mod's anvil/map_modes is anvil-map's files, not a plugin; other bad folder names still are (#577)", [] {
+        const fs::path dir = fresh("anvil-inventory-data-folder");
+        const fs::path user = dir / "user";
+        const fs::path x = mod_plugin(user, "One", "x", "1.0.0");
+        write(x.parent_path() / "map_modes" / "modes.txt", "m = { label = M }\n");
+        write(x.parent_path() / "Bad_Name" / "plugin.toml", "");
+        enable_mods(user, {"One"});
+        const ModDiscovery found = find_mod_plugins(user);
+        CHECK(found.plugins.size() == 2);
+        if (found.plugins.size() == 2) {
+            CHECK(found.plugins[0].id == "Bad_Name" && !found.plugins[0].problem.empty());
+            CHECK(found.plugins[1].id == "x" && found.plugins[1].problem.empty());
+        }
+        CHECK(is_mod_data_folder("map_modes") && !is_mod_data_folder("map-modes") && !is_mod_data_folder("Map_Modes"));
+    });
+
     run("plugin inventory: a mod's plugin is checked from the bytes its hash covered, not the folder later (T3, #545)", [] {
         const fs::path dir = fresh("anvil-inventory-hashed-bytes");
         const fs::path user = dir / "user";

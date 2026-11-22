@@ -79,6 +79,15 @@ The id's prefix cannot be checked by the service (a service does not know its ca
 - The paint hook, for a borrowed number of a registered mode: unless the buffer gives a colour to every province up to the province limit, it first lets the game paint the political map mode (1) into the game's buffer; then it writes the plugin's colours as BGRA with alpha 0xFF, indexed by province ID, for at most as many provinces as the game's own function paints (`map_color_count`). For any other number it passes the call on.
 - A mode that is not shown costs nothing at paint. The game itself marks some borrowed numbers dirty (57, 58, 59, 66, 68); that only repaints them when they are shown.
 
+## 6a. The legend (1.27.0)
+
+`set_legend(mode, entries, count, entry_size)` gives a mode a list of what its colours mean: up to 32 entries of a colour (`ANVIL_MAP_RGB`) and a UTF-8 label of 1 to 64 bytes, in the plugin's order. The entries are copied; `count` 0 removes the legend. It lasts for the process, across sessions, and may be set from any thread at any time, also before the first session.
+
+- **Where it shows.** In a window of Anvil's overlay (`anvil-overlay.panel`), titled with the mode's label as the plugin gave it. The step shows the window when the mode becomes the map mode shown and hides it when the mode is hidden or the session ends. The player may close it; it comes back the next time the mode is shown, or when the plugin sets a new legend while the mode is shown. The window is created the first time the mode with a legend is shown, so a plugin that never shows its mode costs no window (the overlay allows 64 in a process).
+- **Each entry** is a row of the overlay's kind `ANVIL_PANEL_SWATCH` (since anvil-overlay 1.27.0): a square of the colour as tall as the text, then the label. With an older overlay, which refuses that kind, the legend's rows are text with the colour beside the label as `#RRGGBB`, and the log says so once.
+- **Without the overlay** (it is an optional dependency, and draws nothing on the OpenGL renderer) the legend is kept and nothing is drawn.
+- The legend is the plugin's word: anvil-map does not check that its colours match the buffer.
+
 ## 7. Text
 
 - The API takes UTF-8 only: `label`, `description` and the text of `describe`.
@@ -136,5 +145,7 @@ Under the lab's game lock, on Steam and GOG, with the example "player's cores" (
 3. **`mapmode` on a borrowed number.** `mapmode continent` (or the console name of whichever number the example borrowed) shows the plugin mode, and `anvil-map.shown` comes.
 4. **The empty hook's cost.** Frame times (Bellows' frame pacing series) with `anvil-map` and no plugin mode do not differ from those without `anvil-map`.
 5. **Etch's corpus without plugin modes** has no extra buttons on the list.
+
+Since 1.27.0 also: a legend shows with its mode and goes with it, comes back after the player closed it and the mode is shown again, and a mode from a file ([map-mode-files-v1.md](map-mode-files-v1.md) §7).
 
 Also: the session ends and a new one starts (buttons again, buffers dropped); `settings.txt` after quitting with the plugin mode on the quick bar; the console names of the pool; the generic sprite; the tabs' order; how `§` and `$` are shown. The results and what was not checked go into the pull request and into design §4.

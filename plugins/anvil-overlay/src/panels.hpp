@@ -20,6 +20,7 @@ struct AnvilPanel {
         std::string value;
         bool has_value = false;
         std::uint64_t id = 0;
+        std::uint32_t color = 0;  // ANVIL_PANEL_SWATCH: 0x00RRGGBB
     };
     std::uint32_t index = 0;
     std::string title;

@@ -536,7 +536,7 @@ if(ANVIL_BUILD_TESTS)
     # anvil-map's registry, colour buffers and text rules on their own
     # (tests/map_modes_tests.cpp).
     add_executable(anvil_map_tests tests/map_modes_tests.cpp plugins/anvil-map/src/modes.cpp
-        plugins/anvil-map/src/text.cpp)
+        plugins/anvil-map/src/text.cpp plugins/anvil-map/src/files.cpp)
     target_include_directories(anvil_map_tests PRIVATE include)
     target_link_libraries(anvil_map_tests PRIVATE anvil_loader)
     add_test(NAME anvil_map_tests COMMAND anvil_map_tests)

@@ -37,12 +37,20 @@ struct Colors {
     bool complete = false;              // no entry is ANVIL_MAP_NO_COLOR and it covers the province limit
 };
 
+// One entry of a mode's legend (set_legend), its label in UTF-8 as the
+// overlay draws it.
+struct LegendEntry {
+    std::uint32_t color = 0;  // 0x00RRGGBB
+    std::string label;
+};
+
 }  // namespace anvil_map
 
 // The handle a plugin holds (opaque in anvil_map.h). Never freed.
 struct AnvilMapMode {
     std::string id;
     std::string label;        // as the game gets it (text.hpp)
+    std::string label_utf8;   // as the plugin gave it: the legend's title
     std::string description;  // as the game gets it
     std::string sprite;       // empty: the generic one
     std::uint32_t tab = 0;    // 1..4
@@ -61,6 +69,14 @@ struct AnvilMapMode {
     std::mutex text_mutex;
     std::int32_t text_province = 0;
     std::string text;
+
+    // The legend: any thread hands it over, the step draws it.
+    std::mutex legend_mutex;
+    std::vector<anvil_map::LegendEntry> legend;
+    std::atomic<std::uint64_t> legend_generation{0};
+    std::uint64_t legend_drawn = 0;  // main thread: the generation the panel has
+    std::size_t legend_rows = 0;     // main thread: how many entries the panel has
+    void* panel = nullptr;           // main thread: its AnvilPanel, created when first needed
 
     std::shared_ptr<const anvil_map::Colors> snapshot() {
         const std::lock_guard lock(colors_mutex);
@@ -188,6 +204,16 @@ void set_colors(AnvilMapMode& mode, std::shared_ptr<const Colors> colors);
 inline bool describable(std::int32_t province, std::uint64_t limit) noexcept {
     return province > 0 && static_cast<std::uint64_t>(province) < limit;
 }
+
+// Checks a legend for set_legend and copies it. ANVIL_OK fills `out`; `why`
+// says what was wrong otherwise.
+AnvilResult make_legend(const AnvilMapLegendEntry* entries, std::uint32_t count, std::uint32_t entry_size,
+                        std::vector<LegendEntry>& out, std::string& why);
+
+// Hands `legend` to `mode` and counts a new generation; the legend's copy
+// for the step.
+void set_legend(AnvilMapMode& mode, std::vector<LegendEntry> legend);
+std::vector<LegendEntry> legend_of(AnvilMapMode& mode);
 
 // The kept tooltip text of `mode` for `province`, empty when it has none.
 std::string kept_text(AnvilMapMode& mode, std::int32_t province);

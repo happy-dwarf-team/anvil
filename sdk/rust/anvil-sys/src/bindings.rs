@@ -138,6 +138,7 @@ pub const ANVIL_MAP_MODES_SERVICE_VERSION: u32 = 1;
 pub const ANVIL_MAP_EVENT_SHOWN: &[u8; 16] = b"anvil-map.shown\0";
 pub const ANVIL_MAP_EVENT_HIDDEN: &[u8; 17] = b"anvil-map.hidden\0";
 pub const ANVIL_MAP_NO_COLOR: u32 = 4278190080;
+pub const ANVIL_MAP_LEGEND_MAX: u32 = 32;
 pub const ANVIL_SCRIPT_EFFECTS_SERVICE: &[u8; 21] = b"anvil-script.effects\0";
 pub const ANVIL_SCRIPT_EFFECTS_SERVICE_VERSION: u32 = 1;
 pub const ANVIL_SCRIPT_DAY_END_SERVICE: &[u8; 21] = b"anvil-script.day_end\0";
@@ -2207,6 +2208,7 @@ pub struct AnvilPanel {
 pub const ANVIL_PANEL_TEXT: AnvilPanelRowKind = 1;
 pub const ANVIL_PANEL_BUTTON: AnvilPanelRowKind = 2;
 pub const ANVIL_PANEL_SEPARATOR: AnvilPanelRowKind = 3;
+pub const ANVIL_PANEL_SWATCH: AnvilPanelRowKind = 4;
 pub type AnvilPanelRowKind = core::ffi::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -2216,10 +2218,12 @@ pub struct AnvilPanelRow {
     pub label: *const core::ffi::c_char,
     pub value: *const core::ffi::c_char,
     pub id: u64,
+    pub color: u32,
+    pub reserved2: u32,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AnvilPanelRow"][::core::mem::size_of::<AnvilPanelRow>() - 32usize];
+    ["Size of AnvilPanelRow"][::core::mem::size_of::<AnvilPanelRow>() - 40usize];
     ["Alignment of AnvilPanelRow"][::core::mem::align_of::<AnvilPanelRow>() - 8usize];
     [
         "Offset of field: AnvilPanelRow::kind",
@@ -2236,6 +2240,12 @@ const _: () = {
     [
         "Offset of field: AnvilPanelRow::id",
     ][::core::mem::offset_of!(AnvilPanelRow, id) - 24usize];
+    [
+        "Offset of field: AnvilPanelRow::color",
+    ][::core::mem::offset_of!(AnvilPanelRow, color) - 32usize];
+    [
+        "Offset of field: AnvilPanelRow::reserved2",
+    ][::core::mem::offset_of!(AnvilPanelRow, reserved2) - 36usize];
 };
 pub type AnvilPanelClick = ::core::option::Option<
     unsafe extern "C" fn(context: *mut core::ffi::c_void, id: u64),
@@ -2633,6 +2643,31 @@ const _: () = {
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct AnvilMapLegendEntry {
+    pub color: u32,
+    pub reserved: u32,
+    pub label: *const core::ffi::c_char,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    [
+        "Size of AnvilMapLegendEntry",
+    ][::core::mem::size_of::<AnvilMapLegendEntry>() - 16usize];
+    [
+        "Alignment of AnvilMapLegendEntry",
+    ][::core::mem::align_of::<AnvilMapLegendEntry>() - 8usize];
+    [
+        "Offset of field: AnvilMapLegendEntry::color",
+    ][::core::mem::offset_of!(AnvilMapLegendEntry, color) - 0usize];
+    [
+        "Offset of field: AnvilMapLegendEntry::reserved",
+    ][::core::mem::offset_of!(AnvilMapLegendEntry, reserved) - 4usize];
+    [
+        "Offset of field: AnvilMapLegendEntry::label",
+    ][::core::mem::offset_of!(AnvilMapLegendEntry, label) - 8usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct AnvilMapModesService {
     pub size: u32,
     pub register_mode: ::core::option::Option<
@@ -2658,12 +2693,20 @@ pub struct AnvilMapModesService {
     pub show: ::core::option::Option<
         unsafe extern "C" fn(mode: *const AnvilMapMode) -> AnvilResult,
     >,
+    pub set_legend: ::core::option::Option<
+        unsafe extern "C" fn(
+            mode: *const AnvilMapMode,
+            entries: *const AnvilMapLegendEntry,
+            count: u32,
+            entry_size: u32,
+        ) -> AnvilResult,
+    >,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     [
         "Size of AnvilMapModesService",
-    ][::core::mem::size_of::<AnvilMapModesService>() - 56usize];
+    ][::core::mem::size_of::<AnvilMapModesService>() - 64usize];
     [
         "Alignment of AnvilMapModesService",
     ][::core::mem::align_of::<AnvilMapModesService>() - 8usize];
@@ -2688,6 +2731,9 @@ const _: () = {
     [
         "Offset of field: AnvilMapModesService::show",
     ][::core::mem::offset_of!(AnvilMapModesService, show) - 48usize];
+    [
+        "Offset of field: AnvilMapModesService::set_legend",
+    ][::core::mem::offset_of!(AnvilMapModesService, set_legend) - 56usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

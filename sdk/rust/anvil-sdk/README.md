@@ -11,7 +11,7 @@ nothing else.
 crate-type = ["cdylib"]
 
 [dependencies]
-anvil-sdk = "0.2"
+anvil-sdk = "0.3"
 ```
 
 ```rust

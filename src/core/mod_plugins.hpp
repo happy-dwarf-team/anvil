@@ -10,6 +10,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace anvil {
@@ -73,6 +74,12 @@ std::filesystem::path approved_copy(const std::filesystem::path& anvil_dir, cons
 // still loads (UpdatePending).
 ModDiscovery discover_mod_plugins(const std::filesystem::path& anvil_dir, const std::filesystem::path& user_dir,
                                   const std::set<std::string>& local_ids);
+
+// Whether a folder of <mod>/anvil/ holds files for Anvil's standard plugins
+// rather than a plugin, so discovery passes it by: map_modes (anvil-map's
+// modes from files, docs/spec/map-mode-files-v1.md). A plugin id never has
+// '_', so no plugin can need one of these names.
+inline bool is_mod_data_folder(std::string_view name) { return name == "map_modes"; }
 
 // The two halves of discover_mod_plugins. find_mod_plugins reads the
 // playset and each plugin folder of its mods (id, mod, folder, hash,
