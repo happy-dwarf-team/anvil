@@ -31,7 +31,7 @@ int GateTable::intern(std::string_view id) {
     }
     if (n >= kMaxGates) return -1;
     ids_[n].assign(id);
-    answers_[n].store(answer_for(ids_[n]) ? 1 : 0, std::memory_order_relaxed);
+    answers_[n].store(closed_ ? kClosed : answer_for(ids_[n]) ? 1 : 0, std::memory_order_relaxed);
     parsed_[n].store(1, std::memory_order_relaxed);
     count_.store(n + 1, std::memory_order_release);
     return static_cast<int>(n);
@@ -39,17 +39,37 @@ int GateTable::intern(std::string_view id) {
 
 bool GateTable::answer(int index) const {
     if (index < 0 || static_cast<std::uint32_t>(index) >= count_.load(std::memory_order_acquire)) return false;
-    return answers_[static_cast<std::size_t>(index)].load(std::memory_order_relaxed) != 0;
+    const std::uint8_t answer = answers_[static_cast<std::size_t>(index)].load(std::memory_order_relaxed);
+    if (answer == kClosed) {
+        closed_answers_.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+    return answer != 0;
 }
 
 void GateTable::update(bool allowed, std::vector<std::string> active) {
     std::lock_guard<std::mutex> guard(lock_);
     allowed_ = allowed;
+    closed_ = false;
     active_ = std::move(active);
+    closed_answers_.store(0, std::memory_order_relaxed);
     const std::uint32_t n = count_.load(std::memory_order_relaxed);
     for (std::uint32_t i = 0; i < n; ++i) {
         answers_[i].store(answer_for(ids_[i]) ? 1 : 0, std::memory_order_relaxed);
     }
+}
+
+void GateTable::close() {
+    std::lock_guard<std::mutex> guard(lock_);
+    if (closed_) return;
+    closed_ = true;
+    const std::uint32_t n = count_.load(std::memory_order_relaxed);
+    for (std::uint32_t i = 0; i < n; ++i) answers_[i].store(kClosed, std::memory_order_relaxed);
+}
+
+bool GateTable::closed() const {
+    std::lock_guard<std::mutex> guard(lock_);
+    return closed_;
 }
 
 std::string GateTable::id(int index) const {
