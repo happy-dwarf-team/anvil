@@ -426,6 +426,22 @@ public:
         const auto it = treasury.find(tag);
         return it == treasury.end() ? std::nullopt : std::optional<std::int64_t>(it->second);
     }
+
+    // Controllers: SWE holds RUS's province 2; cores: RUS on 1, POL and RUS on 3.
+    // POL is RUS's subject.
+    std::map<std::int32_t, std::string> controllers{{1, "RUS"}, {2, "SWE"}, {3, "POL"}};
+    std::set<std::pair<std::int32_t, std::string>> cores{{1, "RUS"}, {3, "POL"}, {3, "RUS"}};
+    std::map<std::string, std::string> overlords{{"POL", "RUS"}};
+    std::string controller(std::int32_t province) override {
+        const auto it = controllers.find(province);
+        return it == controllers.end() ? std::string() : it->second;
+    }
+    bool has_core(std::int32_t province, const std::string& tag) override { return cores.contains({province, tag}); }
+    std::string overlord(const std::string& tag) override {
+        ++country_reads;
+        const auto it = overlords.find(tag);
+        return it == overlords.end() ? std::string() : it->second;
+    }
 };
 
 constexpr const char* kHolySites = R"(# The example of docs/spec/map-mode-files-v1.md
@@ -487,8 +503,8 @@ void file_tests() {
         CHECK(one("m={label=M colour=1 rule={always=yes color={0 0 0} label=x}}").ends_with("a mode has no key colour"));
         CHECK(one("m={label=M label=N rule={always=yes color={0 0 0} label=x}}").ends_with("label is given twice"));
         CHECK(one("m={label=M sprite=\"GFX x\" rule={always=yes color={0 0 0} label=x}}").find("sprite") != std::string::npos);
-        CHECK(one("m={label=M rule={color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier or value"));
-        CHECK(one("m={label=M rule={flag=a variable=b color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier or value"));
+        CHECK(one("m={label=M rule={color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier, value, owned_by, core, occupied or subject"));
+        CHECK(one("m={label=M rule={flag=a variable=b color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier, value, owned_by, core, occupied or subject"));
         CHECK(one("m={label=M rule={always=yes label=x}}").ends_with("a rule needs color = { r g b }"));
         CHECK(one("m={label=M rule={always=yes color={0 0 0}}}").ends_with("a rule needs a label of 1 to 64 bytes"));
         CHECK(one("m={label=M rule={always=yes color={0 0 256} label=x}}").find("0 to 255") != std::string::npos);
@@ -576,6 +592,57 @@ void file_tests() {
         files::Evaluator own(modes[0], world);
         CHECK(own.match(2) == &modes[0].rules[0] && own.match(3) == nullptr);
         CHECK(parse_problems("m={label=M rule={always=yes owner=yes owner=no color={0 0 0} label=x}}").size() == 1);
+    });
+
+    run("map mode files: owned_by, core, occupied and subject", [] {
+        std::vector<files::FileMode> modes;
+        CHECK(parse_problems("m={label=M"
+                             " rule={occupied=yes color={1 0 0} label=Occupied}"
+                             " rule={subject=yes owner=yes color={2 0 0} label=Subject}"
+                             " rule={owned_by=rus color={3 0 0} label=Russia}}",
+                             &modes)
+                  .empty());
+        CHECK(modes.size() == 1 && modes[0].rules[2].name == "RUS" && modes[0].rules[1].owner);
+        TableWorld world;
+        files::Evaluator e(modes[0], world);
+        std::vector<std::uint32_t> colors = e.colors();
+        CHECK(colors[1] == 0x030000);  // RUS's, held by RUS
+        CHECK(colors[2] == 0x010000);  // RUS's, held by SWE
+        CHECK(colors[3] == 0x020000);  // POL's, RUS's subject
+        CHECK(colors[4] == ANVIL_MAP_NO_COLOR && colors[5] == ANVIL_MAP_NO_COLOR);  // no owner
+        std::int64_t value = 0;
+        CHECK(e.match(2, &value) == &modes[0].rules[0] && value == 1);
+
+        // core = no: owned without the owner's core; = yes the other way.
+        CHECK(parse_problems("m={label=M rule={core=no color={1 0 0} label=Uncored}"
+                             " rule={core=yes color={2 0 0} label=Core}}",
+                             &modes)
+                  .empty());
+        files::Evaluator c(modes[0], world);
+        colors = c.colors();
+        CHECK(colors[1] == 0x020000 && colors[2] == 0x010000 && colors[3] == 0x020000);
+        CHECK(colors[4] == ANVIL_MAP_NO_COLOR);  // unowned: neither
+        // occupied = no and subject = no.
+        CHECK(parse_problems("m={label=M rule={occupied=no color={1 0 0} label=Held}}", &modes).empty());
+        files::Evaluator held(modes[0], world);
+        CHECK(held.match(1) != nullptr && held.match(2) == nullptr && held.match(4) == nullptr);
+        CHECK(parse_problems("m={label=M rule={subject=no owner=yes color={1 0 0} label=Free}}", &modes).empty());
+        files::Evaluator independent(modes[0], world);
+        CHECK(independent.match(1) != nullptr && independent.match(3) == nullptr && independent.match(5) == nullptr);
+
+        // Faults.
+        CHECK(parse_problems("m={label=M rule={owned_by=RUSS color={0 0 0} label=x}}")[0].ends_with(
+            "owned_by needs a country tag of three letters or digits: RUSS"));
+        CHECK(parse_problems("m={label=M rule={subject=yes color={0 0 0} label=x}}")[0].ends_with(
+            "subject is the owner's: write owner = yes"));
+        CHECK(parse_problems("m={label=M rule={core=yes owner=yes color={0 0 0} label=x}}")[0].ends_with(
+            "core is the province's: leave out owner = yes"));
+        CHECK(parse_problems("m={label=M rule={occupied=yes at_least=1 color={0 0 0} label=x}}")[0].ends_with(
+            "at_least, at_most, above and below go with a variable, a modifier or a value"));
+        CHECK(parse_problems("m={label=M rule={owned_by=RUS scale={0 1} high_color={0 0 0} color={0 0 0} "
+                             "label=x}}")[0]
+                  .ends_with("a scale goes with a variable, a modifier or a value"));
+        CHECK(parse_problems("m={label=M rule={core=maybe color={0 0 0} label=x}}").size() == 1);
     });
 
     run("map mode files: a scale colours between its two ends (anvil#580)", [] {
