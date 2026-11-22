@@ -11,11 +11,11 @@ use crate::error::{check, Result};
 use crate::event::{read_sized, Event, Payload};
 use crate::host::Host;
 use crate::sys::{
-    AnvilGameDate, AnvilGameDateChange, AnvilGameFrame, AnvilGameOosChange, AnvilGamePendingChange,
-    AnvilGamePlayerChange, AnvilGameService, AnvilGameSession, AnvilGameWarChange,
-    ANVIL_GAME_PENDING_ADDED, ANVIL_GAME_PENDING_REMOVED, ANVIL_GAME_SERVICE_VERSION,
-    ANVIL_GAME_SESSION_ENDED, ANVIL_GAME_SESSION_STARTED, ANVIL_GAME_WAR_ENDED,
-    ANVIL_GAME_WAR_STARTED,
+    AnvilGameDate, AnvilGameDateChange, AnvilGameFrame, AnvilGameLobby, AnvilGameOosChange,
+    AnvilGamePendingChange, AnvilGamePlayerChange, AnvilGameService, AnvilGameSession,
+    AnvilGameWarChange, ANVIL_GAME_LOBBY_ENTERED, ANVIL_GAME_LOBBY_LEFT, ANVIL_GAME_PENDING_ADDED,
+    ANVIL_GAME_PENDING_REMOVED, ANVIL_GAME_SERVICE_VERSION, ANVIL_GAME_SESSION_ENDED,
+    ANVIL_GAME_SESSION_STARTED, ANVIL_GAME_WAR_ENDED, ANVIL_GAME_WAR_STARTED,
 };
 use crate::table::Table;
 use crate::text::{owned_string, Tag};
@@ -63,6 +63,20 @@ impl Session {
             number: raw.number,
         }
     }
+}
+
+/// `anvil-game.lobby`'s payload (anvil-game 1.27.0): outside a session, the
+/// application's session became a real one (a multiplayer lobby, a client
+/// joining, a host alone) or single player's dummy again. A lobby is not a
+/// [`Session`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LobbyChange {
+    /// The application's session is a real one now.
+    Entered,
+    /// It is single player's dummy (or none) again.
+    Left,
+    /// A value this crate does not know.
+    Other(u32),
 }
 
 /// An in-game date, as the game's top bar shows it (years have 365 days).
@@ -269,6 +283,18 @@ unsafe impl Payload for Session {
     }
 }
 
+// SAFETY: anvil-game.lobby publishes a const AnvilGameLobby*.
+unsafe impl Payload for LobbyChange {
+    unsafe fn read(raw: *const c_void) -> Option<Self> {
+        // SAFETY: the event's payload type.
+        unsafe { read_sized::<AnvilGameLobby>(raw) }.map(|l| match l.change {
+            c if c == ANVIL_GAME_LOBBY_ENTERED as u32 => Self::Entered,
+            c if c == ANVIL_GAME_LOBBY_LEFT as u32 => Self::Left,
+            other => Self::Other(other),
+        })
+    }
+}
+
 // SAFETY: anvil-game.oos publishes a const AnvilGameOosChange*.
 unsafe impl Payload for OosChange {
     unsafe fn read(raw: *const c_void) -> Option<Self> {
@@ -379,6 +405,9 @@ pub const WAR: Event<WarChange> = unsafe { Event::new(c"anvil-game.war") };
 /// A pending event of the player's own country came or left (anvil-game 1.21.0).
 // SAFETY: anvil_game.h names the payload type, which this one reads.
 pub const PENDING_EVENT: Event<PendingChange> = unsafe { Event::new(c"anvil-game.pending_event") };
+/// Outside a session, a multiplayer lobby was entered or left (anvil-game 1.27.0).
+// SAFETY: anvil_game.h names the payload type, which this one reads.
+pub const LOBBY: Event<LobbyChange> = unsafe { Event::new(c"anvil-game.lobby") };
 
 /// The `anvil-game.game` service.
 #[derive(Clone, Copy)]

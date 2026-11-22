@@ -175,4 +175,24 @@ private:
     std::uint64_t started_ = 0;
 };
 
+// What a frame read of the application's session outside a game gives (anvil#466).
+enum class AppSession { unread, none_or_dummy, real };
+
+// Turns the reads into lobby events. Only a frame that shows the front end
+// decides: a running session, a root between sessions (a save loading) and an
+// unreadable session keep the last state, so a lobby that starts its game is
+// still entered when that game ends. Main thread only.
+class LobbyTracker {
+public:
+    struct Change {
+        bool changed = false;
+        AnvilGameLobby event{};
+    };
+    Change update(bool front_end, AppSession session);
+    bool entered() const { return entered_; }
+
+private:
+    bool entered_ = false;
+};
+
 }  // namespace anvil_game

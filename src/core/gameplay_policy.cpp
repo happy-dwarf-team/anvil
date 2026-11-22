@@ -82,8 +82,8 @@ void GameplayPolicy::add(const Manifest& manifest, OwnerId owner) {
     {
         std::lock_guard lock(mutex_);
         Entry& entry = entries_.emplace_back(Entry{manifest, owner, false, false});
-        if (session_) {
-            if (std::string reason = suspension_reason(manifest, *session_, opt_ins_); !reason.empty()) {
+        if (const auto mode = mode_locked()) {
+            if (std::string reason = suspension_reason(manifest, *mode, opt_ins_); !reason.empty()) {
                 apply(entry, reason, events);
             }
         }
@@ -129,17 +129,13 @@ void GameplayPolicy::tell(const Events& events) {
     for (const auto& [id, event] : events) bus_.publish_to(id, event, nullptr);
 }
 
-void GameplayPolicy::session_started(SessionMode mode) {
-    Events events;
-    {
-        std::lock_guard lock(mutex_);
-        session_started_locked(mode, events);
-    }
-    tell(events);
+std::optional<SessionMode> GameplayPolicy::mode_locked() const {
+    if (session_) return session_;
+    if (lobby_) return SessionMode{false, true};
+    return std::nullopt;
 }
 
-void GameplayPolicy::session_started_locked(SessionMode mode, Events& events) {
-    session_ = mode;
+std::string GameplayPolicy::follow_locked(SessionMode mode, const char* allows, Events& events) {
     size_t suspended = 0, allowed = 0;
     for (Entry& e : entries_) {
         if (e.forgotten || !e.manifest.affects_gameplay) continue;
@@ -149,15 +145,37 @@ void GameplayPolicy::session_started_locked(SessionMode mode, Events& events) {
                 ++allowed;
                 log_(ANVIL_LOG_INFO, e.manifest.id, "stays active: the player allows it in " + mode_text(mode));
             }
-            if (e.suspended) release(e, "the new session allows it", events);
+            if (e.suspended) release(e, allows, events);
             continue;
         }
         ++suspended;
         if (!e.suspended) apply(e, reason, events);
     }
-    log_(ANVIL_LOG_INFO, "anvil",
-         "game session started (" + mode_text(mode) + "): " + std::to_string(suspended) +
-             " gameplay plugin(s) or module(s) suspended, " + std::to_string(allowed) + " allowed by the player");
+    return std::to_string(suspended) + " gameplay plugin(s) or module(s) suspended, " + std::to_string(allowed) +
+           " allowed by the player";
+}
+
+size_t GameplayPolicy::resume_all_locked(const char* why, Events& events) {
+    size_t resumed = 0;
+    for (Entry& e : entries_) {
+        if (!e.suspended) continue;
+        release(e, why, events);
+        ++resumed;
+    }
+    return resumed;
+}
+
+void GameplayPolicy::session_started(SessionMode mode) {
+    Events events;
+    {
+        std::lock_guard lock(mutex_);
+        session_ = mode;
+        // From a lobby into its game: what the lobby suspended and the game
+        // does not allow stays suspended, without a resume in between.
+        const std::string counts = follow_locked(mode, "the new session allows it", events);
+        log_(ANVIL_LOG_INFO, "anvil", "game session started (" + mode_text(mode) + "): " + counts);
+    }
+    tell(events);
 }
 
 void GameplayPolicy::session_ended() {
@@ -166,15 +184,60 @@ void GameplayPolicy::session_ended() {
         std::lock_guard lock(mutex_);
         if (!session_) return;
         session_.reset();
-        size_t resumed = 0;
-        for (Entry& e : entries_) {
-            if (!e.suspended) continue;
-            release(e, "the session ended", events);
-            ++resumed;
+        if (lobby_) {
+            // Back to the lobby the game started from (anvil#466): suspended
+            // as there, until anvil-game sees the lobby left.
+            const std::string counts = follow_locked(SessionMode{false, true}, "the multiplayer lobby allows it", events);
+            log_(ANVIL_LOG_INFO, "anvil", "game session ended, the multiplayer lobby is still entered: " + counts);
+        } else {
+            const size_t resumed = resume_all_locked("the session ended", events);
+            log_(ANVIL_LOG_INFO, "anvil", "game session ended: " + std::to_string(resumed) + " plugin(s) resumed");
         }
-        log_(ANVIL_LOG_INFO, "anvil", "game session ended: " + std::to_string(resumed) + " plugin(s) resumed");
     }
     tell(events);
+}
+
+void GameplayPolicy::lobby_entered() {
+    Events events;
+    {
+        std::lock_guard lock(mutex_);
+        if (lobby_) return;
+        lobby_ = true;
+        // A session's mode wins; anvil-game reads the lobby only outside one.
+        if (session_) return;
+        const std::string counts = follow_locked(SessionMode{false, true}, "the multiplayer lobby allows it", events);
+        log_(ANVIL_LOG_INFO, "anvil", "multiplayer lobby entered: " + counts);
+    }
+    tell(events);
+}
+
+void GameplayPolicy::lobby_left() {
+    Events events;
+    {
+        std::lock_guard lock(mutex_);
+        if (!lobby_) return;
+        lobby_ = false;
+        if (session_) return;
+        const size_t resumed = resume_all_locked("the multiplayer lobby was left", events);
+        log_(ANVIL_LOG_INFO, "anvil", "multiplayer lobby left: " + std::to_string(resumed) + " plugin(s) resumed");
+    }
+    tell(events);
+}
+
+void GameplayPolicy::on_lobby_event(const void* payload) {
+    const auto* l = static_cast<const AnvilGameLobby*>(payload);
+    if (l == nullptr || l->size < offsetof(AnvilGameLobby, change) + sizeof(l->change)) {
+        log_(ANVIL_LOG_WARNING, "anvil", std::string(ANVIL_GAME_EVENT_LOBBY) + " without a valid payload: ignored");
+        return;
+    }
+    if (l->change == ANVIL_GAME_LOBBY_ENTERED) {
+        lobby_entered();
+    } else if (l->change == ANVIL_GAME_LOBBY_LEFT) {
+        lobby_left();
+    } else {
+        log_(ANVIL_LOG_WARNING, "anvil",
+             std::string(ANVIL_GAME_EVENT_LOBBY) + " with unknown change " + std::to_string(l->change) + ": ignored");
+    }
 }
 
 void GameplayPolicy::on_session_event(const void* payload) {
@@ -200,11 +263,22 @@ void GameplayPolicy::subscribe() {
             static_cast<GameplayPolicy*>(context)->on_session_event(payload);
         },
         this);
+    bus_.subscribe(
+        "anvil", ANVIL_GAME_EVENT_LOBBY,
+        [](const char*, const void* payload, void* context) {
+            static_cast<GameplayPolicy*>(context)->on_lobby_event(payload);
+        },
+        this);
 }
 
 std::optional<SessionMode> GameplayPolicy::session() const {
     std::lock_guard lock(mutex_);
     return session_;
+}
+
+bool GameplayPolicy::lobby() const {
+    std::lock_guard lock(mutex_);
+    return lobby_;
 }
 
 bool GameplayPolicy::suspended(OwnerId owner) const {
