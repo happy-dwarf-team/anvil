@@ -577,6 +577,17 @@ void file_tests() {
             &modes);
         CHECK(p.size() == 1 && p[0] == "mod/anvil/map_modes/t.txt:1: a rule has no key nope");
         CHECK(modes.size() == 1 && modes[0].name == "good");
+
+        // A fault the lexer finds outside any block ends: the parser goes on behind it.
+        modes.clear();
+        const std::vector<std::string> outside = parse_problems(
+            "a = { label = A rule = { always = yes color = { 0 0 0 } label = x } } >\n"
+            "\"open\n"
+            "b = { label = B rule = { always = yes color = { 0 0 0 } label = x } }",
+            &modes);
+        CHECK(outside.size() == 2 && outside[0].find("at_least") != std::string::npos &&
+              outside[1].ends_with(":2: a quoted text has no end"));
+        CHECK(modes.size() == 2 && modes[0].name == "a" && modes[1].name == "b");
     });
 
     run("map mode files: numbers are x 1000 and the bounds hold together", [] {

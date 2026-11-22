@@ -137,10 +137,14 @@ public:
             ++at_;
             t.kind = Token::equals;
         } else if (c == '<' || c == '>' || c == '!') {
+            ++at_;  // past it, so a fault outside any block does not stop here again
             throw Fault{line_, "comparison operators are not read here: write at_least, at_most, above or below"};
         } else if (c == '"') {
             const std::size_t end = text_.find_first_of("\"\n", at_ + 1);
-            if (end == std::string_view::npos || text_[end] != '"') throw Fault{line_, "a quoted text has no end"};
+            if (end == std::string_view::npos || text_[end] != '"') {
+                at_ = end == std::string_view::npos ? text_.size() : end;  // on to the line's end
+                throw Fault{line_, "a quoted text has no end"};
+            }
             t.kind = Token::string;
             t.text = std::string(text_.substr(at_ + 1, end - at_ - 1));
             at_ = end + 1;
@@ -867,9 +871,11 @@ std::vector<Found> playset_files(const std::filesystem::path& user, std::vector<
         folder /= "map_modes";
         std::error_code ec;
         if (!std::filesystem::is_directory(folder, ec)) continue;
-        for (const auto& item : std::filesystem::directory_iterator(folder, ec)) {
-            if (!item.is_regular_file(ec)) continue;
-            const std::filesystem::path& p = item.path();
+        // increment(ec), not a range-for: its operator++ throws when the folder
+        // changes under it (a Workshop update).
+        for (std::filesystem::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec)) {
+            if (!it->is_regular_file(ec)) continue;
+            const std::filesystem::path& p = it->path();
             if (lower(path_utf8(p.extension())) != ".txt") continue;
             const std::string file = path_utf8(p.filename());
             files[lower(file)] = {index, Found{p, name + "/anvil/map_modes/" + file}};
