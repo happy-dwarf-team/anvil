@@ -486,6 +486,63 @@ void compute(FileEntry& entry) {
     }
 }
 
+// The user folder the files were found from, and their stamps: main thread.
+std::filesystem::path g_user_dir;
+std::vector<files::Stamp> g_file_stamps;
+
+// The mode's legend from its rules, or none.
+void apply_legend(const FileEntry& entry) {
+    std::vector<anvil_map::LegendEntry> legend;
+    if (entry.def.legend) {
+        for (files::LegendItem& item : files::legend_of(entry.def)) legend.push_back({item.color, std::move(item.label)});
+    }
+    anvil_map::set_legend(*const_cast<AnvilMapMode*>(entry.mode), std::move(legend));
+}
+
+// Reads the files again when one changed since they were last read, so a
+// modder sees an edit by picking the mode again (or a month later) instead of
+// restarting the game. Rules and legends change; a mode's button, a new mode
+// and a mode now gone wait for a restart. Main thread.
+void reload_file_modes() {
+    if (g_file_modes.empty() || g_user_dir.empty()) return;
+    std::vector<std::string> problems;
+    const std::vector<files::Found> found = files::playset_files(g_user_dir, problems);
+    std::vector<files::Stamp> now = files::stamps(found);
+    if (now == g_file_stamps) return;
+    g_file_stamps = std::move(now);
+    const anvil::Host host;
+    std::vector<files::FileMode> fresh = files::load(found, problems);
+    for (const std::string& p : problems) host.warn("map mode file {}", p);
+    std::vector<const files::FileMode*> registered;
+    for (const auto& e : g_file_modes) registered.push_back(&e->def);
+    const files::Reload plan = files::plan_reload(registered, fresh);
+    std::size_t read = 0;
+    for (std::size_t i = 0; i < g_file_modes.size(); ++i) {
+        if (plan.fresh[i] < 0) continue;
+        FileEntry& entry = *g_file_modes[i];
+        files::FileMode& def = fresh[static_cast<std::size_t>(plan.fresh[i])];
+        entry.evaluator.reset();  // it holds indices into the old rules
+        entry.def.rules = std::move(def.rules);
+        entry.def.legend = def.legend;
+        entry.def.source = std::move(def.source);
+        entry.def.line = def.line;
+        entry.warned = false;
+        apply_legend(entry);
+        ++read;
+    }
+    host.info("map mode files changed: the rules of {} mode(s) read again", read);
+    for (const std::string& name : plan.restart) {
+        host.warn("map mode files: {}'s label, description, tab or sprite changed; the game shows the new ones after a "
+                  "restart",
+                  name);
+    }
+    for (const std::string& name : plan.added) host.warn("map mode files: {} is new; it shows after a restart", name);
+    for (const std::string& name : plan.missing) {
+        host.warn("map mode files: {} is no longer read (gone, or a fault above); it keeps its rules until a restart",
+                  name);
+    }
+}
+
 // The modes of the playset's files, registered once at ready.
 void load_file_modes() {
     const anvil::Host host;
@@ -495,7 +552,9 @@ void load_file_modes() {
         return;
     }
     std::vector<std::string> problems;
-    const std::vector<files::Found> found = files::playset_files(std::filesystem::path(game->user_dir()), problems);
+    g_user_dir = std::filesystem::path(game->user_dir());
+    const std::vector<files::Found> found = files::playset_files(g_user_dir, problems);
+    g_file_stamps = files::stamps(found);
     std::vector<files::FileMode> modes = files::load(found, problems);
     for (const std::string& p : problems) host.warn("map mode file {}", p);
     for (files::FileMode& def : modes) {
@@ -518,11 +577,7 @@ void load_file_modes() {
             continue;
         }
         entry->mode = mode;
-        if (entry->def.legend) {
-            std::vector<anvil_map::LegendEntry> legend;
-            for (files::LegendItem& item : files::legend_of(entry->def)) legend.push_back({item.color, std::move(item.label)});
-            anvil_map::set_legend(*const_cast<AnvilMapMode*>(mode), std::move(legend));
-        }
+        if (entry->def.legend) apply_legend(*entry);
         host.info("mode {} from {} borrows map mode {} (tab {}, {} rules)", id, entry->def.source, mode->number,
                   mode->tab, entry->def.rules.size());
         g_file_modes.push_back(std::move(entry));
@@ -610,7 +665,10 @@ void step() {
         g_shown.store(shown, std::memory_order_release);
         if (last != nullptr) publish(ANVIL_MAP_EVENT_HIDDEN, last);
         if (shown != nullptr) publish(ANVIL_MAP_EVENT_SHOWN, shown);
-        if (FileEntry* entry = shown != nullptr ? file_entry(shown) : nullptr) compute(*entry);
+        if (FileEntry* entry = shown != nullptr ? file_entry(shown) : nullptr) {
+            reload_file_modes();
+            compute(*entry);
+        }
     }
     legend_step(shown, last);
     if (shown != nullptr) {
@@ -794,7 +852,10 @@ struct AnvilMap : anvil::Plugin {
         host.subscribe(ANVIL_GAME_EVENT_MONTH, [] {
             if (!g_in_session.load(std::memory_order_acquire)) return;
             try {
-                if (FileEntry* entry = file_entry(g_shown.load(std::memory_order_acquire))) compute(*entry);
+                if (FileEntry* entry = file_entry(g_shown.load(std::memory_order_acquire))) {
+                    reload_file_modes();
+                    compute(*entry);
+                }
             } catch (...) {
                 // Only a failed allocation; the next month tries again.
             }

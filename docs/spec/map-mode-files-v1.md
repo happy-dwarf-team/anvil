@@ -19,7 +19,8 @@ A mode from a file changes nothing in the game's state, like any plugin mode: it
 - A mode's name is unique in the playset: when two files define the same name, the first one read keeps it and the other is left out with a line in `anvil.log`.
 - A zipped mod (a `.mod` file with `archive` and no `path`) is skipped with a line in the log.
 - A file larger than 1 MiB is not read.
-- The files are read once, at `anvil-game.ready`. A change needs a restart of the game.
+- The files are read at `anvil-game.ready`, and the modes they define are registered then.
+- **Editing a file while the game runs.** Each time a mode from the files becomes shown and at each `anvil-game.month` while one is shown, anvil-map looks at the playset's files again (their paths, sizes and write times; no file is read when none changed). After a change it reads them all again and gives each registered mode the rules and legend of its new definition, so a modder sees an edit by picking the mode again, from another mode, without a restart. `anvil.log` gets `map mode files changed: the rules of N mode(s) read again`. What the game registered at the start waits for a restart, with a line in the log: a mode's `label`, `description`, `tab` and `sprite` (its button), a new mode, and a mode no longer read (its file gone, or a fault in it now; it keeps the rules it had). A fault is logged as at the start.
 
 ## 3. Syntax
 
@@ -108,3 +109,4 @@ Under the lab's game lock, in a test profile with a test mod that has `anvil/map
 5. A faulty file: its line in `anvil.log`, the other modes still there.
 6. A rule with `owner = yes` on a country modifier colours every province of a country alike, and a scale colours between its two colours, with both ends in the legend.
 7. A `value = development` scale, and an owner's `value` (`treasury`), with the value in the tooltip.
+8. While the game runs, a changed colour and bound in a file show after picking another mode and the mode again, with the log's line; a changed label and a new mode are logged as waiting for a restart.

@@ -672,6 +672,47 @@ std::vector<Found> playset_files(const std::filesystem::path& user, std::vector<
     return out;
 }
 
+std::vector<Stamp> stamps(const std::vector<Found>& found) {
+    std::vector<Stamp> out;
+    out.reserve(found.size());
+    for (const Found& f : found) {
+        Stamp s;
+        s.path = f.path;
+        std::error_code ec;
+        s.size = std::filesystem::file_size(f.path, ec);
+        if (ec) s.size = 0;
+        s.time = std::filesystem::last_write_time(f.path, ec);
+        if (ec) s.time = {};
+        out.push_back(std::move(s));
+    }
+    return out;
+}
+
+Reload plan_reload(const std::vector<const FileMode*>& registered, const std::vector<FileMode>& fresh) {
+    Reload out;
+    std::set<std::string> known;
+    for (const FileMode* m : registered) {
+        known.insert(m->name);
+        int index = -1;
+        for (std::size_t i = 0; i < fresh.size(); ++i) {
+            if (fresh[i].name == m->name) index = static_cast<int>(i);
+        }
+        out.fresh.push_back(index);
+        if (index < 0) {
+            out.missing.push_back(m->name);
+            continue;
+        }
+        const FileMode& f = fresh[static_cast<std::size_t>(index)];
+        if (f.label != m->label || f.description != m->description || f.tab != m->tab || f.sprite != m->sprite) {
+            out.restart.push_back(m->name);
+        }
+    }
+    for (const FileMode& f : fresh) {
+        if (!known.contains(f.name)) out.added.push_back(f.name);
+    }
+    return out;
+}
+
 std::vector<FileMode> load(const std::vector<Found>& found, std::vector<std::string>& problems) {
     std::vector<FileMode> out;
     std::set<std::string> names;

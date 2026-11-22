@@ -730,6 +730,37 @@ void file_tests() {
         CHECK(modes.size() == 2 && modes[0].name == "mine" && modes[1].name == "new");
         CHECK(problems.size() == 1 && problems[0] == "Second/anvil/map_modes/z.txt:1: mine is defined in an earlier "
                                                      "file; this one is left out");
+
+        // Reading again: a stamp changes with the file, and the plan maps the
+        // new definitions onto the registered modes.
+        const std::vector<files::Stamp> before = files::stamps(found);
+        CHECK(before.size() == 3 && before == files::stamps(found));
+        write(user / "second/anvil/map_modes/Shared.TXT",
+              "new={label=New rule={always=yes color={255 0 0} label=red}}\n"
+              "extra={label=Extra rule={always=yes color={0 0 0} label=x}}");
+        std::vector<files::Stamp> after = files::stamps(files::playset_files(user, problems));
+        CHECK(after.size() == 3 && after != before && after[0] == before[0] && after[2] == before[2]);
+        problems.clear();
+        std::vector<files::FileMode> again = files::load(files::playset_files(user, problems), problems);
+        std::vector<const files::FileMode*> registered{&modes[0], &modes[1]};
+        files::Reload plan = files::plan_reload(registered, again);
+        CHECK(plan.fresh.size() == 2 && plan.fresh[0] == 0 && plan.fresh[1] == 1);
+        CHECK(again.size() == 3 && again[1].rules.size() == 1 && again[1].rules[0].color == 0xFF0000u);
+        CHECK(plan.restart.empty() && plan.missing.empty());
+        CHECK(plan.added.size() == 1 && plan.added[0] == "extra");
+        // A changed label waits for a restart; a mode gone keeps its rules.
+        write(user / "second/anvil/map_modes/Shared.TXT", "new={label=Renamed rule={always=yes color={0 0 0} label=x}}");
+        write(user / "mod/first/anvil/map_modes/own.txt", "mine={label=Mine rule={always=yes}}");  // a fault now
+        std::filesystem::remove(user / "second/anvil/map_modes/z.txt");  // else its mine would take over
+        problems.clear();
+        const std::vector<files::Found> fewer = files::playset_files(user, problems);
+        CHECK(fewer.size() == 2 && files::stamps(fewer).size() == 2);  // a file gone changes the stamps too
+        again = files::load(fewer, problems);
+        plan = files::plan_reload(registered, again);
+        CHECK(plan.fresh.size() == 2 && plan.fresh[0] == -1 && plan.fresh[1] >= 0);
+        CHECK(plan.missing.size() == 1 && plan.missing[0] == "mine");
+        CHECK(plan.restart.size() == 1 && plan.restart[0] == "new");
+        CHECK(plan.added.empty() && !problems.empty());
         std::filesystem::remove_all(user);
     });
 }
