@@ -182,7 +182,7 @@ typedef struct AnvilMapModesService {
      * loader of map modes). */
     AnvilResult (*show)(const AnvilMapMode *mode);
 
-    /* Since anvil-map 1.27.0; check with ANVIL_MAP_HAS(service, set_legend). */
+    /* Since anvil-map 1.26.0; check with ANVIL_MAP_HAS(service, set_legend). */
     /* Gives `mode` a legend: what its colours mean, in the given order. While
      * the mode is shown, anvil-map shows the legend in a window of Anvil's
      * overlay (anvil-overlay.panel), titled with the mode's label, and hides

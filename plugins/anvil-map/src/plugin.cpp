@@ -96,7 +96,7 @@ sym::Types::set_current_map_mode::Pointer g_set_mode = nullptr;
 const AnvilGameWorldService* g_world = nullptr;
 // The overlay's windows, for legends; null without the overlay.
 const AnvilPanelService* g_panels = nullptr;
-// An overlay older than 1.27.0 refuses swatch rows: legends go as text.
+// An overlay older than 1.26.0 refuses swatch rows: legends go as text.
 bool g_text_legends = false;
 
 std::atomic<bool> g_in_session{false};
@@ -502,7 +502,7 @@ bool sync_legend(AnvilMapMode& mode) {
                                    : g_panels->set_rows(panel, rows.data(), count, sizeof(AnvilPanelRow));
     if (r == ANVIL_ERROR_INVALID_ARGUMENT) {
         // An older overlay: the colour as text beside the label.
-        if (!g_text_legends) host.info("the overlay draws no colour squares (before 1.27.0): legends show #RRGGBB");
+        if (!g_text_legends) host.info("the overlay draws no colour squares (before 1.26.0): legends show #RRGGBB");
         g_text_legends = true;
         std::vector<std::string> hex(legend.size());
         for (std::size_t i = 0; i < legend.size(); ++i) {

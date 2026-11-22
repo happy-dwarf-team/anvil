@@ -97,7 +97,7 @@ int main() {
         CHECK(store.set_rows(&stranger, rows, 4, sizeof(AnvilPanelRow)) == ANVIL_ERROR_INVALID_ARGUMENT);
         CHECK(store.show(&stranger, true) == ANVIL_ERROR_INVALID_ARGUMENT && !store.shown(&stranger));
 
-        // A swatch: a colour square before its label (since 1.27.0); a row of
+        // A swatch: a colour square before its label (since 1.26.0); a row of
         // the older size has no colour to read.
         AnvilPanelRow swatch{ANVIL_PANEL_SWATCH, 0, "Holy site", "3", 0};
         swatch.color = 0xE0B000;

@@ -373,7 +373,7 @@ impl MapModes {
     /// Anvil's overlay while the mode is shown; an empty slice removes it.
     /// Any thread, any time; it lasts across sessions. `InvalidArgument` for
     /// too many entries, [`NO_COLOR`], or a label that is empty or longer
-    /// than 64 bytes; `Unsupported` with an anvil-map before 1.27.0.
+    /// than 64 bytes; `Unsupported` with an anvil-map before 1.26.0.
     pub fn set_legend(&self, mode: Mode, entries: &[(u32, &str)]) -> Result<()> {
         let f = function!(self.table, AnvilMapModesService, set_legend)?;
         let count = u32::try_from(entries.len()).map_err(|_| {

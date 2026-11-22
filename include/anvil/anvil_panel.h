@@ -50,7 +50,7 @@ typedef enum AnvilPanelRowKind {
     ANVIL_PANEL_TEXT = 1,     /* `label`, and `value` beside it when not NULL */
     ANVIL_PANEL_BUTTON = 2,   /* a button with `label`; a click gives back `id` */
     ANVIL_PANEL_SEPARATOR = 3, /* a line */
-    /* Since anvil-overlay 1.27.0: a square of `color` before `label`, and
+    /* Since anvil-overlay 1.26.0: a square of `color` before `label`, and
      * `value` beside it when not NULL. An older overlay refuses the kind with
      * ANVIL_ERROR_INVALID_ARGUMENT. Needs row_size >= sizeof(AnvilPanelRow). */
     ANVIL_PANEL_SWATCH = 4
@@ -62,7 +62,7 @@ typedef struct AnvilPanelRow {
     const char *label; /* UTF-8; NULL for a separator */
     const char *value; /* UTF-8; NULL for none */
     uint64_t id;       /* given back on a click */
-    /* Since anvil-overlay 1.27.0, read for ANVIL_PANEL_SWATCH only. */
+    /* Since anvil-overlay 1.26.0, read for ANVIL_PANEL_SWATCH only. */
     uint32_t color;    /* 0x00RRGGBB */
     uint32_t reserved2;
 } AnvilPanelRow;
