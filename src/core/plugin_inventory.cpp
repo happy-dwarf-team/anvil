@@ -87,13 +87,17 @@ PluginInventory take_inventory(const fs::path& anvil_dir, const fs::path& user_d
         inventory.local.push_back(std::move(p));
     }
 
-    ModDiscovery found = find_mod_plugins(user_dir);
+    // Each mod's plugin is checked from the bytes its hash covered (T3, #545):
+    // the plugin.toml, symbols and settings an approval of that hash names.
+    std::vector<PluginCheck> checks;
+    ModDiscovery found = find_mod_plugins(
+        user_dir, [&](const ModPlugin&, const HeldFolder& held) { checks.push_back(check_plugin_folder(held, game)); });
     inventory.playset = std::move(found.playset);
     inventory.mod_warnings = std::move(found.warnings);
-    for (ModPlugin& p : found.plugins) {
+    for (size_t i = 0; i < found.plugins.size(); ++i) {
         InventoryModPlugin m;
-        m.check = check_plugin_folder(p.folder, game);
-        m.found = std::move(p);
+        m.check = std::move(checks[i]);
+        m.found = std::move(found.plugins[i]);
         inventory.mods.push_back(std::move(m));
     }
 
@@ -120,8 +124,12 @@ PluginInventory take_inventory(const fs::path& anvil_dir, const fs::path& user_d
             const bool may_load = approved != nullptr && approved->hash == c.name;
             // The load hashes it again and refuses a changed copy (copy_changed); this
             // one is for the plan, so a damaged copy is made again before that (T4, #543).
-            if (of_a_mod && may_load) c.damaged = hash_plugin_folder(folder).sha256 != c.name;
-            if (of_a_mod && !same_as_a_mod && may_load && !c.damaged) c.check = check_plugin_folder(folder, game);
+            // The check reads the bytes this hash covered (T3, #545).
+            if (of_a_mod && may_load) {
+                const HeldFolder held(folder);
+                c.damaged = held.hash().sha256 != c.name;
+                if (!same_as_a_mod && !c.damaged) c.check = check_plugin_folder(held, game);
+            }
             inventory.copies.push_back(std::move(c));
         }
     }

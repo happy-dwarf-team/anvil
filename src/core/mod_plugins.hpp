@@ -77,11 +77,19 @@ ModDiscovery discover_mod_plugins(const std::filesystem::path& anvil_dir, const 
 // The two halves of discover_mod_plugins. find_mod_plugins reads the
 // playset and each plugin folder of its mods (id, mod, folder, hash,
 // plugin.toml and why it cannot be approved) and decides nothing: `trust`
-// stays empty and every state Pending. decide_mod_plugins decides them as
+// stays empty and every state Pending. Each folder is hashed first and held
+// (HeldFolder) while its plugin.toml is read from the hashed bytes, so the
+// manifest is the one its hash names (T3, #545); `while_held` then gets the
+// plugin and its held folder, for a check of the same bytes (the plugin
+// inventory's). A folder whose hash failed has no hash to approve: its
+// plugin.toml is read from the disk, for the player to see, and `while_held`
+// gets that HeldFolder as it is (ok() false). decide_mod_plugins decides them as
 // above against `trust`, without reading the disk: `copy_exists(id, hash)`
 // says whether anvil/data/anvil/approved/<id>/<hash> is there.
 using CopyExists = std::function<bool(const std::string& id, const std::string& hash)>;
-ModDiscovery find_mod_plugins(const std::filesystem::path& user_dir);
+class HeldFolder;
+using WhileHeld = std::function<void(const ModPlugin& plugin, const HeldFolder& folder)>;
+ModDiscovery find_mod_plugins(const std::filesystem::path& user_dir, const WhileHeld& while_held = {});
 void decide_mod_plugins(std::vector<ModPlugin>& plugins, const TrustFile& trust, const std::set<std::string>& local_ids,
                         const std::filesystem::path& anvil_dir, const CopyExists& copy_exists);
 

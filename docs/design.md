@@ -673,6 +673,7 @@ Decided in [Workshop discovery and trust](https://github.com/happy-dwarf-team/an
   - **invalid:** the folder name is not a plugin id, or `plugin.toml` does not parse, has another id, or its entry is missing, or the folder cannot be hashed.
 - **Loading**
   - Approved plugins go through the resolver with the local ones, from their copies (§7, §10).
+  - The plugin inventory hashes each mod's plugin folder, and an approved copy it checks, with every file open and no write or delete sharing, and reads `plugin.toml`, the `symbols` and `settings` files and the entry's presence through those handles while they are open (`HeldFolder`, T3 of #545). So the manifest, symbols and settings a plugin loads with are the bytes its hash covered: a Workshop update between the hash and the reads can no longer pair an approved DLL with a manifest nobody approved, and a file added after the hash counts as missing.
   - Right before `LoadLibrary`, the core hashes the copy again with every file open and no write or delete sharing, and keeps the files open until the DLL is mapped. A copy that no longer has the approved hash fails to load with "its approved copy changed".
   - Safe mode skips plugins from mods.
   - At each start, before any plugin loads, the copies that `trust.toml` no longer names are removed: revoked ids, older hashes and unfinished copies.

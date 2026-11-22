@@ -90,4 +90,12 @@ struct PluginCheck {
 // says nothing about symbols.
 PluginCheck check_plugin_folder(const std::filesystem::path& folder, const GameImage& game);
 
+// The same check of a held folder (T3, #545): plugin.toml, symbols.toml,
+// settings.toml and the entry DLL's presence from the files its hash covered,
+// read through the handles that hashed them, so the check is of the bytes an
+// approval of that hash names. A folder whose hash failed is checked from
+// the disk, as above: it cannot be approved, so it never loads.
+class HeldFolder;
+PluginCheck check_plugin_folder(const HeldFolder& folder, const GameImage& game);
+
 }  // namespace anvil
