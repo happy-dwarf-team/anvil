@@ -358,6 +358,38 @@ public:
         if (g_world->province(province, &p) != ANVIL_OK) return {};
         return std::string(p.owner.text, strnlen(p.owner.text, sizeof(p.owner.text)));
     }
+    std::string controller(std::int32_t province) override {
+        AnvilGameProvince p{};
+        p.size = sizeof(p);
+        if (g_world->province(province, &p) != ANVIL_OK) return {};
+        return std::string(p.controller.text, strnlen(p.controller.text, sizeof(p.controller.text)));
+    }
+    bool has_core(std::int32_t province, const std::string& tag) override {
+        std::array<AnvilGameTag, 16> some{};
+        std::uint32_t count = 0;
+        if (g_world->province_cores(province, some.data(), static_cast<std::uint32_t>(some.size()), &count) !=
+            ANVIL_OK) {
+            return false;
+        }
+        std::vector<AnvilGameTag> all;
+        const AnvilGameTag* tags = some.data();
+        if (count > some.size()) {
+            all.resize(count);
+            if (g_world->province_cores(province, all.data(), count, &count) != ANVIL_OK) return false;
+            count = std::min<std::uint32_t>(count, static_cast<std::uint32_t>(all.size()));
+            tags = all.data();
+        }
+        return std::any_of(tags, tags + count, [&](const AnvilGameTag& t) {
+            return std::string_view(t.text, strnlen(t.text, sizeof(t.text))) == tag;
+        });
+    }
+    std::string overlord(const std::string& tag) override {
+        AnvilGameTag out{};
+        if (!ANVIL_GAME_WORLD_HAS(g_world, country_overlord) || g_world->country_overlord(tag.c_str(), &out) != ANVIL_OK) {
+            return {};
+        }
+        return std::string(out.text, strnlen(out.text, sizeof(out.text)));
+    }
     bool country_has_flag(const std::string& tag, std::int32_t flag) override {
         if (!ANVIL_GAME_WORLD_HAS(g_world, country_flags)) return false;
         std::array<AnvilGameFlag, 64> some{};

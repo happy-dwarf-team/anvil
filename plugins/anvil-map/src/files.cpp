@@ -276,6 +276,22 @@ public:
                 }
                 r.value = found->value;
                 ++tests;
+            } else if (k == "owned_by") {
+                r.test = Test::owned_by;
+                r.name = text("owned_by");
+                const bool tag = r.name.size() == 3 && std::all_of(r.name.begin(), r.name.end(), [](char c) {
+                    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+                });
+                if (!tag) throw Fault{key.line, "owned_by needs a country tag of three letters or digits: " + r.name};
+                for (char& c : r.name) {
+                    if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+                }
+                ++tests;
+            } else if (k == "core" || k == "occupied" || k == "subject") {
+                r.test = k == "core" ? Test::core : k == "occupied" ? Test::occupied : Test::subject;
+                r.name = k;
+                r.yes = yes_no(k.c_str());
+                ++tests;
             } else if (k == "flag" || k == "variable" || k == "modifier") {
                 r.test = k == "flag" ? Test::flag : k == "variable" ? Test::variable : Test::modifier;
                 r.name = text(k.c_str());
@@ -313,24 +329,31 @@ public:
                 throw Fault{key.line, "a rule has no key " + k};
             }
         }
-        if (tests != 1) throw Fault{line, "a rule needs one of always, flag, variable, modifier or value"};
+        if (tests != 1) {
+            throw Fault{line, "a rule needs one of always, flag, variable, modifier, value, owned_by, core, occupied "
+                              "or subject"};
+        }
         if (!has_color) throw Fault{line, "a rule needs color = { r g b }"};
         if (!has_label || r.label.empty() || r.label.size() > kLabelMax) {
             throw Fault{line, "a rule needs a label of 1 to 64 bytes"};
         }
         const bool bounded = r.at_least || r.at_most || r.above || r.below;
-        if (bounded && (r.test == Test::always || r.test == Test::flag)) {
+        if (bounded && (r.test == Test::always || is_yes_no(r.test))) {
             throw Fault{line, "at_least, at_most, above and below go with a variable, a modifier or a value"};
         }
         if (r.low.has_value() != has_high_color) {
             throw Fault{line, "scale = { low high } and high_color = { r g b } go together"};
         }
-        if (r.low && (r.test == Test::always || r.test == Test::flag)) {
+        if (r.low && (r.test == Test::always || is_yes_no(r.test))) {
             throw Fault{line, "a scale goes with a variable, a modifier or a value"};
         }
         if (r.test == Test::value && is_country_value(r.value) != r.owner) {
             throw Fault{line, r.owner ? r.name + " is the province's: leave out owner = yes"
                                       : r.name + " is the owner's: write owner = yes"};
+        }
+        if (r.test == Test::subject && !r.owner) throw Fault{line, "subject is the owner's: write owner = yes"};
+        if ((r.test == Test::owned_by || r.test == Test::core || r.test == Test::occupied) && r.owner) {
+            throw Fault{line, r.name + " is the province's: leave out owner = yes"};
         }
         return r;
     }
@@ -474,6 +497,11 @@ std::string decimal(std::int64_t value) {
     return out;
 }
 
+bool is_yes_no(Test test) {
+    return test == Test::flag || test == Test::owned_by || test == Test::core || test == Test::occupied ||
+           test == Test::subject;
+}
+
 Evaluator::Evaluator(const FileMode& mode, World& world) : mode_(mode), world_(world) {
     ids_.reserve(mode.rules.size());
     for (const Rule& r : mode.rules) {
@@ -512,6 +540,13 @@ std::optional<std::int64_t> Evaluator::read_country(std::size_t i, const std::st
         case Test::value:
             v = world_.country_value(tag, r.value);
             break;
+        case Test::subject:
+            v = world_.overlord(tag).empty() != r.yes ? 1 : 0;
+            break;
+        case Test::owned_by:
+        case Test::core:
+        case Test::occupied:
+            break;  // the province's: refused with owner = yes
     }
     reads.done[i] = true;
     reads.value[i] = v;
@@ -538,6 +573,21 @@ std::optional<std::int64_t> Evaluator::read(std::size_t i, std::int32_t province
             return world_.modifier(province, *ids_[i]);
         case Test::value:
             return world_.province_value(province, r.value);
+        case Test::owned_by:
+            if (!owner) owner = world_.owner(province);
+            return *owner == r.name ? 1 : 0;
+        case Test::core:
+            if (!owner) owner = world_.owner(province);
+            if (owner->empty()) return std::nullopt;
+            return world_.has_core(province, *owner) == r.yes ? 1 : 0;
+        case Test::occupied: {
+            if (!owner) owner = world_.owner(province);
+            if (owner->empty()) return std::nullopt;
+            const std::string by = world_.controller(province);
+            return (!by.empty() && by != *owner) == r.yes ? 1 : 0;
+        }
+        case Test::subject:
+            return std::nullopt;  // the owner's: refused without owner = yes
     }
     return std::nullopt;
 }
@@ -548,7 +598,7 @@ const Rule* Evaluator::match(std::int32_t province, std::int64_t* value) {
         const Rule& r = mode_.rules[i];
         const std::optional<std::int64_t> v = read(i, province, owner);
         if (!v) continue;
-        const bool passes = r.test == Test::always || (r.test == Test::flag ? *v != 0 : in_bounds(r, *v));
+        const bool passes = r.test == Test::always || (is_yes_no(r.test) ? *v != 0 : in_bounds(r, *v));
         if (!passes) continue;
         if (value != nullptr) *value = *v;
         return &r;
