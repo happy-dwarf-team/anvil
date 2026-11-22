@@ -1733,7 +1733,7 @@ void load_world(anvil::Host& host) {
                          host.present(sym::province_name) && host.present(sym::player_country) &&
                          host.present(sym::tag_buckets) && host.present(sym::country_exists) &&
                          host.present(sym::country_provinces) && host.present(sym::province_is_city) &&
-                         host.present(sym::province_in_empire);
+                         host.present(sym::province_in_empire) && host.present(sym::province_coastal);
     if (!present) {
         host.info("the world's symbols are absent on this build: no service {}", ANVIL_GAME_WORLD_SERVICE);
         return;
@@ -1775,6 +1775,8 @@ void load_world(anvil::Host& host) {
     l.city_bit = sym::province_is_city.city_bit;
     l.empire_flags = sym::province_in_empire.empire_flags;
     l.empire_bit = sym::province_in_empire.empire_bit;
+    l.coastal_flags = sym::province_coastal.coastal_flags;
+    l.coastal_mask = sym::province_coastal.coastal_mask;
     l.country_index_shift = sym::province_base_tax.country_index_shift;
     l.tag_kind = sym::player_country.player_kind - sym::player_country.player;
     l.tag_valid = sym::player_country.observed_valid - sym::player_country.observed;

@@ -99,8 +99,8 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
   variables, modifiers and values such as development, on its owner, occupation
   and cores, its religion, culture, trade goods and their groups, its area,
   region, continent and trade node, and whether it is a capital, part of the Holy
-  Roman Empire or a colony, in one colour or a scale between two; an edited file
-  shows the next time the mode is picked, without a restart
+  Roman Empire, a colony or coastal, in one colour or a scale between two; an
+  edited file shows the next time the mode is picked, without a restart
   ([docs/spec/map-mode-files-v1.md](docs/spec/map-mode-files-v1.md)).
   By itself it changes nothing.
 - And `anvil-script` (`anvil/plugins/anvil-script/`): a gameplay plugin can add

@@ -98,6 +98,7 @@ std::string key_of(Test test) {
         case Test::capital: return "capital";
         case Test::hre: return "hre";
         case Test::city: return "city";
+        case Test::coastal: return "coastal";
         case Test::trade_node: return "trade_node";
         case Test::trade_goods: return "trade_goods";
         case Test::area: return "area";
@@ -366,12 +367,14 @@ public:
                                               "russian, grain, scandinavia_region): " + r.name};
                 }
                 ++tests;
-            } else if (k == "occupied" || k == "subject" || k == "capital" || k == "hre" || k == "city") {
+            } else if (k == "occupied" || k == "subject" || k == "capital" || k == "hre" || k == "city" ||
+                       k == "coastal") {
                 r.test = k == "occupied" ? Test::occupied
                          : k == "subject" ? Test::subject
                          : k == "capital" ? Test::capital
                          : k == "hre"     ? Test::hre
-                                          : Test::city;
+                         : k == "city"    ? Test::city
+                                          : Test::coastal;
                 r.name = k;
                 r.yes = yes_no(k.c_str());
                 ++tests;
@@ -416,7 +419,7 @@ public:
             throw Fault{line, "a rule needs one of always, flag, variable, modifier, value, owned_by, controlled_by, "
                               "core, occupied, subject, subject_of, religion, religion_group, culture, "
                               "culture_group, trade_goods, area, region, superregion, continent, trade_node, capital, "
-                              "hre or city"};
+                              "hre, city or coastal"};
         }
         if (!has_color) throw Fault{line, "a rule needs color = { r g b }"};
         if (!has_label || r.label.empty() || r.label.size() > kLabelMax) {
@@ -441,7 +444,8 @@ public:
         }
         if ((r.test == Test::owned_by || r.test == Test::controlled_by || r.test == Test::core ||
              r.test == Test::core_of || r.test == Test::occupied || r.test == Test::trade_goods ||
-             r.test == Test::capital || r.test == Test::hre || r.test == Test::city || is_place(r.test)) &&
+             r.test == Test::capital || r.test == Test::hre || r.test == Test::city ||
+             r.test == Test::coastal || is_place(r.test)) &&
             r.owner) {
             throw Fault{line, key_of(r.test) + " is the province's: leave out owner = yes"};
         }
@@ -592,7 +596,8 @@ bool is_yes_no(Test test) {
            test == Test::subject || test == Test::controlled_by || test == Test::core_of || test == Test::subject_of ||
            test == Test::religion || test == Test::culture || test == Test::trade_goods ||
            test == Test::religion_group || test == Test::culture_group || is_place(test) ||
-           test == Test::capital || test == Test::hre || test == Test::city;
+           test == Test::capital || test == Test::hre || test == Test::city ||
+           test == Test::coastal;
 }
 
 Evaluator::Evaluator(const FileMode& mode, World& world) : mode_(mode), world_(world) {
@@ -658,6 +663,7 @@ std::optional<std::int64_t> Evaluator::read_country(std::size_t i, const std::st
         case Test::trade_node:
         case Test::hre:
         case Test::city:
+        case Test::coastal:
         case Test::owned_by:
         case Test::controlled_by:
         case Test::core:
@@ -718,6 +724,11 @@ std::optional<std::int64_t> Evaluator::read(std::size_t i, std::int32_t province
         case Test::city: {
             if (!owner) owner = world_.owner(province);
             if (owner->empty()) return std::nullopt;
+            const std::optional<bool> is = world_.province_is(province, r.test);
+            if (!is) return std::nullopt;
+            return *is == r.yes ? 1 : 0;
+        }
+        case Test::coastal: {  // the land's, owned or not
             const std::optional<bool> is = world_.province_is(province, r.test);
             if (!is) return std::nullopt;
             return *is == r.yes ? 1 : 0;

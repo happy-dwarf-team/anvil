@@ -48,6 +48,8 @@ struct WorldLayout {
     std::uint32_t city_bit = 0;
     std::uint32_t empire_flags = 0;    // province: byte
     std::uint32_t empire_bit = 0;
+    std::uint32_t coastal_flags = 0;   // map part: byte
+    std::uint32_t coastal_mask = 0;
 
     // Tags: three characters, the country index (int16) above the shift, the
     // kind byte and the valid byte.
