@@ -1992,10 +1992,11 @@ fn lobby_payload_reads_its_change() {
         let read = unsafe { game::LobbyChange::read(ptr::from_ref(&l).cast()) };
         assert_eq!(read, Some(expected));
     }
+    // A payload without `change` reads its missing bytes as 0.
     let short = AnvilGameLobby { size: 4, change: 1 };
     assert_eq!(
         unsafe { game::LobbyChange::read(ptr::from_ref(&short).cast()) },
-        None
+        Some(game::LobbyChange::Other(0))
     );
 }
 

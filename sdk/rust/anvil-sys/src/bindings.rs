@@ -105,6 +105,7 @@ pub const ANVIL_GAME_COMMANDS_SERVICE_VERSION: u32 = 3;
 pub const ANVIL_GAME_CAMERA_LOCKED: u32 = 1;
 pub const ANVIL_GAME_CAMERA_SERVICE: &[u8; 18] = b"anvil-game.camera\0";
 pub const ANVIL_GAME_CAMERA_SERVICE_VERSION: u32 = 1;
+pub const ANVIL_GAME_EVENT_LOBBY: &[u8; 17] = b"anvil-game.lobby\0";
 pub const ANVIL_OVERLAY_ID: &[u8; 14] = b"anvil-overlay\0";
 pub const ANVIL_PANEL_SERVICE: &[u8; 20] = b"anvil-overlay.panel\0";
 pub const ANVIL_PANEL_SERVICE_VERSION: u32 = 1;
@@ -2198,6 +2199,26 @@ const _: () = {
     [
         "Offset of field: AnvilGameCameraService::pan",
     ][::core::mem::offset_of!(AnvilGameCameraService, pan) - 16usize];
+};
+pub const ANVIL_GAME_LOBBY_ENTERED: AnvilGameLobbyChange = 1;
+pub const ANVIL_GAME_LOBBY_LEFT: AnvilGameLobbyChange = 2;
+pub type AnvilGameLobbyChange = core::ffi::c_int;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AnvilGameLobby {
+    pub size: u32,
+    pub change: u32,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AnvilGameLobby"][::core::mem::size_of::<AnvilGameLobby>() - 8usize];
+    ["Alignment of AnvilGameLobby"][::core::mem::align_of::<AnvilGameLobby>() - 4usize];
+    [
+        "Offset of field: AnvilGameLobby::size",
+    ][::core::mem::offset_of!(AnvilGameLobby, size) - 0usize];
+    [
+        "Offset of field: AnvilGameLobby::change",
+    ][::core::mem::offset_of!(AnvilGameLobby, change) - 4usize];
 };
 #[repr(C)]
 #[derive(Debug)]
