@@ -27,6 +27,7 @@ struct Recorded {
     map_infos: Vec<String>,
     describes: Vec<(usize, usize)>,
     colors: Vec<u32>,
+    legend: Vec<String>,
     bindings: Vec<(i64, u32, usize, usize)>, // code, flags, handler, context
     day_ends: Vec<(usize, usize, usize)>,    // (self, callback, context)
     effects: Vec<(usize, String, usize, usize, usize)>, // (self, key, execute, describe, context)
@@ -400,7 +401,11 @@ unsafe extern "C" fn panel_set_rows(
             } else {
                 format!("={}", text(row.value))
             };
-            format!("{}:{label}{value}:{}", row.kind, row.id)
+            if row.kind == ANVIL_PANEL_SWATCH as u32 {
+                format!("{}:#{:06X} {label}{value}:{}", row.kind, row.color, row.id)
+            } else {
+                format!("{}:{label}{value}:{}", row.kind, row.id)
+            }
         })
         .collect();
     with(|r| r.rows = lines);
@@ -515,6 +520,23 @@ unsafe extern "C" fn map_show(mode: *const AnvilMapMode) -> AnvilResult {
     ANVIL_OK
 }
 
+unsafe extern "C" fn map_set_legend(
+    mode: *const AnvilMapMode,
+    entries: *const AnvilMapLegendEntry,
+    count: u32,
+    size: u32,
+) -> AnvilResult {
+    assert_eq!(mode, MAP_MODE);
+    assert_eq!(size as usize, std::mem::size_of::<AnvilMapLegendEntry>());
+    let entries = unsafe { std::slice::from_raw_parts(entries, count as usize) };
+    let lines = entries
+        .iter()
+        .map(|e| format!("#{:06X} {}", e.color, text(e.label)))
+        .collect();
+    with(|r| r.legend = lines);
+    ANVIL_OK
+}
+
 static FAKE_MAP: Shared<AnvilMapModesService> = Shared(AnvilMapModesService {
     size: std::mem::size_of::<AnvilMapModesService>() as u32,
     register_mode: Some(map_register),
@@ -523,6 +545,7 @@ static FAKE_MAP: Shared<AnvilMapModesService> = Shared(AnvilMapModesService {
     shown: Some(map_shown),
     id: Some(map_id),
     show: Some(map_show),
+    set_legend: Some(map_set_legend),
 });
 
 // --- a fake day end service: refuses after two subscriptions ----------------------
@@ -1713,11 +1736,18 @@ fn panel_rows_reach_the_overlay_and_a_panicking_click_is_logged_once() {
         panel::Row::Separator,
         panel::Row::button("Ref\0resh", 3),
         panel::Row::text("plain"),
+        panel::Row::swatch(0xE0B000, "Holy site"),
     ])
     .unwrap();
     assert_eq!(
         with(|r| r.rows.clone()),
-        ["1:Treasury=12.5:0", "3::0", "2:Refresh:3", "1:plain:0"]
+        [
+            "1:Treasury=12.5:0",
+            "3::0",
+            "2:Refresh:3",
+            "1:plain:0",
+            "4:#E0B000 Holy site:0"
+        ]
     );
     p.on_click(|id| assert!(id != 3, "button {id}")).unwrap();
     let (click, context) = with(|r| r.clicks[0]);
@@ -2141,6 +2171,14 @@ fn map_modes_register_paint_and_cut_tooltips_at_a_whole_character() {
     let shows = MAP_SHOWS.load(Ordering::Relaxed);
     modes.show(mode).unwrap();
     assert_eq!(MAP_SHOWS.load(Ordering::Relaxed), shows + 1);
+    modes
+        .set_legend(mode, &[(map::rgb(224, 176, 0), "Holy site"), (1, "N\0ul")])
+        .unwrap();
+    assert_eq!(
+        with(|r| r.legend.clone()),
+        ["#E0B000 Holy site", "#000001 Nul"]
+    );
+    assert_eq!(map::LEGEND_MAX, 32);
 
     let (describe, context) = with(|r| r.describes[0]);
     let describe: unsafe extern "C" fn(

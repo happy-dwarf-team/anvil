@@ -23,7 +23,7 @@ use crate::host::Host;
 use crate::panic::run_callback;
 use crate::sys::{
     AnvilPanel, AnvilPanelRow, AnvilPanelService, ANVIL_PANEL_BUTTON, ANVIL_PANEL_SEPARATOR,
-    ANVIL_PANEL_SERVICE_VERSION, ANVIL_PANEL_TEXT,
+    ANVIL_PANEL_SERVICE_VERSION, ANVIL_PANEL_SWATCH, ANVIL_PANEL_TEXT,
 };
 use crate::table::Table;
 use crate::text::{c_string, static_str};
@@ -33,8 +33,10 @@ pub const SERVICE: &std::ffi::CStr = c"anvil-overlay.panel";
 /// The service's major version.
 pub const VERSION: u32 = ANVIL_PANEL_SERVICE_VERSION;
 
-/// One row of a panel.
+/// One row of a panel. Kinds are added with newer overlays, so a `match`
+/// needs a `_` arm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Row<'a> {
     /// `label`, and `value` beside it when there is one.
     Text {
@@ -52,6 +54,17 @@ pub enum Row<'a> {
     },
     /// A line.
     Separator,
+    /// A square of `color` (`0x00RRGGBB`) before `label`, and `value` beside
+    /// it when there is one. Since anvil-overlay 1.27.0: an older overlay
+    /// refuses the rows with `InvalidArgument`.
+    Swatch {
+        /// The colour, `0x00RRGGBB`.
+        color: u32,
+        /// The text.
+        label: &'a str,
+        /// The value beside it.
+        value: Option<&'a str>,
+    },
 }
 
 impl<'a> Row<'a> {
@@ -71,6 +84,15 @@ impl<'a> Row<'a> {
     /// A button.
     pub const fn button(label: &'a str, id: u64) -> Self {
         Self::Button { label, id }
+    }
+
+    /// A colour square before a label (anvil-overlay 1.27.0).
+    pub const fn swatch(color: u32, label: &'a str) -> Self {
+        Self::Swatch {
+            color,
+            label,
+            value: None,
+        }
     }
 }
 
@@ -196,6 +218,8 @@ impl Panel {
                     label: keep(label),
                     value: value.map_or(ptr::null(), &mut keep),
                     id: 0,
+                    color: 0,
+                    reserved2: 0,
                 },
                 Row::Button { label, id } => AnvilPanelRow {
                     kind: ANVIL_PANEL_BUTTON as u32,
@@ -203,6 +227,8 @@ impl Panel {
                     label: keep(label),
                     value: ptr::null(),
                     id,
+                    color: 0,
+                    reserved2: 0,
                 },
                 Row::Separator => AnvilPanelRow {
                     kind: ANVIL_PANEL_SEPARATOR as u32,
@@ -210,6 +236,21 @@ impl Panel {
                     label: ptr::null(),
                     value: ptr::null(),
                     id: 0,
+                    color: 0,
+                    reserved2: 0,
+                },
+                Row::Swatch {
+                    color,
+                    label,
+                    value,
+                } => AnvilPanelRow {
+                    kind: ANVIL_PANEL_SWATCH as u32,
+                    reserved: 0,
+                    label: keep(label),
+                    value: value.map_or(ptr::null(), &mut keep),
+                    id: 0,
+                    color,
+                    reserved2: 0,
                 },
             })
             .collect();
