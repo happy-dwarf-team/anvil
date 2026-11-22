@@ -1,5 +1,51 @@
 # Changelog
 
+## [1.26.0](https://github.com/happy-dwarf-team/anvil/compare/v1.25.0...v1.26.0) (2026-11-22)
+
+
+### Features
+
+* **anvil-game:** crash reports name an unchecked province ID and an idea count past its group ([#569](https://github.com/happy-dwarf-team/anvil/issues/569)) ([18d600a](https://github.com/happy-dwarf-team/anvil/commit/18d600a286bf0d6feacdf416d65c557baab03adc)), closes [#426](https://github.com/happy-dwarf-team/anvil/issues/426)
+* **anvil-map:** a legend for map modes, and map modes from mod files; Rust plugins get them in anvil-sdk 0.3.0, which breaks code that matches every panel::Row kind or builds a world::Province itself ([#592](https://github.com/happy-dwarf-team/anvil/issues/592), [#594](https://github.com/happy-dwarf-team/anvil/issues/594)) ([e4944e2](https://github.com/happy-dwarf-team/anvil/commit/e4944e231174b96449860fbe8c1194472478bbed))
+* **anvil-map:** area, region, superregion and continent rules, with the province's place keys in anvil-game.world ([#590](https://github.com/happy-dwarf-team/anvil/issues/590)) ([7658668](https://github.com/happy-dwarf-team/anvil/commit/7658668c01c583a51a47633754ee4be840f9be16))
+* **anvil-map:** capital = yes and no rules in map mode files ([#591](https://github.com/happy-dwarf-team/anvil/issues/591)) ([7c4a2a2](https://github.com/happy-dwarf-team/anvil/commit/7c4a2a269a727c2d02d72058403220c42ee592bb))
+* **anvil-map:** coastal = yes and no rules in map mode files ([#594](https://github.com/happy-dwarf-team/anvil/issues/594)) ([ee8ca52](https://github.com/happy-dwarf-team/anvil/commit/ee8ca5251a2450e91a590a2b460ff3c1bd9e1964))
+* **anvil-map:** controlled_by, core = TAG and subject_of rules in map mode files ([#586](https://github.com/happy-dwarf-team/anvil/issues/586)) ([7dd8614](https://github.com/happy-dwarf-team/anvil/commit/7dd8614c77c19178fd6423fcb4c9a074ec7c8084))
+* **anvil-map:** hre, city and trade_node rules in map mode files ([#592](https://github.com/happy-dwarf-team/anvil/issues/592)) ([cb8325d](https://github.com/happy-dwarf-team/anvil/commit/cb8325da7f6be4037828a1080c00d444858b02d2))
+* **anvil-map:** map mode files read the owner and the game's own values, and colour scales ([#581](https://github.com/happy-dwarf-team/anvil/issues/581)) ([a17b3ed](https://github.com/happy-dwarf-team/anvil/commit/a17b3eddf45f7362b347e7173fce43e8cf621da7))
+* **anvil-map:** owned_by, core, occupied and subject rules in map mode files ([#584](https://github.com/happy-dwarf-team/anvil/issues/584)) ([a337f90](https://github.com/happy-dwarf-team/anvil/commit/a337f90c2c13798fbdca1a2cbddb0e13981f6cc3))
+* **anvil-map:** read map mode files again after an edit, without a restart ([#582](https://github.com/happy-dwarf-team/anvil/issues/582)) ([2fcc0dd](https://github.com/happy-dwarf-team/anvil/commit/2fcc0dd02640a3a9804cad81577bd18c1b787047))
+* **anvil-map:** religion_group and culture_group rules, with the group keys in anvil-game.world ([#588](https://github.com/happy-dwarf-team/anvil/issues/588)) ([a8be507](https://github.com/happy-dwarf-team/anvil/commit/a8be5073ee3b1fcd3668495d822715c9578009c3))
+* **anvil-map:** religion, culture and trade_goods rules, with their keys in anvil-game.world ([#587](https://github.com/happy-dwarf-team/anvil/issues/587)) ([1f36f58](https://github.com/happy-dwarf-team/anvil/commit/1f36f58cb6b8df05f60a55a6a0de13cec9dfdf84))
+* **manager:** say "Try again tomorrow" when a daily limit of the receiver refuses a report ([#566](https://github.com/happy-dwarf-team/anvil/issues/566)) ([11362fd](https://github.com/happy-dwarf-team/anvil/commit/11362fd46d5d56221819246c3d1e36b7f02dddb8))
+
+
+### Bug Fixes
+
+* **anvil-map:** a lexer fault outside any block no longer stops map mode files in a loop ([#595](https://github.com/happy-dwarf-team/anvil/issues/595)) ([66d02b0](https://github.com/happy-dwarf-team/anvil/commit/66d02b0803426c16ddfe2f7ce34fb67bb76977d8))
+* **anvil-map:** start a plugin mode's tooltip lines on a line of their own after the game's ([#585](https://github.com/happy-dwarf-team/anvil/issues/585)) ([ac8f96c](https://github.com/happy-dwarf-team/anvil/commit/ac8f96c6ca3512f1410242fcd04ac2662d5edadb))
+* **anvil-script:** answer has_dlc for plugins no while a save loads ([#575](https://github.com/happy-dwarf-team/anvil/issues/575)) ([e116ccd](https://github.com/happy-dwarf-team/anvil/commit/e116ccdc201c4261b26acd46245267b9412c70eb))
+* **api:** a reused hook object gets its next before the change is enabled ([#555](https://github.com/happy-dwarf-team/anvil/issues/555)) ([b6c32eb](https://github.com/happy-dwarf-team/anvil/commit/b6c32eb94e50a08ccc1605ef505f491b3dbcd59d)), closes [#534](https://github.com/happy-dwarf-team/anvil/issues/534)
+* **api:** an atomic accessor for the game's hash in the C++ SDK ([#560](https://github.com/happy-dwarf-team/anvil/issues/560)) ([c139f0d](https://github.com/happy-dwarf-team/anvil/commit/c139f0ddbe2b17bdfd5e0745486a0ec35cfcdf1f))
+* catch only access violations in game calls, range-check the tooltip province, show an unsaved setting ([#557](https://github.com/happy-dwarf-team/anvil/issues/557)) ([a18523c](https://github.com/happy-dwarf-team/anvil/commit/a18523c33896535ba3c5e18bc27052ef4eefc856))
+* **cli:** judge anvil check --game against the installed Anvil's version ([#552](https://github.com/happy-dwarf-team/anvil/issues/552)) ([73a0f27](https://github.com/happy-dwarf-team/anvil/commit/73a0f27c198b6c7804483ad3e3859666ee6709eb)), closes [#544](https://github.com/happy-dwarf-team/anvil/issues/544)
+* **cli:** keep symbols.lock on an undeclared exe and hold table ids to the hash in port ([#558](https://github.com/happy-dwarf-team/anvil/issues/558)) ([01b16e0](https://github.com/happy-dwarf-team/anvil/commit/01b16e05be8298e0c954a7819f094b10e2f4bddc))
+* **core:** a -userdir folder that does not exist yet means an empty playset ([#550](https://github.com/happy-dwarf-team/anvil/issues/550)) ([de72518](https://github.com/happy-dwarf-team/anvil/commit/de7251873e65bace7f5884648ab4c520a15d2fdf)), closes [#542](https://github.com/happy-dwarf-team/anvil/issues/542)
+* **core:** a broken anvil.toml loads no plugin and keeps last-start.toml ([#547](https://github.com/happy-dwarf-team/anvil/issues/547)) ([3a02abd](https://github.com/happy-dwarf-team/anvil/commit/3a02abdd7dba12c3fa6cb0c34f0a5ef4cf3a3ed0)), closes [#537](https://github.com/happy-dwarf-team/anvil/issues/537)
+* **core:** check a mod's plugin from the bytes its hash covered ([#574](https://github.com/happy-dwarf-team/anvil/issues/574)) ([5a8bd33](https://github.com/happy-dwarf-team/anvil/commit/5a8bd3356ef486ca7325ca0c57c183c4fa564238))
+* **core:** hook and memory low findings of the 19.11 run (C5, Y2, Y4) ([#565](https://github.com/happy-dwarf-team/anvil/issues/565)) ([a91cb72](https://github.com/happy-dwarf-team/anvil/commit/a91cb72442a88e7ddaea43bef1ddff1e12bf1776)), closes [#545](https://github.com/happy-dwarf-team/anvil/issues/545)
+* **core:** leave a plugin's crash note out of the report when it wrote nothing ([#573](https://github.com/happy-dwarf-team/anvil/issues/573)) ([d2797d9](https://github.com/happy-dwarf-team/anvil/commit/d2797d9078452f09df0faac12c95286f9d13060f))
+* **core:** make a damaged approved copy again when its mod still has the approved files ([#553](https://github.com/happy-dwarf-team/anvil/issues/553)) ([68b9a65](https://github.com/happy-dwarf-team/anvil/commit/68b9a6507e93b7c7e0f9366655e71d378e9a748c)), closes [#543](https://github.com/happy-dwarf-team/anvil/issues/543)
+* **core:** refuse hook sites a short branch or "??" bytes make unsafe ([#562](https://github.com/happy-dwarf-team/anvil/issues/562)) ([1eac519](https://github.com/happy-dwarf-team/anvil/commit/1eac51909391a08679e8679c264b2fa1428166e4)), closes [#535](https://github.com/happy-dwarf-team/anvil/issues/535) [#536](https://github.com/happy-dwarf-team/anvil/issues/536)
+* **core:** shared setting variables, prerelease ranges and partial hashes ([#559](https://github.com/happy-dwarf-team/anvil/issues/559)) ([64c90d3](https://github.com/happy-dwarf-team/anvil/commit/64c90d37baac2b95511cfe6efff3b88009f5bda4))
+* **game:** a new war at a reused address gives ENDED and STARTED ([#554](https://github.com/happy-dwarf-team/anvil/issues/554)) ([baef6d7](https://github.com/happy-dwarf-team/anvil/commit/baef6d71f7efa6fc9d545d2f7264d545d7936e3d)), closes [#538](https://github.com/happy-dwarf-team/anvil/issues/538)
+* limit network requests with WinHTTP timeouts, a deadline and a stall limit ([#549](https://github.com/happy-dwarf-team/anvil/issues/549)) ([6541c37](https://github.com/happy-dwarf-team/anvil/commit/6541c379b896ba7004083cf7567df6af4f0b20c9)), closes [#540](https://github.com/happy-dwarf-team/anvil/issues/540)
+* low findings in the manager and the crash history (MU3-MU8, T5) ([#561](https://github.com/happy-dwarf-team/anvil/issues/561)) ([4ffddb8](https://github.com/happy-dwarf-team/anvil/commit/4ffddb8dcc674d239364777f50c0cf828270d435))
+* **manager:** finish an interrupted EU4DLL or Unicode Patch replace in its own backup ([#551](https://github.com/happy-dwarf-team/anvil/issues/551)) ([adfcd55](https://github.com/happy-dwarf-team/anvil/commit/adfcd5568b92d8b8d6b17c259c04eea4d5c239cf)), closes [#541](https://github.com/happy-dwarf-team/anvil/issues/541)
+* **manager:** no benchmark series without random bytes for its id ([#556](https://github.com/happy-dwarf-team/anvil/issues/556)) ([7274b19](https://github.com/happy-dwarf-team/anvil/commit/7274b196c76d398cbd04341ffd101359c92f140b))
+* **manager:** show the system error when the receiver's status cannot be read ([#570](https://github.com/happy-dwarf-team/anvil/issues/570)) ([6066303](https://github.com/happy-dwarf-team/anvil/commit/60663032550023de8f25156ef9a1600a48176d6a))
+* **sdk:** a group's record of filled hooks belongs to its owner handle ([#563](https://github.com/happy-dwarf-team/anvil/issues/563)) ([93d0dcc](https://github.com/happy-dwarf-team/anvil/commit/93d0dcce4f479bac8ac35847624dda46a0c156cb)), closes [#533](https://github.com/happy-dwarf-team/anvil/issues/533)
+
 ## [1.25.0](https://github.com/happy-dwarf-team/anvil/compare/v1.24.0...v1.25.0) (2026-11-19)
 
 
