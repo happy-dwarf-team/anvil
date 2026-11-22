@@ -78,6 +78,9 @@ pub const ANVIL_GAME_RELATION_GIVING_MILITARY_ACCESS: u32 = 4;
 pub const ANVIL_GAME_RELATION_SUBSIDIES: u32 = 5;
 pub const ANVIL_GAME_RELATION_DEPENDENCY: u32 = 6;
 pub const ANVIL_GAME_RELATION_WARNING: u32 = 7;
+pub const ANVIL_GAME_KEY_RELIGION: u32 = 0;
+pub const ANVIL_GAME_KEY_CULTURE: u32 = 1;
+pub const ANVIL_GAME_KEY_TRADE_GOODS: u32 = 2;
 pub const ANVIL_GAME_DIPLOMACY_TRUCE: u32 = 1;
 pub const ANVIL_GAME_PLAYER_OBSERVER: u32 = 1;
 pub const ANVIL_GAME_WORLD_SERVICE: &[u8; 17] = b"anvil-game.world\0";
@@ -1848,12 +1851,30 @@ pub struct AnvilGameWorldService {
             length: *mut u32,
         ) -> AnvilResult,
     >,
+    pub province_key: ::core::option::Option<
+        unsafe extern "C" fn(
+            province: i32,
+            key: u32,
+            utf8: *mut core::ffi::c_char,
+            capacity: u32,
+            length: *mut u32,
+        ) -> AnvilResult,
+    >,
+    pub country_key: ::core::option::Option<
+        unsafe extern "C" fn(
+            tag: *const core::ffi::c_char,
+            key: u32,
+            utf8: *mut core::ffi::c_char,
+            capacity: u32,
+            length: *mut u32,
+        ) -> AnvilResult,
+    >,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     [
         "Size of AnvilGameWorldService",
-    ][::core::mem::size_of::<AnvilGameWorldService>() - 456usize];
+    ][::core::mem::size_of::<AnvilGameWorldService>() - 472usize];
     [
         "Alignment of AnvilGameWorldService",
     ][::core::mem::align_of::<AnvilGameWorldService>() - 8usize];
@@ -2034,6 +2055,12 @@ const _: () = {
         "Offset of field: AnvilGameWorldService::province_triggered_modifier_keys",
     ][::core::mem::offset_of!(AnvilGameWorldService, province_triggered_modifier_keys)
         - 448usize];
+    [
+        "Offset of field: AnvilGameWorldService::province_key",
+    ][::core::mem::offset_of!(AnvilGameWorldService, province_key) - 456usize];
+    [
+        "Offset of field: AnvilGameWorldService::country_key",
+    ][::core::mem::offset_of!(AnvilGameWorldService, country_key) - 464usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

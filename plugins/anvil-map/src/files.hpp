@@ -20,7 +20,7 @@ inline constexpr std::size_t kFileMax = 1u << 20;
 
 // What a rule reads of a province.
 enum class Test { always, flag, variable, modifier, value, owned_by, core, occupied, subject, controlled_by, core_of,
-                  subject_of };
+                  subject_of, religion, culture, trade_goods };
 // Tests that pass or not, with no number: they take no bounds and no scale.
 bool is_yes_no(Test test);
 
@@ -32,7 +32,8 @@ bool is_country_value(Value value);
 
 struct Rule {
     Test test = Test::always;
-    std::string name;    // the flag, variable or modifier key, the value's name, or a country tag
+    std::string name;    // the flag, variable or modifier key, the value's name, a country tag, or the
+                         // religion's, culture's or trade goods' script key
     Value value = Value::development;  // for Test::value
     bool owner = false;  // read from the province's owner, not the province
     bool yes = true;     // core, occupied, subject: = yes or = no
@@ -106,6 +107,11 @@ public:
     virtual bool has_core(std::int32_t province, const std::string& tag) = 0;
     // The country's overlord's tag; empty for none.
     virtual std::string overlord(const std::string& tag) = 0;
+    // The script key of the province's religion, culture or trade goods
+    // (`test` is one of the three), or of the country's state religion or
+    // primary culture; empty for none.
+    virtual std::string province_key(std::int32_t province, Test test) = 0;
+    virtual std::string country_key(const std::string& tag, Test test) = 0;
 };
 
 // A mode's rules with the game's ids for this computation. A country's

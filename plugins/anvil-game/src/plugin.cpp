@@ -1511,6 +1511,32 @@ AnvilResult world_province_triggered_modifier_keys(std::int32_t province, char* 
                            capacity, length);
 }
 
+template <class Read>
+AnvilResult give_key(Read read, char* utf8, std::uint32_t capacity, std::uint32_t* length) {
+    if (capacity != 0 && utf8 == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (!world_open()) return ANVIL_ERROR_WRONG_PHASE;
+    try {
+        std::string key;
+        const AnvilResult r = read(key);
+        return r == ANVIL_OK ? give_text(key, utf8, capacity, length) : r;
+    } catch (const std::bad_alloc&) {
+        return ANVIL_ERROR_OUT_OF_MEMORY;
+    }
+}
+
+AnvilResult world_province_key(std::int32_t province, std::uint32_t key, char* utf8, std::uint32_t capacity,
+                               std::uint32_t* length) {
+    return give_key([&](auto& k) { return anvil_game::read_province_key(g_world, province, key, k); }, utf8, capacity,
+                    length);
+}
+
+AnvilResult world_country_key(const char* tag, std::uint32_t key, char* utf8, std::uint32_t capacity,
+                              std::uint32_t* length) {
+    if (tag == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
+    return give_key([&](auto& k) { return anvil_game::read_country_key(g_world, tag, key, k); }, utf8, capacity,
+                    length);
+}
+
 AnvilResult world_province_view(std::int32_t* province) {
     if (province == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
     if (!world_open()) return ANVIL_ERROR_WRONG_PHASE;
@@ -1694,6 +1720,7 @@ constexpr AnvilGameWorldService kWorldService = {
     world_player_tags,             world_selected_province, world_province_at, world_unit_at,
     world_exploration_regions,     world_region_name,       world_region_key,
     world_province_triggered_modifier_keys,
+    world_province_key,            world_country_key,
 };
 
 // A port may declare these symbols absent on a new build (ADR 0004): the game
@@ -1912,6 +1939,17 @@ void load_world(anvil::Host& host) {
             l.province_triggered = sym::province_triggered_modifiers.data;
             l.province_triggered_count = sym::province_triggered_modifiers.count;
         }
+    }
+    if (host.present(sym::religion_of) && host.present(sym::culture_of) && host.present(sym::trade_goods_of) &&
+        host.present(sym::religion_key) && host.present(sym::culture_key) && host.present(sym::trade_goods_key)) {
+        l.province_religion = sym::religion_of.province;
+        l.province_culture = sym::culture_of.province;
+        l.province_trade_goods = sym::trade_goods_of.province;
+        l.country_religion = sym::religion_of.country;
+        l.country_culture = sym::culture_of.country;
+        l.religion_key = sym::religion_key.key;
+        l.culture_key = sym::culture_key.key;
+        l.trade_goods_key = sym::trade_goods_key.key;
     }
     if (host.present(sym::selection_holder) && host.present(sym::selection_view) && host.present(sym::view_window) &&
         host.present(sym::province_view_province) && host.present(sym::dialog_window_part) &&

@@ -1289,6 +1289,67 @@ impl World {
             |buffer, capacity, length| unsafe { f(region, buffer, capacity, length) },
         )
     }
+
+    fn province_key(&self, province: i32, key: u32, name: &str) -> Result<String> {
+        let f = function!(self.table, AnvilGameWorldService, province_key)?;
+        // SAFETY: the service fills at most `capacity` bytes.
+        read_text(
+            || format!("world {name} {province}"),
+            |buffer, capacity, length| unsafe { f(province, key, buffer, capacity, length) },
+        )
+    }
+
+    fn country_key(&self, tag: Tag, key: u32, name: &str) -> Result<String> {
+        let f = function!(self.table, AnvilGameWorldService, country_key)?;
+        let text = tag.c_text();
+        // SAFETY: a NUL-terminated tag; the service fills at most `capacity` bytes.
+        read_text(
+            || format!("world {name} {tag}"),
+            |buffer, capacity, length| unsafe { f(text.as_ptr(), key, buffer, capacity, length) },
+        )
+    }
+
+    /// The script key of a province's religion, such as `orthodox`;
+    /// `NotFound` when it has none (anvil-game 1.26.0).
+    pub fn province_religion(&self, province: i32) -> Result<String> {
+        self.province_key(
+            province,
+            crate::sys::ANVIL_GAME_KEY_RELIGION,
+            "province_religion",
+        )
+    }
+
+    /// The script key of a province's culture, such as `russian`; `NotFound`
+    /// when it has none (anvil-game 1.26.0).
+    pub fn province_culture(&self, province: i32) -> Result<String> {
+        self.province_key(
+            province,
+            crate::sys::ANVIL_GAME_KEY_CULTURE,
+            "province_culture",
+        )
+    }
+
+    /// The script key of a province's trade goods, such as `grain`;
+    /// `NotFound` when it has none (anvil-game 1.26.0).
+    pub fn province_trade_goods(&self, province: i32) -> Result<String> {
+        self.province_key(
+            province,
+            crate::sys::ANVIL_GAME_KEY_TRADE_GOODS,
+            "province_trade_goods",
+        )
+    }
+
+    /// The script key of a country's state religion; `NotFound` when it has
+    /// none (anvil-game 1.26.0).
+    pub fn country_religion(&self, tag: Tag) -> Result<String> {
+        self.country_key(tag, crate::sys::ANVIL_GAME_KEY_RELIGION, "country_religion")
+    }
+
+    /// The script key of a country's primary culture; `NotFound` when it has
+    /// none (anvil-game 1.26.0).
+    pub fn country_culture(&self, tag: Tag) -> Result<String> {
+        self.country_key(tag, crate::sys::ANVIL_GAME_KEY_CULTURE, "country_culture")
+    }
 }
 
 fn timed_list(

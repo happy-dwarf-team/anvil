@@ -618,6 +618,11 @@ struct FakeWorld {
     std::string triggered_texts[2] = {"pr_mughal_tomb", "center_of_trade_modifier"};
     alignas(8) uint8_t triggered_modifiers[2][0x2E0] = {};
     uintptr_t moskva_triggered[2] = {};
+    // Religion, culture and trade goods (1.26.0): Moskva and Russia orthodox
+    // and russian, Moskva's goods grain; province 2 has none of them.
+    alignas(8) uint8_t orthodox[0x100] = {};
+    alignas(8) uint8_t russian[0x100] = {};
+    alignas(8) uint8_t grain[0x80] = {};
     alignas(8) uint8_t selection_object[0x20] = {};
     alignas(8) uint8_t province_view[0x1000] = {};
     alignas(8) uint8_t view_window[0x200] = {};
@@ -652,6 +657,14 @@ struct FakeWorld {
             moskva_triggered[i] = reinterpret_cast<uintptr_t>(triggered_modifiers[i]);
         }
         set(province(1), 0x310, reinterpret_cast<uintptr_t>(moskva_triggered));
+        set_key(orthodox + 0x90, "orthodox");
+        set_key(russian + 0x48, "russian");
+        set_key(grain + 0x18, "grain");
+        set(province(1), 0x448, reinterpret_cast<uintptr_t>(orthodox));
+        set(province(1), 0x440, reinterpret_cast<uintptr_t>(russian));
+        set(province(1), 0x458, reinterpret_cast<uintptr_t>(grain));
+        set(rus, 0xF30, reinterpret_cast<uintptr_t>(orthodox));
+        set(rus, 0x1228, reinterpret_cast<uintptr_t>(russian));
         set(province(1), 0x31C, int32_t{2});
 
         set(session, 0x1220, reinterpret_cast<uintptr_t>(selection_object));
@@ -2163,7 +2176,7 @@ int main(int argc, char** argv) {
         start.add(gp_toml);
         start.add(plugin_toml("other"));
         start.make();
-        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 187);
+        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 193);
         AnvilPlugin* p = start.load(ANVIL_GAME_ID);
         CHECK(p != nullptr);
         if (p == nullptr) return;
@@ -3537,6 +3550,52 @@ int main(int argc, char** argv) {
             fake.moskva_triggered[1] = 0;
             CHECK(world->province_triggered_modifier_keys(1, keys, sizeof keys, &length) == ANVIL_ERROR_INTERNAL);
             fake.moskva_triggered[1] = reinterpret_cast<uintptr_t>(fake.triggered_modifiers[1]);
+            // Religion, culture and trade goods: the script keys.
+            CHECK(ANVIL_GAME_WORLD_HAS(world, province_key) && ANVIL_GAME_WORLD_HAS(world, country_key));
+            char key_text[16] = {};
+            CHECK(world->province_key(1, ANVIL_GAME_KEY_RELIGION, key_text, sizeof key_text, &length) == ANVIL_OK &&
+                  length == 8 && std::string(key_text) == "orthodox");
+            CHECK(world->province_key(1, ANVIL_GAME_KEY_CULTURE, key_text, sizeof key_text, &length) == ANVIL_OK &&
+                  length == 7 && std::string(key_text) == "russian");
+            CHECK(world->province_key(1, ANVIL_GAME_KEY_TRADE_GOODS, key_text, sizeof key_text, &length) ==
+                      ANVIL_OK &&
+                  length == 5 && std::string(key_text) == "grain");
+            CHECK(world->province_key(1, ANVIL_GAME_KEY_RELIGION, nullptr, 0, &length) == ANVIL_OK && length == 8);
+            std::memset(key_text, 0x7F, sizeof key_text);
+            CHECK(world->province_key(1, ANVIL_GAME_KEY_RELIGION, key_text, 5, &length) == ANVIL_OK && length == 8 &&
+                  std::string(key_text) == "orth" && key_text[5] == 0x7F);
+            CHECK(world->province_key(2, ANVIL_GAME_KEY_RELIGION, key_text, sizeof key_text, &length) ==
+                  ANVIL_ERROR_NOT_FOUND);
+            CHECK(world->province_key(2, ANVIL_GAME_KEY_TRADE_GOODS, key_text, sizeof key_text, &length) ==
+                  ANVIL_ERROR_NOT_FOUND);
+            CHECK(world->province_key(4, ANVIL_GAME_KEY_RELIGION, key_text, sizeof key_text, &length) ==
+                  ANVIL_ERROR_NOT_FOUND);
+            CHECK(world->province_key(1, 3, key_text, sizeof key_text, &length) == ANVIL_ERROR_INVALID_ARGUMENT);
+            CHECK(world->province_key(1, ANVIL_GAME_KEY_RELIGION, nullptr, 4, &length) ==
+                  ANVIL_ERROR_INVALID_ARGUMENT);
+            CHECK(world->country_key("RUS", ANVIL_GAME_KEY_RELIGION, key_text, sizeof key_text, &length) ==
+                      ANVIL_OK &&
+                  std::string(key_text) == "orthodox");
+            CHECK(world->country_key("rus", ANVIL_GAME_KEY_CULTURE, key_text, sizeof key_text, &length) == ANVIL_OK &&
+                  std::string(key_text) == "russian");
+            CHECK(world->country_key("TUR", ANVIL_GAME_KEY_RELIGION, key_text, sizeof key_text, &length) ==
+                  ANVIL_ERROR_NOT_FOUND);
+            CHECK(world->country_key("RUS", ANVIL_GAME_KEY_TRADE_GOODS, key_text, sizeof key_text, &length) ==
+                  ANVIL_ERROR_INVALID_ARGUMENT);
+            CHECK(world->country_key("XXX", ANVIL_GAME_KEY_RELIGION, key_text, sizeof key_text, &length) ==
+                  ANVIL_ERROR_NOT_FOUND);
+            CHECK(world->country_key(nullptr, ANVIL_GAME_KEY_RELIGION, key_text, sizeof key_text, &length) ==
+                  ANVIL_ERROR_INVALID_ARGUMENT);
+            FakeWorld::set_key(fake.russian + 0x48, "russian_\x80");
+            CHECK(world->country_key("RUS", ANVIL_GAME_KEY_CULTURE, key_text, sizeof key_text, &length) == ANVIL_OK &&
+                  std::string(key_text) == "russian_\xE2\x82\xAC");
+            FakeWorld::set_key(fake.russian + 0x48, "russian");
+            // A broken key string costs that answer.
+            FakeWorld::set(fake.grain, 0x18 + 0x10, uint64_t{0x10});
+            FakeWorld::set(fake.grain, 0x18 + 0x18, uint64_t{0x8});
+            CHECK(world->province_key(1, ANVIL_GAME_KEY_TRADE_GOODS, key_text, sizeof key_text, &length) ==
+                  ANVIL_ERROR_INTERNAL);
+            FakeWorld::set_key(fake.grain + 0x18, "grain");
             // A broken list costs that answer.
             FakeWorld::set(fake.timed[1], 0x30, uintptr_t{0});
             CHECK(world->country_timed_modifiers("RUS", list, 4, &count) == ANVIL_ERROR_INTERNAL);
@@ -3563,9 +3622,12 @@ int main(int argc, char** argv) {
         anvil_game::WorldLayout l;
         std::vector<anvil_game::TimedEntry> none;
         std::int32_t id = 0;
+        std::string text;
         CHECK(anvil_game::read_country_timed(l, "RUS", none) == ANVIL_ERROR_NOT_DECLARED &&
               anvil_game::read_province_timed(l, 1, none) == ANVIL_ERROR_NOT_DECLARED &&
               anvil_game::read_province_triggered(l, 1, none) == ANVIL_ERROR_NOT_DECLARED &&
+              anvil_game::read_province_key(l, 1, ANVIL_GAME_KEY_RELIGION, text) == ANVIL_ERROR_NOT_DECLARED &&
+              anvil_game::read_country_key(l, "RUS", ANVIL_GAME_KEY_CULTURE, text) == ANVIL_ERROR_NOT_DECLARED &&
               anvil_game::read_province_view(l, id) == ANVIL_ERROR_NOT_DECLARED);
     });
 

@@ -64,6 +64,9 @@ holy_sites = {
 | `occupied` | `yes`: another country (or rebels) controls the province; `no`: its owner does. An unowned province passes neither |
 | `subject` | with `owner = yes`: `yes` when the owner has an overlord (any kind of subject), `no` when it has none |
 | `subject_of` | with `owner = yes`, a country tag: the owner's overlord is that country |
+| `religion` | a religion's key as the game's files write it (`orthodox`, compared as written): the province's religion; with `owner = yes` the owner's state religion |
+| `culture` | a culture's key (`russian`): the province's culture; with `owner = yes` the owner's primary culture |
+| `trade_goods` | a trade good's key (`grain`): what the province produces |
 | `value` | one of the game's own numbers: the province's `development`, `base_tax`, `base_production` or `base_manpower`; with `owner = yes` the owner's `treasury`, `stability`, `prestige`, `manpower` (in thousands of men, as the game shows it), `monthly_income` (before expenses, as of the last monthly update) or `provinces` (how many it owns) |
 | `owner` | `yes` or `no` (default): with `yes` the `flag`, `variable`, `modifier` or `value` is the province's owner's (`has_country_flag`, a country variable, the country's modifier value), and `always = yes owner = yes` passes every owned province. A province without an owner never passes such a rule |
 | `at_least`, `at_most`, `above`, `below` | a number with at most three decimals; for `variable`, `modifier` and `value` only |
@@ -72,7 +75,7 @@ holy_sites = {
 | `high_color` | `{ r g b }`: the colour at the scale's high end; only with `scale` |
 | `label` | text, 1 to 64 bytes; required: the tooltip's line and the legend's entry |
 
-A rule has exactly one of `always`, `flag`, `variable`, `modifier`, `value`, `owned_by`, `controlled_by`, `core`, `occupied`, `subject` and `subject_of`. A `value` of the owner, `subject` and `subject_of` need `owner = yes`; a `value` of the province, `owned_by`, `controlled_by`, `core` and `occupied` refuse it. These seven tests, like `flag`, take no bounds and no scale. With no bound, a `variable`, `modifier` or `value` rule passes when the value is not 0. With bounds, all of them hold together (`at_least = 1 below = 5` is 1 ≤ value < 5). A variable the province or country does not have is 0, as for the game's triggers. Numbers are compared as the game keeps them, in thousandths.
+A rule has exactly one of `always`, `flag`, `variable`, `modifier`, `value`, `owned_by`, `controlled_by`, `core`, `occupied`, `subject`, `subject_of`, `religion`, `culture` and `trade_goods`. A `value` of the owner, `subject` and `subject_of` need `owner = yes`; a `value` of the province, `owned_by`, `controlled_by`, `core`, `occupied` and `trade_goods` refuse it; `religion` and `culture` take either. These ten tests, like `flag`, take no bounds and no scale. A province or country without a religion, culture or trade goods (the sea, wasteland) passes no such rule. The key is the game's, which can differ from what the game shows: Moskva's culture in the 1719 save is `russian_new`, not `russian`; the game's `common/cultures`, `common/religions` and `common/tradegoods` files list them. With no bound, a `variable`, `modifier` or `value` rule passes when the value is not 0. With bounds, all of them hold together (`at_least = 1 below = 5` is 1 ≤ value < 5). A variable the province or country does not have is 0, as for the game's triggers. Numbers are compared as the game keeps them, in thousandths.
 
 A scale does not change whether a rule passes; it only gives the colour: `color` at `low` and below, `high_color` at `high` and above, and each of red, green and blue linear between them. Write `at_least = 0` (or the scale's low end) to let a value of 0 take the low colour.
 
@@ -97,6 +100,12 @@ russian_sphere = {
     rule = { subject_of = RUS owner = yes color = { 120 200 120 } label = "Russia's subjects'" }
     rule = { controlled_by = RUS color = { 200 40 40 } label = "Held by Russia" }
     rule = { core = RUS color = { 230 160 0 } label = "Russia's claims" }
+}
+faiths = {
+    label = "Russian lands"
+    rule = { culture = russian color = { 200 160 40 } label = "Russian" }
+    rule = { religion = orthodox owner = yes color = { 120 90 200 } label = "Under an Orthodox ruler" }
+    rule = { trade_goods = grain color = { 230 220 120 } label = "Grain" }
 }
 ```
 
@@ -131,3 +140,4 @@ Under the lab's game lock, in a test profile with a test mod that has `anvil/map
 8. While the game runs, a changed colour and bound in a file show after picking another mode and the mode again, with the log's line; a changed label and a new mode are logged as waiting for a restart.
 9. `owned_by`, `core = no`, `occupied = yes` and `subject = yes owner = yes` on a save with an occupation and a subject.
 10. `controlled_by`, `core = TAG` on a province another country owns, and `subject_of` on the same save.
+11. `religion`, `culture` and `trade_goods` of the province, and `religion` and `culture` with `owner = yes`, against the province view and the country's.

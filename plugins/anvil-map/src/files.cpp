@@ -74,6 +74,7 @@ std::string key_of(Test test) {
         case Test::occupied: return "occupied";
         case Test::subject: return "subject";
         case Test::subject_of: return "subject_of";
+        case Test::trade_goods: return "trade_goods";
         default: return "this test";
     }
 }
@@ -323,6 +324,19 @@ public:
                     throw Fault{key.line, "core is yes, no or a country tag of three letters or digits: " + v};
                 }
                 ++tests;
+            } else if (k == "religion" || k == "culture" || k == "trade_goods") {
+                r.test = k == "religion" ? Test::religion : k == "culture" ? Test::culture : Test::trade_goods;
+                r.name = text(k.c_str());
+                const bool key_like = !r.name.empty() && r.name.size() <= 128 &&
+                                      std::all_of(r.name.begin(), r.name.end(), [](char ch) {
+                                          return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                                                 (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' || ch == '.';
+                                      });
+                if (!key_like) {
+                    throw Fault{key.line, k + " needs a script key as the game's files write it (orthodox, russian, "
+                                              "grain): " + r.name};
+                }
+                ++tests;
             } else if (k == "occupied" || k == "subject") {
                 r.test = k == "occupied" ? Test::occupied : Test::subject;
                 r.name = k;
@@ -367,7 +381,7 @@ public:
         }
         if (tests != 1) {
             throw Fault{line, "a rule needs one of always, flag, variable, modifier, value, owned_by, controlled_by, "
-                              "core, occupied, subject or subject_of"};
+                              "core, occupied, subject, subject_of, religion, culture or trade_goods"};
         }
         if (!has_color) throw Fault{line, "a rule needs color = { r g b }"};
         if (!has_label || r.label.empty() || r.label.size() > kLabelMax) {
@@ -391,7 +405,7 @@ public:
             throw Fault{line, key_of(r.test) + " is the owner's: write owner = yes"};
         }
         if ((r.test == Test::owned_by || r.test == Test::controlled_by || r.test == Test::core ||
-             r.test == Test::core_of || r.test == Test::occupied) &&
+             r.test == Test::core_of || r.test == Test::occupied || r.test == Test::trade_goods) &&
             r.owner) {
             throw Fault{line, key_of(r.test) + " is the province's: leave out owner = yes"};
         }
@@ -539,7 +553,8 @@ std::string decimal(std::int64_t value) {
 
 bool is_yes_no(Test test) {
     return test == Test::flag || test == Test::owned_by || test == Test::core || test == Test::occupied ||
-           test == Test::subject || test == Test::controlled_by || test == Test::core_of || test == Test::subject_of;
+           test == Test::subject || test == Test::controlled_by || test == Test::core_of || test == Test::subject_of ||
+           test == Test::religion || test == Test::culture || test == Test::trade_goods;
 }
 
 Evaluator::Evaluator(const FileMode& mode, World& world) : mode_(mode), world_(world) {
@@ -586,6 +601,13 @@ std::optional<std::int64_t> Evaluator::read_country(std::size_t i, const std::st
         case Test::subject_of:
             v = world_.overlord(tag) == r.name ? 1 : 0;
             break;
+        case Test::religion:
+        case Test::culture: {
+            const std::string key = world_.country_key(tag, r.test);
+            if (!key.empty()) v = key == r.name ? 1 : 0;
+            break;
+        }
+        case Test::trade_goods:
         case Test::owned_by:
         case Test::controlled_by:
         case Test::core:
@@ -635,6 +657,13 @@ std::optional<std::int64_t> Evaluator::read(std::size_t i, std::int32_t province
             return world_.controller(province) == r.name ? 1 : 0;
         case Test::core_of:
             return world_.has_core(province, r.name) ? 1 : 0;
+        case Test::religion:
+        case Test::culture:
+        case Test::trade_goods: {
+            const std::string key = world_.province_key(province, r.test);
+            if (key.empty()) return std::nullopt;
+            return key == r.name ? 1 : 0;
+        }
         case Test::subject:
         case Test::subject_of:
             return std::nullopt;  // the owner's: refused without owner = yes

@@ -407,6 +407,35 @@ public:
         }
         return std::string(out.text, strnlen(out.text, sizeof(out.text)));
     }
+    static std::uint32_t key_of(files::Test test) {
+        return test == files::Test::religion  ? ANVIL_GAME_KEY_RELIGION
+               : test == files::Test::culture ? ANVIL_GAME_KEY_CULTURE
+                                              : ANVIL_GAME_KEY_TRADE_GOODS;
+    }
+    // A script key fits 128 bytes (the parser's limit for the rule's); a
+    // longer one is no rule's.
+    std::string province_key(std::int32_t province, files::Test test) override {
+        std::array<char, 132> text{};
+        std::uint32_t length = 0;
+        if (!ANVIL_GAME_WORLD_HAS(g_world, province_key) ||
+            g_world->province_key(province, key_of(test), text.data(), static_cast<std::uint32_t>(text.size()),
+                                  &length) != ANVIL_OK ||
+            length >= text.size()) {
+            return {};
+        }
+        return std::string(text.data(), length);
+    }
+    std::string country_key(const std::string& tag, files::Test test) override {
+        std::array<char, 132> text{};
+        std::uint32_t length = 0;
+        if (!ANVIL_GAME_WORLD_HAS(g_world, country_key) ||
+            g_world->country_key(tag.c_str(), key_of(test), text.data(), static_cast<std::uint32_t>(text.size()),
+                                 &length) != ANVIL_OK ||
+            length >= text.size()) {
+            return {};
+        }
+        return std::string(text.data(), length);
+    }
     bool country_has_flag(const std::string& tag, std::int32_t flag) override {
         if (!ANVIL_GAME_WORLD_HAS(g_world, country_flags)) return false;
         std::array<AnvilGameFlag, 64> some{};

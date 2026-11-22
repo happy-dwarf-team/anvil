@@ -1122,6 +1122,38 @@ unsafe extern "C" fn world_region_key(
     unsafe { region_text(region, b"baltic_sea_region", utf8, capacity, length) }
 }
 
+unsafe extern "C" fn world_province_key(
+    province: i32,
+    key: u32,
+    utf8: *mut c_char,
+    capacity: u32,
+    length: *mut u32,
+) -> AnvilResult {
+    let text: &[u8] = match key {
+        0 => b"orthodox",
+        1 => b"russian",
+        2 => b"grain",
+        _ => return ANVIL_ERROR_INVALID_ARGUMENT,
+    };
+    unsafe { region_text(province + 11, text, utf8, capacity, length) }
+}
+
+unsafe extern "C" fn world_country_key(
+    tag: *const c_char,
+    key: u32,
+    utf8: *mut c_char,
+    capacity: u32,
+    length: *mut u32,
+) -> AnvilResult {
+    let text: &[u8] = match key {
+        0 => b"orthodox",
+        1 => b"russian",
+        _ => return ANVIL_ERROR_INVALID_ARGUMENT,
+    };
+    let rus = unsafe { std::ffi::CStr::from_ptr(tag) }.to_bytes() == b"RUS";
+    unsafe { region_text(if rus { 12 } else { 0 }, text, utf8, capacity, length) }
+}
+
 static FAKE_WORLD_FULL: Shared<AnvilGameWorldService> = Shared({
     let mut table: AnvilGameWorldService = unsafe { std::mem::zeroed() };
     table.size = std::mem::size_of::<AnvilGameWorldService>() as u32;
@@ -1147,6 +1179,8 @@ static FAKE_WORLD_FULL: Shared<AnvilGameWorldService> = Shared({
     table.region_name = Some(world_region_name);
     table.region_key = Some(world_region_key);
     table.province_triggered_modifier_keys = Some(world_province_triggered_modifier_keys);
+    table.province_key = Some(world_province_key);
+    table.country_key = Some(world_country_key);
     table
 });
 
@@ -1859,6 +1893,36 @@ fn world_reads_rulers_flags_and_variable_names() {
         ["pr_mughal_tomb", "center_of_trade_modifier"]
     );
     assert!(w.province_triggered_modifiers(2).unwrap().is_empty());
+    assert_eq!(
+        (
+            w.province_religion(1).unwrap(),
+            w.province_culture(1).unwrap(),
+            w.province_trade_goods(1).unwrap()
+        ),
+        (
+            "orthodox".to_owned(),
+            "russian".to_owned(),
+            "grain".to_owned()
+        )
+    );
+    assert_eq!(
+        w.province_religion(2).unwrap_err().code(),
+        ErrorCode::NotFound
+    );
+    let rus = Tag::new("RUS").unwrap();
+    assert_eq!(
+        (
+            w.country_religion(rus).unwrap(),
+            w.country_culture(rus).unwrap()
+        ),
+        ("orthodox".to_owned(), "russian".to_owned())
+    );
+    assert_eq!(
+        w.country_culture(Tag::new("TUR").unwrap())
+            .unwrap_err()
+            .code(),
+        ErrorCode::NotFound
+    );
     assert_eq!(
         w.province_timed_modifiers(295).unwrap_err().code(),
         ErrorCode::Unsupported

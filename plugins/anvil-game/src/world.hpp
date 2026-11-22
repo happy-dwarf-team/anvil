@@ -265,6 +265,17 @@ struct WorldLayout {
     std::uint32_t rival_next = 0;           // node: the next node
     std::uint32_t overlord = 0;             // country: tag
     std::uint32_t subjects = 0;             // country: std::vector of tags, its begin; end after it
+
+    // Religion, culture and trade goods, each a pointer to the game's object
+    // whose script key is a std::string: `religion_key` 0 when absent.
+    std::uint32_t province_religion = 0;    // province: CReligion*
+    std::uint32_t province_culture = 0;     // province: CCulture*
+    std::uint32_t province_trade_goods = 0; // province: CTradeGoods*
+    std::uint32_t country_religion = 0;     // country: CReligion*, the state religion
+    std::uint32_t country_culture = 0;      // country: CCulture*, the primary culture
+    std::uint32_t religion_key = 0;         // religion: std::string
+    std::uint32_t culture_key = 0;          // culture: std::string
+    std::uint32_t trade_goods_key = 0;      // trade goods: std::string
 };
 
 // A relation, its dates still the game's hours.
@@ -394,6 +405,10 @@ AnvilResult read_diplomacy_status(const WorldLayout& l, std::string_view from, s
 AnvilResult read_rivals(const WorldLayout& l, std::string_view tag, std::vector<AnvilGameTag>& out);
 AnvilResult read_overlord(const WorldLayout& l, std::string_view tag, AnvilGameTag& out);
 AnvilResult read_subjects(const WorldLayout& l, std::string_view tag, std::vector<AnvilGameTag>& out);
+// `key` is ANVIL_GAME_KEY_*: INVALID_ARGUMENT for another, and for trade
+// goods of a country. NOT_FOUND when the pointer is null.
+AnvilResult read_province_key(const WorldLayout& l, std::int32_t province, std::uint32_t key, std::string& utf8);
+AnvilResult read_country_key(const WorldLayout& l, std::string_view tag, std::uint32_t key, std::string& utf8);
 
 // A getter of 3 bytes that returns a constant bool: xor al,al; ret or mov al,1; ret.
 bool decode_bool_getter(const std::uint8_t* code, std::size_t size, bool& value);
