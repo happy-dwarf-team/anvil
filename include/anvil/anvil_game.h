@@ -561,6 +561,10 @@ typedef struct AnvilGameTimedModifier {
 #define ANVIL_GAME_KEY_TRADE_GOODS 2u    /* "grain"; provinces only */
 #define ANVIL_GAME_KEY_RELIGION_GROUP 3u /* "christian"; the religion's group */
 #define ANVIL_GAME_KEY_CULTURE_GROUP 4u  /* "east_slavic"; the culture's group */
+#define ANVIL_GAME_KEY_AREA 5u           /* "uppland_area"; provinces only */
+#define ANVIL_GAME_KEY_REGION 6u         /* "scandinavia_region"; provinces only */
+#define ANVIL_GAME_KEY_SUPERREGION 7u    /* "europe_superregion"; provinces only */
+#define ANVIL_GAME_KEY_CONTINENT 8u      /* "europe"; provinces only */
 
 /* One relation. It comes in arrays and has no `size`, so it never grows within
  * version 1. */
@@ -892,11 +896,11 @@ typedef struct AnvilGameWorldService {
     AnvilResult (*province_triggered_modifier_keys)(int32_t province, char *keys, uint32_t capacity,
                                                     uint32_t *length);
     /* Since anvil-game 1.26.0. The script key of a province's religion,
-     * culture, trade goods or the group of its religion or culture (`key`,
-     * ANVIL_GAME_KEY_*), as the game's files write it ("orthodox",
-     * "russian", "grain", "christian"), in UTF-8 with a NUL, as
-     * province_name gives its text. ANVIL_ERROR_NOT_FOUND when the province
-     * has none (the sea, wasteland). ANVIL_ERROR_INVALID_ARGUMENT for another
+     * culture, trade goods, the group of its religion or culture, or its
+     * area, region, superregion or continent (`key`, ANVIL_GAME_KEY_*), as
+     * the game's files write it ("orthodox", "russian", "grain", "christian",
+     * "uppland_area"), in UTF-8 with a NUL, as province_name gives its text.
+     * ANVIL_ERROR_NOT_FOUND when the province has none (the sea, wasteland). ANVIL_ERROR_INVALID_ARGUMENT for another
      * key. ANVIL_ERROR_NOT_DECLARED when a port declared these symbols
      * absent. */
     AnvilResult (*province_key)(int32_t province, uint32_t key, char *utf8, uint32_t capacity, uint32_t *length);
@@ -905,7 +909,7 @@ typedef struct AnvilGameWorldService {
      * and their groups. ANVIL_ERROR_NOT_DECLARED for the two groups alone
      * when a port declared only their symbols absent. ANVIL_ERROR_NOT_FOUND when it has none (a country that does not exist
      * now may have none). ANVIL_ERROR_INVALID_ARGUMENT for another key,
-     * ANVIL_GAME_KEY_TRADE_GOODS included. */
+     * ANVIL_GAME_KEY_TRADE_GOODS and the four places included. */
     AnvilResult (*country_key)(const char *tag, uint32_t key, char *utf8, uint32_t capacity, uint32_t *length);
 } AnvilGameWorldService;
 

@@ -281,6 +281,15 @@ struct WorldLayout {
     std::uint32_t culture_group = 0;        // culture: CCultureGroup*
     std::uint32_t religion_group_key = 0;   // religion group: std::string
     std::uint32_t culture_group_key = 0;    // culture group: std::string
+    // The province's places: `area_key` 0 when absent. Area and region go
+    // through the map part (`static_part`).
+    std::uint32_t province_area = 0;        // map part: CMapArea*
+    std::uint32_t area_region = 0;          // area: CRegion*
+    std::uint32_t province_superregion = 0; // province: CSuperRegion*
+    std::uint32_t province_continent = 0;   // province: CContinent*
+    std::uint32_t area_key = 0;             // area: std::string
+    std::uint32_t place_region_key = 0;     // region and superregion (CRegionBase): std::string
+    std::uint32_t continent_key = 0;        // continent: std::string
 };
 
 // A relation, its dates still the game's hours.

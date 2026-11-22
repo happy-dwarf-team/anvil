@@ -1135,6 +1135,10 @@ unsafe extern "C" fn world_province_key(
         2 => b"grain",
         3 => b"christian",
         4 => b"east_slavic",
+        5 => b"moskva_area",
+        6 => b"russia_region",
+        7 => b"eastern_europe_superregion",
+        8 => b"europe",
         _ => return ANVIL_ERROR_INVALID_ARGUMENT,
     };
     unsafe { region_text(province + 11, text, utf8, capacity, length) }
@@ -1933,6 +1937,20 @@ fn world_reads_rulers_flags_and_variable_names() {
             "east_slavic".to_owned(),
             "christian".to_owned(),
             "east_slavic".to_owned()
+        )
+    );
+    assert_eq!(
+        (
+            w.province_area(1).unwrap(),
+            w.province_region(1).unwrap(),
+            w.province_superregion(1).unwrap(),
+            w.province_continent(1).unwrap()
+        ),
+        (
+            "moskva_area".to_owned(),
+            "russia_region".to_owned(),
+            "eastern_europe_superregion".to_owned(),
+            "europe".to_owned()
         )
     );
     assert_eq!(

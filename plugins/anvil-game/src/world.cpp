@@ -1691,18 +1691,36 @@ AnvilResult read_faith_key(const WorldLayout& l, std::uintptr_t religion, std::u
 
 }  // namespace
 
+// The province's area, region, superregion or continent.
+AnvilResult read_place_key(const WorldLayout& l, std::uintptr_t p, std::uint32_t key, std::string& utf8) {
+    switch (key) {
+    case ANVIL_GAME_KEY_SUPERREGION: return read_object_key(p + l.province_superregion, l.place_region_key, utf8);
+    case ANVIL_GAME_KEY_CONTINENT: return read_object_key(p + l.province_continent, l.continent_key, utf8);
+    default: break;
+    }
+    std::uintptr_t map_part = 0;
+    if (!read(p + l.static_part, map_part)) return ANVIL_ERROR_INTERNAL;
+    if (map_part == 0) return ANVIL_ERROR_NOT_FOUND;
+    if (key == ANVIL_GAME_KEY_AREA) return read_object_key(map_part + l.province_area, l.area_key, utf8);
+    return read_group_key(map_part + l.province_area, l.area_region, l.place_region_key, utf8);
+}
+
 AnvilResult read_province_key(const WorldLayout& l, std::int32_t province, std::uint32_t key, std::string& utf8) {
-    if (key > ANVIL_GAME_KEY_CULTURE_GROUP) return ANVIL_ERROR_INVALID_ARGUMENT;
-    if (l.religion_key == 0) return ANVIL_ERROR_NOT_DECLARED;
-    if (key >= ANVIL_GAME_KEY_RELIGION_GROUP && l.religion_group_key == 0) return ANVIL_ERROR_NOT_DECLARED;
+    if (key > ANVIL_GAME_KEY_CONTINENT) return ANVIL_ERROR_INVALID_ARGUMENT;
+    const bool place = key >= ANVIL_GAME_KEY_AREA;
+    if (place ? l.area_key == 0 : l.religion_key == 0) return ANVIL_ERROR_NOT_DECLARED;
+    if (!place && key >= ANVIL_GAME_KEY_RELIGION_GROUP && l.religion_group_key == 0) return ANVIL_ERROR_NOT_DECLARED;
     std::uintptr_t p = 0;
     if (const AnvilResult r = province_at(l, province, p); r != ANVIL_OK) return r;
+    if (place) return read_place_key(l, p, key, utf8);
     if (key == ANVIL_GAME_KEY_TRADE_GOODS) return read_object_key(p + l.province_trade_goods, l.trade_goods_key, utf8);
     return read_faith_key(l, p + l.province_religion, p + l.province_culture, key, utf8);
 }
 
 AnvilResult read_country_key(const WorldLayout& l, std::string_view tag, std::uint32_t key, std::string& utf8) {
-    if (key > ANVIL_GAME_KEY_CULTURE_GROUP || key == ANVIL_GAME_KEY_TRADE_GOODS) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (key > ANVIL_GAME_KEY_CULTURE_GROUP || key == ANVIL_GAME_KEY_TRADE_GOODS) {
+        return ANVIL_ERROR_INVALID_ARGUMENT;  // trade goods and places are the province's
+    }
     if (l.religion_key == 0) return ANVIL_ERROR_NOT_DECLARED;
     if (key >= ANVIL_GAME_KEY_RELIGION_GROUP && l.religion_group_key == 0) return ANVIL_ERROR_NOT_DECLARED;
     std::uintptr_t country = 0;
