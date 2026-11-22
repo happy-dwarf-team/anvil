@@ -622,7 +622,7 @@ Decided in [Workshop distribution and trust model](https://github.com/happy-dwar
   - a mod "should be exclusive" to the forum and the Workshop (rule 9): plugins are also released on GitHub on purpose, because the Manager installs them from zips and the Workshop cannot install Anvil.
   The binding terms are Paradox's and Valve's agreements, which forbid malware and cheats but not native code ([#16](https://github.com/happy-dwarf-team/anvil/issues/16)); Bellows has been public on the Workshop since 0.9.
 
-- **Discovery:** only mods enabled in the current playset (`dlc_load.json` → `.mod` → `path`), in `anvil/<plugin-id>/` folders, several per mod. This also gates a plugin on its mod being enabled.
+- **Discovery:** only mods enabled in the current playset (`dlc_load.json` → `.mod` → `path`), in `anvil/<plugin-id>/` folders, several per mod. `anvil/map_modes/` is not a plugin but anvil-map's mode files (1.27.0); discovery passes it by, and since a plugin id has no `_`, no plugin can need that name. This also gates a plugin on its mod being enabled.
 - **Trust:**
   - an approval covers a SHA-256 over the whole plugin folder;
   - `trust.toml` records the id, version, Workshop id, hash and date;
