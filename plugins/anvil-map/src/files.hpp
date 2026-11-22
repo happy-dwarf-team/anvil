@@ -166,4 +166,29 @@ std::vector<Found> playset_files(const std::filesystem::path& user, std::vector<
 // already took is left out with a line in `problems`.
 std::vector<FileMode> load(const std::vector<Found>& found, std::vector<std::string>& problems);
 
+// ---- reading the files again ---------------------------------------------------
+
+// What a reload compares: each file's path, size and last write time, in the
+// order playset_files gives them. Equal stamps: nothing to read again.
+struct Stamp {
+    std::filesystem::path path;
+    std::uintmax_t size = 0;
+    std::filesystem::file_time_type time{};
+    bool operator==(const Stamp&) const = default;
+};
+std::vector<Stamp> stamps(const std::vector<Found>& found);
+
+// How the modes read again map onto the registered ones. The game keeps a
+// mode's button (label, description, tab, sprite) from the start, so a reload
+// changes only its rules and legend.
+struct Reload {
+    // For each registered mode, the index of its new definition in the modes
+    // read again, or -1 when it is gone or has a fault now (it keeps its rules).
+    std::vector<int> fresh;
+    std::vector<std::string> restart;  // registered modes whose button changed
+    std::vector<std::string> added;    // new modes: they need a restart
+    std::vector<std::string> missing;  // registered modes not read again
+};
+Reload plan_reload(const std::vector<const FileMode*>& registered, const std::vector<FileMode>& fresh);
+
 }  // namespace anvil_map::files
