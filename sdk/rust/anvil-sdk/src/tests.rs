@@ -1139,6 +1139,7 @@ unsafe extern "C" fn world_province_key(
         6 => b"russia_region",
         7 => b"eastern_europe_superregion",
         8 => b"europe",
+        9 => b"novgorod",
         _ => return ANVIL_ERROR_INVALID_ARGUMENT,
     };
     unsafe { region_text(province + 11, text, utf8, capacity, length) }
@@ -1953,6 +1954,7 @@ fn world_reads_rulers_flags_and_variable_names() {
             "europe".to_owned()
         )
     );
+    assert_eq!(w.province_trade_node(1).unwrap(), "novgorod");
     assert_eq!(
         w.country_culture(Tag::new("TUR").unwrap())
             .unwrap_err()

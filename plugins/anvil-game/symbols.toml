@@ -2680,6 +2680,58 @@ build."eu4-1.37.5-steam-win64" = { rva = 0x98790 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x987C0 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x987C0 }
 
+[symbol.province_is_city]
+# movzx eax,byte [rcx+958h]; shr al,4; and al,1; ret
+bytes = "0F B6 81 58 09 00 00 C0 E8 04 24 01 C3"
+memory = "code"
+values.city_flags = { at = 3, size = 4 }
+values.city_bit = { at = 9, size = 1 }
+note = "CProvince::IsCity: bit 4 of +0x958 (_isCity)"
+build."eu4-1.37.5-steam-win64" = { rva = 0x987D0 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x98800 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x98800 }
+
+[symbol.province_in_empire]
+# movzx eax,byte [rcx+958h]; shr al,5; and al,1; ret
+bytes = "0F B6 81 58 09 00 00 C0 E8 05 24 01 C3"
+memory = "code"
+values.empire_flags = { at = 3, size = 4 }
+values.empire_bit = { at = 9, size = 1 }
+note = "CProvince::IsPartOfEmpire: bit 5 of +0x958 (_bEmpireStatus)"
+build."eu4-1.37.5-steam-win64" = { rva = 0x98810 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x98840 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x98840 }
+
+[symbol.province_trade_node]
+# mov rax,[rcx+340h]; ret; (padding); mov rax,[rcx+0E8h]; ret
+bytes = "48 8B 81 40 03 00 00 C3 CC CC CC CC CC CC CC CC 48 8B 81 E8 00 00 00 C3"
+memory = "code"
+values.node = { at = 19, size = 4 }
+note = "CProvince::GetTradeNode, after the getter before it (+0x340): _pTradeNode (+0xE8), CTradeNode*"
+build."eu4-1.37.5-steam-win64" = { rva = 0x98880 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x988B0 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x988B0 }
+
+[symbol.trade_node_definition]
+# mov rax,[rcx+0A8h]; add rax,30h; ret
+bytes = "48 8B 81 A8 00 00 00 48 83 C0 30 C3"
+memory = "code"
+values.definition = { at = 3, size = 4 }
+note = "CTradeNode::GetName: _pDefinition (+0xA8), CTradeNodeDefinition*, whose shown name is at +0x30"
+build."eu4-1.37.5-steam-win64" = { rva = 0xB51280 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0xB4FA60 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0xB4FA60 }
+
+[symbol.trade_node_key]
+# mov ebp,r8d; mov rbx,rcx; mov dword [rcx+8],165h; lea rax,vftable; mov [rcx],rax; lea rsi,[rcx+10h]
+bytes = "41 8B E8 48 8B D9 C7 41 08 65 01 00 00 48 8D 05 ?? ?? ?? ?? 48 89 01 48 8D 71 10"
+memory = "code"
+values.key = { at = 26, size = 1 }
+note = "CTradeNodeDefinition::CTradeNodeDefinition: the script key it is given is copied to _Name (+0x10), a std::string"
+build."eu4-1.37.5-steam-win64" = { rva = 0xB68BF7 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0xB673D7 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0xB673D7 }
+
 [symbol.continent_key]
 # lea rdx,[rcx+28h]; (an empty std::string there) ...; movups (the key moved in); ...; lea rbx,[rcx+48h]
 bytes = """

@@ -68,7 +68,8 @@ struct Fault {
 
 // The key a test is written with, for faults about where it reads.
 bool is_place(Test test) {
-    return test == Test::area || test == Test::region || test == Test::superregion || test == Test::continent;
+    return test == Test::area || test == Test::region || test == Test::superregion || test == Test::continent ||
+           test == Test::trade_node;
 }
 
 // The tests whose value is one of the game's script keys.
@@ -78,7 +79,7 @@ std::optional<Test> key_test(const std::string& k) {
         {"trade_goods", Test::trade_goods}, {"religion_group", Test::religion_group},
         {"culture_group", Test::culture_group}, {"area", Test::area},
         {"region", Test::region},           {"superregion", Test::superregion},
-        {"continent", Test::continent}};
+        {"continent", Test::continent},     {"trade_node", Test::trade_node}};
     for (const auto& [name, test] : kKeys) {
         if (k == name) return test;
     }
@@ -95,6 +96,9 @@ std::string key_of(Test test) {
         case Test::subject: return "subject";
         case Test::subject_of: return "subject_of";
         case Test::capital: return "capital";
+        case Test::hre: return "hre";
+        case Test::city: return "city";
+        case Test::trade_node: return "trade_node";
         case Test::trade_goods: return "trade_goods";
         case Test::area: return "area";
         case Test::region: return "region";
@@ -362,8 +366,12 @@ public:
                                               "russian, grain, scandinavia_region): " + r.name};
                 }
                 ++tests;
-            } else if (k == "occupied" || k == "subject" || k == "capital") {
-                r.test = k == "occupied" ? Test::occupied : k == "subject" ? Test::subject : Test::capital;
+            } else if (k == "occupied" || k == "subject" || k == "capital" || k == "hre" || k == "city") {
+                r.test = k == "occupied" ? Test::occupied
+                         : k == "subject" ? Test::subject
+                         : k == "capital" ? Test::capital
+                         : k == "hre"     ? Test::hre
+                                          : Test::city;
                 r.name = k;
                 r.yes = yes_no(k.c_str());
                 ++tests;
@@ -407,7 +415,8 @@ public:
         if (tests != 1) {
             throw Fault{line, "a rule needs one of always, flag, variable, modifier, value, owned_by, controlled_by, "
                               "core, occupied, subject, subject_of, religion, religion_group, culture, "
-                              "culture_group, trade_goods, area, region, superregion, continent or capital"};
+                              "culture_group, trade_goods, area, region, superregion, continent, trade_node, capital, "
+                              "hre or city"};
         }
         if (!has_color) throw Fault{line, "a rule needs color = { r g b }"};
         if (!has_label || r.label.empty() || r.label.size() > kLabelMax) {
@@ -432,7 +441,7 @@ public:
         }
         if ((r.test == Test::owned_by || r.test == Test::controlled_by || r.test == Test::core ||
              r.test == Test::core_of || r.test == Test::occupied || r.test == Test::trade_goods ||
-             r.test == Test::capital || is_place(r.test)) &&
+             r.test == Test::capital || r.test == Test::hre || r.test == Test::city || is_place(r.test)) &&
             r.owner) {
             throw Fault{line, key_of(r.test) + " is the province's: leave out owner = yes"};
         }
@@ -583,7 +592,7 @@ bool is_yes_no(Test test) {
            test == Test::subject || test == Test::controlled_by || test == Test::core_of || test == Test::subject_of ||
            test == Test::religion || test == Test::culture || test == Test::trade_goods ||
            test == Test::religion_group || test == Test::culture_group || is_place(test) ||
-           test == Test::capital;
+           test == Test::capital || test == Test::hre || test == Test::city;
 }
 
 Evaluator::Evaluator(const FileMode& mode, World& world) : mode_(mode), world_(world) {
@@ -646,6 +655,9 @@ std::optional<std::int64_t> Evaluator::read_country(std::size_t i, const std::st
         case Test::region:
         case Test::superregion:
         case Test::continent:
+        case Test::trade_node:
+        case Test::hre:
+        case Test::city:
         case Test::owned_by:
         case Test::controlled_by:
         case Test::core:
@@ -702,6 +714,14 @@ std::optional<std::int64_t> Evaluator::read(std::size_t i, std::int32_t province
             if (!capital) return std::nullopt;
             return (*capital == province) == r.yes ? 1 : 0;
         }
+        case Test::hre:
+        case Test::city: {
+            if (!owner) owner = world_.owner(province);
+            if (owner->empty()) return std::nullopt;
+            const std::optional<bool> is = world_.province_is(province, r.test);
+            if (!is) return std::nullopt;
+            return *is == r.yes ? 1 : 0;
+        }
         case Test::religion:
         case Test::culture:
         case Test::trade_goods:
@@ -710,7 +730,8 @@ std::optional<std::int64_t> Evaluator::read(std::size_t i, std::int32_t province
         case Test::area:
         case Test::region:
         case Test::superregion:
-        case Test::continent: {
+        case Test::continent:
+        case Test::trade_node: {
             const std::string key = world_.province_key(province, r.test);
             if (key.empty()) return std::nullopt;
             return key == r.name ? 1 : 0;

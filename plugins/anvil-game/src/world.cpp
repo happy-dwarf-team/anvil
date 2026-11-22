@@ -317,15 +317,18 @@ AnvilResult read_province(const WorldLayout& l, std::int32_t id, AnvilGameProvin
         !read(p + l.static_part, map_part) || map_part == 0) {
         return ANVIL_ERROR_INTERNAL;
     }
-    std::uint8_t land = 0, wasteland = 0;
-    if (!read(map_part + l.land_flags, land) || !read(map_part + l.wasteland_flags, wasteland)) {
+    std::uint8_t land = 0, wasteland = 0, city = 0, empire = 0;
+    if (!read(map_part + l.land_flags, land) || !read(map_part + l.wasteland_flags, wasteland) ||
+        !read(p + l.city_flags, city) || !read(p + l.empire_flags, empire)) {
         return ANVIL_ERROR_INTERNAL;
     }
     out.id = id;
     out.owner = tag_text(owner, l);
     out.controller = tag_text(controller, l);
     out.flags = (((land >> l.land_bit) & 1) != 0 ? ANVIL_GAME_PROVINCE_LAND : 0u) |
-                (((wasteland >> l.wasteland_bit) & 1) != 0 ? ANVIL_GAME_PROVINCE_WASTELAND : 0u);
+                (((wasteland >> l.wasteland_bit) & 1) != 0 ? ANVIL_GAME_PROVINCE_WASTELAND : 0u) |
+                (((city >> l.city_bit) & 1) != 0 ? ANVIL_GAME_PROVINCE_CITY : 0u) |
+                (((empire >> l.empire_bit) & 1) != 0 ? ANVIL_GAME_PROVINCE_HRE : 0u);
     return ANVIL_OK;
 }
 
@@ -1706,7 +1709,13 @@ AnvilResult read_place_key(const WorldLayout& l, std::uintptr_t p, std::uint32_t
 }
 
 AnvilResult read_province_key(const WorldLayout& l, std::int32_t province, std::uint32_t key, std::string& utf8) {
-    if (key > ANVIL_GAME_KEY_CONTINENT) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (key > ANVIL_GAME_KEY_TRADE_NODE) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (key == ANVIL_GAME_KEY_TRADE_NODE) {
+        if (l.trade_node_key == 0) return ANVIL_ERROR_NOT_DECLARED;
+        std::uintptr_t p = 0;
+        if (const AnvilResult r = province_at(l, province, p); r != ANVIL_OK) return r;
+        return read_group_key(p + l.province_trade_node, l.trade_node_definition, l.trade_node_key, utf8);
+    }
     const bool place = key >= ANVIL_GAME_KEY_AREA;
     if (place ? l.area_key == 0 : l.religion_key == 0) return ANVIL_ERROR_NOT_DECLARED;
     if (!place && key >= ANVIL_GAME_KEY_RELIGION_GROUP && l.religion_group_key == 0) return ANVIL_ERROR_NOT_DECLARED;

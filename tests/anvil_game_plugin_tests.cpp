@@ -631,6 +631,9 @@ struct FakeWorld {
     alignas(8) uint8_t russia_region[0x108] = {};
     alignas(8) uint8_t europe_superregion[0xA0] = {};
     alignas(8) uint8_t europe[0x98] = {};
+    // Moskva's trade node (1.26.0): novgorod.
+    alignas(8) uint8_t novgorod_node[0x140] = {};
+    alignas(8) uint8_t novgorod_definition[0xE8] = {};
     alignas(8) uint8_t selection_object[0x20] = {};
     alignas(8) uint8_t province_view[0x1000] = {};
     alignas(8) uint8_t view_window[0x200] = {};
@@ -680,6 +683,9 @@ struct FakeWorld {
         set(map[1], 0x40, reinterpret_cast<uintptr_t>(moskva_area));
         set(province(1), 0x558, reinterpret_cast<uintptr_t>(europe_superregion));
         set(province(1), 0x560, reinterpret_cast<uintptr_t>(europe));
+        set_key(novgorod_definition + 0x10, "novgorod");
+        set(novgorod_node, 0xA8, reinterpret_cast<uintptr_t>(novgorod_definition));
+        set(province(1), 0xE8, reinterpret_cast<uintptr_t>(novgorod_node));
         set(province(1), 0x448, reinterpret_cast<uintptr_t>(orthodox));
         set(province(1), 0x440, reinterpret_cast<uintptr_t>(russian));
         set(province(1), 0x458, reinterpret_cast<uintptr_t>(grain));
@@ -901,12 +907,14 @@ struct FakeWorld {
         set(province(1), 0x3E8, 8000);
         set(province(1), 0x3E0, 9500);
         map[1][0x228] = 1 << 3;
+        province(1)[0x958] = 1 << 4;  // a city, outside the Empire
         set_name(1, "Moskva");
         // A wasteland without an owner, with a long name in Windows-1252.
         set(province(2), 0x468, game_tag("---", 0, 0, 0));
         set(province(2), 0x470, game_tag("---", 0, 0, 0));
         map[2][0x228] = 1 << 3;
         map[2][0x229] = 1 << 3;
+        province(2)[0x958] = 1 << 5;  // in the Empire, not a city
         set_name(2, long_name);
         // A sea with a name in UTF-8, as Mei keeps it.
         set_name(3, "\xE5\x8C\x97\xE4\xBA\xAC");
@@ -2196,7 +2204,7 @@ int main(int argc, char** argv) {
         start.add(gp_toml);
         start.add(plugin_toml("other"));
         start.make();
-        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 202);
+        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 207);
         AnvilPlugin* p = start.load(ANVIL_GAME_ID);
         CHECK(p != nullptr);
         if (p == nullptr) return;
@@ -2950,11 +2958,11 @@ int main(int argc, char** argv) {
             CHECK(world->province(1, &moskva) == ANVIL_OK && moskva.id == 1 && moskva.size == sizeof(moskva));
             CHECK(std::strcmp(moskva.owner.text, "RUS") == 0 && std::strcmp(moskva.controller.text, "TUR") == 0);
             CHECK(moskva.base_tax == 15000 && moskva.base_production == 8000 && moskva.base_manpower == 9500);
-            CHECK(moskva.flags == ANVIL_GAME_PROVINCE_LAND);
+            CHECK(moskva.flags == (ANVIL_GAME_PROVINCE_LAND | ANVIL_GAME_PROVINCE_CITY));
             AnvilGameProvince waste{};
             waste.size = sizeof(waste);
             CHECK(world->province(2, &waste) == ANVIL_OK && waste.owner.text[0] == 0 &&
-                  waste.flags == (ANVIL_GAME_PROVINCE_LAND | ANVIL_GAME_PROVINCE_WASTELAND));
+                  waste.flags == (ANVIL_GAME_PROVINCE_LAND | ANVIL_GAME_PROVINCE_WASTELAND | ANVIL_GAME_PROVINCE_HRE));
             CHECK(world->province(3, &waste) == ANVIL_OK && waste.flags == 0);
             CHECK(world->province(0, &waste) == ANVIL_ERROR_NOT_FOUND && world->province(4, &waste) == ANVIL_ERROR_NOT_FOUND);
             CHECK(world->province(1, nullptr) == ANVIL_ERROR_INVALID_ARGUMENT);
@@ -3632,7 +3640,18 @@ int main(int argc, char** argv) {
             FakeWorld::set(fake.moskva_area, 0x18, reinterpret_cast<uintptr_t>(fake.russia_region));
             CHECK(world->country_key("RUS", ANVIL_GAME_KEY_CONTINENT, place, sizeof place, &length) ==
                   ANVIL_ERROR_INVALID_ARGUMENT);
-            CHECK(world->province_key(1, 9, key_text, sizeof key_text, &length) == ANVIL_ERROR_INVALID_ARGUMENT);
+            // The trade node, the province's only.
+            CHECK(world->province_key(1, ANVIL_GAME_KEY_TRADE_NODE, place, sizeof place, &length) == ANVIL_OK &&
+                  length == 8 && std::string(place) == "novgorod");
+            CHECK(world->province_key(2, ANVIL_GAME_KEY_TRADE_NODE, place, sizeof place, &length) ==
+                  ANVIL_ERROR_NOT_FOUND);
+            FakeWorld::set(fake.novgorod_node, 0xA8, uintptr_t{0});
+            CHECK(world->province_key(1, ANVIL_GAME_KEY_TRADE_NODE, place, sizeof place, &length) ==
+                  ANVIL_ERROR_NOT_FOUND);
+            FakeWorld::set(fake.novgorod_node, 0xA8, reinterpret_cast<uintptr_t>(fake.novgorod_definition));
+            CHECK(world->country_key("RUS", ANVIL_GAME_KEY_TRADE_NODE, place, sizeof place, &length) ==
+                  ANVIL_ERROR_INVALID_ARGUMENT);
+            CHECK(world->province_key(1, 10, key_text, sizeof key_text, &length) == ANVIL_ERROR_INVALID_ARGUMENT);
             CHECK(world->province_key(1, ANVIL_GAME_KEY_RELIGION, nullptr, 4, &length) ==
                   ANVIL_ERROR_INVALID_ARGUMENT);
             CHECK(world->country_key("RUS", ANVIL_GAME_KEY_RELIGION, key_text, sizeof key_text, &length) ==
@@ -3691,7 +3710,8 @@ int main(int argc, char** argv) {
               anvil_game::read_province_key(l, 1, ANVIL_GAME_KEY_RELIGION, text) == ANVIL_ERROR_NOT_DECLARED &&
               anvil_game::read_country_key(l, "RUS", ANVIL_GAME_KEY_CULTURE, text) == ANVIL_ERROR_NOT_DECLARED &&
               anvil_game::read_province_view(l, id) == ANVIL_ERROR_NOT_DECLARED);
-        CHECK(anvil_game::read_province_key(l, 1, ANVIL_GAME_KEY_AREA, text) == ANVIL_ERROR_NOT_DECLARED);
+        CHECK(anvil_game::read_province_key(l, 1, ANVIL_GAME_KEY_AREA, text) == ANVIL_ERROR_NOT_DECLARED &&
+              anvil_game::read_province_key(l, 1, ANVIL_GAME_KEY_TRADE_NODE, text) == ANVIL_ERROR_NOT_DECLARED);
         // A port with the keys but not their groups: only the groups are NOT_DECLARED.
         l.religion_key = 0x90;
         CHECK(anvil_game::read_province_key(l, 1, ANVIL_GAME_KEY_RELIGION_GROUP, text) == ANVIL_ERROR_NOT_DECLARED &&
