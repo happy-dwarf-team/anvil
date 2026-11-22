@@ -19,7 +19,8 @@ inline constexpr std::size_t kRulesMax = 64;
 inline constexpr std::size_t kFileMax = 1u << 20;
 
 // What a rule reads of a province.
-enum class Test { always, flag, variable, modifier, value, owned_by, core, occupied, subject };
+enum class Test { always, flag, variable, modifier, value, owned_by, core, occupied, subject, controlled_by, core_of,
+                  subject_of };
 // Tests that pass or not, with no number: they take no bounds and no scale.
 bool is_yes_no(Test test);
 
@@ -31,7 +32,7 @@ bool is_country_value(Value value);
 
 struct Rule {
     Test test = Test::always;
-    std::string name;    // the flag, variable or modifier key, the value's name, or owned_by's tag
+    std::string name;    // the flag, variable or modifier key, the value's name, or a country tag
     Value value = Value::development;  // for Test::value
     bool owner = false;  // read from the province's owner, not the province
     bool yes = true;     // core, occupied, subject: = yes or = no

@@ -64,6 +64,20 @@ struct Fault {
     std::string what;
 };
 
+// The key a test is written with, for faults about where it reads.
+std::string key_of(Test test) {
+    switch (test) {
+        case Test::owned_by: return "owned_by";
+        case Test::controlled_by: return "controlled_by";
+        case Test::core:
+        case Test::core_of: return "core";
+        case Test::occupied: return "occupied";
+        case Test::subject: return "subject";
+        case Test::subject_of: return "subject_of";
+        default: return "this test";
+    }
+}
+
 struct Token {
     enum Kind { word, string, open, close, equals, end } kind = end;
     std::string text;
@@ -186,6 +200,19 @@ public:
         return t.text;
     }
 
+    // A country tag: three letters or digits, upper-cased.
+    static bool is_tag(const std::string& v) {
+        return v.size() == 3 && std::all_of(v.begin(), v.end(), [](char c) {
+                   return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+               });
+    }
+    static std::string upper(std::string v) {
+        for (char& c : v) {
+            if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+        }
+        return v;
+    }
+
     bool yes_no(const char* key) {
         const Token t = lex_.next();
         if (t.kind == Token::word && t.text == "yes") return true;
@@ -276,19 +303,28 @@ public:
                 }
                 r.value = found->value;
                 ++tests;
-            } else if (k == "owned_by") {
-                r.test = Test::owned_by;
-                r.name = text("owned_by");
-                const bool tag = r.name.size() == 3 && std::all_of(r.name.begin(), r.name.end(), [](char c) {
-                    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
-                });
-                if (!tag) throw Fault{key.line, "owned_by needs a country tag of three letters or digits: " + r.name};
-                for (char& c : r.name) {
-                    if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+            } else if (k == "owned_by" || k == "controlled_by" || k == "subject_of") {
+                r.test = k == "owned_by" ? Test::owned_by : k == "controlled_by" ? Test::controlled_by : Test::subject_of;
+                r.name = text(k.c_str());
+                if (!is_tag(r.name)) throw Fault{key.line, k + " needs a country tag of three letters or digits: " + r.name};
+                r.name = upper(r.name);
+                ++tests;
+            } else if (k == "core") {
+                // core = yes / no: the owner's core; core = TAG: that country's.
+                const std::string v = text("core");
+                if (v == "yes" || v == "no") {
+                    r.test = Test::core;
+                    r.name = k;
+                    r.yes = v == "yes";
+                } else if (is_tag(v)) {
+                    r.test = Test::core_of;
+                    r.name = upper(v);
+                } else {
+                    throw Fault{key.line, "core is yes, no or a country tag of three letters or digits: " + v};
                 }
                 ++tests;
-            } else if (k == "core" || k == "occupied" || k == "subject") {
-                r.test = k == "core" ? Test::core : k == "occupied" ? Test::occupied : Test::subject;
+            } else if (k == "occupied" || k == "subject") {
+                r.test = k == "occupied" ? Test::occupied : Test::subject;
                 r.name = k;
                 r.yes = yes_no(k.c_str());
                 ++tests;
@@ -330,8 +366,8 @@ public:
             }
         }
         if (tests != 1) {
-            throw Fault{line, "a rule needs one of always, flag, variable, modifier, value, owned_by, core, occupied "
-                              "or subject"};
+            throw Fault{line, "a rule needs one of always, flag, variable, modifier, value, owned_by, controlled_by, "
+                              "core, occupied, subject or subject_of"};
         }
         if (!has_color) throw Fault{line, "a rule needs color = { r g b }"};
         if (!has_label || r.label.empty() || r.label.size() > kLabelMax) {
@@ -351,9 +387,13 @@ public:
             throw Fault{line, r.owner ? r.name + " is the province's: leave out owner = yes"
                                       : r.name + " is the owner's: write owner = yes"};
         }
-        if (r.test == Test::subject && !r.owner) throw Fault{line, "subject is the owner's: write owner = yes"};
-        if ((r.test == Test::owned_by || r.test == Test::core || r.test == Test::occupied) && r.owner) {
-            throw Fault{line, r.name + " is the province's: leave out owner = yes"};
+        if ((r.test == Test::subject || r.test == Test::subject_of) && !r.owner) {
+            throw Fault{line, key_of(r.test) + " is the owner's: write owner = yes"};
+        }
+        if ((r.test == Test::owned_by || r.test == Test::controlled_by || r.test == Test::core ||
+             r.test == Test::core_of || r.test == Test::occupied) &&
+            r.owner) {
+            throw Fault{line, key_of(r.test) + " is the province's: leave out owner = yes"};
         }
         return r;
     }
@@ -499,7 +539,7 @@ std::string decimal(std::int64_t value) {
 
 bool is_yes_no(Test test) {
     return test == Test::flag || test == Test::owned_by || test == Test::core || test == Test::occupied ||
-           test == Test::subject;
+           test == Test::subject || test == Test::controlled_by || test == Test::core_of || test == Test::subject_of;
 }
 
 Evaluator::Evaluator(const FileMode& mode, World& world) : mode_(mode), world_(world) {
@@ -543,8 +583,13 @@ std::optional<std::int64_t> Evaluator::read_country(std::size_t i, const std::st
         case Test::subject:
             v = world_.overlord(tag).empty() != r.yes ? 1 : 0;
             break;
+        case Test::subject_of:
+            v = world_.overlord(tag) == r.name ? 1 : 0;
+            break;
         case Test::owned_by:
+        case Test::controlled_by:
         case Test::core:
+        case Test::core_of:
         case Test::occupied:
             break;  // the province's: refused with owner = yes
     }
@@ -586,7 +631,12 @@ std::optional<std::int64_t> Evaluator::read(std::size_t i, std::int32_t province
             const std::string by = world_.controller(province);
             return (!by.empty() && by != *owner) == r.yes ? 1 : 0;
         }
+        case Test::controlled_by:
+            return world_.controller(province) == r.name ? 1 : 0;
+        case Test::core_of:
+            return world_.has_core(province, r.name) ? 1 : 0;
         case Test::subject:
+        case Test::subject_of:
             return std::nullopt;  // the owner's: refused without owner = yes
     }
     return std::nullopt;
