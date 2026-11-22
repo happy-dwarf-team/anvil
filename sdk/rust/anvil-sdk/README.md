@@ -87,4 +87,14 @@ the crate from its 1.0, which comes after the first real Rust plugin. A new
 Anvil service, or a function appended to one, gets its wrapper here in the
 same Anvil pull request as its C header.
 
+From 0.2 to 0.3 (Anvil 1.26), two changes can stop existing code from building:
+
+- `panel::Row` is `#[non_exhaustive]`, for the new `Row::swatch`: a `match`
+  over its kinds needs a `_` arm.
+- `world::Province` has three new fields, `hre`, `city` and `coastal`: code
+  that builds a `Province` itself (in a test, say) sets them or ends with
+  `..` from another value.
+
+Code that only reads them, and every other 0.2 call, builds as before.
+
 License: MIT.
