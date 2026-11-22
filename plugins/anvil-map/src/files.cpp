@@ -324,8 +324,13 @@ public:
                     throw Fault{key.line, "core is yes, no or a country tag of three letters or digits: " + v};
                 }
                 ++tests;
-            } else if (k == "religion" || k == "culture" || k == "trade_goods") {
-                r.test = k == "religion" ? Test::religion : k == "culture" ? Test::culture : Test::trade_goods;
+            } else if (k == "religion" || k == "culture" || k == "trade_goods" || k == "religion_group" ||
+                       k == "culture_group") {
+                r.test = k == "religion"         ? Test::religion
+                         : k == "culture"        ? Test::culture
+                         : k == "trade_goods"    ? Test::trade_goods
+                         : k == "religion_group" ? Test::religion_group
+                                                 : Test::culture_group;
                 r.name = text(k.c_str());
                 const bool key_like = !r.name.empty() && r.name.size() <= 128 &&
                                       std::all_of(r.name.begin(), r.name.end(), [](char ch) {
@@ -381,7 +386,8 @@ public:
         }
         if (tests != 1) {
             throw Fault{line, "a rule needs one of always, flag, variable, modifier, value, owned_by, controlled_by, "
-                              "core, occupied, subject, subject_of, religion, culture or trade_goods"};
+                              "core, occupied, subject, subject_of, religion, religion_group, culture, "
+                              "culture_group or trade_goods"};
         }
         if (!has_color) throw Fault{line, "a rule needs color = { r g b }"};
         if (!has_label || r.label.empty() || r.label.size() > kLabelMax) {
@@ -554,7 +560,8 @@ std::string decimal(std::int64_t value) {
 bool is_yes_no(Test test) {
     return test == Test::flag || test == Test::owned_by || test == Test::core || test == Test::occupied ||
            test == Test::subject || test == Test::controlled_by || test == Test::core_of || test == Test::subject_of ||
-           test == Test::religion || test == Test::culture || test == Test::trade_goods;
+           test == Test::religion || test == Test::culture || test == Test::trade_goods ||
+           test == Test::religion_group || test == Test::culture_group;
 }
 
 Evaluator::Evaluator(const FileMode& mode, World& world) : mode_(mode), world_(world) {
@@ -602,7 +609,9 @@ std::optional<std::int64_t> Evaluator::read_country(std::size_t i, const std::st
             v = world_.overlord(tag) == r.name ? 1 : 0;
             break;
         case Test::religion:
-        case Test::culture: {
+        case Test::culture:
+        case Test::religion_group:
+        case Test::culture_group: {
             const std::string key = world_.country_key(tag, r.test);
             if (!key.empty()) v = key == r.name ? 1 : 0;
             break;
@@ -659,7 +668,9 @@ std::optional<std::int64_t> Evaluator::read(std::size_t i, std::int32_t province
             return world_.has_core(province, r.name) ? 1 : 0;
         case Test::religion:
         case Test::culture:
-        case Test::trade_goods: {
+        case Test::trade_goods:
+        case Test::religion_group:
+        case Test::culture_group: {
             const std::string key = world_.province_key(province, r.test);
             if (key.empty()) return std::nullopt;
             return key == r.name ? 1 : 0;

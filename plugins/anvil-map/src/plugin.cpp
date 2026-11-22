@@ -408,9 +408,13 @@ public:
         return std::string(out.text, strnlen(out.text, sizeof(out.text)));
     }
     static std::uint32_t key_of(files::Test test) {
-        return test == files::Test::religion  ? ANVIL_GAME_KEY_RELIGION
-               : test == files::Test::culture ? ANVIL_GAME_KEY_CULTURE
-                                              : ANVIL_GAME_KEY_TRADE_GOODS;
+        switch (test) {
+            case files::Test::religion: return ANVIL_GAME_KEY_RELIGION;
+            case files::Test::culture: return ANVIL_GAME_KEY_CULTURE;
+            case files::Test::religion_group: return ANVIL_GAME_KEY_RELIGION_GROUP;
+            case files::Test::culture_group: return ANVIL_GAME_KEY_CULTURE_GROUP;
+            default: return ANVIL_GAME_KEY_TRADE_GOODS;
+        }
     }
     // A script key fits 128 bytes (the parser's limit for the rule's); a
     // longer one is no rule's.

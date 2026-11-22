@@ -1950,6 +1950,13 @@ void load_world(anvil::Host& host) {
         l.religion_key = sym::religion_key.key;
         l.culture_key = sym::culture_key.key;
         l.trade_goods_key = sym::trade_goods_key.key;
+        if (host.present(sym::religion_group_of) && host.present(sym::culture_group_of) &&
+            host.present(sym::religion_group_key) && host.present(sym::culture_group_key)) {
+            l.religion_group = sym::religion_group_of.group;
+            l.culture_group = sym::culture_group_of.group;
+            l.religion_group_key = sym::religion_group_key.key;
+            l.culture_group_key = sym::culture_group_key.key;
+        }
     }
     if (host.present(sym::selection_holder) && host.present(sym::selection_view) && host.present(sym::view_window) &&
         host.present(sym::province_view_province) && host.present(sym::dialog_window_part) &&

@@ -1350,6 +1350,46 @@ impl World {
     pub fn country_culture(&self, tag: Tag) -> Result<String> {
         self.country_key(tag, crate::sys::ANVIL_GAME_KEY_CULTURE, "country_culture")
     }
+
+    /// The script key of the group of a province's religion, such as
+    /// `christian`; `NotFound` when it has none (anvil-game 1.26.0).
+    pub fn province_religion_group(&self, province: i32) -> Result<String> {
+        self.province_key(
+            province,
+            crate::sys::ANVIL_GAME_KEY_RELIGION_GROUP,
+            "province_religion_group",
+        )
+    }
+
+    /// The script key of the group of a province's culture, such as
+    /// `east_slavic`; `NotFound` when it has none (anvil-game 1.26.0).
+    pub fn province_culture_group(&self, province: i32) -> Result<String> {
+        self.province_key(
+            province,
+            crate::sys::ANVIL_GAME_KEY_CULTURE_GROUP,
+            "province_culture_group",
+        )
+    }
+
+    /// The script key of the group of a country's state religion; `NotFound`
+    /// when it has none (anvil-game 1.26.0).
+    pub fn country_religion_group(&self, tag: Tag) -> Result<String> {
+        self.country_key(
+            tag,
+            crate::sys::ANVIL_GAME_KEY_RELIGION_GROUP,
+            "country_religion_group",
+        )
+    }
+
+    /// The script key of the group of a country's primary culture; `NotFound`
+    /// when it has none (anvil-game 1.26.0).
+    pub fn country_culture_group(&self, tag: Tag) -> Result<String> {
+        self.country_key(
+            tag,
+            crate::sys::ANVIL_GAME_KEY_CULTURE_GROUP,
+            "country_culture_group",
+        )
+    }
 }
 
 fn timed_list(

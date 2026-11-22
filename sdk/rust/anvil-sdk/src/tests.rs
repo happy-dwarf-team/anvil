@@ -1133,6 +1133,8 @@ unsafe extern "C" fn world_province_key(
         0 => b"orthodox",
         1 => b"russian",
         2 => b"grain",
+        3 => b"christian",
+        4 => b"east_slavic",
         _ => return ANVIL_ERROR_INVALID_ARGUMENT,
     };
     unsafe { region_text(province + 11, text, utf8, capacity, length) }
@@ -1148,6 +1150,8 @@ unsafe extern "C" fn world_country_key(
     let text: &[u8] = match key {
         0 => b"orthodox",
         1 => b"russian",
+        3 => b"christian",
+        4 => b"east_slavic",
         _ => return ANVIL_ERROR_INVALID_ARGUMENT,
     };
     let rus = unsafe { std::ffi::CStr::from_ptr(tag) }.to_bytes() == b"RUS";
@@ -1916,6 +1920,20 @@ fn world_reads_rulers_flags_and_variable_names() {
             w.country_culture(rus).unwrap()
         ),
         ("orthodox".to_owned(), "russian".to_owned())
+    );
+    assert_eq!(
+        (
+            w.province_religion_group(1).unwrap(),
+            w.province_culture_group(1).unwrap(),
+            w.country_religion_group(rus).unwrap(),
+            w.country_culture_group(rus).unwrap()
+        ),
+        (
+            "christian".to_owned(),
+            "east_slavic".to_owned(),
+            "christian".to_owned(),
+            "east_slavic".to_owned()
+        )
     );
     assert_eq!(
         w.country_culture(Tag::new("TUR").unwrap())

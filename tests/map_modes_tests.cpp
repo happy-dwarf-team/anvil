@@ -453,10 +453,15 @@ public:
         {{1, files::Test::religion}, "orthodox"}, {{2, files::Test::religion}, "orthodox"},
         {{3, files::Test::religion}, "catholic"}, {{1, files::Test::culture}, "russian"},
         {{2, files::Test::culture}, "swedish"},   {{3, files::Test::culture}, "polish"},
-        {{1, files::Test::trade_goods}, "grain"}, {{3, files::Test::trade_goods}, "fur"}};
+        {{1, files::Test::trade_goods}, "grain"}, {{3, files::Test::trade_goods}, "fur"},
+        {{1, files::Test::religion_group}, "christian"}, {{2, files::Test::religion_group}, "christian"},
+        {{3, files::Test::religion_group}, "christian"}, {{1, files::Test::culture_group}, "east_slavic"},
+        {{2, files::Test::culture_group}, "scandinavian"}, {{3, files::Test::culture_group}, "west_slavic"}};
     std::map<std::pair<std::string, files::Test>, std::string> country_keys{
         {{"RUS", files::Test::religion}, "orthodox"}, {{"RUS", files::Test::culture}, "russian"},
-        {{"POL", files::Test::religion}, "catholic"}, {{"POL", files::Test::culture}, "polish"}};
+        {{"POL", files::Test::religion}, "catholic"}, {{"POL", files::Test::culture}, "polish"},
+        {{"RUS", files::Test::culture_group}, "east_slavic"}, {{"POL", files::Test::culture_group}, "west_slavic"},
+        {{"RUS", files::Test::religion_group}, "christian"}, {{"POL", files::Test::religion_group}, "christian"}};
     std::string province_key(std::int32_t province, files::Test test) override {
         const auto it = province_keys.find({province, test});
         return it == province_keys.end() ? std::string() : it->second;
@@ -528,9 +533,9 @@ void file_tests() {
         CHECK(one("m={label=M label=N rule={always=yes color={0 0 0} label=x}}").ends_with("label is given twice"));
         CHECK(one("m={label=M sprite=\"GFX x\" rule={always=yes color={0 0 0} label=x}}").find("sprite") != std::string::npos);
         CHECK(one("m={label=M rule={color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier, value, owned_by, controlled_by, core, occupied, subject, "
-                                                                                          "subject_of, religion, culture or trade_goods"));
+                                                                                          "subject_of, religion, religion_group, culture, culture_group or trade_goods"));
         CHECK(one("m={label=M rule={flag=a variable=b color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier, value, owned_by, controlled_by, core, occupied, subject, "
-                                                                                          "subject_of, religion, culture or trade_goods"));
+                                                                                          "subject_of, religion, religion_group, culture, culture_group or trade_goods"));
         CHECK(one("m={label=M rule={always=yes label=x}}").ends_with("a rule needs color = { r g b }"));
         CHECK(one("m={label=M rule={always=yes color={0 0 0}}}").ends_with("a rule needs a label of 1 to 64 bytes"));
         CHECK(one("m={label=M rule={always=yes color={0 0 256} label=x}}").find("0 to 255") != std::string::npos);
@@ -755,6 +760,24 @@ void file_tests() {
             "at_least, at_most, above and below go with a variable, a modifier or a value"));
         CHECK(parse_problems("m={label=M rule={culture=russian religion=orthodox color={0 0 0} label=x}}").size() ==
               1);
+
+        // Their groups, the province's and with owner = yes the owner's.
+        CHECK(parse_problems("m={label=M"
+                             " rule={culture_group=scandinavian color={1 0 0} label=Scandinavian}"
+                             " rule={culture_group=west_slavic owner=yes color={2 0 0} label=West}"
+                             " rule={religion_group=christian color={3 0 0} label=Christian}}",
+                             &modes)
+                  .empty());
+        CHECK(modes[0].rules[0].test == files::Test::culture_group &&
+              modes[0].rules[2].test == files::Test::religion_group);
+        files::Evaluator groups(modes[0], world);
+        colors = groups.colors();
+        CHECK(colors[2] == 0x010000);                           // scandinavian
+        CHECK(colors[3] == 0x020000);                           // POL's west_slavic
+        CHECK(colors[1] == 0x030000);                           // christian, east_slavic under RUS
+        CHECK(colors[4] == ANVIL_MAP_NO_COLOR && colors[5] == ANVIL_MAP_NO_COLOR);
+        CHECK(parse_problems("m={label=M rule={religion_group=\"\" color={0 0 0} label=x}}")[0].ends_with(
+            "religion_group needs a script key as the game's files write it (orthodox, russian, grain): "));
     });
 
     run("map mode files: a scale colours between its two ends (anvil#580)", [] {
