@@ -132,6 +132,20 @@ bool read_raw(std::uintptr_t address, void* out, std::size_t size) noexcept {
 
 template <class T> bool read(std::uintptr_t address, T& out) noexcept { return read_raw(address, &out, sizeof(T)); }
 
+// The last character of the tooltip's text so far, 0 when it is empty or
+// cannot be read. The text is the CString at the tooltip's start (text_append's
+// note): MSVC's std::string, its size at +0x10, its capacity at +0x18, and its
+// characters in place up to 15, behind a pointer beyond.
+char tooltip_last(const void* tooltip) noexcept {
+    const auto base = reinterpret_cast<std::uintptr_t>(tooltip);
+    std::uint64_t size = 0, capacity = 0;
+    if (!read(base + 0x10, size) || !read(base + 0x18, capacity) || size == 0 || size > capacity) return 0;
+    std::uintptr_t data = base;
+    if (capacity > 15 && !read(base, data)) return 0;
+    char last = 0;
+    return read(data + size - 1, last) ? last : 0;
+}
+
 // The session object and its current map mode.
 bool current_mode(std::uintptr_t& session, std::int32_t& mode) noexcept {
     std::uintptr_t root = 0;
@@ -245,8 +259,11 @@ void on_tooltip(void* province, std::uint8_t flag, const void* other, void* tool
     g_asked_province.store(id, std::memory_order_relaxed);
     g_asked_mode.store(m, std::memory_order_release);
     try {
-        const std::string text = anvil_map::kept_text(*m, id);
-        if (!text.empty() && tooltip != nullptr) g_append(tooltip, text.data(), text.size());
+        std::string text = anvil_map::kept_text(*m, id);
+        if (!text.empty() && tooltip != nullptr) {
+            if (anvil_map::needs_line_break(tooltip_last(tooltip))) text.insert(text.begin(), '\n');
+            g_append(tooltip, text.data(), text.size());
+        }
     } catch (...) {
         // Only a failed allocation: the tooltip goes without the lines.
     }

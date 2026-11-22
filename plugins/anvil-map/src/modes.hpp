@@ -205,6 +205,15 @@ inline bool describable(std::int32_t province, std::uint64_t limit) noexcept {
     return province > 0 && static_cast<std::uint64_t>(province) < limit;
 }
 
+// Whether a mode's lines start a line of their own after the tooltip's text so
+// far, whose last character is `last` (0: none read). The game's first line
+// ends in " - (@TAG)", the owner's flag, and takes the mode's text after it; a
+// line the game adds below it, such as "Occupied by ..." (PROVVIEW_OCCUPIED_BY),
+// ends in a name or a colour code, and the mode's text would join it.
+inline bool needs_line_break(char last) noexcept {
+    return last != 0 && last != ' ' && last != '\n' && last != ')';
+}
+
 // Checks a legend for set_legend and copies it. ANVIL_OK fills `out`; `why`
 // says what was wrong otherwise.
 AnvilResult make_legend(const AnvilMapLegendEntry* entries, std::uint32_t count, std::uint32_t entry_size,

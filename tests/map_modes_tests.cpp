@@ -268,6 +268,9 @@ void text_tests() {
         CHECK(describable(1, 4942) && describable(4941, 4942));
         CHECK(!describable(0, 4942) && !describable(-1, 4942) && !describable(4942, 4942));
         CHECK(!describable(0x7FFFFFFF, 4942) && !describable(INT32_MIN, 4942));
+        // After "Name (Owner) - (@TAG)" the lines follow; after "Occupied by X" they start a line.
+        CHECK(!needs_line_break(')') && !needs_line_break(' ') && !needs_line_break('\n') && !needs_line_break(0));
+        CHECK(needs_line_break('a') && needs_line_break('!'));
         CHECK(!describable(1, 0));  // no limit known: none
     });
 
