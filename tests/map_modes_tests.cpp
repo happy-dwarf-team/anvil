@@ -445,6 +445,27 @@ public:
         const auto it = overlords.find(tag);
         return it == overlords.end() ? std::string() : it->second;
     }
+
+    // Religion and culture: 1 and 2 orthodox (2 Swedish), 3 catholic and
+    // polish, 4 and 5 none; RUS orthodox and russian, POL catholic and polish.
+    // Trade goods: 1 grain, 3 fur.
+    std::map<std::pair<std::int32_t, files::Test>, std::string> province_keys{
+        {{1, files::Test::religion}, "orthodox"}, {{2, files::Test::religion}, "orthodox"},
+        {{3, files::Test::religion}, "catholic"}, {{1, files::Test::culture}, "russian"},
+        {{2, files::Test::culture}, "swedish"},   {{3, files::Test::culture}, "polish"},
+        {{1, files::Test::trade_goods}, "grain"}, {{3, files::Test::trade_goods}, "fur"}};
+    std::map<std::pair<std::string, files::Test>, std::string> country_keys{
+        {{"RUS", files::Test::religion}, "orthodox"}, {{"RUS", files::Test::culture}, "russian"},
+        {{"POL", files::Test::religion}, "catholic"}, {{"POL", files::Test::culture}, "polish"}};
+    std::string province_key(std::int32_t province, files::Test test) override {
+        const auto it = province_keys.find({province, test});
+        return it == province_keys.end() ? std::string() : it->second;
+    }
+    std::string country_key(const std::string& tag, files::Test test) override {
+        ++country_reads;
+        const auto it = country_keys.find({tag, test});
+        return it == country_keys.end() ? std::string() : it->second;
+    }
 };
 
 constexpr const char* kHolySites = R"(# The example of docs/spec/map-mode-files-v1.md
@@ -506,8 +527,10 @@ void file_tests() {
         CHECK(one("m={label=M colour=1 rule={always=yes color={0 0 0} label=x}}").ends_with("a mode has no key colour"));
         CHECK(one("m={label=M label=N rule={always=yes color={0 0 0} label=x}}").ends_with("label is given twice"));
         CHECK(one("m={label=M sprite=\"GFX x\" rule={always=yes color={0 0 0} label=x}}").find("sprite") != std::string::npos);
-        CHECK(one("m={label=M rule={color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier, value, owned_by, controlled_by, core, occupied, subject or subject_of"));
-        CHECK(one("m={label=M rule={flag=a variable=b color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier, value, owned_by, controlled_by, core, occupied, subject or subject_of"));
+        CHECK(one("m={label=M rule={color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier, value, owned_by, controlled_by, core, occupied, subject, "
+                                                                                          "subject_of, religion, culture or trade_goods"));
+        CHECK(one("m={label=M rule={flag=a variable=b color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier, value, owned_by, controlled_by, core, occupied, subject, "
+                                                                                          "subject_of, religion, culture or trade_goods"));
         CHECK(one("m={label=M rule={always=yes label=x}}").ends_with("a rule needs color = { r g b }"));
         CHECK(one("m={label=M rule={always=yes color={0 0 0}}}").ends_with("a rule needs a label of 1 to 64 bytes"));
         CHECK(one("m={label=M rule={always=yes color={0 0 256} label=x}}").find("0 to 255") != std::string::npos);
@@ -688,6 +711,50 @@ void file_tests() {
             "owned_by is the province's: leave out owner = yes"));
         CHECK(parse_problems("m={label=M rule={controlled_by=SWE above=1 color={0 0 0} label=x}}")[0].ends_with(
             "at_least, at_most, above and below go with a variable, a modifier or a value"));
+    });
+
+    run("map mode files: religion, culture and trade_goods", [] {
+        std::vector<files::FileMode> modes;
+        CHECK(parse_problems("m={label=M"
+                             " rule={culture=swedish color={1 0 0} label=Swedish}"
+                             " rule={religion=orthodox color={2 0 0} label=Orthodox}"
+                             " rule={trade_goods=fur color={3 0 0} label=Fur}}"
+                             " n={label=N"
+                             " rule={culture=russian owner=yes color={4 0 0} label=Russian}"
+                             " rule={religion=catholic owner=yes color={5 0 0} label=Catholic}}",
+                             &modes)
+                  .empty());
+        CHECK(modes.size() == 2 && modes[0].rules[0].test == files::Test::culture &&
+              modes[0].rules[0].name == "swedish" && modes[0].rules[2].test == files::Test::trade_goods);
+        TableWorld world;
+        files::Evaluator e(modes[0], world);
+        std::vector<std::uint32_t> colors = e.colors();
+        CHECK(colors[1] == 0x020000);  // orthodox
+        CHECK(colors[2] == 0x010000);  // Swedish culture (orthodox too: the first rule wins)
+        CHECK(colors[3] == 0x030000);  // fur
+        CHECK(colors[4] == ANVIL_MAP_NO_COLOR && colors[5] == ANVIL_MAP_NO_COLOR);
+        // owner = yes: the owner's primary culture and state religion, read once per owner.
+        world.country_reads = 0;
+        files::Evaluator owners(modes[1], world);
+        colors = owners.colors();
+        CHECK(colors[1] == 0x040000 && colors[2] == 0x040000);  // RUS's: russian, whatever the province's culture
+        CHECK(colors[3] == 0x050000);                           // POL's: catholic
+        CHECK(colors[4] == ANVIL_MAP_NO_COLOR && colors[5] == ANVIL_MAP_NO_COLOR);
+        CHECK(world.country_reads == 3);
+        // A key is compared as written.
+        CHECK(parse_problems("m={label=M rule={religion=Orthodox color={1 0 0} label=O}}", &modes).empty());
+        files::Evaluator upper(modes[0], world);
+        CHECK(upper.match(1) == nullptr);
+
+        // Faults.
+        CHECK(parse_problems("m={label=M rule={trade_goods=grain owner=yes color={0 0 0} label=x}}")[0].ends_with(
+            "trade_goods is the province's: leave out owner = yes"));
+        CHECK(parse_problems("m={label=M rule={religion=\"two words\" color={0 0 0} label=x}}")[0].ends_with(
+            "religion needs a script key as the game's files write it (orthodox, russian, grain): two words"));
+        CHECK(parse_problems("m={label=M rule={culture=russian above=1 color={0 0 0} label=x}}")[0].ends_with(
+            "at_least, at_most, above and below go with a variable, a modifier or a value"));
+        CHECK(parse_problems("m={label=M rule={culture=russian religion=orthodox color={0 0 0} label=x}}").size() ==
+              1);
     });
 
     run("map mode files: a scale colours between its two ends (anvil#580)", [] {
