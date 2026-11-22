@@ -199,6 +199,22 @@ void gate_tests() {
         t.update(false, {"chisel", "mei"});  // multiplayer, or the menu
         CHECK(!t.answer(chisel) && !t.answer(mei));
     });
+    run("has_dlc gate: closed while a session is put in, until the next session event (G5, #545)", [] {
+        anvil_script::GateTable t;
+        const int chisel = t.intern("chisel");
+        t.update(true, {"chisel", "mei"});
+        CHECK(t.answer(chisel) && !t.closed() && t.closed_answers() == 0);
+        t.close();  // a save loads from the running session
+        CHECK(t.closed() && !t.answer(chisel) && !t.answer(chisel) && t.closed_answers() == 2);
+        t.close();  // the game calls it several times per load
+        const int mei = t.intern("mei");  // parsed while closed: no as well
+        CHECK(mei == 1 && !t.answer(mei) && t.closed_answers() == 3);
+        t.update(true, {"chisel", "mei"});  // the new session's event
+        CHECK(!t.closed() && t.answer(chisel) && t.answer(mei) && t.closed_answers() == 0);
+        t.close();
+        t.update(false, {});  // a multiplayer session, or the menu
+        CHECK(!t.closed() && !t.answer(chisel) && t.closed_answers() == 0);
+    });
     run("has_dlc gate: at most 256 names", [] {
         anvil_script::GateTable t;
         for (std::size_t i = 0; i < anvil_script::kMaxGates; ++i) CHECK(t.intern("p" + std::to_string(i)) == static_cast<int>(i));
@@ -342,6 +358,8 @@ bool fake_has_dlc_assign(void* trigger, const void* token) {
     return true;
 }
 bool fake_has_dlc_evaluate(void* trigger, void*) { return (static_cast<FakeDlcTrigger*>(trigger)->bits & 8) != 0; }
+int g_set_session_calls = 0;
+void fake_set_session(void*, void*) { ++g_set_session_calls; }
 
 // eu4.exe's size and sections (Steam), reserved; pages are committed only
 // where the symbols of anvil-script lie.
@@ -356,7 +374,7 @@ struct FakeEu4 {
         commit(0x0, PAGE_READWRITE);
         for (uint32_t page :
              {0xC9000u, 0x5DE000u, 0x5E0000u, 0x5E4000u, 0x5ED000u, 0x5EF000u, 0x623000u, 0x758000u, 0x1703000u,
-              0xBB4000u, 0xCC5000u})
+              0xBB4000u, 0xCC5000u, 0x756000u})
             commit(page, PAGE_EXECUTE_READWRITE);
         commit(0x1C9E000, PAGE_READWRITE);
         commit(0x1D17000, PAGE_READWRITE);
@@ -421,6 +439,12 @@ struct FakeEu4 {
                        0x48, 0x83, 0xC4, 0x40, 0x5D, 0x48, 0x8B, 0x5C, 0x24, 0x08, 0x48, 0x8B, 0x74, 0x24, 0x10,
                        0x48, 0x8B, 0x7C, 0x24, 0x18, 0x4C, 0x8B, 0x74, 0x24, 0x20});
         jump(0xCC5BA0 + 53, &fake_has_dlc_assign);
+        // The root's session setter: its declared bytes (the last one runs: the root is the
+        // caller's buffer), then undo them (add rsp,20h; pop rdi; restore rbp, rsi) and the stand-in.
+        put(0x756A30, {0x48, 0x89, 0x6C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57, 0x48, 0x83, 0xEC, 0x20,
+                       0x48, 0x89, 0x91, 0x00, 0x1E, 0x00, 0x00, 0x48, 0x83, 0xC4, 0x20, 0x5F, 0x48, 0x8B, 0x6C,
+                       0x24, 0x10, 0x48, 0x8B, 0x74, 0x24, 0x18});
+        jump(0x756A30 + 37, &fake_set_session);
         // make_unique<CHasDLCTrigger> (not run): its size, its vtable at 0x1D172B0, the DLC bits at +0x68.
         put(0xBB4012, {0xB9, 0x70, 0x00, 0x00, 0x00, 0xE8, 0xB8, 0xF2, 0xE7, 0x00, 0x48, 0x8B, 0xD8, 0x48, 0x89, 0x44,
                        0x24, 0x30, 0x48, 0x8B, 0xC8, 0xE8, 0xE4, 0x56, 0xFD, 0xFF, 0x48, 0x8D, 0x05, 0x7D, 0x32, 0x16,
@@ -611,14 +635,14 @@ int main(int argc, char** argv) {
         CHECK(parsed.manifest && parsed.manifest->phase == Phase::Early && !parsed.manifest->affects_gameplay);
         if (!parsed.manifest) return;
         anvil::ResolvedPlugin* resolved = start.add(dir);
-        CHECK(resolved != nullptr && resolved->symbols.size() == 15);
+        CHECK(resolved != nullptr && resolved->symbols.size() == 16);
         if (resolved == nullptr) return;
         // After it, a stand-in for anvil-game: never loaded, it publishes the
         // session events through its handle below.
         start.add(plugin_toml("anvil-game"));
         start.make();
         AnvilPlugin* p = start.load("anvil-script");
-        CHECK(p != nullptr && changes.count(p->owner) == 3);
+        CHECK(p != nullptr && changes.count(p->owner) == 4);
         if (p == nullptr) return;
         plugin = p;
     });
@@ -949,6 +973,36 @@ int main(int argc, char** argv) {
         g_plugins[late_handle].loaded = false;
         session(ANVIL_GAME_SESSION_STARTED, 0);
         CHECK(!evaluate(later) && evaluate(chisel));
+    });
+
+    auto* set_session = reinterpret_cast<void (*)(void*, void*)>(image.address(0x756A30));
+    run("has_dlc: a save loading from a session answers no until the new session's event (G5, #545)", [&] {
+        FakeDlcTrigger chisel;
+        CHECK(parse(chisel, "anvil:chisel"));
+        session(ANVIL_GAME_SESSION_STARTED, 0);
+        CHECK(evaluate(chisel));
+        // The load puts the session into the root: the game's setter runs, and from
+        // there to the event its triggers (the load's, its first frame's) read no.
+        std::vector<std::uint8_t> root(0x1E08);
+        int session_object = 0;
+        g_set_session_calls = 0;
+        set_session(root.data(), &session_object);
+        void* stored = nullptr;
+        std::memcpy(&stored, root.data() + 0x1E00, sizeof stored);
+        CHECK(g_set_session_calls == 1 && stored == &session_object);
+        CHECK(!evaluate(chisel) && !evaluate(chisel));
+        // The new session is ironman and Chisel is suspended in it: still no after the event.
+        g_plugins[chisel_handle].suspended = true;
+        session(ANVIL_GAME_SESSION_ENDED, 0);
+        session(ANVIL_GAME_SESSION_STARTED, 0);
+        CHECK(!evaluate(chisel));
+        CHECK(contains(log, "anvil-script: has_dlc while the session loaded: 2 answer(s), all no"));
+        g_plugins[chisel_handle].suspended = false;
+        // A load into a session where it acts: no while loading, then yes.
+        set_session(root.data(), &session_object);
+        CHECK(!evaluate(chisel));
+        session(ANVIL_GAME_SESSION_STARTED, 0);
+        CHECK(evaluate(chisel));
     });
 
     if (g_failures) {

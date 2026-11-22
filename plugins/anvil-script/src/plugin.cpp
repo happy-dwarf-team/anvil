@@ -383,6 +383,7 @@ constexpr std::size_t kSlotAssign = 7;       // bool Assign(const CToken&)
 
 GateTable g_gates;
 anvil::HookOf<sym::has_dlc_assign> g_has_dlc_assign;
+anvil::HookOf<sym::set_session> g_set_session;
 void* g_gate_vtable[kTriggerSlots];
 std::size_t g_gate_index_offset = 0;  // the padding after the DLC bits: our index
 std::atomic<bool> g_gate_full_logged{false};
@@ -416,12 +417,23 @@ bool detour_has_dlc_assign(void* self, const void* token) noexcept {
     return true;
 }
 
+// The game puts a session into its root as a save or a new game loads (also
+// from the game menu, where the same object comes back): from here until the
+// session event, has_dlc answers false (G5, #545). Before, a load and its
+// first frame read the previous session's answers.
+void detour_set_session(void* root, void* session) noexcept {
+    g_gates.close();
+    g_set_session.next(root, session);
+}
+
 // A session started or ended: the answers for it. Anvil suspends plugins
 // before any plugin hears of the session, so the entries say who acts now.
 void on_session(const void* payload) {
     AnvilGameSession s{};
     if (payload != nullptr) std::memcpy(&s, payload, std::min<std::size_t>(sizeof s, *static_cast<const std::uint32_t*>(payload)));
     const bool allowed = s.change == ANVIL_GAME_SESSION_STARTED && s.multiplayer == 0;
+    const bool was_closed = g_gates.closed();
+    const std::uint64_t closed_answers = g_gates.closed_answers();
     std::vector<std::string> active;
     AnvilControlStatus status{};
     status.size = sizeof status;
@@ -434,6 +446,7 @@ void on_session(const void* payload) {
     }
     g_gates.update(allowed, active);
     if (g_gates.size() == 0) return;
+    if (was_closed) anvil::Host{}.info("has_dlc while the session loaded: {} answer(s), all no", closed_answers);
     std::string answers;
     for (std::size_t i = 0; i < g_gates.size(); ++i) {
         if (!answers.empty()) answers += ", ";
@@ -546,6 +559,8 @@ struct AnvilScript : anvil::Plugin {
         std::memcpy(g_gate_vtable, game, sizeof g_gate_vtable);
         g_gate_vtable[kSlotEvaluate] = reinterpret_cast<void*>(&gate_evaluate);
         host.hook(g_has_dlc_assign, sym::has_dlc_assign, &detour_has_dlc_assign);
+        if (host.present(sym::set_session)) host.hook(g_set_session, sym::set_session, &detour_set_session);
+        else host.warn("set_session is absent on this build: has_dlc keeps the previous session's answers while a save loads");
         host.subscribe(ANVIL_GAME_EVENT_SESSION, [](std::string_view, const void* payload) { on_session(payload); });
         return true;
     }

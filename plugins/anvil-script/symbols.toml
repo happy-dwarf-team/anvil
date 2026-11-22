@@ -164,6 +164,18 @@ build."eu4-1.37.5-steam-win64" = { rva = 0xCC5BA0 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0xCC4350 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0xCC4350 }
 
+[symbol.set_session]
+# The same function anvil-game hooks: has_dlc closes there until the session
+# event, so a load does not read the previous session's answers (G5, #545).
+# mov [rsp+10h],rbp; mov [rsp+18h],rsi; push rdi; sub rsp,20h; mov [rcx+1E00h],rdx
+bytes = "48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 89 91 00 1E 00 00"
+memory = "code"
+signature = "void (void* root, void* session)"
+note = "puts a session into the root (root+0x1E00); called while a save or a new game loads, also from the game menu, where the same session object comes back"
+build."eu4-1.37.5-steam-win64" = { rva = 0x756A30 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x755BF0 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x755BF0 }
+
 [symbol.has_dlc_make]
 memory = "code"
 values.trigger_size = { at = 1, size = 4 }
