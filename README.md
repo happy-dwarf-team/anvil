@@ -97,9 +97,10 @@ native plugins improve or extend the game **without modifying `eu4.exe`**.
   mode can have a legend in the overlay, and a mod can add modes with no code, in
   `anvil/map_modes/*.txt` files with rules on a province's or its owner's flags,
   variables, modifiers and values such as development, on its owner, occupation
-  and cores, in one colour or a scale
-  between two; an edited file shows the next time the mode is picked, without a
-  restart
+  and cores, its religion, culture, trade goods and their groups, its area,
+  region, continent and trade node, and whether it is a capital, part of the Holy
+  Roman Empire or a colony, in one colour or a scale between two; an edited file
+  shows the next time the mode is picked, without a restart
   ([docs/spec/map-mode-files-v1.md](docs/spec/map-mode-files-v1.md)).
   By itself it changes nothing.
 - And `anvil-script` (`anvil/plugins/anvil-script/`): a gameplay plugin can add
