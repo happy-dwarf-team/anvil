@@ -2527,6 +2527,75 @@ build."eu4-1.37.5-steam-win64" = { rva = 0xC506AB }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0xC4EE5B }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0xC4EE5B }
 
+# --- religion, culture and trade goods (province_key, country_key, 1.26.0) ------
+# Each is a pointer to the game's database object; the script key (orthodox,
+# russian, grain) is a std::string in that object.
+
+[symbol.culture_of]
+# mov rdx,[rcx+1CA8h]; cmp [r8+r10+440h],r9; jmp; ... ; mov rax,[rax+rdx*8]; cmp [rax+1228h],r9
+bytes = """
+48 8B 91 A8 1C 00 00 4D 39 8C 10 40 04 00 00 EB ?? 80 7B 4B 00 49 0F 44 FE 48 8B 0C 1F 48 8B C1 48 C1 E8 38
+84 C0 74 ?? 48 C1 E9 20 48 0F BF D1 48 8B 05 ?? ?? ?? ?? 48 8B 88 18 01 00 00 48 8B 04 D1 4C 39 88 28 12 00 00
+"""
+memory = "code"
+values.province = { at = 11, size = 4 }
+values.country = { at = 69, size = 4 }
+note = "CCultureTrigger::Evaluate: the province's _pCulture (+0x440) and the country's _pPrimaryCulture (+0x1228), CCulture*"
+build."eu4-1.37.5-steam-win64" = { rva = 0xC03C5D }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0xC0240D }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0xC0240D }
+
+[symbol.religion_of]
+# add ebx,[r14]; mov rax,[r15+0F30h]; cmp [rsi+448h],rax; jne
+bytes = "41 03 1E 49 8B 87 30 0F 00 00 48 39 86 48 04 00 00 75 ??"
+memory = "code"
+values.country = { at = 6, size = 4 }
+values.province = { at = 13, size = 4 }
+note = "CProvince::GetCurrentManpower: the owner's _pReligion (+0xF30) against the province's _pReligion (+0x448), CReligion*"
+build."eu4-1.37.5-steam-win64" = { rva = 0xA0BAA7 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0xA0AA87 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0xA0AA87 }
+
+[symbol.trade_goods_of]
+# mov rax,[rcx+1CA8h]; mov rdi,[rdx+rax+458h]; jmp
+bytes = "48 8B 81 A8 1C 00 00 48 8B BC 02 58 04 00 00 EB ??"
+memory = "code"
+values.province = { at = 11, size = 4 }
+note = "CTradeGoodsTrigger::GetToolTip: the province's _pTradeGoods (+0x458), CTradeGoods*"
+build."eu4-1.37.5-steam-win64" = { rva = 0xC543AA }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0xC52B5A }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0xC52B5A }
+
+[symbol.trade_goods_key]
+# mov r14,rax; lea rdx,[rdi+18h]; cmp qword [rdx+18h],10h; jb; mov rdx,[rdx]
+bytes = "4C 8B F0 48 8D 57 18 48 83 7A 18 10 72 03 48 8B 12 45 33 C9 45 33 C0 48 8D 4D C7"
+memory = "code"
+values.key = { at = 6, size = 1 }
+note = "CTradeGoodsTrigger::GetToolTip: the trade goods' script key _Tag (+0x18), a std::string"
+build."eu4-1.37.5-steam-win64" = { rva = 0xC5440A }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0xC52BBA }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0xC52BBA }
+
+[symbol.culture_key]
+# mov [rsi+40h],r12b; lea r14,[rsi+48h]; mov rdx,r15; cmp qword [r15+18h],10h; jb; mov rdx,[r15]
+bytes = "44 88 66 40 4C 8D 76 48 49 8B D7 49 83 7F 18 10 72 03 49 8B 17 4D 89 26"
+memory = "code"
+values.key = { at = 7, size = 1 }
+note = "CCulture::CCulture: the script key it is given goes to _Tag (+0x48), a std::string"
+build."eu4-1.37.5-steam-win64" = { rva = 0x27E8A3 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x27E853 }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x27E853 }
+
+[symbol.religion_key]
+# mov [rcx+88h],r12; add rcx,90h; mov rdx,r9; cmp qword [r9+18h],10h; jb; mov rdx,[r9]
+bytes = "4C 89 A1 88 00 00 00 48 81 C1 90 00 00 00 49 8B D1 49 83 79 18 10 72 03 49 8B 11"
+memory = "code"
+values.key = { at = 10, size = 4 }
+note = "CReligion::CReligion: the script key it is given goes to _Tag (+0x90), a std::string"
+build."eu4-1.37.5-steam-win64" = { rva = 0xA7AF6F }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0xA79EEF }
+build."eu4-1.37.5.0-gog-win64" = { rva = 0xA79EEF }
+
 [symbol.camera_of_session]
 memory = "code"
 values.frame_time = { at = 5, size = 4 }

@@ -1654,4 +1654,42 @@ AnvilResult read_subjects(const WorldLayout& l, std::string_view tag, std::vecto
     return read_tag_vector(l, country + l.subjects, out) ? ANVIL_OK : ANVIL_ERROR_INTERNAL;
 }
 
+namespace {
+
+// The script key of the object the pointer at `at` points to.
+AnvilResult read_object_key(std::uintptr_t at, std::uint32_t key_offset, std::string& utf8) {
+    std::uintptr_t object = 0;
+    if (!read(at, object)) return ANVIL_ERROR_INTERNAL;
+    if (object == 0) return ANVIL_ERROR_NOT_FOUND;
+    std::string key;
+    if (!read_string(object + key_offset, key)) return ANVIL_ERROR_INTERNAL;
+    if (key.empty()) return ANVIL_ERROR_NOT_FOUND;
+    utf8 = game_text_to_utf8(key);
+    return ANVIL_OK;
+}
+
+}  // namespace
+
+AnvilResult read_province_key(const WorldLayout& l, std::int32_t province, std::uint32_t key, std::string& utf8) {
+    if (key > ANVIL_GAME_KEY_TRADE_GOODS) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (l.religion_key == 0) return ANVIL_ERROR_NOT_DECLARED;
+    std::uintptr_t p = 0;
+    if (const AnvilResult r = province_at(l, province, p); r != ANVIL_OK) return r;
+    switch (key) {
+    case ANVIL_GAME_KEY_RELIGION: return read_object_key(p + l.province_religion, l.religion_key, utf8);
+    case ANVIL_GAME_KEY_CULTURE: return read_object_key(p + l.province_culture, l.culture_key, utf8);
+    default: return read_object_key(p + l.province_trade_goods, l.trade_goods_key, utf8);
+    }
+}
+
+AnvilResult read_country_key(const WorldLayout& l, std::string_view tag, std::uint32_t key, std::string& utf8) {
+    if (key > ANVIL_GAME_KEY_CULTURE) return ANVIL_ERROR_INVALID_ARGUMENT;
+    if (l.religion_key == 0) return ANVIL_ERROR_NOT_DECLARED;
+    std::uintptr_t country = 0;
+    std::uint64_t own = 0;
+    if (const AnvilResult r = country_at(l, tag, country, own); r != ANVIL_OK) return r;
+    return key == ANVIL_GAME_KEY_RELIGION ? read_object_key(country + l.country_religion, l.religion_key, utf8)
+                                          : read_object_key(country + l.country_culture, l.culture_key, utf8);
+}
+
 }  // namespace anvil_game
