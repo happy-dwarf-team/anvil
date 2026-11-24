@@ -1140,6 +1140,24 @@ int main(int argc, char** argv) {
         // The crashed frame, then what the scan finds on this thread's stack.
         CHECK(n >= 2 && frames[0].where.address == reinterpret_cast<uintptr_t>(page + 5));
         CHECK(n >= 2 && frames[1].source == FrameSource::Scan);
+        // The notes get the report's frames only up to the scan (anvil#603):
+        // here the crashed frame alone, none of the scanned return addresses.
+        EXCEPTION_RECORD record{};
+        record.ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
+        record.ExceptionAddress = page + 5;
+        ReportInput in;
+        in.record = &record;
+        in.context = &ctx;
+        in.stack_low = reinterpret_cast<uintptr_t>(tib->StackLimit);
+        in.stack_high = reinterpret_cast<uintptr_t>(tib->StackBase);
+        in.sources = &sources;
+        static char json_data[256 * 1024], text_data[192 * 1024];
+        TextBuffer json(json_data, sizeof(json_data)), text(text_data, sizeof(text_data));
+        build_report(in, json, text);
+        CHECK(contains(std::string(text.view()), "(scan)"));
+        uintptr_t unwound[64] = {};
+        CHECK(unwound_addresses(unwound, 64) == 1 && unwound[0] == reinterpret_cast<uintptr_t>(page + 5));
+        CHECK(unwound_addresses(unwound, 0) == 0);
         RtlDeleteFunctionTable(function);
         VirtualFree(page, 0, MEM_RELEASE);
     });

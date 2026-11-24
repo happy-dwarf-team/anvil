@@ -1,5 +1,9 @@
 #include "crash_hints.hpp"
 
+#include <windows.h>
+
+#include "anvil_control.h"
+
 namespace anvil_game::crash_hints {
 
 namespace {
@@ -102,6 +106,34 @@ IdeaLoop idea_loop(std::uintptr_t idea_return, const Crash& crash, Reader read) 
 }
 
 }  // namespace
+
+bool crash_from_scope(const AnvilControlCrashScope* scope, Crash& crash) {
+    constexpr std::size_t kFirst = offsetof(AnvilControlCrashScope, stack_high) + sizeof(scope->stack_high);
+    crash = Crash{};
+    if (scope == nullptr || scope->size < kFirst || scope->context == nullptr) return false;
+    const auto& context = *static_cast<const CONTEXT*>(scope->context);
+    crash.rip = context.Rip;
+    crash.rsp = context.Rsp;
+    crash.stack_high = scope->stack_high;
+    // The unwound frames came with Anvil 1.27; an older core leaves the stack scan.
+    if (scope->size >= offsetof(AnvilControlCrashScope, frame_count) + sizeof(scope->frame_count)) {
+        crash.frames_known = true;
+        crash.frames = scope->frames;
+        crash.frame_count = scope->frames != nullptr ? scope->frame_count : 0;
+    }
+    // The exception came with Anvil 1.26.0; an older core gives the stack only.
+    if (scope->size >= offsetof(AnvilControlCrashScope, exception) + sizeof(scope->exception) &&
+        scope->exception != nullptr) {
+        const auto& e = *static_cast<const EXCEPTION_RECORD*>(scope->exception);
+        if (e.ExceptionCode == EXCEPTION_ACCESS_VIOLATION && e.NumberParameters >= 2) {
+            crash.access_violation = true;
+            crash.write = e.ExceptionInformation[0] == 1;
+            crash.execute = e.ExceptionInformation[0] == 8;
+            crash.address = static_cast<std::uintptr_t>(e.ExceptionInformation[1]);
+        }
+    }
+    return true;
+}
 
 ProvinceEntry province_entry(std::uintptr_t array, std::int64_t count, std::uint32_t size, std::uintptr_t address) {
     ProvinceEntry e;

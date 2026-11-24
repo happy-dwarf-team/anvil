@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <cstdint>
 
+struct AnvilControlCrashScope;  // anvil_control.h
+
 namespace anvil_game::crash_hints {
 
 // Reads `size` bytes at `address` without faulting (ReadProcessMemory in the
@@ -58,6 +60,11 @@ struct ProvinceEntry {
 };
 
 ProvinceEntry province_entry(std::uintptr_t array, std::int64_t count, std::uint32_t size, std::uintptr_t address);
+
+// The crash as the core's scope gives it, reading each field only when the
+// scope's size covers it (the exception since Anvil 1.26, the frames since
+// 1.27); false when the scope lacks the context or the stack.
+bool crash_from_scope(const AnvilControlCrashScope* scope, Crash& out);
 
 // The note: lines of text, each ended by '\n', into `out`; returns the bytes
 // written (0: nothing to say). `idea_return` is the return address of the
