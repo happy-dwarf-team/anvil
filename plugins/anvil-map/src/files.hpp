@@ -173,7 +173,8 @@ std::vector<LegendItem> legend_of(const FileMode& mode);
 
 // The entries of "enabled_mods" in dlc_load.json, in order ("mod/ugc_1.mod").
 std::vector<std::string> enabled_mods(std::string_view dlc_load_json);
-// The first key="value" of `key` in a .mod file; empty when it has none.
+// The value of `key` at the top level of a .mod file, as Anvil's loader reads
+// it (the last one, quoted or bare); empty when it has none.
 std::string mod_value(std::string_view mod_text, std::string_view key);
 
 // One mode file found in the playset.

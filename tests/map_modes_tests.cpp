@@ -1112,6 +1112,17 @@ void file_tests() {
         CHECK(files::mod_value("name=\"A \\\"quoted\\\" mod\"\n", "name") == "A \"quoted\" mod");
         CHECK(files::mod_value("path=\"C:\\\\mods\\\\a\"\n", "path") == "C:\\mods\\a");
         CHECK(files::mod_value("path=\"C:\\mods\\a\\\"\n", "path").empty());  // \" does not close it, as in the game
+        // As the loader: a bare value, a quote in a comment after it, a quoted
+        // text over two lines, the last of two keys, no space before a key, and
+        // only the top level.
+        CHECK(files::mod_value("path=mod/x\n", "path") == "mod/x");
+        CHECK(files::mod_value("path=mod/x # was \"mod/old\"\n", "path") == "mod/x");
+        CHECK(files::mod_value("name=\"My\nmod\" path=\"mod/x\"\n", "path") == "mod/x");
+        CHECK(files::mod_value("name=\"My\nmod\" path=\"mod/x\"\n", "name") == "My\nmod");
+        CHECK(files::mod_value("path=\"mod/a\"\npath=\"mod/b\"\n", "path") == "mod/b");
+        CHECK(files::mod_value("name=\"a\"path=\"mod/x\"\n", "path") == "mod/x");
+        CHECK(files::mod_value("tags={ path=\"mod/x\" }\n", "path").empty());
+        CHECK(files::mod_value("path={ \"mod/x\" }\n", "path").empty());
 
         const std::filesystem::path user = std::filesystem::temp_directory_path() /
                                            ("anvil-map-files-" + std::to_string(GetCurrentProcessId()));
