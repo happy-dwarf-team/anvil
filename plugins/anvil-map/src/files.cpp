@@ -848,42 +848,67 @@ std::vector<std::string> enabled_mods(std::string_view json) {
 }
 
 std::string mod_value(std::string_view text, std::string_view key) {
-    // As Anvil's loader reads a descriptor (src/core/playset.cpp): without a
-    // UTF-8 BOM, with \" and \\ as escapes in a quoted text.
-    if (text.starts_with("\xEF\xBB\xBF")) text.remove_prefix(3);
-    for (std::size_t at = text.find(key); at != std::string_view::npos; at = text.find(key, at + 1)) {
-        if (at != 0 && !std::isspace(static_cast<unsigned char>(text[at - 1]))) continue;
-        // The key counts only outside a comment and a quoted text of its line:
-        // `name="Mod #2" path="mod/x"` has a path, `# path="x"` and
-        // `name="a path=\"x\""` have none.
-        const std::size_t line_start = text.rfind('\n', at) == std::string_view::npos ? 0 : text.rfind('\n', at) + 1;
+    // As Anvil's loader reads a descriptor (parse_mod_descriptor in
+    // src/core/playset.cpp), so that both agree on a mod's folder: tokens
+    // = { } "quoted" and bare words, # starts a comment outside a quoted text,
+    // \" and \\ are escapes in one, which may span lines; a key = value at the
+    // top level, the last one winning. Unlike the loader, a quoted text that
+    // does not close gives no value (the loader takes a folder that cannot exist).
+    struct Token {
+        std::string text;
         bool quoted = false;
-        bool comment = false;
-        for (std::size_t j = line_start; j < at && !comment; ++j) {
-            if (quoted && text[j] == '\\' && j + 1 < at && (text[j + 1] == '"' || text[j + 1] == '\\')) {
-                ++j;
-            } else if (text[j] == '"') {
-                quoted = !quoted;
-            } else if (text[j] == '#' && !quoted) {
-                comment = true;
+        bool closed = true;
+    };
+    if (text.starts_with("\xEF\xBB\xBF")) text.remove_prefix(3);
+    std::vector<Token> list;
+    for (std::size_t at = 0;;) {
+        while (at < text.size()) {
+            if (std::string_view(" \t\r\n").find(text[at]) != std::string_view::npos) {
+                ++at;
+            } else if (text[at] == '#') {
+                while (at < text.size() && text[at] != '\n') ++at;
+            } else {
+                break;
             }
         }
-        if (comment || quoted) continue;
-        std::size_t i = at + key.size();
-        while (i < text.size() && (text[i] == ' ' || text[i] == '\t')) ++i;
-        if (i >= text.size() || text[i] != '=') continue;
-        const std::size_t q = text.find('"', i);
-        const std::size_t eol = text.find('\n', i);
-        if (q == std::string_view::npos || q > eol) continue;
-        std::string value;
-        for (std::size_t j = q + 1; j < text.size(); ++j) {
-            if (text[j] == '"') return value;
-            if (text[j] == '\\' && j + 1 < text.size() && (text[j + 1] == '"' || text[j + 1] == '\\')) ++j;
-            value += text[j];
+        if (at >= text.size()) break;
+        Token t;
+        const char c = text[at];
+        if (c == '=' || c == '{' || c == '}') {
+            t.text.assign(1, c);
+            ++at;
+        } else if (c == '"') {
+            t.quoted = true;
+            ++at;
+            while (at < text.size() && text[at] != '"') {
+                if (text[at] == '\\' && at + 1 < text.size() && (text[at + 1] == '"' || text[at + 1] == '\\')) ++at;
+                t.text += text[at++];
+            }
+            t.closed = at < text.size();
+            if (t.closed) ++at;
+        } else {
+            while (at < text.size() && std::string_view(" \t\r\n={}#\"").find(text[at]) == std::string_view::npos) {
+                t.text += text[at++];
+            }
         }
-        return {};
+        list.push_back(std::move(t));
     }
-    return {};
+    const auto is = [&](std::size_t i, const char* what) {
+        return i < list.size() && !list[i].quoted && list[i].text == what;
+    };
+    std::string value;
+    int depth = 0;
+    for (std::size_t i = 0; i < list.size(); ++i) {
+        if (is(i, "{")) {
+            ++depth;
+        } else if (is(i, "}")) {
+            if (depth > 0) --depth;
+        } else if (depth == 0 && is(i + 1, "=") && i + 2 < list.size() && !is(i + 2, "{") && !is(i + 2, "}")) {
+            if (list[i].text == key) value = list[i + 2].closed ? list[i + 2].text : std::string();
+            i += 2;
+        }
+    }
+    return value;
 }
 
 std::vector<Found> playset_files(const std::filesystem::path& user, std::vector<std::string>& problems) {
