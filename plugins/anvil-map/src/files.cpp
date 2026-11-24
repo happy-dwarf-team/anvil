@@ -853,8 +853,22 @@ std::string mod_value(std::string_view text, std::string_view key) {
     if (text.starts_with("\xEF\xBB\xBF")) text.remove_prefix(3);
     for (std::size_t at = text.find(key); at != std::string_view::npos; at = text.find(key, at + 1)) {
         if (at != 0 && !std::isspace(static_cast<unsigned char>(text[at - 1]))) continue;
+        // The key counts only outside a comment and a quoted text of its line:
+        // `name="Mod #2" path="mod/x"` has a path, `# path="x"` and
+        // `name="a path=\"x\""` have none.
         const std::size_t line_start = text.rfind('\n', at) == std::string_view::npos ? 0 : text.rfind('\n', at) + 1;
-        if (text.substr(line_start, at - line_start).find('#') != std::string_view::npos) continue;  // a comment
+        bool quoted = false;
+        bool comment = false;
+        for (std::size_t j = line_start; j < at && !comment; ++j) {
+            if (quoted && text[j] == '\\' && j + 1 < at && (text[j + 1] == '"' || text[j + 1] == '\\')) {
+                ++j;
+            } else if (text[j] == '"') {
+                quoted = !quoted;
+            } else if (text[j] == '#' && !quoted) {
+                comment = true;
+            }
+        }
+        if (comment || quoted) continue;
         std::size_t i = at + key.size();
         while (i < text.size() && (text[i] == ' ' || text[i] == '\t')) ++i;
         if (i >= text.size() || text[i] != '=') continue;
