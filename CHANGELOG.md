@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.27.0](https://github.com/happy-dwarf-team/anvil/compare/v1.26.0...v1.27.0) (2026-11-24)
+
+
+### Features
+
+* **Map mode files:** rules can read a province's local autonomy, devastation and trade power (`value = local_autonomy`, `devastation` or `trade_power` with `at_least`, `below` or a colour scale), and `state = yes` / `no` tells states from territories. ([#599](https://github.com/happy-dwarf-team/anvil/pull/599))
+* **Plugins:** `anvil-game.world` gives the same four province values to plugins. Rust plugins need `anvil-sdk` 0.4.0, whose `world::Province` has four new fields: code that builds a `Province` itself must set them. ([#599](https://github.com/happy-dwarf-team/anvil/pull/599), [#601](https://github.com/happy-dwarf-team/anvil/pull/601))
+* **Anvil Manager:** the plugin catalog offers Bellows 2.2.0 and Hamweard 1.7.1. ([#597](https://github.com/happy-dwarf-team/anvil/pull/597), [#614](https://github.com/happy-dwarf-team/anvil/pull/614))
+
+
+### Bug Fixes
+
+* **Map mode files:** a mod whose `.mod` file was saved in an encoding other than UTF-8 no longer stops every other mod's map modes from loading, and a file full of mistakes logs 20 lines and a count instead of one line per mistake. ([#602](https://github.com/happy-dwarf-team/anvil/pull/602))
+* **Map mode files:** a mod's `.mod` file is read the way Anvil reads it for plugins, so a mod whose plugins load also gets its map modes: `path` without quotes or with a comment after it, and a `#` or `path =` inside a quoted name, no longer hide the mod's files. ([#602](https://github.com/happy-dwarf-team/anvil/pull/602), [#605](https://github.com/happy-dwarf-team/anvil/pull/605), [#608](https://github.com/happy-dwarf-team/anvil/pull/608))
+* **Map mode files:** a mod listed in `dlc_load.json` with JSON escapes (`\/`, `é`) or with a `]` in its file name no longer loses its map modes while its plugins load. ([#612](https://github.com/happy-dwarf-team/anvil/pull/612))
+* **Map mode files:** a quoted text wrapped over two lines (a long `description`) or left without its closing quote no longer makes the modes after it disappear; the log names the line of the mistake. ([#609](https://github.com/happy-dwarf-team/anvil/pull/609), [#610](https://github.com/happy-dwarf-team/anvil/pull/610))
+* **Map mode files:** with an older anvil-game (a hand-mixed install), rules it cannot answer (`hre`, `city`, `coastal`, `state`, `subject`) no longer colour every province as "no"; they colour none. ([#607](https://github.com/happy-dwarf-team/anvil/pull/607))
+* **Crash reports:** the hint about an idea count past its group (anvil#426) shows only when the crash went through the game's idea loop, not when an old copy of its address was left on the stack. ([#604](https://github.com/happy-dwarf-team/anvil/pull/604), [#606](https://github.com/happy-dwarf-team/anvil/pull/606))
+
 ## [1.26.0](https://github.com/happy-dwarf-team/anvil/compare/v1.25.0...v1.26.0) (2026-11-22)
 
 
