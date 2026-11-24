@@ -516,7 +516,9 @@ sp::Vtables g_note_vtables;
 std::uintptr_t g_image_low = 0, g_image_high = 0;
 
 std::size_t crash_note(void*, const AnvilControlCrashScope* scope, char* out, std::size_t capacity) {
-    if (scope == nullptr || scope->size < sizeof(AnvilControlCrashScope) || scope->context == nullptr) return 0;
+    // It reads only the first fields, which every core gives (the scope grew in 1.26 and 1.27).
+    constexpr std::size_t kFirst = offsetof(AnvilControlCrashScope, stack_high) + sizeof(scope->stack_high);
+    if (scope == nullptr || scope->size < kFirst || scope->context == nullptr) return 0;
     const auto& context = *static_cast<const CONTEXT*>(scope->context);
     return sp::write_crash_note(g_note_vtables, g_image_low, g_image_high, context.Rsp, scope->stack_high, out,
                                 capacity);

@@ -651,8 +651,17 @@ constexpr Register kRegisters[] = {
 
 constexpr size_t kMaxFrames = 64;
 Frame g_frames[kMaxFrames];  // one report at a time: the crash helper's
+size_t g_frame_count = 0;
 
 }  // namespace
+
+size_t unwound_addresses(uintptr_t* out, size_t max) {
+    size_t n = 0;
+    for (size_t i = 0; i < g_frame_count && n < max && g_frames[i].source != FrameSource::Scan; ++i) {
+        out[n++] = g_frames[i].where.address;
+    }
+    return n;
+}
 
 void describe_verdict(const CrashVerdict& v, const CrashSources& s, TextBuffer& out) {
     if (v.count == 0) {
@@ -686,6 +695,7 @@ CrashVerdict build_report(const ReportInput& in, TextBuffer& j, TextBuffer& t) {
         g_frames[0].source = FrameSource::Context;
         frames = 1;
     }
+    g_frame_count = frames;
     const CrashVerdict verdict = assess(g_frames, frames, s);
     const Located& top = g_frames[0].where;
     char verdict_text[256];

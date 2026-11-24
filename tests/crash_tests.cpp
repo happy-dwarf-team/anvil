@@ -230,9 +230,15 @@ size_t note_rsp(void*, const AnvilControlCrashScope* scope, char* out, size_t ca
     const bool null_write = e != nullptr && e->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
                             e->NumberParameters >= 2 && e->ExceptionInformation[0] == 1 &&
                             e->ExceptionInformation[1] == 0;
+    // The unwound frames, appended in 1.27: the crash address first, then
+    // crash_here()'s callers up to the thread's start.
+    const bool has_frames = scope->size >= offsetof(AnvilControlCrashScope, frame_count) + sizeof(scope->frame_count);
+    const char* frames = !has_frames                                         ? "no frames"
+                         : scope->frame_count >= 3 && scope->frames[0] == c.Rip ? "frames from rip"
+                                                                                : "other frames";
     // A byte of cp1252 (as in a game's key) must not reach the JSON as it is.
-    const int n = std::snprintf(out, capacity, "rsp %s the stack\n%s\ncaf\xE9\n", inside ? "inside" : "outside",
-                                null_write ? "a write to 0" : "another exception");
+    const int n = std::snprintf(out, capacity, "rsp %s the stack\n%s\n%s\ncaf\xE9\n", inside ? "inside" : "outside",
+                                null_write ? "a write to 0" : "another exception", frames);
     return n > 0 ? static_cast<size_t>(n) : 0;
 }
 // A note with nothing to say this time.
@@ -1172,7 +1178,8 @@ int main(int argc, char** argv) {
         CHECK(contains(r.json, "\"minidump\": \"20"));  // <time>.dmp
         CHECK(contains(r.text, "Verdict: in plugin crasher's code."));
         CHECK(contains(r.text, "Minidump: 20"));
-        CHECK(contains(r.text, "  crasher:\r\n    rsp inside the stack\r\n    a write to 0\r\n    caf?\r\n"));
+        CHECK(contains(r.text,
+                       "  crasher:\r\n    rsp inside the stack\r\n    a write to 0\r\n    frames from rip\r\n    caf?\r\n"));
         // The note's own fault, on the helper thread, is not an earlier exception: only the crash is.
         const size_t earlier = r.json.find("\"earlier_exceptions\": [");
         CHECK(earlier != std::string::npos);

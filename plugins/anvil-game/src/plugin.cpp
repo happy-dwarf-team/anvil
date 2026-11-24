@@ -2395,8 +2395,15 @@ std::size_t crash_note(void*, const AnvilControlCrashScope* scope, char* out, st
     constexpr std::size_t kFirst = offsetof(AnvilControlCrashScope, stack_high) + sizeof(scope->stack_high);
     if (scope == nullptr || scope->size < kFirst || scope->context == nullptr) return 0;
     anvil_game::crash_hints::Crash crash;
+    crash.rip = static_cast<const CONTEXT*>(scope->context)->Rip;
     crash.rsp = static_cast<const CONTEXT*>(scope->context)->Rsp;
     crash.stack_high = scope->stack_high;
+    // The unwound frames came with Anvil 1.27; an older core leaves the stack scan.
+    if (scope->size >= offsetof(AnvilControlCrashScope, frame_count) + sizeof(scope->frame_count)) {
+        crash.frames_known = true;
+        crash.frames = scope->frames;
+        crash.frame_count = scope->frames != nullptr ? scope->frame_count : 0;
+    }
     // The exception came with Anvil 1.26.0; an older core gives the stack only.
     if (scope->size >= offsetof(AnvilControlCrashScope, exception) + sizeof(scope->exception) &&
         scope->exception != nullptr) {
@@ -2404,6 +2411,7 @@ std::size_t crash_note(void*, const AnvilControlCrashScope* scope, char* out, st
         if (e.ExceptionCode == EXCEPTION_ACCESS_VIOLATION && e.NumberParameters >= 2) {
             crash.access_violation = true;
             crash.write = e.ExceptionInformation[0] == 1;
+            crash.execute = e.ExceptionInformation[0] == 8;
             crash.address = static_cast<std::uintptr_t>(e.ExceptionInformation[1]);
         }
     }
@@ -2790,7 +2798,8 @@ struct AnvilGame : anvil::Plugin {
         g_note_image_base = host.game().image_base;
         // The call in CalcTechAndIdeaModifiers' idea loop returns 0x14 bytes in.
         if (host.present(sym::idea_modifiers_loop)) {
-            g_note_idea_return = reinterpret_cast<std::uintptr_t>(host.address(sym::idea_modifiers_loop)) + 0x14;
+            g_note_idea_return = reinterpret_cast<std::uintptr_t>(host.address(sym::idea_modifiers_loop)) +
+                                 anvil_game::crash_hints::kIdeaLoopCall;
         }
         load_world(host);
         load_commands(host);
