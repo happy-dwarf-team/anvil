@@ -22,14 +22,14 @@ inline constexpr std::size_t kFileMax = 1u << 20;
 enum class Test { always, flag, variable, modifier, value, owned_by, core, occupied, subject, controlled_by, core_of,
                   subject_of, religion, culture, trade_goods,
                   religion_group, culture_group, area, region, superregion, continent, capital,
-                  hre, city, trade_node, coastal };
+                  hre, city, trade_node, coastal, state };
 // Tests that pass or not, with no number: they take no bounds and no scale.
 bool is_yes_no(Test test);
 
-// The game's own values a `value` rule reads, x 1000: the first four are the
-// province's, the others its owner's (owner = yes).
-enum class Value { base_tax, base_production, base_manpower, development, treasury, stability, prestige, manpower,
-                   monthly_income, provinces };
+// The game's own values a `value` rule reads, x 1000: the province's, then
+// from treasury on its owner's (owner = yes).
+enum class Value { base_tax, base_production, base_manpower, development, local_autonomy, devastation, trade_power,
+                   treasury, stability, prestige, manpower, monthly_income, provinces };
 bool is_country_value(Value value);
 
 struct Rule {

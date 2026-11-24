@@ -99,6 +99,7 @@ std::string key_of(Test test) {
         case Test::hre: return "hre";
         case Test::city: return "city";
         case Test::coastal: return "coastal";
+        case Test::state: return "state";
         case Test::trade_node: return "trade_node";
         case Test::trade_goods: return "trade_goods";
         case Test::area: return "area";
@@ -210,6 +211,8 @@ struct ValueName {
 constexpr ValueName kValues[] = {
     {"base_tax", Value::base_tax},       {"base_production", Value::base_production},
     {"base_manpower", Value::base_manpower}, {"development", Value::development},
+    {"local_autonomy", Value::local_autonomy}, {"devastation", Value::devastation},
+    {"trade_power", Value::trade_power},
     {"treasury", Value::treasury},       {"stability", Value::stability},
     {"prestige", Value::prestige},       {"manpower", Value::manpower},
     {"monthly_income", Value::monthly_income}, {"provinces", Value::provinces},
@@ -332,7 +335,8 @@ public:
                 const auto* found = std::find_if(std::begin(kValues), std::end(kValues),
                                                  [&](const ValueName& v) { return v.name == r.name; });
                 if (found == std::end(kValues)) {
-                    throw Fault{key.line, "value is one of development, base_tax, base_production, base_manpower, and "
+                    throw Fault{key.line, "value is one of development, base_tax, base_production, base_manpower, "
+                                          "local_autonomy, devastation, trade_power, and "
                                           "with owner = yes treasury, stability, prestige, manpower, monthly_income, "
                                           "provinces: " + r.name};
                 }
@@ -372,13 +376,14 @@ public:
                 }
                 ++tests;
             } else if (k == "occupied" || k == "subject" || k == "capital" || k == "hre" || k == "city" ||
-                       k == "coastal") {
+                       k == "coastal" || k == "state") {
                 r.test = k == "occupied" ? Test::occupied
                          : k == "subject" ? Test::subject
                          : k == "capital" ? Test::capital
                          : k == "hre"     ? Test::hre
                          : k == "city"    ? Test::city
-                                          : Test::coastal;
+                         : k == "coastal" ? Test::coastal
+                                          : Test::state;
                 r.name = k;
                 r.yes = yes_no(k.c_str());
                 ++tests;
@@ -423,7 +428,7 @@ public:
             throw Fault{line, "a rule needs one of always, flag, variable, modifier, value, owned_by, controlled_by, "
                               "core, occupied, subject, subject_of, religion, religion_group, culture, "
                               "culture_group, trade_goods, area, region, superregion, continent, trade_node, capital, "
-                              "hre, city or coastal"};
+                              "hre, city, coastal or state"};
         }
         if (!has_color) throw Fault{line, "a rule needs color = { r g b }"};
         if (!has_label || r.label.empty() || r.label.size() > kLabelMax) {
@@ -449,7 +454,7 @@ public:
         if ((r.test == Test::owned_by || r.test == Test::controlled_by || r.test == Test::core ||
              r.test == Test::core_of || r.test == Test::occupied || r.test == Test::trade_goods ||
              r.test == Test::capital || r.test == Test::hre || r.test == Test::city ||
-             r.test == Test::coastal || is_place(r.test)) &&
+             r.test == Test::coastal || r.test == Test::state || is_place(r.test)) &&
             r.owner) {
             throw Fault{line, key_of(r.test) + " is the province's: leave out owner = yes"};
         }
@@ -566,7 +571,8 @@ bool in_bounds(const Rule& rule, std::int64_t value) {
 
 bool is_country_value(Value value) {
     return value != Value::base_tax && value != Value::base_production && value != Value::base_manpower &&
-           value != Value::development;
+           value != Value::development && value != Value::local_autonomy && value != Value::devastation &&
+           value != Value::trade_power;
 }
 
 std::uint32_t color_at(const Rule& rule, std::int64_t value) {
@@ -601,7 +607,7 @@ bool is_yes_no(Test test) {
            test == Test::religion || test == Test::culture || test == Test::trade_goods ||
            test == Test::religion_group || test == Test::culture_group || is_place(test) ||
            test == Test::capital || test == Test::hre || test == Test::city ||
-           test == Test::coastal;
+           test == Test::coastal || test == Test::state;
 }
 
 Evaluator::Evaluator(const FileMode& mode, World& world) : mode_(mode), world_(world) {
@@ -668,6 +674,7 @@ std::optional<std::int64_t> Evaluator::read_country(std::size_t i, const std::st
         case Test::hre:
         case Test::city:
         case Test::coastal:
+        case Test::state:
         case Test::owned_by:
         case Test::controlled_by:
         case Test::core:
@@ -725,7 +732,8 @@ std::optional<std::int64_t> Evaluator::read(std::size_t i, std::int32_t province
             return (*capital == province) == r.yes ? 1 : 0;
         }
         case Test::hre:
-        case Test::city: {
+        case Test::city:
+        case Test::state: {
             if (!owner) owner = world_.owner(province);
             if (owner->empty()) return std::nullopt;
             const std::optional<bool> is = world_.province_is(province, r.test);

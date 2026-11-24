@@ -318,9 +318,10 @@ AnvilResult read_province(const WorldLayout& l, std::int32_t id, AnvilGameProvin
         return ANVIL_ERROR_INTERNAL;
     }
     std::uint8_t land = 0, wasteland = 0, city = 0, empire = 0, coastal = 0;
+    std::uintptr_t state = 0;
     if (!read(map_part + l.land_flags, land) || !read(map_part + l.wasteland_flags, wasteland) ||
         !read(map_part + l.coastal_flags, coastal) ||
-        !read(p + l.city_flags, city) || !read(p + l.empire_flags, empire)) {
+        !read(p + l.city_flags, city) || !read(p + l.empire_flags, empire) || !read(p + l.country_state, state)) {
         return ANVIL_ERROR_INTERNAL;
     }
     out.id = id;
@@ -330,7 +331,30 @@ AnvilResult read_province(const WorldLayout& l, std::int32_t id, AnvilGameProvin
                 (((wasteland >> l.wasteland_bit) & 1) != 0 ? ANVIL_GAME_PROVINCE_WASTELAND : 0u) |
                 (((city >> l.city_bit) & 1) != 0 ? ANVIL_GAME_PROVINCE_CITY : 0u) |
                 (((empire >> l.empire_bit) & 1) != 0 ? ANVIL_GAME_PROVINCE_HRE : 0u) |
-                ((coastal & l.coastal_mask) != 0 ? ANVIL_GAME_PROVINCE_COASTAL : 0u);
+                ((coastal & l.coastal_mask) != 0 ? ANVIL_GAME_PROVINCE_COASTAL : 0u) |
+                (state != 0 ? ANVIL_GAME_PROVINCE_STATE : 0u);
+    out.values = 0;
+    const auto value = [&](std::uint32_t offset, std::uint32_t bit, std::int32_t& field) {
+        field = 0;
+        if (offset == 0) return true;
+        out.values |= bit;
+        return read(p + offset, field);
+    };
+    if (!value(l.local_autonomy, ANVIL_GAME_PROVINCE_VALUE_LOCAL_AUTONOMY, out.local_autonomy) ||
+        !value(l.devastation, ANVIL_GAME_PROVINCE_VALUE_DEVASTATION, out.devastation) ||
+        !value(l.trade_power, ANVIL_GAME_PROVINCE_VALUE_TRADE_POWER, out.trade_power)) {
+        return ANVIL_ERROR_INTERNAL;
+    }
+    if (l.local_autonomy != 0) {
+        // As CProvince::GetLocalAutonomy gives it: the stored value kept within
+        // the minimum and the maximum, the maximum winning.
+        std::int32_t minimum = 0, maximum = 0;
+        if (!read(p + l.autonomy_minimum, minimum) || !read(p + l.autonomy_maximum, maximum)) {
+            return ANVIL_ERROR_INTERNAL;
+        }
+        if (out.local_autonomy < minimum) out.local_autonomy = minimum;
+        if (out.local_autonomy > maximum) out.local_autonomy = maximum;
+    }
     return ANVIL_OK;
 }
 

@@ -376,6 +376,7 @@ struct FakeWorld {
     uintptr_t pointers[kProvinces] = {};
     alignas(8) uint8_t map[kProvinces][0x240] = {};
     uint64_t cores[2] = {game_tag("RUS", 0), game_tag("TUR", 1)};
+    uint64_t state = 0;  // a country state: only its address is read
     int32_t owned[2] = {1, 3};
     alignas(8) uint8_t rus[0x3000] = {};
     alignas(8) uint8_t tur[0x3000] = {};
@@ -908,6 +909,14 @@ struct FakeWorld {
         set(province(1), 0x3E0, 9500);
         map[1][0x228] = 1 << 3;
         province(1)[0x958] = 1 << 4;  // a city, outside the Empire, inland
+        set(province(1), 0x2E0, reinterpret_cast<uintptr_t>(&state));  // in a state
+        set(province(1), 0x428, 10000);   // autonomy 10, kept at the minimum 25
+        set(province(1), 0x2DF0, 25000);
+        set(province(1), 0x2DF4, 100000);
+        set(province(1), 0x42C, 12500);
+        set(province(1), 0x890, 34567);
+        set(province(2), 0x428, 90000);   // autonomy 90, kept at the maximum 75
+        set(province(2), 0x2DF4, 75000);
         set_name(1, "Moskva");
         // A wasteland without an owner, with a long name in Windows-1252.
         set(province(2), 0x468, game_tag("---", 0, 0, 0));
@@ -2204,7 +2213,7 @@ int main(int argc, char** argv) {
         start.add(gp_toml);
         start.add(plugin_toml("other"));
         start.make();
-        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 208);
+        CHECK(start.plugin(ANVIL_GAME_ID).symbols().size() == 212);
         AnvilPlugin* p = start.load(ANVIL_GAME_ID);
         CHECK(p != nullptr);
         if (p == nullptr) return;
@@ -2958,12 +2967,16 @@ int main(int argc, char** argv) {
             CHECK(world->province(1, &moskva) == ANVIL_OK && moskva.id == 1 && moskva.size == sizeof(moskva));
             CHECK(std::strcmp(moskva.owner.text, "RUS") == 0 && std::strcmp(moskva.controller.text, "TUR") == 0);
             CHECK(moskva.base_tax == 15000 && moskva.base_production == 8000 && moskva.base_manpower == 9500);
-            CHECK(moskva.flags == (ANVIL_GAME_PROVINCE_LAND | ANVIL_GAME_PROVINCE_CITY));
+            CHECK(moskva.flags == (ANVIL_GAME_PROVINCE_LAND | ANVIL_GAME_PROVINCE_CITY | ANVIL_GAME_PROVINCE_STATE));
+            CHECK(moskva.values == (ANVIL_GAME_PROVINCE_VALUE_LOCAL_AUTONOMY | ANVIL_GAME_PROVINCE_VALUE_DEVASTATION |
+                                    ANVIL_GAME_PROVINCE_VALUE_TRADE_POWER));
+            CHECK(moskva.local_autonomy == 25000 && moskva.devastation == 12500 && moskva.trade_power == 34567);
             AnvilGameProvince waste{};
             waste.size = sizeof(waste);
             CHECK(world->province(2, &waste) == ANVIL_OK && waste.owner.text[0] == 0 &&
                   waste.flags == (ANVIL_GAME_PROVINCE_LAND | ANVIL_GAME_PROVINCE_WASTELAND | ANVIL_GAME_PROVINCE_HRE |
                                   ANVIL_GAME_PROVINCE_COASTAL));
+            CHECK(waste.local_autonomy == 75000 && waste.devastation == 0 && waste.trade_power == 0);
             CHECK(world->province(3, &waste) == ANVIL_OK && waste.flags == 0);
             CHECK(world->province(0, &waste) == ANVIL_ERROR_NOT_FOUND && world->province(4, &waste) == ANVIL_ERROR_NOT_FOUND);
             CHECK(world->province(1, nullptr) == ANVIL_ERROR_INVALID_ARGUMENT);

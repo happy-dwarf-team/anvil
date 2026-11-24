@@ -418,7 +418,13 @@ public:
     // Development x 1000 by province; treasury x 1000 by tag (POL's not given).
     std::map<std::int32_t, std::int64_t> development{{1, 3000}, {2, 12000}, {3, 30000}};
     std::map<std::string, std::int64_t> treasury{{"RUS", 150000}};
+    // Local autonomy x 1000 by province; this build has no devastation.
+    std::map<std::int32_t, std::int64_t> autonomy{{1, 0}, {2, 25000}, {3, 75000}};
     std::optional<std::int64_t> province_value(std::int32_t province, files::Value value) override {
+        if (value == files::Value::local_autonomy) {
+            const auto it = autonomy.find(province);
+            return it == autonomy.end() ? std::optional<std::int64_t>(0) : it->second;
+        }
         if (value != files::Value::development) return std::nullopt;
         const auto it = development.find(province);
         return it == development.end() ? std::optional<std::int64_t>(0) : it->second;
@@ -452,15 +458,16 @@ public:
         const auto it = capitals.find(tag);
         return it == capitals.end() ? 0 : it->second;
     }
-    // 1 and 3 in the Empire, 1 and 2 cities, 2 and 4 coastal land; 5 not land; 6 unreadable.
-    std::set<std::int32_t> empire{1, 3}, cities{1, 2}, coasts{2, 4};
+    // 1 and 3 in the Empire, 1 and 2 cities, 2 and 4 coastal land, 1 and 3 in a state; 5 not land;
+    // 6 unreadable.
+    std::set<std::int32_t> empire{1, 3}, cities{1, 2}, coasts{2, 4}, states{1, 3};
     std::optional<bool> province_is(std::int32_t province, files::Test test) override {
         if (province == 6) return std::nullopt;
         if (test == files::Test::coastal) {
             if (province == 5) return std::nullopt;
             return coasts.contains(province);
         }
-        return (test == files::Test::hre ? empire : cities).contains(province);
+        return (test == files::Test::hre ? empire : test == files::Test::state ? states : cities).contains(province);
     }
 
     // Religion and culture: 1 and 2 orthodox (2 Swedish), 3 catholic and
@@ -555,9 +562,9 @@ void file_tests() {
         CHECK(one("m={label=M label=N rule={always=yes color={0 0 0} label=x}}").ends_with("label is given twice"));
         CHECK(one("m={label=M sprite=\"GFX x\" rule={always=yes color={0 0 0} label=x}}").find("sprite") != std::string::npos);
         CHECK(one("m={label=M rule={color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier, value, owned_by, controlled_by, core, occupied, subject, "
-                                                                                          "subject_of, religion, religion_group, culture, culture_group, trade_goods, area, region, superregion, continent, trade_node, capital, hre, city or coastal"));
+                                                                                          "subject_of, religion, religion_group, culture, culture_group, trade_goods, area, region, superregion, continent, trade_node, capital, hre, city, coastal or state"));
         CHECK(one("m={label=M rule={flag=a variable=b color={0 0 0} label=x}}").ends_with("one of always, flag, variable, modifier, value, owned_by, controlled_by, core, occupied, subject, "
-                                                                                          "subject_of, religion, religion_group, culture, culture_group, trade_goods, area, region, superregion, continent, trade_node, capital, hre, city or coastal"));
+                                                                                          "subject_of, religion, religion_group, culture, culture_group, trade_goods, area, region, superregion, continent, trade_node, capital, hre, city, coastal or state"));
         CHECK(one("m={label=M rule={always=yes label=x}}").ends_with("a rule needs color = { r g b }"));
         CHECK(one("m={label=M rule={always=yes color={0 0 0}}}").ends_with("a rule needs a label of 1 to 64 bytes"));
         CHECK(one("m={label=M rule={always=yes color={0 0 256} label=x}}").find("0 to 255") != std::string::npos);
@@ -908,6 +915,49 @@ void file_tests() {
             "coastal is the province's: leave out owner = yes"));
     });
 
+    run("map mode files: state = yes and no", [] {
+        std::vector<files::FileMode> modes;
+        CHECK(parse_problems("m={label=M rule={state=yes color={1 0 0} label=State}"
+                             " rule={state=no color={2 0 0} label=Territory}}",
+                             &modes)
+                  .empty());
+        CHECK(modes[0].rules[0].test == files::Test::state && modes[0].rules[0].yes && !modes[0].rules[1].yes);
+        TableWorld world;
+        world.limit = 7;
+        world.owners[6] = "RUS";
+        files::Evaluator e(modes[0], world);
+        const std::vector<std::uint32_t> colors = e.colors();
+        CHECK(colors[1] == 0x010000 && colors[3] == 0x010000);  // in a state
+        CHECK(colors[2] == 0x020000);                           // RUS's territory
+        CHECK(colors[4] == ANVIL_MAP_NO_COLOR && colors[5] == ANVIL_MAP_NO_COLOR);  // no owner
+        CHECK(colors[6] == ANVIL_MAP_NO_COLOR);                 // the game does not say
+        CHECK(parse_problems("m={label=M rule={state=yes owner=yes color={0 0 0} label=x}}")[0].ends_with(
+            "state is the province's: leave out owner = yes"));
+        CHECK(parse_problems("m={label=M rule={state=yes at_least=1 color={0 0 0} label=x}}").size() == 1);
+    });
+
+    run("map mode files: local_autonomy, devastation and trade_power values", [] {
+        std::vector<files::FileMode> modes;
+        CHECK(parse_problems("m={label=M rule={value=local_autonomy at_least=0 scale={0 100} color={0 200 0} "
+                             "high_color={200 0 0} label=Autonomy}}",
+                             &modes)
+                  .empty());
+        CHECK(modes[0].rules[0].value == files::Value::local_autonomy);
+        TableWorld world;
+        files::Evaluator e(modes[0], world);
+        const std::vector<std::uint32_t> colors = e.colors();
+        CHECK(colors[1] == 0x00C800 && colors[2] == 0x329600 && colors[3] == 0x963200);  // 0, 25 and 75 of 100
+        std::int64_t value = 0;
+        CHECK(e.match(3, &value) != nullptr && value == 75000);
+        // A value the build does not have: the rule never passes.
+        CHECK(parse_problems("m={label=M rule={value=devastation at_least=0 color={9 9 9} label=Devastated}}", &modes)
+                  .empty());
+        files::Evaluator none(modes[0], world);
+        for (const std::uint32_t c : none.colors()) CHECK(c == ANVIL_MAP_NO_COLOR);
+        CHECK(parse_problems("m={label=M rule={value=trade_power owner=yes color={0 0 0} label=x}}")[0].ends_with(
+            "trade_power is the province's: leave out owner = yes"));
+    });
+
     run("map mode files: a scale colours between its two ends (anvil#580)", [] {
         std::vector<files::FileMode> modes;
         CHECK(parse_problems("m={label=M rule={variable=v at_least=0 scale={0 10} color={0 100 200} "
@@ -979,7 +1029,8 @@ void file_tests() {
         CHECK(parse_problems("m={label=M rule={value=development owner=yes color={0 0 0} label=x}}")[0].ends_with(
             "development is the province's: leave out owner = yes"));
         CHECK(parse_problems("m={label=M rule={value=gold color={0 0 0} label=x}}")[0].ends_with(": gold"));
-        for (const char* v : {"base_tax", "base_production", "base_manpower", "development"}) {
+        for (const char* v : {"base_tax", "base_production", "base_manpower", "development", "local_autonomy",
+                              "devastation", "trade_power"}) {
             CHECK(parse_problems(std::string("m={label=M rule={value=") + v + " color={0 0 0} label=x}}").empty());
         }
         for (const char* v : {"treasury", "stability", "prestige", "manpower", "monthly_income", "provinces"}) {
