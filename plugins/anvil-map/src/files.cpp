@@ -167,17 +167,24 @@ public:
 
     // After a fault: on to the end of the block at depth 0 the fault is in.
     void recover() {
-        // After "a quoted text has no end", the first quote met is most likely
-        // that text's end on a later line (`description = "two` / `lines" }`):
-        // read past it alone, so a } behind it still closes the block.
+        // After "a quoted text has no end", the first quote met on a later line
+        // is that text's end when its line has an odd number of quotes
+        // (`description = "two` / `lines" }`): read past it alone, so a }
+        // behind it still closes the block. With an even number it opens a
+        // whole text (`label = "A` with its end forgotten / `label = "x" }`).
         bool unclosed = std::exchange(unclosed_, false);
         while (depth_ > 0) {
             skip();
             if (at_ >= text_.size()) return;
             const char c = text_[at_];
             if (c == '"' && std::exchange(unclosed, false)) {
-                ++at_;
-                continue;
+                const std::size_t newline = text_.rfind('\n', at_);
+                const std::size_t start = newline == std::string_view::npos ? 0 : newline + 1;
+                const std::size_t end = std::min(text_.find('\n', at_), text_.size());
+                if (std::count(text_.begin() + start, text_.begin() + end, '"') % 2 == 1) {
+                    ++at_;
+                    continue;
+                }
             }
             if (c == '"') {
                 // An unclosed text ends at its line's end; skip() then counts the line.
