@@ -17,6 +17,8 @@ namespace anvil_map::files {
 
 inline constexpr std::size_t kRulesMax = 64;
 inline constexpr std::size_t kFileMax = 1u << 20;
+// The most faults of one file given one line each; the rest are counted in one more line.
+inline constexpr std::size_t kFaultsShown = 20;
 
 // What a rule reads of a province.
 enum class Test { always, flag, variable, modifier, value, owned_by, core, occupied, subject, controlled_by, core_of,
@@ -65,8 +67,9 @@ struct FileMode {
 };
 
 // Parses one file. Appends the modes it defines without a fault to `out` and
-// a line "<source>:<line>: <what>" for each fault to `problems`; a mode with a
-// fault is left out whole. Text that is not UTF-8 is read as Windows-1252,
+// a line "<source>:<line>: <what>" for each fault to `problems`, at most
+// kFaultsShown of them and then "<source>: N more faults" for the rest; a mode
+// with a fault is left out whole. Text that is not UTF-8 is read as Windows-1252,
 // the encoding of the game's own script files.
 void parse(std::string_view text, std::string_view source, std::vector<FileMode>& out,
            std::vector<std::string>& problems);

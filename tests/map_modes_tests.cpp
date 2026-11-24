@@ -595,6 +595,17 @@ void file_tests() {
         CHECK(outside.size() == 2 && outside[0].find("at_least") != std::string::npos &&
               outside[1].ends_with(":2: a quoted text has no end"));
         CHECK(modes.size() == 2 && modes[0].name == "a" && modes[1].name == "b");
+
+        // An unclosed text met while recovering ends at its line, which still counts.
+        const std::vector<std::string> lines = parse_problems("a = { nope = 1 label = \"open\n}\nb = { tab = 9 }");
+        CHECK(lines.size() == 2 && lines[0].starts_with("mod/anvil/map_modes/t.txt:1: ") &&
+              lines[1].starts_with("mod/anvil/map_modes/t.txt:3: "));
+
+        // A file of stray braces: twenty lines and a count, not a line per byte.
+        const std::vector<std::string> flood = parse_problems(std::string(1000, '}'));
+        CHECK(flood.size() == files::kFaultsShown + 1 &&
+              flood[0] == "mod/anvil/map_modes/t.txt:1: expected the name of a mode" &&
+              flood.back() == "mod/anvil/map_modes/t.txt: 980 more faults");
     });
 
     run("map mode files: numbers are x 1000 and the bounds hold together", [] {
@@ -1079,6 +1090,12 @@ void file_tests() {
         CHECK(files::enabled_mods("{}").empty());
         CHECK(files::mod_value("name=\"A mod\"\npath = \"C:/mods/a\"\n", "path") == "C:/mods/a");
         CHECK(files::mod_value("replace_path=\"x\"\n", "path").empty());
+        // As Anvil's loader reads a descriptor: a BOM, comments and escapes.
+        CHECK(files::mod_value("\xEF\xBB\xBFpath=\"mod/a\"\n", "path") == "mod/a");
+        CHECK(files::mod_value("# path=\"mod/old\"\npath=\"mod/new\"\n", "path") == "mod/new");
+        CHECK(files::mod_value("name=\"A \\\"quoted\\\" mod\"\n", "name") == "A \"quoted\" mod");
+        CHECK(files::mod_value("path=\"C:\\\\mods\\\\a\"\n", "path") == "C:\\mods\\a");
+        CHECK(files::mod_value("path=\"C:\\mods\\a\\\"\n", "path").empty());  // \" does not close it, as in the game
 
         const std::filesystem::path user = std::filesystem::temp_directory_path() /
                                            ("anvil-map-files-" + std::to_string(GetCurrentProcessId()));
@@ -1087,9 +1104,11 @@ void file_tests() {
             std::filesystem::create_directories(p.parent_path());
             std::ofstream(p, std::ios::binary) << text;
         };
-        write(user / "dlc_load.json", R"({"enabled_mods":["mod/a.mod","mod/z.mod","mod/b.mod"]})");
+        write(user / "dlc_load.json", R"({"enabled_mods":["mod/a.mod","mod/z.mod","mod/ansi.mod","mod/b.mod"]})");
         write(user / "mod/a.mod", "name=\"First\"\npath=\"mod/first\"\n");
         write(user / "mod/z.mod", "name=\"Zipped\"\narchive=\"mod/z.zip\"\n");
+        // Saved in Windows-1252 by hand: std::filesystem::path would throw on it.
+        write(user / "mod/ansi.mod", "name=\"Ansi\"\npath=\"mod/Kr\xF3lestwo\"\n");
         write(user / "mod/b.mod", "name=\"Second\"\npath=\"" + (user / "second").generic_string() + "\"\n");
         write(user / "mod/first/anvil/map_modes/shared.txt", "old={label=Old rule={always=yes color={0 0 0} label=x}}");
         write(user / "mod/first/anvil/map_modes/own.txt", "mine={label=Mine rule={always=yes color={0 0 0} label=x}}");
@@ -1099,7 +1118,8 @@ void file_tests() {
 
         std::vector<std::string> problems;
         const std::vector<files::Found> found = files::playset_files(user, problems);
-        CHECK(problems.size() == 1 && problems[0] == "Zipped: a zipped mod; its anvil/map_modes files are not read");
+        CHECK(problems.size() == 2 && problems[0] == "Zipped: a zipped mod; its anvil/map_modes files are not read" &&
+              problems[1] == "Ansi: its path is not UTF-8; its anvil/map_modes files are not read");
         CHECK(found.size() == 3);
         if (found.size() == 3) {
             CHECK(found[0].source == "First/anvil/map_modes/own.txt");
