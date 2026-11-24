@@ -1570,7 +1570,13 @@ int main(int argc, char** argv) {
         // A cut note stays within its buffer.
         CHECK(ch::write_note(l, 0, 0, c, &note_test_read, out, 10) == 10);
 
-        // The idea loop's return address on the stack, here a buffer standing in for it.
+        // A DEP fault ran code there.
+        c.execute = true;
+        CHECK(note(c).find("The game ran code at 0x") == 0);
+        c.execute = false;
+
+        // From an older core, the idea loop's return address anywhere on the
+        // stack, here a buffer standing in for it.
         const std::uintptr_t base = 0x7FF600000000, idea = base + 0x930FE4;
         std::vector<std::uintptr_t> stack(3000, 0);
         stack[2500] = idea;
@@ -1581,7 +1587,7 @@ int main(int argc, char** argv) {
         s.stack_high = reinterpret_cast<std::uintptr_t>(stack.data() + stack.size());
         text = note(s, base, idea);
         CHECK(text.find("The stack holds a return address of the loop that adds up a country's idea modifiers "
-                        "(eu4.exe+0x930FE4, CalcTechAndIdeaModifiers).\n") == 0);
+                        "(eu4.exe+0x930FE4, CalcTechAndIdeaModifiers), maybe left over from an earlier call.\n") == 0);
         CHECK(text.find("active_idea_groups") != std::string::npos);
         stack[2500] = 0;
         CHECK(note(s, base, idea).empty());
@@ -1591,6 +1597,32 @@ int main(int argc, char** argv) {
         CHECK(note(s, base, idea).empty());
         stack[1] = idea;
         CHECK(note(s, base, 0).empty() && !note(s, base, idea).empty());
+
+        // anvil#603: with the core's unwound frames, a copy left on the stack
+        // by an earlier call does not count; a frame does.
+        std::uintptr_t frames[] = {base + 0x100000, base + 0x200000, base + 0x300000};
+        s.frames_known = true;
+        s.frames = frames;
+        s.frame_count = 3;
+        CHECK(note(s, base, idea).empty());
+        frames[1] = idea;
+        CHECK(note(s, base, idea).find("The crashed call came from the loop that adds up a country's idea modifiers "
+                                       "(eu4.exe+0x930FE4, CalcTechAndIdeaModifiers).\n") == 0);
+        s.frame_count = 1;  // the walk ended before it
+        CHECK(note(s, base, idea).empty());
+        s.frames = nullptr;
+        s.frame_count = 0;
+        CHECK(note(s, base, idea).empty());
+        // The loop's own read of an idea past the group's end: rip is in the loop.
+        for (const std::uintptr_t rip : {idea - ch::kIdeaLoopCall, idea - 9, idea - 1}) {
+            s.rip = rip;
+            CHECK(note(s, base, idea).find("The crash is in the loop that adds up a country's idea modifiers "
+                                           "(eu4.exe+0x930FE4, CalcTechAndIdeaModifiers).\n") == 0);
+        }
+        s.rip = idea;
+        CHECK(note(s, base, idea).empty());
+        s.rip = idea - 1;
+        CHECK(note(s, base, 0).empty());
     });
 
     run("anvil-game: the work queue", [] {

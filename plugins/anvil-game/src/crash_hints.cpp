@@ -85,6 +85,22 @@ bool on_stack(Reader read, std::uintptr_t rsp, std::uintptr_t high, std::uintptr
     return false;
 }
 
+enum class IdeaLoop { None, Crashed, Called, OnStack };
+
+// Where the idea loop is in the crash: the crashed instruction, a frame the
+// core unwound, or, from an older core, any word of the stack.
+IdeaLoop idea_loop(std::uintptr_t idea_return, const Crash& crash, Reader read) {
+    if (idea_return < kIdeaLoopCall) return IdeaLoop::None;
+    if (crash.rip >= idea_return - kIdeaLoopCall && crash.rip < idea_return) return IdeaLoop::Crashed;
+    if (crash.frames_known) {
+        for (std::size_t i = 0; i < crash.frame_count && crash.frames != nullptr; ++i) {
+            if (crash.frames[i] == idea_return) return IdeaLoop::Called;
+        }
+        return IdeaLoop::None;
+    }
+    return on_stack(read, crash.rsp, crash.stack_high, idea_return) ? IdeaLoop::OnStack : IdeaLoop::None;
+}
+
 }  // namespace
 
 ProvinceEntry province_entry(std::uintptr_t array, std::int64_t count, std::uint32_t size, std::uintptr_t address) {
@@ -119,7 +135,7 @@ std::size_t write_note(const ProvinceLayout& layout, std::uintptr_t image_base, 
         const ProvinceEntry e = province_entry(array, count, layout.province_size, crash.address);
         if (e.found) {
             text.put("The game ")
-                .put(crash.write ? "wrote to " : "read ")
+                .put(crash.write ? "wrote to " : crash.execute ? "ran code at " : "read ")
                 .hex(crash.address)
                 .put(", where the entry of province ")
                 .dec(e.id)
@@ -137,10 +153,16 @@ std::size_t write_note(const ProvinceLayout& layout, std::uintptr_t image_base, 
                      "(anvil#426).\n");
         }
     }
-    if (idea_return != 0 && on_stack(read, crash.rsp, crash.stack_high, idea_return)) {
-        text.put("The stack holds a return address of the loop that adds up a country's idea modifiers (eu4.exe+")
+    const IdeaLoop loop = idea_loop(idea_return, crash, read);
+    if (loop != IdeaLoop::None) {
+        text.put(loop == IdeaLoop::Crashed  ? "The crash is in the loop that adds up a country's idea modifiers (eu4.exe+"
+                 : loop == IdeaLoop::Called ? "The crashed call came from the loop that adds up a country's idea "
+                                              "modifiers (eu4.exe+"
+                                            : "The stack holds a return address of the loop that adds up a country's "
+                                              "idea modifiers (eu4.exe+")
             .hex(idea_return - image_base)
-            .put(", CalcTechAndIdeaModifiers).\n");
+            .put(loop == IdeaLoop::OnStack ? ", CalcTechAndIdeaModifiers), maybe left over from an earlier call.\n"
+                                           : ", CalcTechAndIdeaModifiers).\n");
         text.put("A save with more ideas taken in an idea group than the group has makes that loop read ideas "
                  "past the group's end, and the game does not check that count when it loads a save "
                  "(active_idea_groups, anvil#426).\n");

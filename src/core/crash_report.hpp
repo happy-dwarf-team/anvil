@@ -184,6 +184,9 @@ struct ReportInput {
 
 // Writes the report as JSON and as text; returns the verdict.
 CrashVerdict build_report(const ReportInput& input, TextBuffer& json, TextBuffer& text);
+// The addresses of the last report's frames up to the first one its scan found,
+// innermost first (AnvilControlCrashScope.frames); returns how many it wrote.
+size_t unwound_addresses(uintptr_t* out, size_t max);
 // "in plugin tongs's code", "plugin a on the stack (also b)", "no plugin involved"
 void describe_verdict(const CrashVerdict& verdict, const CrashSources& sources, TextBuffer& out);
 

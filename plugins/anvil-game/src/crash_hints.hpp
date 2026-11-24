@@ -26,15 +26,27 @@ struct ProvinceLayout {
 // still counts as a read of a province ID: the IDs a script or a save gives.
 inline constexpr std::int64_t kReach = 65536;
 
-// How much of the crashed thread's stack the note looks through, from rsp up.
+// How much of the crashed thread's stack the note looks through, from rsp up,
+// when the core gives no frames (before Anvil 1.27).
 inline constexpr std::size_t kStackBytes = 256 * 1024;
+
+// The idea loop's bytes before its call's return address: a crash there is
+// the loop's own read of an idea past the group's end.
+inline constexpr std::uintptr_t kIdeaLoopCall = 0x14;
 
 struct Crash {
     bool access_violation = false;
-    bool write = false;           // the access violation wrote, rather than read or ran
+    bool write = false;           // the access violation wrote
+    bool execute = false;         // the access violation ran code there (DEP)
     std::uintptr_t address = 0;   // the address it could not access
+    std::uintptr_t rip = 0;       // the crashed instruction, 0 when unknown
     std::uintptr_t rsp = 0;       // the crashed thread's rsp, 0 when unknown
     std::uintptr_t stack_high = 0;
+    // The core's unwound frames (AnvilControlCrashScope.frames, Anvil 1.27):
+    // with them the note looks only there, not through the raw stack.
+    bool frames_known = false;
+    const std::uintptr_t* frames = nullptr;
+    std::size_t frame_count = 0;
 };
 
 // Where an address falls among the provinces.

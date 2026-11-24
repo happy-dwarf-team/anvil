@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
+#include <iterator>
 
 namespace anvil::crash {
 namespace {
@@ -397,8 +398,10 @@ void keep_utf8(char* text, size_t size) {
 
 // The notes of the plugins that set one, each called guarded.
 size_t gather_notes(const Request& request) {
+    static uintptr_t frames[64];  // the crash helper's, one report at a time
+    const size_t frame_count = unwound_addresses(frames, std::size(frames));
     AnvilControlCrashScope scope{sizeof(AnvilControlCrashScope), request.pointers->ContextRecord, request.stack_low,
-                                 request.stack_high, request.pointers->ExceptionRecord};
+                                 request.stack_high, request.pointers->ExceptionRecord, frames, frame_count};
     g_quiet_thread.store(GetCurrentThreadId());
     size_t count = 0;
     for (size_t i = 0; i < kNoteMax; ++i) {

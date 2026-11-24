@@ -58,6 +58,15 @@ typedef struct AnvilControlCrashScope {
 
     /* --- appended in 1.26 (anvil#426); check size before reading --- */
     const void *exception; /* its EXCEPTION_RECORD: the code and, for an access violation, the address */
+
+    /* --- appended in 1.27 (anvil#603); check size before reading --- */
+    /* The report's stack walk, innermost first: the crash address, then the
+     * return addresses it unwound (with unwind data, through trampolines and
+     * context stubs). Return addresses its scan found are left out: a scan
+     * cannot tell a live one from one an earlier call left on the stack. An
+     * Anvil stub without unwind data ends the list early. */
+    const uintptr_t *frames;
+    size_t frame_count;
 } AnvilControlCrashScope;
 
 /* Writes the note as lines of UTF-8 text, each ended by '\n', into `out`
