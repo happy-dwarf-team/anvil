@@ -11,7 +11,7 @@ nothing else.
 crate-type = ["cdylib"]
 
 [dependencies]
-anvil-sdk = "0.3"
+anvil-sdk = "0.4"
 ```
 
 ```rust
@@ -96,5 +96,10 @@ From 0.2 to 0.3 (Anvil 1.26), two changes can stop existing code from building:
   `..` from another value.
 
 Code that only reads them, and every other 0.2 call, builds as before.
+
+From 0.3 to 0.4 (Anvil 1.27), `world::Province` has four new fields, `state`,
+`local_autonomy`, `devastation` and `trade_power`: code that builds a
+`Province` itself sets them or ends with `..` from another value. Everything
+else builds as with 0.3.
 
 License: MIT.
