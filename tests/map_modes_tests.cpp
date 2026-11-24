@@ -1093,6 +1093,10 @@ void file_tests() {
         // As Anvil's loader reads a descriptor: a BOM, comments and escapes.
         CHECK(files::mod_value("\xEF\xBB\xBFpath=\"mod/a\"\n", "path") == "mod/a");
         CHECK(files::mod_value("# path=\"mod/old\"\npath=\"mod/new\"\n", "path") == "mod/new");
+        // A # in a quoted text is no comment, and a key in a quoted text is none.
+        CHECK(files::mod_value("name=\"Mod #2\" path=\"mod/x\"\n", "path") == "mod/x");
+        CHECK(files::mod_value("name=\"a path=\\\"y\\\"\" path=\"mod/x\"\n", "path") == "mod/x");
+        CHECK(files::mod_value("name=\"a path = 1\"\n", "path").empty());
         CHECK(files::mod_value("name=\"A \\\"quoted\\\" mod\"\n", "name") == "A \"quoted\" mod");
         CHECK(files::mod_value("path=\"C:\\\\mods\\\\a\"\n", "path") == "C:\\mods\\a");
         CHECK(files::mod_value("path=\"C:\\mods\\a\\\"\n", "path").empty());  // \" does not close it, as in the game
