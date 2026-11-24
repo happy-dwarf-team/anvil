@@ -138,7 +138,7 @@ Unless `legend = no`, the mode's legend lists each rule's colour and label once,
 
 ## 6. Faults
 
-A fault in a mode leaves out that mode whole and writes a line to `anvil.log` with the file and the line: `map mode file My mod/anvil/map_modes/holy.txt:7: a rule needs color = { r g b }`. The other modes of the file are read. Comparison operators (`>=`, `<`) are refused with a hint to write `at_least` and the others. A mode that finds the pool of 13 numbers lent is not registered and logged.
+A fault in a mode leaves out that mode whole and writes a line to `anvil.log` with the file and the line: `map mode file My mod/anvil/map_modes/holy.txt:7: a rule needs color = { r g b }`. The other modes of the file are read. At most 20 faults of one file get a line each; one more line counts the rest (`… holy.txt: 980 more faults`). Comparison operators (`>=`, `<`) are refused with a hint to write `at_least` and the others. A mode that finds the pool of 13 numbers lent is not registered and logged.
 
 ## 7. Test in the game before the release
 

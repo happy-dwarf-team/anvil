@@ -171,8 +171,9 @@ public:
             if (at_ >= text_.size()) return;
             const char c = text_[at_];
             if (c == '"') {
+                // An unclosed text ends at its line's end; skip() then counts the line.
                 const std::size_t end = text_.find_first_of("\"\n", at_ + 1);
-                at_ = end == std::string_view::npos ? text_.size() : end + 1;
+                at_ = end == std::string_view::npos ? text_.size() : text_[end] == '"' ? end + 1 : end;
                 continue;
             }
             if (c == '{') ++depth_;
@@ -548,18 +549,25 @@ void parse(std::string_view raw, std::string_view source, std::vector<FileMode>&
     const std::string text = as_utf8(raw);
     Lexer lex(text);
     Parser parser(lex);
+    std::size_t faults = 0;
     for (;;) {
         try {
             const Token name = lex.next();
-            if (name.kind == Token::end) return;
+            if (name.kind == Token::end) break;
             if (name.kind != Token::word) throw Fault{name.line, "expected the name of a mode"};
             FileMode m = parser.mode(name);
             m.source = std::string(source);
             out.push_back(std::move(m));
         } catch (const Fault& f) {
-            problems.push_back(std::string(source) + ":" + std::to_string(f.line) + ": " + f.what);
+            // A file of stray braces has a fault per byte: log a few, count the rest.
+            if (++faults <= kFaultsShown) {
+                problems.push_back(std::string(source) + ":" + std::to_string(f.line) + ": " + f.what);
+            }
             lex.recover();
         }
+    }
+    if (faults > kFaultsShown) {
+        problems.push_back(std::string(source) + ": " + std::to_string(faults - kFaultsShown) + " more faults");
     }
 }
 
@@ -840,17 +848,26 @@ std::vector<std::string> enabled_mods(std::string_view json) {
 }
 
 std::string mod_value(std::string_view text, std::string_view key) {
+    // As Anvil's loader reads a descriptor (src/core/playset.cpp): without a
+    // UTF-8 BOM, with \" and \\ as escapes in a quoted text.
+    if (text.starts_with("\xEF\xBB\xBF")) text.remove_prefix(3);
     for (std::size_t at = text.find(key); at != std::string_view::npos; at = text.find(key, at + 1)) {
         if (at != 0 && !std::isspace(static_cast<unsigned char>(text[at - 1]))) continue;
+        const std::size_t line_start = text.rfind('\n', at) == std::string_view::npos ? 0 : text.rfind('\n', at) + 1;
+        if (text.substr(line_start, at - line_start).find('#') != std::string_view::npos) continue;  // a comment
         std::size_t i = at + key.size();
         while (i < text.size() && (text[i] == ' ' || text[i] == '\t')) ++i;
         if (i >= text.size() || text[i] != '=') continue;
         const std::size_t q = text.find('"', i);
         const std::size_t eol = text.find('\n', i);
         if (q == std::string_view::npos || q > eol) continue;
-        const std::size_t end = text.find('"', q + 1);
-        if (end == std::string_view::npos) return {};
-        return std::string(text.substr(q + 1, end - q - 1));
+        std::string value;
+        for (std::size_t j = q + 1; j < text.size(); ++j) {
+            if (text[j] == '"') return value;
+            if (text[j] == '\\' && j + 1 < text.size() && (text[j + 1] == '"' || text[j + 1] == '\\')) ++j;
+            value += text[j];
+        }
+        return {};
     }
     return {};
 }
@@ -863,6 +880,9 @@ std::vector<Found> playset_files(const std::filesystem::path& user, std::vector<
     std::size_t index = 0;
     for (const std::string& entry : enabled_mods(json)) {
         ++index;
+        // A path that is not UTF-8 (a descriptor saved in ANSI by hand) would
+        // throw from std::filesystem::path and end the whole playset's files.
+        if (!valid_utf8(entry)) continue;
         const std::string mod = read_file(user / utf8_path(entry), too_big);
         std::string name = mod_value(mod, "name");
         if (name.empty() || !valid_utf8(name)) name = entry;
@@ -871,6 +891,10 @@ std::vector<Found> playset_files(const std::filesystem::path& user, std::vector<
             if (!mod_value(mod, "archive").empty()) {
                 problems.push_back(name + ": a zipped mod; its anvil/map_modes files are not read");
             }
+            continue;
+        }
+        if (!valid_utf8(path)) {
+            problems.push_back(name + ": its path is not UTF-8; its anvil/map_modes files are not read");
             continue;
         }
         std::filesystem::path folder = utf8_path(path);
@@ -884,9 +908,13 @@ std::vector<Found> playset_files(const std::filesystem::path& user, std::vector<
         for (std::filesystem::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec)) {
             if (!it->is_regular_file(ec)) continue;
             const std::filesystem::path& p = it->path();
-            if (lower(path_utf8(p.extension())) != ".txt") continue;
-            const std::string file = path_utf8(p.filename());
-            files[lower(file)] = {index, Found{p, name + "/anvil/map_modes/" + file}};
+            try {
+                if (lower(path_utf8(p.extension())) != ".txt") continue;
+                const std::string file = path_utf8(p.filename());
+                files[lower(file)] = {index, Found{p, name + "/anvil/map_modes/" + file}};
+            } catch (const std::system_error&) {
+                // A file name UTF-8 cannot hold (an unpaired surrogate): only that file is left out.
+            }
         }
     }
     std::vector<std::pair<std::size_t, Found>> ordered;
