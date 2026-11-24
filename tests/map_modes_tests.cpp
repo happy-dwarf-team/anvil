@@ -1122,6 +1122,19 @@ void file_tests() {
         CHECK(files::enabled_mods(R"({"enabled_mods":["mod/a.mod", "mod/ugc_2.mod"],"disabled_dlcs":[]})") ==
               std::vector<std::string>({"mod/a.mod", "mod/ugc_2.mod"}));
         CHECK(files::enabled_mods("{}").empty());
+        // As Anvil's loader reads dlc_load.json: escapes decoded, a ] in a name,
+        // a BOM, the last enabled_mods, none from inside another value, and none
+        // at all from a file that is not such a JSON object.
+        using Mods = std::vector<std::string>;
+        CHECK(files::enabled_mods("{\"enabled_mods\":[\"mod\\/a.mod\",\"mod/Kr\\u00f3l.mod\",\"mod/\\\"q\\\".mod\"]}") ==
+              Mods({"mod/a.mod", "mod/Kr\xC3\xB3l.mod", "mod/\"q\".mod"}));
+        CHECK(files::enabled_mods(R"({"enabled_mods":["mod/a].mod","mod/b.mod"]})") == Mods({"mod/a].mod", "mod/b.mod"}));
+        CHECK(files::enabled_mods("\xEF\xBB\xBF{\"enabled_mods\":[\"mod/a.mod\"]}") == Mods({"mod/a.mod"}));
+        CHECK(files::enabled_mods(R"({"enabled_mods":["mod/a.mod"],"enabled_mods":["mod/b.mod"]})") == Mods({"mod/b.mod"}));
+        CHECK(files::enabled_mods(R"({"old":{"enabled_mods":["mod/x.mod"]},"enabled_mods":[]})").empty());
+        CHECK(files::enabled_mods(R"({"enabled_mods":["mod/a.mod", 3]})").empty());
+        CHECK(files::enabled_mods(R"({"enabled_mods":["mod/a.mod"]} and more)").empty());
+        CHECK(files::enabled_mods(R"({"enabled_mods":["mod/a.mod"])").empty());
         CHECK(files::mod_value("name=\"A mod\"\npath = \"C:/mods/a\"\n", "path") == "C:/mods/a");
         CHECK(files::mod_value("replace_path=\"x\"\n", "path").empty());
         // As Anvil's loader reads a descriptor: a BOM, comments and escapes.
