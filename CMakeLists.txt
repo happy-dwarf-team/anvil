@@ -428,6 +428,7 @@ if(ANVIL_BUILD_TESTS)
         plugins/anvil-game/src/session.cpp
         plugins/anvil-game/src/work_queue.cpp plugins/anvil-game/src/world.cpp)
     target_link_libraries(anvil_game_plugin_tests PRIVATE anvil_loader)
+    target_include_directories(anvil_game_plugin_tests PRIVATE src/control)  # crash_hints.cpp
     add_dependencies(anvil_game_plugin_tests anvil_game)
     add_test(NAME anvil_game_plugin_tests COMMAND anvil_game_plugin_tests ${CMAKE_BINARY_DIR}/plugin)
 

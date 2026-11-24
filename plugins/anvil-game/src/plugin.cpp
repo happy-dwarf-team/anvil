@@ -2392,29 +2392,8 @@ bool note_read(std::uintptr_t address, void* out, std::size_t size) {
 }
 
 std::size_t crash_note(void*, const AnvilControlCrashScope* scope, char* out, std::size_t capacity) {
-    constexpr std::size_t kFirst = offsetof(AnvilControlCrashScope, stack_high) + sizeof(scope->stack_high);
-    if (scope == nullptr || scope->size < kFirst || scope->context == nullptr) return 0;
     anvil_game::crash_hints::Crash crash;
-    crash.rip = static_cast<const CONTEXT*>(scope->context)->Rip;
-    crash.rsp = static_cast<const CONTEXT*>(scope->context)->Rsp;
-    crash.stack_high = scope->stack_high;
-    // The unwound frames came with Anvil 1.27; an older core leaves the stack scan.
-    if (scope->size >= offsetof(AnvilControlCrashScope, frame_count) + sizeof(scope->frame_count)) {
-        crash.frames_known = true;
-        crash.frames = scope->frames;
-        crash.frame_count = scope->frames != nullptr ? scope->frame_count : 0;
-    }
-    // The exception came with Anvil 1.26.0; an older core gives the stack only.
-    if (scope->size >= offsetof(AnvilControlCrashScope, exception) + sizeof(scope->exception) &&
-        scope->exception != nullptr) {
-        const auto& e = *static_cast<const EXCEPTION_RECORD*>(scope->exception);
-        if (e.ExceptionCode == EXCEPTION_ACCESS_VIOLATION && e.NumberParameters >= 2) {
-            crash.access_violation = true;
-            crash.write = e.ExceptionInformation[0] == 1;
-            crash.execute = e.ExceptionInformation[0] == 8;
-            crash.address = static_cast<std::uintptr_t>(e.ExceptionInformation[1]);
-        }
-    }
+    if (!anvil_game::crash_hints::crash_from_scope(scope, crash)) return 0;
     return anvil_game::crash_hints::write_note(g_note_provinces, g_note_image_base, g_note_idea_return, crash,
                                                &note_read, out, capacity);
 }

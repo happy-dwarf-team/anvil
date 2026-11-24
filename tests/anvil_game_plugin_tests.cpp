@@ -1623,6 +1623,38 @@ int main(int argc, char** argv) {
         CHECK(note(s, base, idea).empty());
         s.rip = idea - 1;
         CHECK(note(s, base, 0).empty());
+
+        // The crash as each core's scope gives it: 1.25 the stack, 1.26 the
+        // exception, 1.27 the frames, each read only when the size covers it.
+        CONTEXT context{};
+        context.Rip = base + 0x100000;
+        context.Rsp = reinterpret_cast<std::uintptr_t>(stack.data() + 1);
+        EXCEPTION_RECORD record{};
+        record.ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
+        record.NumberParameters = 2;
+        record.ExceptionInformation[0] = 8;
+        record.ExceptionInformation[1] = 0x10;
+        std::uintptr_t unwound[] = {base + 0x100000, base + 0x200000};
+        AnvilControlCrashScope scope{sizeof(AnvilControlCrashScope), &context, 0, s.stack_high, &record, unwound, 2};
+        ch::Crash got;
+        CHECK(ch::crash_from_scope(&scope, got) && got.rip == context.Rip && got.rsp == context.Rsp &&
+              got.stack_high == s.stack_high && got.access_violation && got.execute && !got.write &&
+              got.address == 0x10 && got.frames_known && got.frames == unwound && got.frame_count == 2);
+        // stack[1] still holds a copy of the loop's return address: with the frames it does not count.
+        CHECK(note(got, base, idea).empty());
+        scope.size = offsetof(AnvilControlCrashScope, frames);  // 1.26
+        CHECK(ch::crash_from_scope(&scope, got) && got.access_violation && !got.frames_known);
+        CHECK(note(got, base, idea).find("maybe left over from an earlier call") != std::string::npos);
+        scope.size = offsetof(AnvilControlCrashScope, exception);  // 1.25
+        CHECK(ch::crash_from_scope(&scope, got) && !got.access_violation && got.rsp == context.Rsp);
+        scope.size = offsetof(AnvilControlCrashScope, stack_high);  // too short
+        CHECK(!ch::crash_from_scope(&scope, got));
+        scope.size = sizeof(AnvilControlCrashScope);
+        scope.context = nullptr;
+        CHECK(!ch::crash_from_scope(&scope, got) && !ch::crash_from_scope(nullptr, got));
+        scope.context = &context;
+        scope.frames = nullptr;  // a core with no frames to give
+        CHECK(ch::crash_from_scope(&scope, got) && got.frames_known && got.frame_count == 0);
     });
 
     run("anvil-game: the work queue", [] {
