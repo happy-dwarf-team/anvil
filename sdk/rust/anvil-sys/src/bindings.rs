@@ -31,6 +31,10 @@ pub const ANVIL_GAME_PROVINCE_WASTELAND: u32 = 2;
 pub const ANVIL_GAME_PROVINCE_HRE: u32 = 4;
 pub const ANVIL_GAME_PROVINCE_CITY: u32 = 8;
 pub const ANVIL_GAME_PROVINCE_COASTAL: u32 = 16;
+pub const ANVIL_GAME_PROVINCE_STATE: u32 = 32;
+pub const ANVIL_GAME_PROVINCE_VALUE_LOCAL_AUTONOMY: u32 = 1;
+pub const ANVIL_GAME_PROVINCE_VALUE_DEVASTATION: u32 = 2;
+pub const ANVIL_GAME_PROVINCE_VALUE_TRADE_POWER: u32 = 4;
 pub const ANVIL_GAME_COUNTRY_OBSERVER: u32 = 1;
 pub const ANVIL_GAME_VALUE_TREASURY: u32 = 1;
 pub const ANVIL_GAME_VALUE_STABILITY: u32 = 2;
@@ -990,10 +994,14 @@ pub struct AnvilGameProvince {
     pub base_production: i32,
     pub base_manpower: i32,
     pub flags: u32,
+    pub values: u32,
+    pub local_autonomy: i32,
+    pub devastation: i32,
+    pub trade_power: i32,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AnvilGameProvince"][::core::mem::size_of::<AnvilGameProvince>() - 32usize];
+    ["Size of AnvilGameProvince"][::core::mem::size_of::<AnvilGameProvince>() - 48usize];
     [
         "Alignment of AnvilGameProvince",
     ][::core::mem::align_of::<AnvilGameProvince>() - 4usize];
@@ -1021,6 +1029,18 @@ const _: () = {
     [
         "Offset of field: AnvilGameProvince::flags",
     ][::core::mem::offset_of!(AnvilGameProvince, flags) - 28usize];
+    [
+        "Offset of field: AnvilGameProvince::values",
+    ][::core::mem::offset_of!(AnvilGameProvince, values) - 32usize];
+    [
+        "Offset of field: AnvilGameProvince::local_autonomy",
+    ][::core::mem::offset_of!(AnvilGameProvince, local_autonomy) - 36usize];
+    [
+        "Offset of field: AnvilGameProvince::devastation",
+    ][::core::mem::offset_of!(AnvilGameProvince, devastation) - 40usize];
+    [
+        "Offset of field: AnvilGameProvince::trade_power",
+    ][::core::mem::offset_of!(AnvilGameProvince, trade_power) - 44usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

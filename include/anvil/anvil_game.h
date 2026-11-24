@@ -324,6 +324,12 @@ typedef struct AnvilGameWarChange {
 #define ANVIL_GAME_PROVINCE_HRE 0x4u       /* since anvil-game 1.26.0: part of the Holy Roman Empire */
 #define ANVIL_GAME_PROVINCE_CITY 0x8u      /* since anvil-game 1.26.0: a city, not a colony */
 #define ANVIL_GAME_PROVINCE_COASTAL 0x10u  /* since anvil-game 1.26.0: land the game counts as coastal */
+#define ANVIL_GAME_PROVINCE_STATE 0x20u    /* since anvil-game 1.27.0: in a state of its owner's, not a territory */
+
+/* AnvilGameProvince.values, since anvil-game 1.27.0: the fields below this game build has. */
+#define ANVIL_GAME_PROVINCE_VALUE_LOCAL_AUTONOMY 0x1u
+#define ANVIL_GAME_PROVINCE_VALUE_DEVASTATION 0x2u
+#define ANVIL_GAME_PROVINCE_VALUE_TRADE_POWER 0x4u
 
 /* AnvilGameCountry.flags */
 #define ANVIL_GAME_COUNTRY_OBSERVER 0x1u   /* the observer's pseudo-country */
@@ -347,6 +353,11 @@ typedef struct AnvilGameProvince {
     int32_t base_production; /* x 1000 */
     int32_t base_manpower;   /* x 1000 */
     uint32_t flags;          /* ANVIL_GAME_PROVINCE_* */
+    /* Since anvil-game 1.27.0 */
+    uint32_t values;         /* ANVIL_GAME_PROVINCE_VALUE_*; a field without its bit is 0 */
+    int32_t local_autonomy;  /* x 1000: as the game shows it, within the province's minimum and maximum */
+    int32_t devastation;     /* x 1000, 0 to 100000 */
+    int32_t trade_power;     /* x 1000: its trade power in its trade node, as of the game's last update */
 } AnvilGameProvince;
 
 typedef struct AnvilGameCountry {

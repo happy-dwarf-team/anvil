@@ -423,7 +423,10 @@ public:
             }
             return (p.flags & ANVIL_GAME_PROVINCE_COASTAL) != 0;
         }
-        return (p.flags & (test == files::Test::hre ? ANVIL_GAME_PROVINCE_HRE : ANVIL_GAME_PROVINCE_CITY)) != 0;
+        const std::uint32_t bit = test == files::Test::hre     ? ANVIL_GAME_PROVINCE_HRE
+                                  : test == files::Test::state ? ANVIL_GAME_PROVINCE_STATE
+                                                               : ANVIL_GAME_PROVINCE_CITY;
+        return (p.flags & bit) != 0;
     }
     static std::uint32_t key_of(files::Test test) {
         switch (test) {
@@ -505,6 +508,15 @@ public:
                 return p.base_manpower;
             case files::Value::development:
                 return std::int64_t{p.base_tax} + p.base_production + p.base_manpower;
+            case files::Value::local_autonomy:
+                if ((p.values & ANVIL_GAME_PROVINCE_VALUE_LOCAL_AUTONOMY) == 0) return std::nullopt;
+                return p.local_autonomy;
+            case files::Value::devastation:
+                if ((p.values & ANVIL_GAME_PROVINCE_VALUE_DEVASTATION) == 0) return std::nullopt;
+                return p.devastation;
+            case files::Value::trade_power:
+                if ((p.values & ANVIL_GAME_PROVINCE_VALUE_TRADE_POWER) == 0) return std::nullopt;
+                return p.trade_power;
             default:
                 return std::nullopt;
         }

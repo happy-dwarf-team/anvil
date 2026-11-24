@@ -50,6 +50,13 @@ struct WorldLayout {
     std::uint32_t empire_bit = 0;
     std::uint32_t coastal_flags = 0;   // map part: byte
     std::uint32_t coastal_mask = 0;
+    std::uint32_t country_state = 0;   // province: pointer to its owner's state; null in a territory
+    // Province values: 0 when absent on this build.
+    std::uint32_t local_autonomy = 0;  // province: fixed point, x 1000, as stored
+    std::uint32_t autonomy_minimum = 0;  // province: fixed point, what it is kept at or above
+    std::uint32_t autonomy_maximum = 0;  // province: fixed point, what it is kept at or below
+    std::uint32_t devastation = 0;     // province: fixed point
+    std::uint32_t trade_power = 0;     // province: fixed point
 
     // Tags: three characters, the country index (int16) above the shift, the
     // kind byte and the valid byte.
