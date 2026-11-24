@@ -541,6 +541,15 @@ if(ANVIL_BUILD_TESTS)
     target_include_directories(anvil_map_tests PRIVATE include)
     target_link_libraries(anvil_map_tests PRIVATE anvil_loader)
     add_test(NAME anvil_map_tests COMMAND anvil_map_tests)
+    # Generated and mutated map mode files, .mod descriptors, dlc_load.json and
+    # anvil.toml list edits: anvil-map's readers against the loader's, and the
+    # editor's result read back (tests/parser_fuzz_tests.cpp). Fixed seed;
+    # ANVIL_FUZZ_ITERATIONS and ANVIL_FUZZ_SEED widen a local run.
+    add_executable(anvil_parser_fuzz tests/parser_fuzz_tests.cpp plugins/anvil-map/src/modes.cpp
+        plugins/anvil-map/src/text.cpp plugins/anvil-map/src/files.cpp)
+    target_include_directories(anvil_parser_fuzz PRIVATE include src)
+    target_link_libraries(anvil_parser_fuzz PRIVATE anvil_loader)
+    add_test(NAME anvil_parser_fuzz COMMAND anvil_parser_fuzz)
     # anvil-script's key table on its own, and the plugin end to end on a
     # synthetic image with CEffect's code and vtable (tests/script_tests.cpp).
     add_executable(anvil_script_tests tests/script_tests.cpp plugins/anvil-script/src/registry.cpp

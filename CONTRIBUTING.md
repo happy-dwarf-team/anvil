@@ -209,6 +209,13 @@ ctest --test-dir build -C Release --output-on-failure
 A change that touches game memory or the loader should also be tried on a copy
 of the game; say in the pull request what was and was not tested.
 
+`anvil_parser_fuzz` (in `ctest`) feeds generated and mutated modder files to the
+readers that take them: anvil-map's map mode files, `.mod` descriptors and
+`dlc_load.json` against the loader's own readers, and the `anvil.toml` list
+edits read back. It prints each failing input. A change to one of those readers
+also runs it longer, on other seeds:
+`$env:ANVIL_FUZZ_ITERATIONS = 50000; $env:ANVIL_FUZZ_SEED = 7; build/Release/anvil_parser_fuzz.exe`.
+
 A change to stubs, chains or the core start-up also runs the microbenchmarks
 (design §17). CI runs them and fails when a case is more than 20% slower than
 `bench/baseline-ci.json` on the same runner CPU:
