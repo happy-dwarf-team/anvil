@@ -110,8 +110,8 @@ public:
     virtual std::string controller(std::int32_t province) = 0;
     // Whether `tag` has a core on the province.
     virtual bool has_core(std::int32_t province, const std::string& tag) = 0;
-    // The country's overlord's tag; empty for none.
-    virtual std::string overlord(const std::string& tag) = 0;
+    // The country's overlord's tag; empty for none, nullopt when the game does not say.
+    virtual std::optional<std::string> overlord(const std::string& tag) = 0;
     // The country's capital, a province ID; 0 for none.
     virtual std::int32_t capital(const std::string& tag) = 0;
     // Whether the province is part of the Holy Roman Empire (Test::hre), a

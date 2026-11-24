@@ -400,11 +400,13 @@ public:
             return std::string_view(t.text, strnlen(t.text, sizeof(t.text))) == tag;
         });
     }
-    std::string overlord(const std::string& tag) override {
+    std::optional<std::string> overlord(const std::string& tag) override {
+        // An anvil-game older than 1.22.0 cannot say: neither subject = yes nor = no passes.
+        if (!ANVIL_GAME_WORLD_HAS(g_world, country_overlord)) return std::nullopt;
         AnvilGameTag out{};
-        if (!ANVIL_GAME_WORLD_HAS(g_world, country_overlord) || g_world->country_overlord(tag.c_str(), &out) != ANVIL_OK) {
-            return {};
-        }
+        const AnvilResult r = g_world->country_overlord(tag.c_str(), &out);
+        if (r == ANVIL_ERROR_NOT_FOUND) return std::string();  // also its answer for no overlord
+        if (r != ANVIL_OK) return std::nullopt;
         return std::string(out.text, strnlen(out.text, sizeof(out.text)));
     }
     std::int32_t capital(const std::string& tag) override {
@@ -417,6 +419,12 @@ public:
         AnvilGameProvince p{};
         p.size = sizeof(p);
         if (g_world->province(province, &p) != ANVIL_OK) return std::nullopt;
+        // An older anvil-game leaves the flag 0 for every province, which would read as "no": the
+        // Empire, city and coastal flags came with 1.26.0 (and province_key), the state flag with
+        // 1.27.0 (and the values, which every build anvil-game knows has).
+        if (test == files::Test::state ? p.values == 0 : !ANVIL_GAME_WORLD_HAS(g_world, province_key)) {
+            return std::nullopt;
+        }
         if (test == files::Test::coastal) {
             if ((p.flags & ANVIL_GAME_PROVINCE_LAND) == 0 || (p.flags & ANVIL_GAME_PROVINCE_WASTELAND) != 0) {
                 return std::nullopt;

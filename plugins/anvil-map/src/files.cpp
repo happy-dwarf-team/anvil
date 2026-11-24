@@ -657,10 +657,10 @@ std::optional<std::int64_t> Evaluator::read_country(std::size_t i, const std::st
             v = world_.country_value(tag, r.value);
             break;
         case Test::subject:
-            v = world_.overlord(tag).empty() != r.yes ? 1 : 0;
+            if (const std::optional<std::string> overlord = world_.overlord(tag)) v = overlord->empty() != r.yes ? 1 : 0;
             break;
         case Test::subject_of:
-            v = world_.overlord(tag) == r.name ? 1 : 0;
+            if (const std::optional<std::string> overlord = world_.overlord(tag)) v = *overlord == r.name ? 1 : 0;
             break;
         case Test::capital:
             v = world_.capital(tag);  // the province rule compares it, read once per owner

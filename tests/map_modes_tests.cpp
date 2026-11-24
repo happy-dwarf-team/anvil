@@ -446,8 +446,10 @@ public:
         return it == controllers.end() ? std::string() : it->second;
     }
     bool has_core(std::int32_t province, const std::string& tag) override { return cores.contains({province, tag}); }
-    std::string overlord(const std::string& tag) override {
+    bool overlords_known = true;  // false: an anvil-game that cannot say
+    std::optional<std::string> overlord(const std::string& tag) override {
         ++country_reads;
+        if (!overlords_known) return std::nullopt;
         const auto it = overlords.find(tag);
         return it == overlords.end() ? std::string() : it->second;
     }
@@ -711,6 +713,16 @@ void file_tests() {
         CHECK(parse_problems("m={label=M rule={subject=no owner=yes color={1 0 0} label=Free}}", &modes).empty());
         files::Evaluator independent(modes[0], world);
         CHECK(independent.match(1) != nullptr && independent.match(3) == nullptr && independent.match(5) == nullptr);
+        // An anvil-game that cannot say whose subject a country is: neither yes nor no passes.
+        TableWorld older;
+        older.overlords_known = false;
+        CHECK(parse_problems("m={label=M rule={subject=no owner=yes color={1 0 0} label=Free}"
+                             " rule={subject=yes owner=yes color={2 0 0} label=Subject}"
+                             " rule={subject_of=RUS owner=yes color={3 0 0} label=Vassal}}",
+                             &modes)
+                  .empty());
+        files::Evaluator unknown(modes[0], older);
+        CHECK(unknown.match(1) == nullptr && unknown.match(3) == nullptr);
 
         // Faults.
         CHECK(parse_problems("m={label=M rule={owned_by=RUSS color={0 0 0} label=x}}")[0].ends_with(
