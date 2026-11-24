@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.27.0](https://github.com/happy-dwarf-team/anvil/compare/v1.26.0...v1.27.0) (2026-11-24)
+
+
+### Features
+
+* **anvil-map:** local_autonomy, devastation, trade_power and state rules in map mode files ([#599](https://github.com/happy-dwarf-team/anvil/issues/599)) ([02b2255](https://github.com/happy-dwarf-team/anvil/commit/02b225586d5277dd219f7e5ad756aa20adff78f2))
+
+
+### Bug Fixes
+
+* **anvil-game:** the idea-count crash hint looks only at the unwound frames ([#604](https://github.com/happy-dwarf-team/anvil/issues/604)) ([c7cdc29](https://github.com/happy-dwarf-team/anvil/commit/c7cdc293df10483ad2732a33d51e8d60667f6bef)), closes [#603](https://github.com/happy-dwarf-team/anvil/issues/603)
+* **anvil-map:** a # or a key inside a descriptor's quoted text no longer hides the mod's path ([#605](https://github.com/happy-dwarf-team/anvil/issues/605)) ([4ec85d8](https://github.com/happy-dwarf-team/anvil/commit/4ec85d89d7a30b59e528e9fc7ba850306c3eda70))
+* **anvil-map:** a forgotten closing quote no longer hides every later mode ([#610](https://github.com/happy-dwarf-team/anvil/issues/610)) ([5a2b966](https://github.com/happy-dwarf-team/anvil/commit/5a2b966f61688474c865f9b3dbbdd66ac5d91f0e))
+* **anvil-map:** a mod path that is not UTF-8 no longer drops every map mode file ([#602](https://github.com/happy-dwarf-team/anvil/issues/602)) ([40dcecc](https://github.com/happy-dwarf-team/anvil/commit/40dcecc02d0e64415aa937c910976dc9db1b77c6))
+* **anvil-map:** a quoted text over two lines no longer hides the next mode ([#609](https://github.com/happy-dwarf-team/anvil/issues/609)) ([0c36b04](https://github.com/happy-dwarf-team/anvil/commit/0c36b04334d2c5b9611529bcc5545970fcf74630))
+* **anvil-map:** read a mod's descriptor as the loader does ([#608](https://github.com/happy-dwarf-team/anvil/issues/608)) ([8c028ee](https://github.com/happy-dwarf-team/anvil/commit/8c028eef715533447e21bd36152c22e7ecb19cd1))
+* **anvil-map:** read dlc_load.json as the loader does ([#612](https://github.com/happy-dwarf-team/anvil/issues/612)) ([10a9e9d](https://github.com/happy-dwarf-team/anvil/commit/10a9e9d9349fb14c52e8da9fec837b935f68436d))
+* **anvil-map:** rules an older anvil-game cannot answer no longer pass for every province ([#607](https://github.com/happy-dwarf-team/anvil/issues/607)) ([b2cdd9c](https://github.com/happy-dwarf-team/anvil/commit/b2cdd9c20e7a44b8324324e24e33f9bd3b5a94fb))
+* **sdk:** anvil-sdk 0.4.0 for the new Province fields ([#601](https://github.com/happy-dwarf-team/anvil/issues/601)) ([0010cf8](https://github.com/happy-dwarf-team/anvil/commit/0010cf82495417f0e58c24165a9c315546ec5fcc))
+
 ## [1.26.0](https://github.com/happy-dwarf-team/anvil/compare/v1.25.0...v1.26.0) (2026-11-22)
 
 
