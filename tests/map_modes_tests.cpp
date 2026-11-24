@@ -613,6 +613,18 @@ void file_tests() {
         CHECK(wrapped.size() == 1 && wrapped[0] == "mod/anvil/map_modes/t.txt:1: a quoted text has no end");
         CHECK(modes.size() == 1 && modes[0].name == "b");
 
+        // A text whose closing quote was forgotten, with whole texts on the next
+        // line: the first quote met there opens one, so the } behind it still
+        // closes the block and the next mode is read.
+        modes.clear();
+        const std::vector<std::string> forgotten = parse_problems(
+            "a = { label = \"A\n"
+            "  rule = { always = yes color = { 0 0 0 } label = \"x\" } }\n"
+            "b = { label = B rule = { always = yes color = { 0 0 0 } label = x } }",
+            &modes);
+        CHECK(forgotten.size() == 1 && forgotten[0] == "mod/anvil/map_modes/t.txt:1: a quoted text has no end");
+        CHECK(modes.size() == 1 && modes[0].name == "b");
+
         // A file of stray braces: twenty lines and a count, not a line per byte.
         const std::vector<std::string> flood = parse_problems(std::string(1000, '}'));
         CHECK(flood.size() == files::kFaultsShown + 1 &&
