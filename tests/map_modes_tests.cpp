@@ -613,6 +613,19 @@ void file_tests() {
         CHECK(wrapped.size() == 1 && wrapped[0] == "mod/anvil/map_modes/t.txt:1: a quoted text has no end");
         CHECK(modes.size() == 1 && modes[0].name == "b");
 
+        // A text left open for good, then whole quoted texts on later lines: they
+        // are read whole, so a { or # in one does not swallow the next mode.
+        for (const char* later : {"description = \"open { brace\"", "description = \"Mode #1\""}) {
+            modes.clear();
+            const std::vector<std::string> open = parse_problems(
+                std::string("a = { label = \"no end\n") + later +
+                    " rule = { always = yes color = { 0 0 0 } label = x } }\n"
+                    "b = { label = B rule = { always = yes color = { 0 0 0 } label = x } }",
+                &modes);
+            CHECK(open.size() == 1 && open[0] == "mod/anvil/map_modes/t.txt:1: a quoted text has no end");
+            CHECK(modes.size() == 1 && modes[0].name == "b");
+        }
+
         // A file of stray braces: twenty lines and a count, not a line per byte.
         const std::vector<std::string> flood = parse_problems(std::string(1000, '}'));
         CHECK(flood.size() == files::kFaultsShown + 1 &&
