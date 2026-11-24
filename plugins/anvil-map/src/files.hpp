@@ -186,12 +186,13 @@ struct Found {
 // The mode files of the playset in the user folder `user`: each enabled
 // mod's anvil/map_modes/*.txt, mods in load order and each mod's files by
 // name. A file of the same name in a later mod replaces an earlier one, as
-// the game's files do. A mod without a folder `path` (a zip archive) is
-// skipped with a line in `problems`.
+// the game's files do. A mod without a folder `path` (a zip archive), or
+// whose entry or path is not UTF-8, is skipped with a line in `problems`.
 std::vector<Found> playset_files(const std::filesystem::path& user, std::vector<std::string>& problems);
 
-// Reads and parses every file of `found`. A mode whose name an earlier file
-// already took is left out with a line in `problems`.
+// Reads and parses every file of `found`. A mode whose name an earlier mode
+// already took is left out with a line in `problems`, at most kFaultsShown
+// per file and then a count.
 std::vector<FileMode> load(const std::vector<Found>& found, std::vector<std::string>& problems);
 
 // ---- reading the files again ---------------------------------------------------

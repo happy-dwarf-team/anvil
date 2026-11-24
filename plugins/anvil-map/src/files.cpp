@@ -144,6 +144,7 @@ public:
             const std::size_t end = text_.find_first_of("\"\n", at_ + 1);
             if (end == std::string_view::npos || text_[end] != '"') {
                 at_ = end == std::string_view::npos ? text_.size() : end;  // on to the line's end
+                unclosed_ = true;
                 throw Fault{line_, "a quoted text has no end"};
             }
             t.kind = Token::string;
@@ -166,10 +167,18 @@ public:
 
     // After a fault: on to the end of the block at depth 0 the fault is in.
     void recover() {
+        // After "a quoted text has no end", the first quote met is most likely
+        // that text's end on a later line (`description = "two` / `lines" }`):
+        // read past it alone, so a } behind it still closes the block.
+        bool unclosed = std::exchange(unclosed_, false);
         while (depth_ > 0) {
             skip();
             if (at_ >= text_.size()) return;
             const char c = text_[at_];
+            if (c == '"' && std::exchange(unclosed, false)) {
+                ++at_;
+                continue;
+            }
             if (c == '"') {
                 // An unclosed text ends at its line's end; skip() then counts the line.
                 const std::size_t end = text_.find_first_of("\"\n", at_ + 1);
@@ -203,6 +212,7 @@ private:
     std::size_t at_ = 0;
     int line_ = 1;
     int depth_ = 0;
+    bool unclosed_ = false;  // the last fault was a quoted text with no end
 };
 
 struct ValueName {
@@ -921,7 +931,11 @@ std::vector<Found> playset_files(const std::filesystem::path& user, std::vector<
         ++index;
         // A path that is not UTF-8 (a descriptor saved in ANSI by hand) would
         // throw from std::filesystem::path and end the whole playset's files.
-        if (!valid_utf8(entry)) continue;
+        if (!valid_utf8(entry)) {
+            problems.push_back("dlc_load.json: mod " + std::to_string(index) +
+                               " is not a UTF-8 file name; its anvil/map_modes files are not read");
+            continue;
+        }
         const std::string mod = read_file(user / utf8_path(entry), too_big);
         std::string name = mod_value(mod, "name");
         if (name.empty() || !valid_utf8(name)) name = entry;
@@ -1018,13 +1032,21 @@ std::vector<FileMode> load(const std::vector<Found>& found, std::vector<std::str
         }
         std::vector<FileMode> modes;
         parse(text, f.source, modes, problems);
+        // A file of one mode repeated: a few lines and a count, as for faults.
+        std::size_t repeated = 0;
         for (FileMode& m : modes) {
             if (!names.insert(m.name).second) {
-                problems.push_back(m.source + ":" + std::to_string(m.line) + ": " + m.name +
-                                   " is defined in an earlier file; this one is left out");
+                if (++repeated <= kFaultsShown) {
+                    problems.push_back(m.source + ":" + std::to_string(m.line) + ": " + m.name +
+                                       " is defined earlier; this one is left out");
+                }
                 continue;
             }
             out.push_back(std::move(m));
+        }
+        if (repeated > kFaultsShown) {
+            problems.push_back(f.source + ": " + std::to_string(repeated - kFaultsShown) +
+                               " more modes defined earlier, left out");
         }
     }
     return out;

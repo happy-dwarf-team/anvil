@@ -603,6 +603,16 @@ void file_tests() {
         CHECK(lines.size() == 2 && lines[0].starts_with("mod/anvil/map_modes/t.txt:1: ") &&
               lines[1].starts_with("mod/anvil/map_modes/t.txt:3: "));
 
+        // A quoted text over two lines: one fault, and its closing quote on the
+        // next line does not hide the } behind it, so the next mode is read.
+        modes.clear();
+        const std::vector<std::string> wrapped = parse_problems(
+            "a = { label = A description = \"two\nlines\" rule = { always = yes color = { 0 0 0 } label = x } }\n"
+            "b = { label = B rule = { always = yes color = { 0 0 0 } label = x } }",
+            &modes);
+        CHECK(wrapped.size() == 1 && wrapped[0] == "mod/anvil/map_modes/t.txt:1: a quoted text has no end");
+        CHECK(modes.size() == 1 && modes[0].name == "b");
+
         // A file of stray braces: twenty lines and a count, not a line per byte.
         const std::vector<std::string> flood = parse_problems(std::string(1000, '}'));
         CHECK(flood.size() == files::kFaultsShown + 1 &&
@@ -1131,7 +1141,9 @@ void file_tests() {
             std::filesystem::create_directories(p.parent_path());
             std::ofstream(p, std::ios::binary) << text;
         };
-        write(user / "dlc_load.json", R"({"enabled_mods":["mod/a.mod","mod/z.mod","mod/ansi.mod","mod/b.mod"]})");
+        // The last entry is not UTF-8 (a .mod named in Windows-1252 by hand).
+        write(user / "dlc_load.json",
+              "{\"enabled_mods\":[\"mod/a.mod\",\"mod/z.mod\",\"mod/ansi.mod\",\"mod/b.mod\",\"mod/Kr\xF3l.mod\"]}");
         write(user / "mod/a.mod", "name=\"First\"\npath=\"mod/first\"\n");
         write(user / "mod/z.mod", "name=\"Zipped\"\narchive=\"mod/z.zip\"\n");
         // Saved in Windows-1252 by hand: std::filesystem::path would throw on it.
@@ -1145,8 +1157,9 @@ void file_tests() {
 
         std::vector<std::string> problems;
         const std::vector<files::Found> found = files::playset_files(user, problems);
-        CHECK(problems.size() == 2 && problems[0] == "Zipped: a zipped mod; its anvil/map_modes files are not read" &&
-              problems[1] == "Ansi: its path is not UTF-8; its anvil/map_modes files are not read");
+        CHECK(problems.size() == 3 && problems[0] == "Zipped: a zipped mod; its anvil/map_modes files are not read" &&
+              problems[1] == "Ansi: its path is not UTF-8; its anvil/map_modes files are not read" &&
+              problems[2] == "dlc_load.json: mod 5 is not a UTF-8 file name; its anvil/map_modes files are not read");
         CHECK(found.size() == 3);
         if (found.size() == 3) {
             CHECK(found[0].source == "First/anvil/map_modes/own.txt");
@@ -1156,8 +1169,20 @@ void file_tests() {
         problems.clear();
         const std::vector<files::FileMode> modes = files::load(found, problems);
         CHECK(modes.size() == 2 && modes[0].name == "mine" && modes[1].name == "new");
-        CHECK(problems.size() == 1 && problems[0] == "Second/anvil/map_modes/z.txt:1: mine is defined in an earlier "
-                                                     "file; this one is left out");
+        CHECK(problems.size() == 1 &&
+              problems[0] == "Second/anvil/map_modes/z.txt:1: mine is defined earlier; this one is left out");
+
+        // A file of one mode repeated: twenty lines and a count.
+        write(user / "repeated.txt", [] {
+            std::string text;
+            for (int i = 0; i < 26; ++i) text += "r={label=R rule={always=yes color={0 0 0} label=x}}\n";
+            return text;
+        }());
+        problems.clear();
+        const std::vector<files::FileMode> repeated = files::load({{user / "repeated.txt", "R/repeated.txt"}}, problems);
+        CHECK(repeated.size() == 1 && problems.size() == files::kFaultsShown + 1 &&
+              problems[0] == "R/repeated.txt:2: r is defined earlier; this one is left out" &&
+              problems.back() == "R/repeated.txt: 5 more modes defined earlier, left out");
 
         // Reading again: a stamp changes with the file, and the plan maps the
         // new definitions onto the registered modes.
