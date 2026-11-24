@@ -16,7 +16,7 @@ A mode from a file changes nothing in the game's state, like any plugin mode: it
 
 - The folder is under `anvil/`, which the game does not read, so the files do not change the game's checksum. Anvil's discovery of plugins from mods (design §14) passes `anvil/map_modes/` by: it is not a plugin folder, and before 1.26.0 it showed as a plugin that cannot load (its name is not a plugin id).
 - Mods are read in the playset's load order and each mod's files by name. A file of the same name (case ignored) in a later mod replaces an earlier one, as the game's own files do.
-- A mode's name is unique in the playset: when two files define the same name, the first one read keeps it and the other is left out with a line in `anvil.log`.
+- A mode's name is unique in the playset: when two files, or one file twice, define the same name, the first one read keeps it and the other is left out with a line in `anvil.log` (at most 20 lines per file, then a count).
 - A zipped mod (a `.mod` file with `archive` and no `path`) is skipped with a line in the log.
 - A file larger than 1 MiB is not read.
 - The files are read at `anvil-game.ready`, and the modes they define are registered then.
