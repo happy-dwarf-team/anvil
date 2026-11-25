@@ -5,13 +5,15 @@ build = "eu4-1.37.5-steam-win64"
 
 [symbol.speed_object]
 rva = 0x8024D0
-bytes = "48 8B 81 18 04 00 00 C3"      # mov rax, [rcx+0x418]; ret
+sha256 = "AE4C23FB37CE181F11EF2E3EAF4BAC498572CD06FA1783BB0BBCFE0FE93A1407"
+size = 8      # returns the game-speed object, a field at session+0x418
 memory = "code"
 signature = "void* (void* session)"
 note = "session vtable slot 0x100: returns the game-speed object"
 
 [symbol.idle_exit]
 rva = 0x815CAE
-bytes = "48 8D 8D 40 02 00 00"         # lea rcx, [rbp+0x240]
+sha256 = "FB0ECFE605355C97E7DE153CE7ACC9327AD2800E058AF3193D2DA4340EFCDF1E"
+size = 7
 memory = "code"
-note = "CInGameIdler::Idle, start of the block that returns to the menu"
+note = "inside the in-game loop's per-frame step: start of the block that returns to the main menu"

@@ -1,12 +1,13 @@
 // anvil-script (plugins/anvil-script): the key table on its own, and the
 // plugin end to end. The DLL loads through the host table against a synthetic
-// image with the declared bytes of symbols.toml at their Steam RVAs: the start
-// of CEffect::ReadMember, the constructor and destructor, CArray::Append, the
-// scope getters and CString's constructor run their declared bytes, undo them
-// and jump to stand-ins; CEffect's vtable lies in .rdata. A stand-in of
-// anvil.control answers who a plugin is.
+// image with the symbols of symbols.toml laid out at their Steam RVAs
+// (tests/synthetic_symbols.hpp): effect_read_member, the effect's constructor
+// and destructor, array_append, cstring_from_text, daily_tick, has_dlc_assign
+// and set_session jump to stand-ins after their declared bytes; the effect's
+// vtable lies in .rdata. A stand-in of anvil.control answers who a plugin is.
 // Usage: anvil_script_tests <folder with one folder per plugin>
 #include "plugin_set_fixture.hpp"
+#include "synthetic_symbols.hpp"
 
 #include "../plugins/anvil-script/src/day_end.hpp"
 #include "../plugins/anvil-script/src/dlc_gate.hpp"
@@ -237,12 +238,12 @@ struct GameString {
 };
 static_assert(sizeof(GameString) == 32);
 
-// CToken: the lexer's id, then the text.
+// A token of the script reader: the lexer's id, then the text.
 struct Token {
     int id = 0;
     char text[0x204] = {};
 };
-// CReader as far as the plugin reads it: _Toklhs at +0x30, _Tokrhs at +0x440.
+// The script reader as far as the plugin reads it: the key's token at +0x30, the value's at +0x440.
 struct Reader {
     std::uint8_t head[0x30] = {};
     Token lhs;
@@ -251,7 +252,7 @@ struct Reader {
 };
 static_assert(offsetof(Reader, lhs) == 0x30 && offsetof(Reader, rhs) == 0x440);
 
-// CEffect: vtable, the children vector at +0x10, the token at +0x28.
+// An effect: vtable, the children vector at +0x10, the token at +0x28.
 struct FakeEffect {
     const void* vtable = nullptr;
     std::uint8_t type[8] = {};
@@ -263,8 +264,8 @@ struct FakeEffect {
 };
 static_assert(sizeof(FakeEffect) == 0x38 && offsetof(FakeEffect, begin) == 0x10 && offsetof(FakeEffect, token) == 0x28);
 
-// CEventScope as the plugin reads it: the province at +0x28, the country's
-// tag at +0x2C and an override tag at +0x44 (CCountryTag, valid at +7).
+// A script scope as the plugin reads it: the province at +0x28, the country's
+// tag at +0x2C and an override tag at +0x44 (a tag, valid at +7).
 struct FakeScope {
     std::uint8_t head[0x28] = {};
     int province = 0;
@@ -286,9 +287,9 @@ static_assert(offsetof(FakeScope, province) == 0x28 && offsetof(FakeScope, tag) 
               offsetof(FakeScope, override_tag) == 0x44);
 
 // What the stand-ins of the game got.
-std::vector<std::string> g_read_keys;       // ReadMember reached the game
+std::vector<std::string> g_read_keys;       // effect_read_member reached the game
 int g_ctors = 0, g_dtors = 0, g_grows = 0, g_base_descs = 0;
-std::vector<std::string> g_strings;         // CString::CString(const char*)
+std::vector<std::string> g_strings;         // cstring_from_text
 std::uintptr_t g_vtable_address = 0;
 
 void fake_read_member(void*, void* reader, int) {
@@ -303,6 +304,13 @@ void* fake_ctor(void* effect) {
 }
 void fake_dtor(void*) { ++g_dtors; }
 void fake_grow(void*, void**) { ++g_grows; }
+// array_append(array, item): the item at the end, or the growth path when the array is full.
+void fake_append(void* array, void** item) {
+    auto** slots = static_cast<void***>(array);
+    if (slots[1] == slots[2]) return fake_grow(array, item);
+    *slots[1] = *item;
+    ++slots[1];
+}
 void* fake_cstring(void* string, const char* text) {
     g_strings.push_back(text);
     auto* s = static_cast<GameString*>(string);
@@ -342,7 +350,7 @@ void fake_daily_tick(void* game_state) {
     if (g_inside_day) g_inside_day();
 }
 
-// CHasDLCTrigger: vtable, CTrigger's fields, the DLC bits at +0x68, padding.
+// A has_dlc trigger: vtable, the trigger base's fields, the DLC bits at +0x68, padding.
 struct FakeDlcTrigger {
     const void* vtable = nullptr;
     std::uint8_t trigger[0x60] = {};
@@ -359,7 +367,11 @@ bool fake_has_dlc_assign(void* trigger, const void* token) {
 }
 bool fake_has_dlc_evaluate(void* trigger, void*) { return (static_cast<FakeDlcTrigger*>(trigger)->bits & 8) != 0; }
 int g_set_session_calls = 0;
-void fake_set_session(void*, void*) { ++g_set_session_calls; }
+// set_session (0x756A30): stores the session at root+0x1E00.
+void fake_set_session(void* root, void* session) {
+    ++g_set_session_calls;
+    std::memcpy(static_cast<std::uint8_t*>(root) + 0x1E00, &session, sizeof session);
+}
 
 // eu4.exe's size and sections (Steam), reserved; pages are committed only
 // where the symbols of anvil-script lie.
@@ -379,78 +391,25 @@ struct FakeEu4 {
         commit(0x1C9E000, PAGE_READWRITE);
         commit(0x1D17000, PAGE_READWRITE);
         write_headers();
-        // ReadMember: mov [rsp+8],rbx; mov [rsp+10h],rsi; push rbp; push rdi; push r12; push r14; push r15,
-        // then pop them and jump to the stand-in.
-        put(0x5DEC50, {0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x55, 0x57, 0x41, 0x54, 0x41, 0x56,
-                       0x41, 0x57, 0x41, 0x5F, 0x41, 0x5E, 0x41, 0x5C, 0x5F, 0x5D});
-        jump(0x5DEC50 + 26, &fake_read_member);
-        // The constructor: its declared bytes, add rsp,40h; pop rdi; mov rbx,[rsp+20h].
-        put(0x5DE770, {0x48, 0x89, 0x5C, 0x24, 0x20, 0x48, 0x89, 0x4C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x40, 0x48,
-                       0x8B, 0xD9, 0x33, 0xC0, 0x48, 0x83, 0xC4, 0x40, 0x5F, 0x48, 0x8B, 0x5C, 0x24, 0x20});
-        // The vtable's site lies inside the constructor (+0x27), so a short jmp rel32 (to 0x5DE7A1) gets
-        // over it to the long jump.
-        put(0x5DE770 + 30, {0xE9, 0x0E, 0x00, 0x00, 0x00});
-        jump(0x5DE7A1, &fake_ctor);
-        // lea rax,[CEffect::vftable]; mov [rcx],rax
-        put(0x5DE797, {0x48, 0x8D, 0x05, 0xAA, 0xFD, 0x6B, 0x01, 0x48, 0x89, 0x01});
-        // The destructor: its declared bytes, add rsp,40h; pop r14.
-        put(0x5DE8D0, {0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x48, 0x89, 0x7C, 0x24, 0x18, 0x41,
-                       0x56, 0x48, 0x83, 0xEC, 0x40, 0x4C, 0x8B, 0xF1, 0x48, 0x83, 0xC4, 0x40, 0x41, 0x5E});
-        jump(0x5DE8D0 + 30, &fake_dtor);
-        // CArray::Append runs as it is; the growth path goes to a stand-in.
-        put(0xC9F10, {0x4C, 0x8B, 0xC2, 0x48, 0x8B, 0x51, 0x08, 0x48, 0x3B, 0x51, 0x10, 0x74, 0x0C, 0x49, 0x8B, 0x00,
-                      0x48, 0x89, 0x02, 0x48, 0x83, 0x41, 0x08, 0x08, 0xC3});
-        jump(0xC9F10 + 0x19, &fake_grow);
-        // Sites with values (not run).
-        put(0x5E4B04, {0x48, 0x8D, 0x5E, 0x30, 0x48, 0x8B, 0xCB});
-        put(0x5E0F43, {0x48, 0x8D, 0x4F, 0x10, 0x48, 0x8D, 0x54, 0x24, 0x20, 0xE8, 0xBF, 0x8F, 0xAE, 0xFF, 0x48, 0x8B,
-                       0x4C, 0x24, 0x20, 0x48, 0x8B, 0x01, 0x48, 0x8D, 0x96, 0x40, 0x04, 0x00, 0x00, 0xFF, 0x50, 0x48});
-        put(0x5EF140, {0x89, 0x51, 0x28, 0xC3});
-        // Where the game's effects read the scope (not run): a province and a country effect.
-        put(0x62367F, {0x48, 0x8B, 0xDA, 0x48, 0x8B, 0xF9, 0x83, 0x7A, 0x28, 0x00});
-        put(0x5EFC55, {0x44, 0x0F, 0xB6, 0x42, 0x4B, 0xBA, 0x44, 0x00, 0x00, 0x00, 0x8B, 0xC2, 0x41, 0xB9, 0x2C, 0x00,
-                       0x00, 0x00, 0x45, 0x84, 0xC0, 0x41, 0x0F, 0x44, 0xC1});
-        // CString::CString(const char*): its declared bytes, add rsp,20h; pop rbx.
-        put(0x1703550, {0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x33, 0xC0, 0x48, 0xC7, 0x41, 0x18, 0x0F, 0x00, 0x00, 0x00,
-                        0x48, 0x89, 0x01, 0x48, 0x8B, 0xD9, 0x88, 0x01, 0x48, 0x83, 0xC4, 0x20, 0x5B});
-        jump(0x1703550 + 29, &fake_cstring);
-        // HandleDailyTick: its declared bytes, add rsp,1F8h and the eight pops, then the stand-in.
-        put(0x758430, {0x48, 0x8B, 0xC4, 0x55, 0x53, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57,
-                       0x48, 0x8D, 0xA8, 0xC8, 0xFE, 0xFF, 0xFF, 0x48, 0x81, 0xEC, 0xF8, 0x01, 0x00, 0x00, 0x48,
-                       0x81, 0xC4, 0xF8, 0x01, 0x00, 0x00, 0x41, 0x5F, 0x41, 0x5E, 0x41, 0x5D, 0x41, 0x5C, 0x5F,
-                       0x5E, 0x5B, 0x5D});
-        jump(0x758430 + 48, &fake_daily_tick);
-        // The date's site inside it (not run): lea r15,[rsi+1DD0h] ... add dword [r15],18h.
-        put(0x7584C1, {0x4C, 0x8D, 0xBE, 0xD0, 0x1D, 0x00, 0x00, 0x49, 0x8B, 0xCF, 0xE8, 0x40, 0x79, 0x97, 0xFF,
-                       0x4C, 0x8D, 0x25, 0xF1, 0x20, 0x4E, 0x01, 0x83, 0xE8, 0x1F, 0x78, 0x0F, 0x49, 0x8B, 0xCC,
-                       0x90, 0x41, 0xFF, 0xC5, 0x48, 0x8D, 0x49, 0x04, 0x2B, 0x01, 0x79, 0xF5, 0x49, 0x8B, 0xCF,
-                       0xE8, 0x7D, 0x78, 0x97, 0xFF, 0x89, 0x85, 0x40, 0x01, 0x00, 0x00, 0x41, 0x83, 0x07, 0x18});
-        // Code for the slots the plugin keeps: the base GetDesc and an empty function.
+        // The functions the plugin hooks or runs: after their declared bytes (laid
+        // out by tests/synthetic_symbols.hpp when the plugin is added), jumps to
+        // the stand-ins above. The sites in between are only read.
+        jump(0x5DEC50 + 18, &fake_read_member);
+        jump(0x5DE770 + 20, &fake_ctor);
+        jump(0x5DE8D0 + 24, &fake_dtor);
+        jump(0xC9F10 + 25, &fake_append);
+        jump(0x1703550 + 24, &fake_cstring);
+        jump(0x758430 + 29, &fake_daily_tick);
+        // Code for the slots the plugin keeps: the base description getter and an empty function.
         jump(0x5ED100, &fake_base_get_desc);
         jump(0x5ED200, &fake_slot);
         for (int i = 0; i < 19; ++i) put_pointer(kVtable + 8 * i, address(0x5ED200));
         put_pointer(kVtable + 8 * 4, address(0x5DEC50));
         put_pointer(kVtable + 8 * 13, address(0x5ED100));
         g_vtable_address = address(kVtable);
-        // CHasDLCTrigger::Assign: its declared bytes, then undo them (add rsp,40h; pop rbp; restore
-        // rbx, rsi, rdi, r14) and jump to the stand-in.
-        put(0xCC5BA0, {0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x48, 0x89, 0x7C, 0x24, 0x18,
-                       0x4C, 0x89, 0x74, 0x24, 0x20, 0x55, 0x48, 0x8B, 0xEC, 0x48, 0x83, 0xEC, 0x40,
-                       0x48, 0x83, 0xC4, 0x40, 0x5D, 0x48, 0x8B, 0x5C, 0x24, 0x08, 0x48, 0x8B, 0x74, 0x24, 0x10,
-                       0x48, 0x8B, 0x7C, 0x24, 0x18, 0x4C, 0x8B, 0x74, 0x24, 0x20});
-        jump(0xCC5BA0 + 53, &fake_has_dlc_assign);
-        // The root's session setter: its declared bytes (the last one runs: the root is the
-        // caller's buffer), then undo them (add rsp,20h; pop rdi; restore rbp, rsi) and the stand-in.
-        put(0x756A30, {0x48, 0x89, 0x6C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57, 0x48, 0x83, 0xEC, 0x20,
-                       0x48, 0x89, 0x91, 0x00, 0x1E, 0x00, 0x00, 0x48, 0x83, 0xC4, 0x20, 0x5F, 0x48, 0x8B, 0x6C,
-                       0x24, 0x10, 0x48, 0x8B, 0x74, 0x24, 0x18});
-        jump(0x756A30 + 37, &fake_set_session);
-        // make_unique<CHasDLCTrigger> (not run): its size, its vtable at 0x1D172B0, the DLC bits at +0x68.
-        put(0xBB4012, {0xB9, 0x70, 0x00, 0x00, 0x00, 0xE8, 0xB8, 0xF2, 0xE7, 0x00, 0x48, 0x8B, 0xD8, 0x48, 0x89, 0x44,
-                       0x24, 0x30, 0x48, 0x8B, 0xC8, 0xE8, 0xE4, 0x56, 0xFD, 0xFF, 0x48, 0x8D, 0x05, 0x7D, 0x32, 0x16,
-                       0x01, 0x48, 0x89, 0x03, 0x48, 0x8D, 0x05, 0xDB, 0x7A, 0x0F, 0x01, 0x48, 0x89, 0x43, 0x38, 0x81,
-                       0x63, 0x68, 0x00, 0x00, 0x00, 0x80});
-        // Its vtable: Evaluate (slot 6) the game's stand-in, Assign (slot 7) the function above.
+        jump(0xCC5BA0 + 28, &fake_has_dlc_assign);
+        jump(0x756A30 + 22, &fake_set_session);
+        // The has_dlc trigger's vtable: slot 6 evaluates (a stand-in), slot 7 is has_dlc_assign.
         jump(0xCC5C00, &fake_has_dlc_evaluate);
         for (int i = 0; i < 16; ++i) put_pointer(kDlcVtable + 8 * i, address(0x5ED200));
         put_pointer(kDlcVtable + 8 * 6, address(0xCC5C00));
@@ -571,7 +530,7 @@ struct Parent {
 
 using ReadMemberFn = void(void* effect, void* reader, int token);
 using ExecuteFn = void(void* effect, void* scope, int value);
-using GetDescFn = void*(void* effect, void* out, void* scope, void* prefix, int indent, bool flag);
+using DescribeFn = void*(void* effect, void* out, void* scope, void* prefix, int indent, bool flag);
 using DeletingDtorFn = void*(void* effect, unsigned flags);
 
 struct Recorded {
@@ -629,12 +588,19 @@ int main(int argc, char** argv) {
     CHECK(bus.register_service("anvil", ANVIL_CONTROL_SERVICE, ANVIL_CONTROL_VERSION, &control) == ANVIL_OK);
     AnvilPlugin* plugin = nullptr;
 
-    run("script plugin: symbols verify, it hooks ReadMember and HandleDailyTick and registers its services", [&] {
+    run("script plugin: symbols verify, it hooks effect_read_member and daily_tick and registers its services", [&] {
         const auto dir = plugins_dir / "anvil-script";
         const auto parsed = load_manifest(dir);
         CHECK(parsed.manifest && parsed.manifest->phase == Phase::Early && !parsed.manifest->affects_gameplay);
         if (!parsed.manifest) return;
-        anvil::ResolvedPlugin* resolved = start.add(dir);
+        // The values that differ between builds: the effect's and the has_dlc
+        // trigger's vtables, where the sites point on Steam.
+        const std::filesystem::path laid_out = synthetic::synthetic_plugin(
+            dir, image.base, FakeEu4::kSize, kBuild,
+            {{"effect_vtable_site.vtable", FakeEu4::kVtable}, {"has_dlc_make.dlc_vtable", FakeEu4::kDlcVtable}});
+        CHECK(!laid_out.empty());
+        if (laid_out.empty()) return;
+        anvil::ResolvedPlugin* resolved = start.add(laid_out);
         CHECK(resolved != nullptr && resolved->symbols.size() == 16);
         if (resolved == nullptr) return;
         // After it, a stand-in for anvil-game: never loaded, it publishes the
@@ -768,24 +734,24 @@ int main(int argc, char** argv) {
         g_plugins[chisel].suspended = false;
     });
 
-    run("script plugin: GetDesc frees the prefix through the base and builds the game's string", [&] {
+    run("script plugin: the description slot frees the prefix through the base and builds the game's string", [&] {
         FakeScope scope{295, "RUS"};
         GameString prefix{};
         GameString out{};
         g_strings.clear();
         g_base_descs = 0;
-        reinterpret_cast<GetDescFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
+        reinterpret_cast<DescribeFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
         CHECK(g_base_descs == 1 && prefix.size == 0xDEAD && out.text() == "Mountains ahead\n" &&
               (g_strings == std::vector<std::string>{"Mountains ahead\n"}));
         // Without Mei's UTF-8: Windows-1252, literal as in anvil-map ('$' stays, the
         // colour sign becomes '?'), cut at a bad byte, one line; a line break ends it.
         g_line = "Teren: g\xC3\xB3ry \xC2\xA7Y$x$ \xE4\xB8\x80";
         g_strings.clear();
-        reinterpret_cast<GetDescFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
+        reinterpret_cast<DescribeFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
         CHECK((g_strings == std::vector<std::string>{"Teren: g\xF3ry ?Y$x$ ?\n"}));
         g_line = "two\nlines\r and a bad byte \xFF here";
         g_strings.clear();
-        reinterpret_cast<GetDescFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
+        reinterpret_cast<DescribeFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
         CHECK((g_strings == std::vector<std::string>{"twolines and a bad byte \n"}));
         g_line = "Mountains ahead";
     });
@@ -799,7 +765,7 @@ int main(int argc, char** argv) {
         GameString prefix{}, out{};
         g_strings.clear();
         g_base_descs = 0;
-        reinterpret_cast<GetDescFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
+        reinterpret_cast<DescribeFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
         g_throw = false;
         CHECK(g_executed.size() == 2 && g_base_descs == 1 && g_strings.empty() && out.size == 0);
         const auto lines = std::count_if(log.begin(), log.end(), [](const std::string& l) {
@@ -824,7 +790,7 @@ int main(int argc, char** argv) {
         GameString prefix{}, out{};
         g_strings.clear();
         auto* const* s = static_cast<void* const*>(p.child(0)->vtable);
-        reinterpret_cast<GetDescFn*>(s[13])(p.child(0), &out, &scope, &prefix, 0, false);
+        reinterpret_cast<DescribeFn*>(s[13])(p.child(0), &out, &scope, &prefix, 0, false);
         CHECK(g_strings.empty() && out.size == 0);
     });
 
@@ -947,7 +913,7 @@ int main(int argc, char** argv) {
         CHECK((g_dlc_names == std::vector<std::string>{"Art of War", "anvil:Chisel"}));
         CHECK(aow.vtable == reinterpret_cast<const void*>(g_dlc_vtable_address) &&
               chisel.vtable != aow.vtable && chisel.bits == 0 && chisel.padding == 0 && stats.padding == 1);
-        // The plugin's copy keeps the game's slots but Evaluate.
+        // The plugin's copy keeps the game's slots but the evaluate slot (6).
         const auto* ours = static_cast<void* const*>(chisel.vtable);
         const auto* game = reinterpret_cast<void* const*>(g_dlc_vtable_address);
         CHECK(ours[0] == game[0] && ours[7] == game[7] && ours[9] == game[9] && ours[6] != game[6]);

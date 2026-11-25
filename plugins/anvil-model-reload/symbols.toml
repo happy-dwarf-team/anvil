@@ -1,14 +1,14 @@
 # What anvil-model-reload reads, writes and calls in EU4 1.37.5 (Steam and GOG
 # 1.37.5.2 and 1.37.5.0, win64). Source: EU4 engine lab,
-# docs/anvil-470-gfx-reload-2026-11-18.md (anvil#470). GOG's names come from
-# its eu4.pdb; Steam's addresses are GOG's functions found in Steam's eu4.exe.
-# The two GOG builds have these bytes at the same addresses.
+# docs/anvil-470-gfx-reload-2026-11-18.md (anvil#470). Steam's addresses are
+# the GOG functions found in Steam's eu4.exe. The two GOG builds have these
+# bytes at the same addresses.
 #
-# Field offsets the plugin uses (PDB layouts, the same in every build):
-# CPdx3DType::_Key +0x10 (CString), _vScale +0x30 (float), _vCullSqDistance
-# +0x34 (float, the square); CPdxMeshType::_Filename +0xA0 (CString), _Lookup
-# +0xC0 (CArray<SAnimationLookup>, begin/end/capacity), entries of 0x40 bytes
-# with _nHash +0x10 and _Name +0x20.
+# Field offsets the plugin uses (the same in every build): a 3D type's key
+# +0x10 (the game's string), its scale +0x30 (float) and its cull distance
+# +0x34 (float, the square); a mesh type's file name +0xA0 (the game's
+# string) and its animation lookup +0xC0 (an array, begin/end/capacity),
+# entries of 0x40 bytes with a hash at +0x10 and a name at +0x20.
 builds = ["eu4-1.37.5-steam-win64", "eu4-1.37.5.2-gog-win64", "eu4-1.37.5.0-gog-win64"]
 
 # --- The gfx type table ------------------------------------------------------
@@ -16,62 +16,69 @@ builds = ["eu4-1.37.5-steam-win64", "eu4-1.37.5.2-gog-win64", "eu4-1.37.5.0-gog-
 [symbol.graphics_types]
 memory = "code"
 values.graphics = { at = 3, rip_relative = 7, type = "uintptr_t" }
-values.bucket_count = { at = 15, size = 4 }
-values.buckets = { at = 26, size = 4 }
-note = "CMeshReloader::Reload(const CArray<CString>&): mov r13,[CGraphics*]; mov ecx,[r13+0x554]; ...; mov rdx,[r13+0x558]: the hash table of 3D types (CGraphics' CHashTable<CString,CPdx3DType>), buckets of nodes {type, next}"
+values.bucket_count = { at = 15, size = 4, is = 0x554 }
+values.buckets = { at = 26, size = 4, is = 0x558 }
+note = "in the mesh reloader (a list of names): reads the graphics object's global, its bucket count at +0x554 and its buckets at +0x558: the hash table of 3D types by name, buckets of nodes {type, next}"
 
 [symbol.graphics_types.build."eu4-1.37.5-steam-win64"]
 rva = 0x14D705F
-bytes = "4C 8B 2D 52 24 E7 00 8B DF 4C 8B FF 41 8B 8D 54 05 00 00 85 C9 74 18 49 8B 95 58 05 00 00"
+sha256 = "59A75F2704D0791D16A55A068FDB5E646428F693324D016D60277E000517014C"
+size = 30
 
 [symbol.graphics_types.build."eu4-1.37.5.2-gog-win64"]
-rva = 0x14D0BCF   # CMeshReloader::Reload+0x7F
-bytes = "4C 8B 2D 62 C7 E5 00 8B DF 4C 8B FF 41 8B 8D 54 05 00 00 85 C9 74 18 49 8B 95 58 05 00 00"
+rva = 0x14D0BCF   # +0x7F in the mesh reloader
+sha256 = "62398DD0CD7794D56BD227E53D6544F5C0CC38909EEA71FAEE24CFE35B0992A1"
+size = 30
 
 [symbol.graphics_types.build."eu4-1.37.5.0-gog-win64"]
 rva = 0x14D0BCF
-bytes = "4C 8B 2D 62 C7 E5 00 8B DF 4C 8B FF 41 8B 8D 54 05 00 00 85 C9 74 18 49 8B 95 58 05 00 00"
+sha256 = "62398DD0CD7794D56BD227E53D6544F5C0CC38909EEA71FAEE24CFE35B0992A1"
+size = 30
 
 [symbol.mesh_type_id]
-bytes = "41 81 7E 08 80 01 00 00"
+sha256 = "805AB8322210FEEB2A8BF988D2DCC8DE9406364862EDCD3B475E7E05C56A131E"
+size = 8
 memory = "code"
-values.type_id = { at = 4, size = 4 }
-note = "CMeshReloader::Reload: cmp dword [r14+8], 0x180: the token id of a pdxmesh type (CPersistent +8)"
+values.type_id = { at = 4, size = 4, is = 0x180 }
+note = "in the mesh reloader: compares a type's token id (at +8) with 0x180, the id of a pdxmesh type"
 build."eu4-1.37.5-steam-win64" = { rva = 0x14D70BC }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x14D0C2C }   # CMeshReloader::Reload+0xDC
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x14D0C2C }   # +0xDC in the mesh reloader
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x14D0C2C }
 
 [symbol.mesh_type_vtable]
 memory = "read"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1D975D8, points_to = 0x1588950 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x1D7F920, points_to = 0x157F470 }   # CPdxMeshType::`vftable'
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x1D7F920, points_to = 0x157F470 }   # the mesh type's vtable
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1D7F920, points_to = 0x157F470 }
-note = "CPdxMeshType: slot 0 the deleting destructor, slot 8 (+0x40) InitForDevice, which ReloadType calls"
+note = "a mesh type: slot 0 the deleting destructor, slot 8 (+0x40) the device setup that mesh_type_reload calls"
 
 # --- Calls --------------------------------------------------------------------
 
 [symbol.mesh_type_reload]
-bytes = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 54 41 56 41 57 48 83 EC 40"
+sha256 = "FE54BC55C80D133CA5B6F7477865FF70A67F367B137B9664DF4D686698697D3A"
+size = 30
 memory = "code"
 signature = "void (void* type)"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1588B40 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x157F660 }   # CPdxMeshType::ReloadType()
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x157F660 }   # the mesh type's reload
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x157F660 }
-note = "CPdxMeshType::ReloadType, 557 B: frees the skeleton, buffers and locators, looks each _Lookup animation up by _Name, calls InitForDevice (loads _Filename, scaled by _vScale) and the reload callbacks; what `reload mesh` calls"
+note = "a mesh type's reload, 557 B: frees the skeleton, buffers and locators, looks each animation of the lookup (+0xC0) up by its name, calls the device setup (loads the file name at +0xA0, scaled by the scale at +0x30) and the reload callbacks; what `reload mesh` calls"
 
 [symbol.string_assign]
-bytes = "48 89 5C 24 10 48 89 6C 24 18 56 57 41 57 48 83 EC 20 48 8B 69 18 49 8B F0 4C 8B FA 48 8B D9 4C 3B C5 77 21"
+sha256 = "485724929147D8D1D416FAE13703BFBF0D7FB77E7773C09A047443F8F0E810C6"
+size = 36
 memory = "code"
 signature = "void* (void* text, const char* chars, uint64_t count)"
 build."eu4-1.37.5-steam-win64" = { rva = 0x95110 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x95140 }   # std::basic_string<char>::assign(const char*, size_t)
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x95140 }   # the game's std::string assign
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x95140 }
-note = "the game's std::string::assign(chars, count), with the game's allocator; InitForDevice calls it to set _Filename to its fallback mesh"
+note = "the game's std::string::assign(chars, count), with the game's allocator; the device setup calls it to set the file name (+0xA0) to its fallback mesh"
 
 # --- The console (as Tongs' game calls) ---------------------------------------
 
 [symbol.console_dispatch]
-bytes = "48 89 5C 24 10 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 D0 48 81 EC 30 01 00 00 49 8B F0 48 8B FA 4C 8B E1"
+sha256 = "E4CC13A880AE51124F30C516A9734F01F7920CCF073567696AE9AC3F6A2163BB"
+size = 42
 memory = "code"
 signature = "void* (void* manager, void* result, void* tokens)"
 note = "the console dispatcher: (manager, result, tokens) -> result; runs one tokenised line"
@@ -86,18 +93,22 @@ note = "the console manager's getter: the singleton pointer"
 
 [symbol.console_manager_get.build."eu4-1.37.5-steam-win64"]
 rva = 0x6E74C0
-bytes = "48 83 EC 28 48 8B 05 8D 06 C7 01 48 85 C0 75 3D"
+sha256 = "52E0D56F1825FCE1E7C929F8A42825ED5EEF5D52D094F74BCA761D2163B39650"
+size = 16
 
 [symbol.console_manager_get.build."eu4-1.37.5.2-gog-win64"]
 rva = 0x6E6F50
-bytes = "48 83 EC 28 48 8B 05 75 4A C5 01 48 85 C0 75 3D"
+sha256 = "B99D1DA95C12325AB9D54DDEEDF8D3D896470FBAEBF1E2777F34D7BEEAAFFB1D"
+size = 16
 
 [symbol.console_manager_get.build."eu4-1.37.5.0-gog-win64"]
 rva = 0x6E6F50
-bytes = "48 83 EC 28 48 8B 05 75 4A C5 01 48 85 C0 75 3D"
+sha256 = "B99D1DA95C12325AB9D54DDEEDF8D3D896470FBAEBF1E2777F34D7BEEAAFFB1D"
+size = 16
 
 [symbol.string_free]
-bytes = "40 53 48 83 EC 20 48 8B 51 18 48 8B D9 48 83 FA 10 72 2C 48 8B 09"
+sha256 = "DC903CD914BB214A13EFAE1C640150B1F9DD18B8ACB197868053E46D7DCBF224"
+size = 22
 memory = "code"
 signature = "void (void* text)"
 note = "the game's std::string destructor, to free the console's answer"
@@ -107,129 +118,143 @@ build."eu4-1.37.5.0-gog-win64" = { rva = 0x95690 }
 
 # --- Units on the map (after `reload assets`) ---------------------------------
 #
-# CProvinceGraphics (0x1400 bytes in every build) keeps the 3D instances of the
-# units shown in a province in _Units (EntityInstanceENTITY*[21], +0x1E0).
-# CProvinceGraphics::UpdateProvinceUnits creates a slot's instance when it is
-# empty and deletes it with EntityInstanceDestroy when its unit is gone, so a
-# slot emptied between frames is created again, from the reloaded entity, the
-# next time the province's units are drawn.
+# A province's graphics object (0x1400 bytes in every build) keeps the 3D
+# instances of the units shown in the province in 21 slots at +0x1E0 (entity
+# instance pointers). Its unit update creates a slot's instance when it is
+# empty and destroys it when its unit is gone, so a slot emptied between
+# frames is created again, from the reloaded entity, the next time the
+# province's units are drawn.
 
 [symbol.province_units]
 memory = "code"
 values.game_state = { at = 3, rip_relative = 7, type = "uintptr_t" }
-values.graphics_owner = { at = 21, size = 4 }
+values.graphics_owner = { at = 21, size = 4, is = 0x1E00 }
 values.application = { at = 28, size = 4 }
-values.map = { at = 35, size = 4 }
-values.units = { at = 42, size = 4 }
-values.unit_slots = { at = 47, size = 4 }
-note = "CProvinceGraphics::Clear+0x24: mov rax,[CGameState*]; ...; mov rax,[rax+0x1E00] (_pGraphicsOwner, CEU3Idler*); mov rdx,[rax+0x330] (Steam) or [rax+0x328] (GOG), the CEU4Application; mov r12,[rdx+0x360] (_pMap, CEU3GraphicalMap*); lea rbx,[r14+0x1E0] (_Units); mov esi,21"
+values.map = { at = 35, size = 4, is = 0x360 }
+values.units = { at = 42, size = 4, is = 0x1E0 }
+values.unit_slots = { at = 47, size = 4, is = 0x15 }
+note = "+0x24 in province_graphics_clear: the game state's global; its graphics owner, the in-game session, at +0x1E00; the application at session+0x330 (Steam) or +0x328 (GOG); the graphical map at application+0x360; the 21 unit slots at +0x1E0 of the province's graphics"
 
 [symbol.province_units.build."eu4-1.37.5-steam-win64"]
 rva = 0x1329BC4
-bytes = "48 8B 05 AD 62 01 01 45 33 ED 45 8B E5 48 85 C0 74 15 48 8B 80 00 1E 00 00 48 8B 90 30 03 00 00 4C 8B A2 60 03 00 00 49 8D 9E E0 01 00 00 BE 15 00 00 00"
+sha256 = "BA14DD27C1951C55BB2557447B1CA462E43BA27EB3BECF9AFF0DD5690AA1CD3E"
+size = 51
 
 [symbol.province_units.build."eu4-1.37.5.2-gog-win64"]
-rva = 0x1323D24   # CProvinceGraphics::Clear+0x24
-bytes = "48 8B 05 CD FF FF 00 45 33 ED 45 8B E5 48 85 C0 74 15 48 8B 80 00 1E 00 00 48 8B 90 28 03 00 00 4C 8B A2 60 03 00 00 49 8D 9E E0 01 00 00 BE 15 00 00 00"
+rva = 0x1323D24   # +0x24 in province_graphics_clear
+sha256 = "F73CEF25788D18ECC21FABD7871D6787207C822FDE17D7A629092BF82C9D2CC8"
+size = 51
 
 [symbol.province_units.build."eu4-1.37.5.0-gog-win64"]
 rva = 0x1323D24
-bytes = "48 8B 05 CD FF FF 00 45 33 ED 45 8B E5 48 85 C0 74 15 48 8B 80 00 1E 00 00 48 8B 90 28 03 00 00 4C 8B A2 60 03 00 00 49 8D 9E E0 01 00 00 BE 15 00 00 00"
+sha256 = "F73CEF25788D18ECC21FABD7871D6787207C822FDE17D7A629092BF82C9D2CC8"
+size = 51
 
 [symbol.province_graphics]
-bytes = "48 8B 86 80 00 00 00 48 63 04 B8 48 8D 0C 80 48 C1 E1 0A 48 03 4E 70"
+sha256 = "0825DFB0A2A72F8A92FAC59CAA32CCE3DF5DCE2A45D4CC7FF17A9606EB7151D6"
+size = 23
 memory = "code"
-values.provinces = { at = 22, size = 1 }
-note = "CEU3GraphicalMap::UpdateProvinceGraphics, its clear queue: movsxd rax,[_ProvinceGraphicsToClear + i*4]; lea rcx,[rax+rax*4]; shl rcx,10 (0x1400 per province); add rcx,[rsi+0x70] (_ProvinceGraphics' data); call CProvinceGraphics::Clear"
+values.provinces = { at = 22, size = 1, is = 0x70 }
+note = "the graphical map's province graphics update, its clear queue: each queued province ID times 0x1400 plus the data of the map's array of province graphics (+0x70), then province_graphics_clear"
 build."eu4-1.37.5-steam-win64" = { rva = 0x10A7B20 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x10A6320 }   # CEU3GraphicalMap::UpdateProvinceGraphics+0x90
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x10A6320 }   # +0x90 in the map's province graphics update
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x10A6320 }
 
 [symbol.province_graphics_count]
-bytes = "48 63 46 7C"
+sha256 = "C2ECB0A533FD91699DE26A4A2C078BF2D1C3EF88F4285D75A7985F1EBC7439C2"
+size = 4
 memory = "code"
-values.province_count = { at = 3, size = 1 }
-note = "CEU3GraphicalMap::UpdateProvinceGraphics, its province loop: movsxd rax,[rsi+0x7C], the size of _ProvinceGraphics (CPdxArray<CProvinceGraphics,int>)"
+values.province_count = { at = 3, size = 1, is = 0x7C }
+note = "the graphical map's province graphics update, its province loop: reads the count of the map's array of province graphics (an int at +0x7C)"
 build."eu4-1.37.5-steam-win64" = { rva = 0x10A7DFB }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x10A65FB }   # CEU3GraphicalMap::UpdateProvinceGraphics+0x36B
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x10A65FB }   # +0x36B in the map's province graphics update
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x10A65FB }
 
 [symbol.province_graphics_clear]
-bytes = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 54 41 55 41 56 41 57 48 83 EC 20 4C 8B F1 E8 CC 45 00 00"
+sha256 = "BAB54ABAE211E54C01B2925E603681B298D72DFBBB525FADC13D9C7558022722"
+size = 36
 memory = "code"
 signature = "void (void* province_graphics)"
-note = "CProvinceGraphics::Clear: destroys the province's 21 unit instances, its city sprawl lists (+0x728, count +0x718 to 0), its flag (+0x8, +0x2B8 to -1) and the instance at +0xD0, removes its 59 map icon windows and marks it for an update; what UpdateProvinceGraphics calls for each province of _ProvinceGraphicsToClear and CNudgeIdler::RefreshMapItems for one province"
+note = "clears a province's graphics: destroys its 21 unit instances, its city sprawl lists (+0x728, count +0x718 to 0), its flag (+0x8, +0x2B8 to -1) and the instance at +0xD0, removes its 59 map icon windows and marks it for an update; what the map's province graphics update calls for each queued province, and the nudge tool's map refresh for one province"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1329BA0 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x1323D00 }   # CProvinceGraphics::Clear
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x1323D00 }   # clears a province's graphics
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1323D00 }
 
 [symbol.create_province_sprites]
-bytes = "48 8B C4 4C 89 40 18 55 53 56 57 41 54 41 56 41 57 48 8D 68 A8 48 81 EC 20 01 00 00 0F 29 70 B8 0F 29 78 A8 45 0F B6 F1 48 8B FA 48 8B F1 48 8B 59 10"
+sha256 = "0BF787059F6200C249DC59AD9357A66249266B5227A75101DD117B7A18A4D0A4"
+size = 50
 memory = "code"
 signature = "void (void* province_graphics, void* province, void* map, bool remove_only)"
-note = "CProvinceGraphics::CreateProvinceSprites: destroys the city (+0x10) and port (+0xB8) instances; with remove_only it then zeroes the culture key (+0xA20) and returns without reading the province, so CProvinceGraphics::Update calls it again with false (creating both) when it next draws the province; CProvinceGraphics::Update calls it with true for a province it does not draw"
+note = "creates a province's city and port sprites: destroys the city (+0x10) and port (+0xB8) instances; with remove_only it then zeroes the culture key (+0xA20) and returns without reading the province, so the province graphics' update calls it again with false (creating both) when it next draws the province; that update calls it with true for a province it does not draw"
 build."eu4-1.37.5-steam-win64" = { rva = 0x13238B0 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x131DA10 }   # CProvinceGraphics::CreateProvinceSprites
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x131DA10 }   # creates a province's city and port sprites
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x131DA10 }
 
 # --- Map objects outside the province's own slots ------------------------------
 #
-# Clear and CreateProvinceSprites leave three kinds of entity instance on the
-# map: the envoys travelling between provinces (merchants, missionaries,
-# colonists, diplomats), the trade goods moving along trade routes and the
-# ambient objects (eagles, windmills, whales). For each the game has a function
-# or a flag with which it creates the instance again itself.
+# province_graphics_clear and create_province_sprites leave three kinds of
+# entity instance on the map: the envoys travelling between provinces
+# (merchants, missionaries, colonists, diplomats), the trade goods moving along
+# trade routes and the ambient objects (eagles, windmills, whales). For each
+# the game has a function or a flag with which it creates the instance again
+# itself.
 #
-# Field offsets read with them (PDB layouts, the same in every build; Steam's
-# code uses the same ones in the functions below): STemporaryEnvoyGraphics
-# (0x18 bytes) _pEnvoyGraphics +0x8; CEnvoyObject (0xC8 bytes) _pProvince
-# +0x48, _EntityInstance +0x50, the owner tag's valid byte +0x65;
-# CTradeRouteGoods (0x90 bytes) _Type +0x10, _EntityInstance +0x78;
-# CAmbientObjectInstance _EntityInstance +0x8, _bShouldRemove +0x10.
+# Field offsets read with them (the same in every build; Steam's code uses
+# the same ones in the functions below): a province's envoy entry (0x18
+# bytes) points to its envoy graphics at +0x8; an envoy object (0xC8 bytes)
+# has its province at +0x48, its entity instance at +0x50 and the owner tag's
+# valid byte at +0x65; a moving trade good (0x90 bytes) has its type at +0x10
+# and its entity instance at +0x78; an ambient object has its entity
+# instance at +0x8 and its remove flag at +0x10.
 
 [symbol.province_envoys]
-bytes = "4D 8B 85 A0 02 00 00 49 8B 85 A8 02 00 00 49 2B C0"
+sha256 = "B35EA0D88062C25CF738766788C701328DE0ACFB08A3D887ED44657DDACA2973"
+size = 17
 memory = "code"
-values.envoy_graphics = { at = 3, size = 4 }
-note = "CProvinceGraphics::UpdateEnvoys: mov r8,[r13+0x2A0]; mov rax,[r13+0x2A8]; sub rax,r8: CProvinceGraphics::_EnvoyGraphics (CArray<STemporaryEnvoyGraphics>, begin/end/capacity)"
+values.envoy_graphics = { at = 3, size = 4, is = 0x2A0 }
+note = "the province graphics' envoy update: reads the array of the province's envoy entries at +0x2A0 (begin/end/capacity)"
 build."eu4-1.37.5-steam-win64" = { rva = 0x132C4E5 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x1326645 }   # CProvinceGraphics::UpdateEnvoys+0x125
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x1326645 }   # +0x125 in the province graphics' envoy update
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1326645 }
 
 [symbol.envoy_recreate]
-bytes = "85 D2 0F 88 0E 06 00 00 55 53 56 57 41 54 41 56 41 57 48 8D AC 24 70 FD FF FF 48 81 EC 90 03 00 00 4C 8B F1 48 8B 49 38 49 8B 46 40"
+sha256 = "01CCDBED13C301DFB8BC6F114089D91A182F670389F3A22BD1108AAB328623BF"
+size = 44
 memory = "code"
 signature = "void (void* envoy_graphics, uint32_t index)"
-values.envoys = { at = 39, size = 1 }
-note = "CEnvoyGraphics::RecreateEnvoyObject(index): destroys the instance of _Envoys[index] (CArray<CEnvoyObject> at +0x38) and creates it again from the land or naval envoy entity of its owner's graphical culture; what CEnvoyGraphics::Update calls when an envoy passes between land and sea"
+values.envoys = { at = 39, size = 1, is = 0x38 }
+note = "recreates an envoy object (envoy graphics, index): destroys the instance of envoy [index] (an array of envoy objects at +0x38) and creates it again from the land or naval envoy entity of its owner's graphical culture; what the envoy graphics' update calls when an envoy passes between land and sea"
 build."eu4-1.37.5-steam-win64" = { rva = 0x10945D0 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x1092DD0 }   # CEnvoyGraphics::RecreateEnvoyObject
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x1092DD0 }   # recreates an envoy object
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1092DD0 }
 
 [symbol.trade_goods_recreate]
-bytes = "85 D2 0F 88 56 07 00 00 55 53 56 57 41 54 41 56 41 57 48 8D AC 24 70 FD FF FF 48 81 EC 90 03 00 00 4C 8B F1 48 8B 89 A0 00 00 00"
+sha256 = "B027AA7DB45657ED043E784DAF5BDCC995BA8E0CC9A7DDE6D9793C380102413F"
+size = 43
 memory = "code"
 signature = "void (void* trade_route, uint32_t index)"
-values.trade_goods = { at = 39, size = 4 }
-note = "CTradeRouteObject::RecreateTradeGoodsObject(index): destroys the instance of _TradeGoods[index] (CArray<CTradeRouteGoods> at +0xA0) and creates it again from the land or naval trade goods entity; what CTradeRouteObject::Update calls when the goods pass between land and sea"
+values.trade_goods = { at = 39, size = 4, is = 0xA0 }
+note = "recreates a moving trade good (trade route, index): destroys the instance of good [index] (an array of moving goods at +0xA0) and creates it again from the land or naval trade goods entity; what the trade route's update calls when the goods pass between land and sea"
 build."eu4-1.37.5-steam-win64" = { rva = 0x13F7780 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x13F1720 }   # CTradeRouteObject::RecreateTradeGoodsObject
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x13F1720 }   # recreates a moving trade good
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x13F1720 }
 
 [symbol.map_trade_routes]
-bytes = "48 8B C1 48 2B 87 B8 04 00 00 48 A9 F8 FF FF FF"
+sha256 = "9B6B6422B4FEAC9088661DAE9B067B91BD58143C90685383E7551B0B4F590BB4"
+size = 16
 memory = "code"
-values.trade_routes = { at = 6, size = 4 }
-note = "CEU3GraphicalMap::UpdateTradeRoutes: mov rax,rcx; sub rax,[rdi+0x4B8]: CEU3GraphicalMap::_TradeRouteObjects (CArray<CTradeRouteObject*>, begin/end/capacity)"
+values.trade_routes = { at = 6, size = 4, is = 0x4B8 }
+note = "the graphical map's trade route update: reads the map's array of trade route objects at +0x4B8 (pointers, begin/end/capacity)"
 build."eu4-1.37.5-steam-win64" = { rva = 0x10A6F14 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x10A5714 }   # CEU3GraphicalMap::UpdateTradeRoutes+0x54
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x10A5714 }   # +0x54 in the map's trade route update
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x10A5714 }
 
 [symbol.map_ambient_objects]
-bytes = "49 8B B4 24 A8 04 00 00 49 2B B4 24 A0 04 00 00"
+sha256 = "EEFDD973002FE855AA251C5DA78E2DD6BB6B521213EF7417DFA3AD41A4F21262"
+size = 16
 memory = "code"
-values.ambient_objects = { at = 12, size = 4 }
-note = "CEU3GraphicalMap::UpdateAmbientObjects, its removal loop: mov rsi,[r12+0x4A8]; sub rsi,[r12+0x4A0]: _VisibleAmbientObjects (CArray<CAmbientObjectInstance*>); the loop destroys an instance whose _bShouldRemove (+0x10) is set, as when its time runs out, and the grid loop before it creates the object's instance again while its cell is drawn"
+values.ambient_objects = { at = 12, size = 4, is = 0x4A0 }
+note = "the graphical map's ambient object update, its removal loop: reads the map's array of visible ambient objects at +0x4A0 (pointers); the loop destroys an instance whose remove flag (+0x10) is set, as when its time runs out, and the grid loop before it creates the object's instance again while its cell is drawn"
 build."eu4-1.37.5-steam-win64" = { rva = 0x10A8609 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x10A6E09 }   # CEU3GraphicalMap::UpdateAmbientObjects+0x489
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x10A6E09 }   # +0x489 in the map's ambient object update
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x10A6E09 }

@@ -5,6 +5,7 @@
 // symbols.toml declare, at the same RVAs (those of eu4.exe 1.37.5 for the
 // examples). Usage: anvil_plugin_tests <folder with one folder per plugin>
 #include "plugin_set_fixture.hpp"
+#include "synthetic_symbols.hpp"
 
 #include <anvil/anvil_game.h>
 #include <anvil/anvil_panel.h>
@@ -30,6 +31,13 @@ constexpr const char* kBuild = "eu4-1.37.5-steam-win64";
 //   .text  0x1000..0xFFE000 code   test symbols at 0x1000.., hello's at 0x8024D0 and 0x815CAE
 //   .rdata 0xFFE000         read   tick_slot -> add_one
 //   .data  0xFFF000         write  counter
+// The examples' speed_object: the game-speed object at session+0x418.
+void* fake_speed_object(const uint8_t* session) {
+    void* speed = nullptr;
+    std::memcpy(&speed, session + 0x418, sizeof(speed));
+    return speed;
+}
+
 struct FakeGame {
     static constexpr uint32_t kSize = 0x1000000;
     uint8_t* base = nullptr;
@@ -52,10 +60,14 @@ struct FakeGame {
         std::memcpy(base + 0xFFE000, &add_one, sizeof(add_one));
         DWORD old = 0;
         VirtualProtect(base + 0xFFE000, 0x1000, PAGE_READONLY, &old);
-        // The examples (examples/*/symbols.toml): speed_object returns
-        // [rcx+0x418]; idle_exit's lea is followed by mov rax, rcx; ret.
-        put(0x8024D0, {0x48, 0x8B, 0x81, 0x18, 0x04, 0x00, 0x00, 0xC3});
-        put(0x815CAE, {0x48, 0x8D, 0x8D, 0x40, 0x02, 0x00, 0x00, 0x48, 0x89, 0xC8, 0xC3});
+        // The examples (examples/*/symbols.toml), laid out when they are added
+        // (tests/synthetic_symbols.hpp): after speed_object's 8 declared bytes a
+        // jump to its stand-in, after idle_exit's 7 mov rax, rcx; ret.
+        put(0x8024D8, {0x48, 0xB8});
+        const auto speed_object = reinterpret_cast<uintptr_t>(&fake_speed_object);
+        std::memcpy(base + 0x8024DA, &speed_object, sizeof(speed_object));
+        put(0x8024E2, {0xFF, 0xE0});
+        put(0x815CB5, {0x48, 0x89, 0xC8, 0xC3});
     }
     ~FakeGame() { VirtualFree(base, 0, MEM_RELEASE); }
 
@@ -272,9 +284,13 @@ int main(int argc, char** argv) {
     const bool rust_required = GetEnvironmentVariableA("ANVIL_REQUIRE_RUST_EXAMPLES", nullptr, 0) != 0;
     const bool hello_rust_built = std::filesystem::exists(plugins_dir / "hello-rust" / "hello_rust.dll");
     const bool panel_rust_built = std::filesystem::exists(plugins_dir / "panel-rust" / "panel_rust.dll");
-    for (const char* folder : {"probe", "throwing", "hello-c", "hello-cpp"}) start.add(plugins_dir / folder);
-    if (hello_rust_built) start.add(plugins_dir / "hello-rust");
-    if (panel_rust_built) start.add(plugins_dir / "panel-rust");
+    const auto laid_out = [&](const char* folder) {
+        return synthetic::synthetic_plugin(plugins_dir / folder, game.base, FakeGame::kSize, kBuild);
+    };
+    for (const char* folder : {"probe", "throwing"}) start.add(plugins_dir / folder);
+    for (const char* folder : {"hello-c", "hello-cpp"}) start.add(laid_out(folder));
+    if (hello_rust_built) start.add(laid_out("hello-rust"));
+    if (panel_rust_built) start.add(laid_out("panel-rust"));
     start.make();
     using IntFn = int (*)(int);
     using U64Fn = uint64_t (*)(uint64_t);

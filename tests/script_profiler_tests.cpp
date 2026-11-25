@@ -1,12 +1,13 @@
 // anvil-script-profiler (plugins/anvil-script-profiler): its tables, owners,
 // reports and texts on their own, and the plugin end to end. The DLL loads
-// through the host table against a synthetic image with the declared bytes of
-// symbols.toml at their Steam RVAs (CAndTrigger::Evaluate and CEffect::Execute
-// run their declared bytes, undo them and jump to stand-ins) and the owner
+// through the host table against a synthetic image with the symbols of
+// symbols.toml laid out at their Steam RVAs (tests/synthetic_symbols.hpp; the
+// three evaluators jump to stand-ins after their declared bytes) and the owner
 // classes' vtables in .rdata. Stand-ins of anvil-game.game and
 // anvil-overlay.panel carry the events and the clicks.
 // Usage: anvil_script_profiler_tests <folder with one folder per plugin> -userdir=<folder for the CSV files>
 #include "plugin_set_fixture.hpp"
+#include "synthetic_symbols.hpp"
 
 #include "../plugins/anvil-script-profiler/src/owners.hpp"
 #include "../plugins/anvil-script-profiler/src/recorder.hpp"
@@ -90,7 +91,7 @@ struct World {
     std::uint8_t* aspect_child = object(120);  // an AND block inside the aspect's trigger
     std::uint8_t* aspect_children = object(8);
     std::uint8_t* aspect_list = object(8);
-    std::uint8_t* aspect_db = object(96);   // CChurchAspectDatabase
+    std::uint8_t* aspect_db = object(96);   // the church aspects' database
     std::uint8_t* scripted_template = object(136);
 
     World(std::uintptr_t event_vtable, std::uintptr_t decision_vtable, std::uintptr_t aspect_vtable = 0,
@@ -169,23 +170,13 @@ struct FakeEu4 {
         base = static_cast<uint8_t*>(VirtualAlloc(nullptr, kSize, MEM_RESERVE, PAGE_NOACCESS));
         commit(0x0, PAGE_READWRITE);
         for (uint32_t page : {0xB98000u, 0x5ED000u, 0xB99000u, 0x7F6000u}) commit(page, PAGE_EXECUTE_READWRITE);
-        // CChurchAspectDatabase::AccessInstance+0xF: mov rax,[_pDB] (0x242BCB8); not run.
         commit(0x242B000, PAGE_READWRITE);
-        put(0x7F6EFF, {0x48, 0x8B, 0x05, 0xB2, 0x4D, 0xC3, 0x01, 0x48, 0x85, 0xC0, 0x0F, 0x85, 0x07, 0x01, 0x00, 0x00});
         write_headers();
-        // CAndTrigger::Evaluate: its declared bytes, then add rsp,20h; pop rdi; restore rsi and rbx.
-        put(0xB98200, {0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48,
-                       0x8B, 0x59, 0x08, 0x48, 0x83, 0xC4, 0x20, 0x5F, 0x48, 0x8B, 0x74, 0x24, 0x10, 0x48, 0x8B, 0x5C,
-                       0x24, 0x08});
-        jump(0xB98200 + 34, &fake_evaluate);
-        // CEffect::Execute: its declared bytes, then add rsp,20h; pop r14; restore rdi, rsi and rbp.
-        put(0x5ED800, {0x48, 0x89, 0x6C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x48, 0x89, 0x7C, 0x24, 0x20, 0x41,
-                       0x56, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x83, 0xC4, 0x20, 0x41, 0x5E, 0x48, 0x8B, 0x7C, 0x24, 0x20,
-                       0x48, 0x8B, 0x74, 0x24, 0x18, 0x48, 0x8B, 0x6C, 0x24, 0x10});
-        jump(0x5ED800 + 42, &fake_execute);
-        // CScriptedTrigger::Evaluate: its declared bytes, then add rsp,20h; pop rbx.
-        put(0xB99B30, {0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xD9, 0x48, 0x83, 0xC4, 0x20, 0x5B});
-        jump(0xB99B30 + 14, &fake_scripted);
+        // The three evaluators the plugin hooks: after their declared bytes (19, 21
+        // and 9, laid out by tests/synthetic_symbols.hpp), jumps to the stand-ins.
+        jump(0xB98200 + 19, &fake_evaluate);
+        jump(0x5ED800 + 21, &fake_execute);
+        jump(0xB99B30 + 9, &fake_scripted);
         g_scripted_evaluate = reinterpret_cast<EvaluateFn*>(address(0xB99B30));
         g_evaluate = reinterpret_cast<EvaluateFn*>(address(0xB98200));
         g_execute = reinterpret_cast<ExecuteFn*>(address(0x5ED800));
@@ -693,7 +684,12 @@ int main(int argc, char** argv) {
         // anvil-game first, as its required dependency: a stand-in that loads
         // mod-probe and publishes the session events through its handle below.
         start.add(plugin_toml(ANVIL_GAME_ID, "", "1.0.0", "early"), mod_probe_dir()).manifest.entry = "mod-probe.dll";
-        anvil::ResolvedPlugin* resolved = start.add(dir);
+        // The aspect database's global is where the site's value points on Steam.
+        const std::filesystem::path laid_out = synthetic::synthetic_plugin(
+            dir, image.base, FakeEu4::kSize, kBuild, {{"church_aspect_db_site.aspect_db", 0x242BCB8}});
+        CHECK(!laid_out.empty());
+        if (laid_out.empty()) return;
+        anvil::ResolvedPlugin* resolved = start.add(laid_out);
         CHECK(resolved != nullptr && resolved->symbols.size() == 13);
         if (resolved == nullptr) return;
         resolved->data_dir = data;
@@ -809,14 +805,14 @@ int main(int argc, char** argv) {
     });
 
     run("profiler plugin: a Start whose hooks Anvil refuses leaves the next Start free to hook", [&] {
-        // CScriptedTrigger::Evaluate's bytes changed (another program patched them): its hook
+        // scripted_trigger_evaluate's bytes changed (another program patched them): its hook
         // fails after the gate's and the effect's were requested, so the group is aborted.
         const auto before = csv_files();
-        image.put(0xB99B30, {0x90});
+        image.put(0xB99B30, {0xCC});
         click("Start");
         CHECK_PANEL(changes.count(plugin->owner) == 0 && button("Start") != 0);
         CHECK(any_starts(log, "anvil-script-profiler: profiling span not started: "));
-        image.put(0xB99B30, {0x40});
+        image.put(0xB99B30, {0x90});  // the NOP the layout put there
         click("Start");
         CHECK_PANEL(changes.count(plugin->owner) == 3 && button("Stop") != 0);
         click("Stop");
