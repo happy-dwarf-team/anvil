@@ -28,7 +28,7 @@ names), each read from its descriptor's `path`. In each mod's folder it looks at
 | Files | Reloaded with |
 | --- | --- |
 | `.dds` and `.tga` under `gfx/models` | the console's `reloadtexture <file>`, one per file |
-| `.mesh` under `gfx` | the game's own `CPdxMeshType::ReloadType` for every mesh type whose `file` is that file |
+| `.mesh` under `gfx` | the game's own reload of a mesh type (Steam `0x1588B40`) for every mesh type whose `file` is that file |
 | `.anim` under `gfx` | `reload anim` (every animation) |
 | `.dds` and `.tga` under `gfx/particles` | `reload particle` |
 | `.asset` under `gfx` (entities and particles) | `reload assets` |
@@ -47,7 +47,7 @@ game, and in ironman or multiplayer it says it does not reload there. The steps 
 thread after a frame, in this order:
 
 1. `reloadtexture` for each changed model texture, with the game's own spelling of its folder.
-2. Each changed `.mesh`: every mesh type whose `file` names it is reloaded (`ReloadType`: the mesh,
+2. Each changed `.mesh`: every mesh type whose `file` names it is reloaded (the game's mesh type reload: the mesh,
    skeleton, locators and bounds from the file, then the animations looked up again by name).
 3. `reload anim` once, when an `.anim` changed.
 4. `reload particle` once, when a particle texture changed.
@@ -91,15 +91,17 @@ the earlier mod's entries.
 `reload assets` reads every `.asset` again, but an object already on the map (a unit, a city, a port, a
 flag, the buildings of a city) keeps the 3D instance it was created with, and with it the entity's old
 `scale` and attachments. So, once the steps above are done, the plugin clears every province's map
-objects with the game's own `CProvinceGraphics::Clear` and `CreateProvinceSprites`, as the game does
+objects with the game's own functions that clear a province's graphics (Steam `0x1329BA0`) and create its
+city and port sprites (Steam `0x13238B0`), as the game does
 for a province it rebuilds, and the game creates them again from the reloaded entities the next time it
-draws each province. Three kinds of object that `Clear` leaves are created again too, each the way the
+draws each province. Three kinds of object that the clear leaves are created again too, each the way the
 game itself does it:
 
 - the envoys travelling on the map (merchants, missionaries, colonists, diplomats), with
-  `CEnvoyGraphics::RecreateEnvoyObject`, which the game calls when an envoy passes between land and sea;
-- the trade goods moving along the trade routes, with `CTradeRouteObject::RecreateTradeGoodsObject`, called
-  the same way;
+  the game's function that recreates an envoy object (Steam `0x10945D0`), which the game calls when an
+  envoy passes between land and sea;
+- the trade goods moving along the trade routes, with the game's function that recreates a moving trade good
+  (Steam `0x13F7780`), called the same way;
 - the ambient objects (eagles, windmills, whales and the other objects of `map/ambient_object.txt`), which
   are marked as when their time runs out: the game removes them on its next map update and creates them
   again while their part of the map is drawn.
@@ -162,17 +164,19 @@ place of a click, which the overlay's input does not take from Tongs.
 ## How it is built
 
 - **Symbols** (`symbols.toml`, all three 1.37.5 builds): the graphics object and its hash table of 3D
-  types (bucket count `+0x554`, buckets `+0x558`, entries `{type, next}`), read from a site in
-  `CGraphics::GetPdx3DType`; the `CPdxMeshType` type id `0x180` and vtable; `CPdxMeshType::ReloadType`;
+  types (bucket count `+0x554`, buckets `+0x558`, entries `{type, next}`), read from a site in the
+  game's mesh reloader; the mesh type's type id `0x180` and vtable; the mesh type's reload;
   the game's `std::string::assign`; the console's dispatcher, the value manager and the string free
-  that Tongs also uses; for the map, the path to `CEU3GraphicalMap` and its province graphics,
-  `CProvinceGraphics::Clear` and `CreateProvinceSprites`, the province's envoy graphics (`+0x2A0`), the map's
-  trade routes (`+0x4B8`) and visible ambient objects (`+0x4A0`), and the two `Recreate…Object` functions.
-- **Mesh type fields** (from `CPdx3DType::ReadMember`, `CPdxMeshType::ReadMember` and
-  `SAnimationLookup::ReadMember`): name `+0x10`, scale `+0x30`, the square of `cull_distance` `+0x34`,
+  that Tongs also uses; for the map, the path to the graphical map and its province graphics, the
+  province graphics' clear and the creation of a province's city and port sprites, the province's envoy
+  graphics (`+0x2A0`), the map's trade routes (`+0x4B8`) and visible ambient objects (`+0x4A0`), and the
+  two functions that recreate an envoy and a moving trade good.
+- **Mesh type fields** (from the code that reads a 3D type, a mesh type and an animation lookup from a
+  `.gfx` file): name `+0x10`, scale `+0x30`, the square of `cull_distance` `+0x34`,
   `file` `+0xA0`, the animation lookups `+0xC0` (entries of `0x40`: id hash `+0x10`, animation name
-  `+0x20`; the hash is 32-bit FNV-1 of the id's bytes). `ReloadType` frees the mesh, loads it again from
-  `file` through `InitForDevice`, which bakes `scale` into it, and looks the animations up again by name.
+  `+0x20`; the hash is 32-bit FNV-1 of the id's bytes). The mesh type's reload frees the mesh, loads it
+  again from `file` through the type's device setup (vtable slot 8), which bakes `scale` into it, and
+  looks the animations up again by name.
 - **Safety:** every read and write of game memory is guarded and checks the type's vtable and type id
   first; strings are assigned with the game's own `assign`, so the game frees them as its own. A fault
   ends the reload. The parser of `.gfx` files and the plan of steps are plain C++ with unit tests

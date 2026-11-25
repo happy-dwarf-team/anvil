@@ -54,17 +54,17 @@ typedef struct AnvilGameWorldService {
 
 The buffers are the caller's, so no pointer into game memory leaves the service and ADR 0001's lifetime rule has nothing to cover.
 
-**The five values.** They are `CFixedPoint` fields of `CCountry` [pdb], and each has a code site that gives its offset, in the same bytes on both builds [pdb, and a byte search of the Steam exe]:
+**The five values.** They are `CFixedPoint` fields of the country object [pdb], and each has a code site that gives its offset, in the same bytes on both builds [pdb, and a byte search of the Steam exe]:
 
 | Field | Offset | Symbol's site |
 | --- | --- | --- |
-| `treasury` | `+0xBB0` | `CCountry::GetTreasury` |
-| `stability` | `+0xBD8` | `CCountry::GetStability` |
-| `prestige` | `+0xCF8` | `CCountry::GetPrestige` |
-| `manpower` | `+0xDB8` | `CCountry::AddManpower` |
-| `monthly_income` | `+0xE38` | `lea rdi,[r12+0xE38]` in `CCountry::MonthlyUpdateSerial` |
+| `treasury` | `+0xBB0` | the country's treasury getter |
+| `stability` | `+0xBD8` | the country's stability getter |
+| `prestige` | `+0xCF8` | the country's prestige getter |
+| `manpower` | `+0xDB8` | the function that adds manpower to a country |
+| `monthly_income` | `+0xE38` | the field's address taken in the country's serial monthly update |
 
-The service copies the field; it never calls these functions. `monthly_income` is what the monthly update writes, the income total of the economy view before expenses, and not the result of `GetEstimatedMonthlyIncome`, which takes arguments and calculates. The five were compared with the game's top bar and economy view on both builds [live: anvil#219].
+The service copies the field; it never calls these functions. `monthly_income` is what the monthly update writes, the income total of the economy view before expenses, and not the result of the game's estimate of the monthly income, which takes arguments and calculates. The five were compared with the game's top bar and economy view on both builds [live: anvil#219].
 
 **Not in v1.** The selection stays in Tongs: it hangs off the game session, whose layout differs between builds, and only navigation needs it.
 
@@ -95,14 +95,14 @@ The maintainer's assumption was that this is mainly interface work. **For provin
 | --- | --- | --- | --- | --- |
 | `anvil-game.day`, `.month`, `.year` | the date `anvil-game` already reads, compared after the outer frame | 0 | No code in the tick. Only reads. | v1 |
 | `anvil-game.player` | `player()` compared after the outer frame | 0 beyond the world | Local to each machine by nature | v1 |
-| `anvil-game.war` (started, ended) | `_CurrentWars` at `root+0x1E28`, `CPdxArray<CWar*>` [pdb], compared by pointer at each `day`; names and sides from `CWar` | 5 (the first estimate of about 2 was wrong: the list, two leaders and two sides each need a site) | No code in the tick. O(wars) a day. | built in anvil-game 1.11, checked on Steam and GOG |
-| The player's event | `_PendingEvents` at `root+0x1E98` compared [pdb], or Tongs' pop-up read | 1–2 [hypothesis] | No code in the tick | open: `CEventManager::TriggerEvent` adds to it [pdb], but under which condition is not read yet |
-| Any country's event | a hook of `CEventManager::TriggerEvent`, called from `DailyUpdateSerial` and effects [pdb] | 1 and a change | A callback in the middle of a day, with half-applied state | no |
-| Any country's tag | a hook of `CGameState::ChangeTags`, or a pass over all countries | 1 and a change | The same | no |
+| `anvil-game.war` (started, ended) | the list of current wars at `root+0x1E28`, an array of pointers to war objects [pdb], compared by pointer at each `day`; names and sides from the war object | 5 (the first estimate of about 2 was wrong: the list, two leaders and two sides each need a site) | No code in the tick. O(wars) a day. | built in anvil-game 1.11, checked on Steam and GOG |
+| The player's event | the list of pending events at `root+0x1E98` compared [pdb], or Tongs' pop-up read | 1–2 [hypothesis] | No code in the tick | open: the event manager's function that triggers an event adds to it [pdb], but under which condition is not read yet |
+| Any country's event | a hook of the event manager's function that triggers an event, called from the serial daily updates and from effects [pdb] | 1 and a change | A callback in the middle of a day, with half-applied state | no |
+| Any country's tag | a hook of the game state's function that changes a country's tag, or a pass over all countries | 1 and a change | The same | no |
 
-- **Compare, do not hook.** Every event in v1 is a comparison after an outer frame, so it adds no change to the game and no code to the tick, and it needs no port beyond what `anvil-game` already has. A hook of `HandleDailyTick` is one symbol and exact, but its callback runs while the day is half applied, and every author would have to learn that.
-- **One event per frame, with a count.** The payload holds the date, the previous date and `days`. In single player the game posts at most one `CDailyTickCommand` per `CGameState::Tick`, whose only caller is `CInGameIdler::Idle`, and `_bIsInHandleDailyUpdate` gates it [pdb]; an MP client may run several queued days in one frame [hypothesis]. Tongs' `date` notification takes the same shape.
-- **What it means.** The date moves inside `HandleDailyTick`, and the monthly and yearly updates run in the same call [pdb, live], so at `month` they are done. No event crosses a session: the first date of a session is the baseline, and a load is a session change.
+- **Compare, do not hook.** Every event in v1 is a comparison after an outer frame, so it adds no change to the game and no code to the tick, and it needs no port beyond what `anvil-game` already has. A hook of the game state's daily update is one symbol and exact, but its callback runs while the day is half applied, and every author would have to learn that.
+- **One event per frame, with a count.** The payload holds the date, the previous date and `days`. In single player the game posts at most one daily command per game state tick, whose only caller is the in-game loop's per-frame step, and the flag that marks the daily update as running gates it [pdb]; an MP client may run several queued days in one frame [hypothesis]. Tongs' `date` notification takes the same shape.
+- **What it means.** The date moves inside the daily update, and the monthly and yearly updates run in the same call [pdb, live], so at `month` they are done. No event crosses a session: the first date of a session is the baseline, and a load is a session change.
 - **Limits.** Frame timing differs between machines, so these events are local observations: not a clock for anything that must match in MP. A plugin that acts on them through the game's input or memory stops being a reader, and `affects_gameplay` says so. A native plugin can do anything; the service only ensures that using it alone changes nothing.
 
 **Hidden information.** `province` answers for terra incognita, and `country` for any tag, a rival's treasury included. In a multiplayer game that is more than the player sees. Tongs' reads have the same reach, and Anvil cannot stop a native plugin from reading memory, so filtering in the service would be a promise it cannot keep. The header and the author's docs say so, and a plugin that shows such values in multiplayer does not enter the catalog.
@@ -174,12 +174,12 @@ void on_month(const char*, const void*, void*) noexcept {
 
 An outline, no API. Changing the game is possible today for a plugin that declares it; what is missing is a way to do it that is safe. It is safe only when all of this is true.
 
-1. **It goes through a game command.** The simulation is command-driven: `CSession::Post`, and every machine runs what comes back, down to `daily_tick` [pdb, live]. An AI decision reaches MP clients as commands [live]. A plugin that posts a command a player could post should need no twin on the other machines [hypothesis: no plugin has done it]. Anything else needs the same plugin, version and timing everywhere.
+1. **It goes through a game command.** The simulation is command-driven: the session posts a command, and every machine runs what comes back, down to `daily_tick` [pdb, live]. An AI decision reaches MP clients as commands [live]. A plugin that posts a command a player could post should need no twin on the other machines [hypothesis: no plugin has done it]. Anything else needs the same plugin, version and timing everywhere.
 2. **Never from a frame.** Frames differ between machines. A direct write can only happen inside something every machine runs at the same point: a command or the tick. So the events of stage 1 are never a trigger for it.
 3. **No extra draw from the game's RNG.** One extra draw on one machine gave an out-of-sync in 2 game days [live: `lab-oos`].
-4. **The game can check it.** After each `CDailyTickCommand` the game compares checksums of provinces and countries, 140 sums with the RNG count [pdb, live]. What no sum covers can drift unnoticed. A change needs a list of what it touches and a test in MP, with the detector's sensitivity shown, as `lab-oos` did.
+4. **The game can check it.** After each daily command the game compares checksums of provinces and countries, 140 sums with the RNG count [pdb, live]. What no sum covers can drift unnoticed. A change needs a list of what it touches and a test in MP, with the detector's sensitivity shown, as `lab-oos` did.
 5. **`affects_gameplay` stays the gate, and the core enforces it.** Today a service cannot see who calls it (Tongs ADR 0002). `get_service` has `self`, so the core could refuse a writing service to a plugin with `affects_gameplay = false`, and refuse calls while it is suspended, as `TONGS_NAV_SUSPENDED` does.
-6. **Ironman stays the player's opt-in, and it is a question of fairness, not of code.** The game's own gate sees only the checksum (`_bGameOK`), so a plugin is invisible to it [pdb]. Only Anvil's rule stands between a change and an achievement. §13 stays: off by default, opt-in, a permanent notice.
+6. **Ironman stays the player's opt-in, and it is a question of fairness, not of code.** The game's own gate sees only the checksum (a flag that it matched), so a plugin is invisible to it [pdb]. Only Anvil's rule stands between a change and an achievement. §13 stays: off by default, opt-in, a permanent notice.
 7. **Multiplayer needs a way to agree.** The hash is compared by hand, and an automatic exchange is not planned because a channel in the netcode risks desyncs (§21). For command-only changes (1) that is enough. For any other it is not, so they stay out of multiplayer.
 8. **The change survives saving.** Nothing a plugin adds goes into a save. State beyond the game's own fields needs a sidecar keyed to the campaign, and a hot-joining player does not get it.
 
@@ -201,7 +201,7 @@ So the first useful step, when it comes, is a small service that posts a short l
 - *Build on Tongs' services.* Rejected: a consumer would require a plugin with `affects_gameplay = true` and a control pipe, and players in MP would see it in the hash.
 - *A new standard plugin, `anvil-world`.* Keeps `anvil-game` at 16 symbols and fails on its own, at the cost of a third DLL and a service name apart from the rest of the game's knowledge. `absent` gives the same safety within one plugin. Rejected by the maintainer.
 - *Full CJK fonts in the package.* Source Han Sans is many megabytes per language, for what Windows already has. Rejected.
-- *Reads of the country values through the game's getters.* Rejected: `GetEstimatedMonthlyIncome` calculates, and a game call from a plugin is what this service exists to avoid.
+- *Reads of the country values through the game's getters.* Rejected: the game's estimate of the monthly income calculates, and a game call from a plugin is what this service exists to avoid.
 - *A snapshot of the world each day, readable from any thread.* Rejected: it costs every player what few plugins use, and it decides for authors which fields matter.
 - *Publishing each game event through one generic stream.* Rejected for now: nothing needs it, and a contract for events we have not read is a promise we could not keep.
 - *Events from the game's logs.* Rejected: free text, in the player's language, and throttled by `anvil-log-throttle`.
@@ -215,7 +215,7 @@ So the first useful step, when it comes, is a small service that posts a short l
 
 ## Limits
 
-- No game was started for this ADR; the release of stage 1a was checked in the game on both builds (anvil#219). The Steam offset of `root+0x1E98` and the `_PendingEvents` condition are unchecked; the wars' offsets are in the bytes `anvil check --exe` verified on both builds.
+- No game was started for this ADR; the release of stage 1a was checked in the game on both builds (anvil#219). The Steam offset of `root+0x1E98` and the condition of the pending events list are unchecked; the wars' offsets are in the bytes `anvil check --exe` verified on both builds.
 - The panel and its CJK text were checked in the game on one machine with a Polish Windows (anvil#225). A Windows without these fonts, the status tab's switch and a device reset in the game were not.
 - Whether anything of the simulation runs between outer frames is open: the lab's single-player AI hypothesis says decisions may spread across frames (lab `docs/range-witness-verify.md`). Reads every frame at speed 5 gave no failed read in about 139 000 reads on both builds [live: anvil#219]; that shows the reads hold, not that nothing runs.
 - The number of symbols for the game's GUI, and every effort in the table, are estimates.

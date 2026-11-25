@@ -82,9 +82,9 @@ with an anvil-game before 1.24.0, the `-userdir=` folder, else Documents), one p
 ## How it works
 
 - **Hooks, only during a span.** Three detours, put in together when a span starts and removed when it
-  ends: `CAndTrigger::Evaluate` (Steam `0xB98200`), which every `AND` block runs through, the root of each
-  trigger and each limit; and `CEffect::Execute` (Steam `0x5ED800`), which every block of effects runs
-  through; and `CScriptedTrigger::Evaluate` (Steam `0xB99B30`), every use of a scripted trigger. `anvil.log` says when the span starts ("profiling span started: hooks on …") and ends ("hooks
+  ends: the evaluation of an `AND` block (Steam `0xB98200`), which every `AND` block runs through, the root
+  of each trigger and each limit; the execution of a block of effects (Steam `0x5ED800`), which every block
+  of effects runs through; and the evaluation of a scripted trigger's use (Steam `0xB99B30`). `anvil.log` says when the span starts ("profiling span started: hooks on …") and ends ("hooks
   removed"); the plugin's load line says `0 change(s)`.
 - **Recording.** Each game thread has a table of its own (65 536 slots, made on its first block and kept
   for the process), written only by that thread, without a lock and without sampling. On each thread only
@@ -97,12 +97,12 @@ with an anvil-game before 1.24.0, the `-userdir=` folder, else Documents), one p
   mission's `ai_weight`) are found from the owner once one of its member blocks was seen in the span. The
   owners are looked up on the main thread at each day's end and at the end of the span; every read is
   guarded, and a block that is not what the tables expect has no owner. The owner's name is its key
-  (`_DebugKey` for an event, `_Tag` for the rest).
-- **Church aspects** (v1.1): `CChurch::FindCheapestAspect` evaluates the children of each aspect's
-  `trigger` and `potential` one by one (its own loop), so those children are the root blocks. They are
-  found from the game's aspect database (`CChurchAspectDatabase::_pDB`, read through a code site in
+  (the event's debug key for an event, the key field for the rest).
+- **Church aspects** (v1.1): the church's search for its cheapest aspect evaluates the children of each
+  aspect's `trigger` and `potential` one by one (its own loop), so those children are the root blocks. They
+  are found from the game's aspect database (its global pointer, read through a code site in
   `symbols.toml`) when the first day of a span ends.
-- **Scripted triggers** (v1.1): a use of a scripted trigger in a script is a `CScriptedTrigger` object,
+- **Scripted triggers** (v1.1): a use of a scripted trigger in a script is a trigger object of its own,
   an `AND` block itself; its name is its template's key.
 - **Builds.** Steam 1.37.5, GOG 1.37.5.2 and GOG 1.37.5.0. A build that declared an owner's vtable absent
   would still measure, without that owner's names.
@@ -128,8 +128,9 @@ The share of the trigger list's time that has an owner, from one span of 181 day
 | Vanilla, Russia 1719 | 71.5% | 76.6% |
 | Anbennar, Verne 1444 | 39.4% | 70.0% (84.7% of the calls) |
 
-Most of what is left: the AI's decision checks (`CEU3AI::ExecuteDecisions`), `OR` blocks run on their own,
-`limit`s (`CIfTrigger`) and, on Anbennar, `CReligiousSchool::CanInviteScholar`.
+Most of what is left: the AI's decision checks (its pass over the decisions it may take), `OR` blocks run on
+their own, `limit`s (the trigger of an `if` block) and, on Anbennar, the check whether a religious school may
+invite a scholar.
 
 ## Limits
 
