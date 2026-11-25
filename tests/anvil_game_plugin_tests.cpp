@@ -8,6 +8,7 @@
 #include "core/benchmark.hpp"
 #include "control/anvil_control.h"
 #include "plugin_set_fixture.hpp"
+#include "synthetic_symbols.hpp"
 
 #include "../plugins/anvil-game/src/commands.hpp"
 #include "../plugins/anvil-game/src/crash_hints.hpp"
@@ -45,6 +46,55 @@ using namespace anvil;
 
 constexpr const char* kBuild = "eu4-1.37.5-steam-win64";
 
+// The values of anvil-game's symbols that differ between builds, so that
+// symbols.toml gives them no `is`: as they are on Steam (offsets, and the RVAs
+// a rip_relative value points to). synthetic_plugin() writes them into the
+// image; the fakes below lay out their objects at these offsets.
+const synthetic::Values kSteamValues = {
+    {"resign_check.resign", 0x12E9},
+    {"ready_store.ready_flag", 0x233FF4E},
+    {"root_and_date.root", 0x233FE78},
+    {"speed_object.speed", 0x418},
+    {"oos_handler.handler", 0x4D8},
+    {"gui_text_receiver.gui", 0x23494F0},
+    {"frontend_state.state", 0x900},
+    {"sdl_dynapi_init.push_event", 0x1746B90},
+    {"sdl_dynapi_init.push_event_slot", 0x1FB02C0},
+    {"province_count.root", 0x233FE78},
+    {"province_is_sea.root", 0x233FE78},
+    {"province_is_wasteland.root", 0x233FE78},
+    {"province_base_tax.countries_db", 0x233D8D0},
+    {"player_country.countries_db", 0x233D8D0},
+    {"country_exists.countries_db", 0x233D8D0},
+    {"modifier_definitions.definitions_end", 0x2358088},
+    {"modifier_definitions.definitions", 0x2358080},
+    {"selection.input", 0x1B80},
+    {"null_monarch.instance", 0x233FFA0},
+    {"null_heir.instance", 0x233FFA8},
+    {"null_consort.instance", 0x233FFB0},
+    {"flag_names.names", 0x2357D80},
+    {"global_flags.root", 0x233FE78},
+    {"drill_button.game", 0x330},
+    {"event_window.vtable", 0x1D590F8},
+    {"popup_list_tail.tail", 0x80},
+    {"speed_button.menu", 0x12F0},
+    {"speed_button.game", 0x330},
+    {"explore_button.game", 0x330},
+    {"timed_modifier_never.never", 0x1FD149C},
+    {"selection_holder.holder", 0x1220},
+    {"map_of_session.graphical_map", 0x330},
+    {"exploration_regions_free.free", 0x17394F0},
+    {"game_map.map", 0x233FED8},
+    {"camera_of_session.frame_time", 0x1658},
+    {"camera_of_session.camera", 0x1200},
+    {"camera_key_speed.divisor", 0x1DC18DC},
+    {"camera_key_speed.lower", 0x1DC1604},
+    {"camera_key_speed.upper", 0x1DC181C},
+    {"camera_key_speed.settings", 0x242BDE8},
+    {"camera_key_speed.factor", 0x1DC1764},
+    {"camera_frame_time_cap.cap", 0x1DC15A8},
+};
+
 bool g_multiplayer = false;  // what the stand-in of the session's vtable slot 0x318 answers
 bool fake_is_multiplayer_slot(void*) { return g_multiplayer; }
 
@@ -66,8 +116,19 @@ const char* fake_get_write_dir() {
     if (g_write_dir_switch >= 0) --g_write_dir_switch;
     return g_write_dir;
 }
-// What the stand-in of CEU3GraphicalMap::GetSelectable picks.
+// What the stand-in of selectable_at_point (0x10A46C0) picks.
 void* g_picked = nullptr;
+void* fake_selectable(void*, const float*, void*, std::uint8_t, std::uint8_t) { return g_picked; }
+// The stand-in of province_from_point (0x10A3DD0): the province under the
+// point is its x; -1 while the root (the global at 0x233FE78) has no session.
+std::uint8_t* g_image = nullptr;
+std::int32_t fake_pick(void*, const float* point) {
+    std::uint8_t* root = nullptr;
+    std::memcpy(&root, g_image + 0x233FE78, sizeof root);
+    void* session = nullptr;
+    if (root != nullptr) std::memcpy(&session, root + 0x1E00, sizeof session);
+    return session == nullptr ? -1 : static_cast<std::int32_t>(point[0]);
+}
 
 // Picks that fault, as the game's would on a map torn down under them: the stand-ins jump here.
 volatile std::int32_t* g_fault_at = nullptr;
@@ -151,9 +212,51 @@ int fake_push_event_rest(const void* event) {
     return 1;
 }
 
-// eu4.exe's size and sections, reserved; pages are committed only where the
-// symbols of anvil-game lie:
-//   .text  0x1000    code   the declared bytes; frame and is_multiplayer callable
+// The stand-ins FakeEu4's functions jump to, each doing what the test needs
+// of the game's function at that address.
+template <class T> T at_offset(const void* object, size_t offset) {
+    T value{};
+    std::memcpy(&value, static_cast<const uint8_t*>(object) + offset, sizeof value);
+    return value;
+}
+// frame (0x14C25A0): counts the frame at application+0x320 (frame_counter's
+// offset) and draws, then answers 0.
+uintptr_t fake_frame(uint8_t* app, uint8_t) {
+    const uint64_t counter = at_offset<uint64_t>(app, 0x320) + 1;
+    std::memcpy(app + 0x320, &counter, sizeof counter);
+    fake_frame_body();
+    return 0;
+}
+// set_session (0x756A30): stores the session at root+0x1E00.
+void fake_set_session(uint8_t* root, void* session) { std::memcpy(root + 0x1E00, &session, sizeof session); }
+// is_multiplayer (0x6EAA10): the answer of the session's vtable slot 0x318.
+bool fake_is_multiplayer(void* session) {
+    const auto* vtable = at_offset<const uintptr_t*>(session, 0);
+    return reinterpret_cast<bool (*)(void*)>(vtable[0x318 / 8])(session);
+}
+// is_paused (0x7E01B0), on the speed object: paused by its flag at +0x48, or,
+// outside multiplayer (is_multiplayer on the session at +0x50, called through
+// the image so a hook there sees it), by a pause request in the list at +0.
+bool fake_is_paused(const uint8_t* speed) {
+    if (speed[0x48] != 0) return true;
+    const auto is_multiplayer = reinterpret_cast<bool (*)(void*)>(g_image + 0x6EAA10);
+    if (is_multiplayer(at_offset<void*>(speed, 0x50))) return false;
+    return ((at_offset<uintptr_t>(speed, 8) - at_offset<uintptr_t>(speed, 0)) & ~uintptr_t{7}) != 0;
+}
+// SDL_PushEvent (0x1746B90): stamps the event with SDL_GetTicks (the test's
+// code at 0x1761F20) at +4, then hands it on.
+int fake_push_event(void* event) {
+    const uint32_t ticks = reinterpret_cast<uint32_t (*)()>(g_image + 0x1761F20)();
+    std::memcpy(static_cast<uint8_t*>(event) + 4, &ticks, sizeof ticks);
+    return fake_push_event_rest(event);
+}
+
+// eu4.exe's size and sections, reserved; pages are committed where the test
+// puts its own code and data. The plugin's symbols are laid out when it loads
+// (tests/synthetic_symbols.hpp): each function's declared bytes become NOPs,
+// and the functions the plugin runs end in a jump, just after their declared
+// bytes, to a stand-in above that does what the game's function does:
+//   .text  0x1000    code   frame, set_session, is_multiplayer, is_paused, sdl_push_event
 //   .rdata 0x1B66000 read   the export table (PHYSFS_getWriteDir), the game session's
 //                           vtable 0x1CB8460, the front end's 0x1D5A8C8
 //   .data  0x1FB0000 write  root global 0x233FE78, ready flag 0x233FF4E
@@ -163,9 +266,9 @@ struct FakeEu4 {
 
     FakeEu4() {
         base = static_cast<uint8_t*>(VirtualAlloc(nullptr, kSize, MEM_RESERVE, PAGE_NOACCESS));
+        g_image = base;
         commit(0x0, PAGE_READWRITE);
-        for (uint32_t page : {0x205000u, 0x6E9000u, 0x6EA000u, 0x742000u, 0x756000u, 0x7E0000u, 0x802000u, 0x815000u, 0x848000u,
-                              0x1432000u, 0x10DB000u, 0x14C2000u, 0x1732000u, 0x1746000u, 0x1761000u}) {
+        for (uint32_t page : {0x6EA000u, 0x756000u, 0x7E0000u, 0x14C2000u, 0x1746000u, 0x1761000u}) {
             commit(page, PAGE_EXECUTE_READWRITE);
         }
         commit(0x1B66000, PAGE_READWRITE);
@@ -177,59 +280,15 @@ struct FakeEu4 {
         commit(0x233F000, PAGE_READWRITE);
         write_headers();
 
-        // frame: the declared prologue, then inc qword [rcx+320h], a call of
-        // fake_frame_body (mov rax, imm64; call rax) and the epilogue.
-        put(0x14C25A0, {0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18,
-                        0x48, 0x89, 0x7C, 0x24, 0x20, 0x41, 0x56, 0x48, 0x83, 0xEC, 0x70,
-                        0x48, 0xFF, 0x81, 0x20, 0x03, 0x00, 0x00,              // inc qword [rcx+320h]
-                        0x48, 0xB8});
-        put_pointer(0x14C25A0 + 35, reinterpret_cast<uintptr_t>(&fake_frame_body));
-        put(0x14C25A0 + 43, {0xFF, 0xD0,                                       // call rax
-                        0x48, 0x83, 0xC4, 0x70, 0x41, 0x5E,                     // add rsp,70h; pop r14
-                        0x48, 0x8B, 0x5C, 0x24, 0x08, 0x48, 0x8B, 0x6C, 0x24, 0x10,
-                        0x48, 0x8B, 0x74, 0x24, 0x18, 0x48, 0x8B, 0x7C, 0x24, 0x20,
-                        0x31, 0xC0, 0xC3});                                    // xor eax,eax; ret
-        put(0x14C2A23, {0x48, 0xFF, 0x87, 0x20, 0x03, 0x00, 0x00});
-        put(0x14C2E0E, {0xB2, 0x01, 0x48, 0x8B, 0xCE, 0xE8, 0x88, 0xF7, 0xFF, 0xFF, 0x44, 0x38, 0xB6, 0x83, 0x00, 0x00, 0x00});
-        put(0x14C2DD0, {0x44, 0x38, 0xB6, 0xF8, 0x02, 0x00, 0x00, 0x75, 0x48});
-        put(0x205EED, {0x48, 0x89, 0x1D, 0x0C, 0x36, 0x14, 0x02, 0xC6, 0x05, 0x53, 0xA0, 0x13, 0x02, 0x01});
-        put(0x14321FC, {0x48, 0x8B, 0x05, 0x75, 0xDC, 0xF0, 0x00, 0x8B, 0x98, 0xD0, 0x1D, 0x00, 0x00});
-        put(0x848976, {0x48, 0x8B, 0x05, 0xFB, 0x74, 0xAF, 0x01, 0x48, 0x8B, 0xD9, 0x48, 0x8B, 0x88, 0x00, 0x1E,
-                       0x00, 0x00, 0x48, 0x8B, 0x01, 0xFF, 0x90, 0x00, 0x01, 0x00, 0x00});
-        put(0x8024D0, {0x48, 0x8B, 0x81, 0x18, 0x04, 0x00, 0x00, 0xC3});
-        put(0x815730, {0x49, 0x8B, 0x8D, 0xD8, 0x04, 0x00, 0x00, 0x48, 0x85, 0xC9, 0x74, 0x09});
-        put(0x742D18, {0x41, 0x80, 0x7C, 0x24, 0x08, 0x00, 0x75, 0x17});
-        put(0x7E04AC, {0x44, 0x88, 0x7F, 0x19, 0x45, 0x84, 0xFF});
-        // speed_of_root, and is_paused whole: it calls is_multiplayer at 0x6EAA10 on [rcx+50h].
-        put(0x1432315, {0x8B, 0x98, 0x08, 0x1E, 0x00, 0x00, 0xFF, 0xC3});
-        put(0x7E01B0, {0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x80, 0x79, 0x48, 0x00, 0x48, 0x8B, 0xD9, 0x74, 0x0E, 0x33,
-                       0xC0, 0x83, 0xF8, 0x02, 0x0F, 0x95, 0xC0, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xC3, 0x48, 0x8B, 0x49,
-                       0x50, 0xE8, 0x3A, 0xA8, 0xF0, 0xFF, 0x84, 0xC0, 0x75, 0x14, 0x48, 0x8B, 0x43, 0x08, 0x48, 0x2B,
-                       0x03, 0x48, 0xA9, 0xF8, 0xFF, 0xFF, 0xFF, 0xB8, 0x01, 0x00, 0x00, 0x00, 0x75, 0x05, 0xB8, 0x02,
-                       0x00, 0x00, 0x00, 0x83, 0xF8, 0x02, 0x0F, 0x95, 0xC0, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xC3});
-        // set_session: the declared bytes (it stores the session at root+0x1E00), then
-        // add rsp,20h; pop rdi; mov rbp,[rsp+10h]; mov rsi,[rsp+18h]; ret.
-        put(0x756A30, {0x48, 0x89, 0x6C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57, 0x48, 0x83, 0xEC, 0x20,
-                       0x48, 0x89, 0x91, 0x00, 0x1E, 0x00, 0x00, 0x48, 0x83, 0xC4, 0x20, 0x5F, 0x48, 0x8B, 0x6C,
-                       0x24, 0x10, 0x48, 0x8B, 0x74, 0x24, 0x18, 0xC3});
-        put(0x6E9128, {0x48, 0x8B, 0x0D, 0x49, 0x6D, 0xC5, 0x01, 0xC6, 0x40, 0x18, 0x01, 0x48, 0x8B, 0x89,
-                       0x00, 0x1E, 0x00, 0x00, 0xE8, 0xD1, 0x18, 0x00, 0x00, 0x48, 0x8B, 0x0D, 0x32, 0x6D,
-                       0xC5, 0x01, 0x0F, 0xB6, 0xD8, 0x0F, 0xB6, 0xB9, 0xD0, 0x24, 0x00, 0x00});
-        // is_multiplayer: the declared bytes (it calls vtable slot 0x318), then
-        // add rsp,20h; pop rdi; mov rbx,[rsp+8]; ret.
-        put(0x6EAA10, {0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0x01, 0x48, 0x8B,
-                       0xF9, 0xFF, 0x90, 0x18, 0x03, 0x00, 0x00, 0x48, 0x83, 0xC4, 0x20, 0x5F, 0x48, 0x8B, 0x5C,
-                       0x24, 0x08, 0xC3});
+        // The functions the plugin runs: their declared bytes (frame 26, set_session 22,
+        // is_multiplayer 22, is_paused 79, sdl_push_event 17), then the jump to the stand-in.
+        jump(0x14C25A0 + 26, &fake_frame);
+        jump(0x756A30 + 22, &fake_set_session);
+        jump(0x6EAA10 + 22, &fake_is_multiplayer);
+        jump(0x7E01B0 + 79, &fake_is_paused);
+        jump(0x1746B90 + 17, &fake_push_event);
         // SDL's dynamic API: the init stores SDL_PushEvent in slot 88 (0x1FB02C0).
-        put(0x17325DD, {0x48, 0x8D, 0x0D, 0xAC, 0x45, 0x01, 0x00, 0x48, 0x89, 0x0D, 0xD5, 0xDC, 0x87, 0x00});
         put_pointer(0x1FB02C0, address(0x1746B90));
-        // SDL_PushEvent: the declared bytes (push rdi; sub rsp,20h; mov rdi,rcx;
-        // call SDL_GetTicks; mov [rdi+4],eax), then mov rcx,rdi; mov rax,
-        // fake_push_event_rest; call rax; add rsp,20h; pop rdi; ret.
-        put(0x1746B90, {0x40, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xF9, 0xE8, 0x82, 0xB3, 0x01, 0x00, 0x89, 0x47,
-                        0x04, 0x48, 0x89, 0xF9, 0x48, 0xB8});
-        put_pointer(0x1746BA6, reinterpret_cast<uintptr_t>(&fake_push_event_rest));
-        put(0x1746BAE, {0xFF, 0xD0, 0x48, 0x83, 0xC4, 0x20, 0x5F, 0xC3});
         put(0x1761F20, {0xB8, 0xD2, 0x04, 0x00, 0x00, 0xC3});  // SDL_GetTicks: mov eax,1234; ret
         // PHYSFS_getWriteDir, exported: mov rax, fake_get_write_dir; jmp rax.
         // Below SDL_GetTicks: FakeWorld's getters start at 0x1761F40.
@@ -251,15 +310,12 @@ struct FakeEu4 {
         std::memset(base + 0x1B66160, 0, 2);
         std::memcpy(base + 0x1B66170, "PHYSFS_getWriteDir", sizeof("PHYSFS_getWriteDir"));
         std::memcpy(base + 0x1B661A0, "eu4.exe", sizeof("eu4.exe"));
-        // The front end's state change, which stores the state at frontend+0x900.
-        put(0x10DB037, {0x41, 0x8B, 0x8E, 0x00, 0x09, 0x00, 0x00, 0x49, 0x8B, 0x86, 0xE8, 0x08, 0x00, 0x00, 0x48, 0x8B,
-                        0x0C, 0xC8, 0x48, 0x8B, 0x01, 0xFF, 0x50, 0x18, 0x41, 0x89, 0xBE, 0x00, 0x09, 0x00, 0x00});
         // The game session's vtable: slot 0x100 = speed_object, slot 0x318 = the multiplayer answer.
         put_pointer(0x1CB8460 + 0x100, address(0x8024D0));
         put_pointer(0x1CB8460 + 0x318, reinterpret_cast<uintptr_t>(&fake_is_multiplayer_slot));
         // The front end's vtable: slot 0 = its destructor.
         put_pointer(0x1D5A8C8, address(0x10D2C00));
-        // CEU3GraphicalMap's vtable, as graphical_map_vtable declares its first slot.
+        // The graphical map's vtable, as graphical_map_vtable declares its first slot.
         put_pointer(0x1D57E38, address(0x10A3840));
         DWORD old = 0;
         VirtualProtect(base + 0x1CB8000, 0x1000, PAGE_READONLY, &old);
@@ -274,6 +330,12 @@ struct FakeEu4 {
         FlushInstructionCache(GetCurrentProcess(), base + rva, bytes.size());
     }
     void put_pointer(uint32_t rva, uintptr_t value) { std::memcpy(base + rva, &value, sizeof(value)); }
+    // mov rax, target; jmp rax
+    template <class F> void jump(uint32_t rva, F* target) {
+        put(rva, {0x48, 0xB8});
+        put_pointer(rva + 2, reinterpret_cast<uintptr_t>(target));
+        put(rva + 10, {0xFF, 0xE0});
+    }
 
     void write_headers() {
         IMAGE_DOS_HEADER dos{};
@@ -956,11 +1018,8 @@ struct FakeWorld {
         set(rus, 0x28D0 + 0x20, int32_t{750});
         set(rus, 0x28D0 + 0x24, int32_t{-250});
         set(province(1), 0x998 + 0x24, int32_t{100});
-        // The value function: its declared bytes are in place (the symbols test
-        // copied them), then add rsp,20h; pop rbx; mov rax, fake_modifier_value; jmp rax.
-        image.put(kModifierValue + 16, {0x48, 0x83, 0xC4, 0x20, 0x5B, 0x48, 0xB8});
-        image.put_pointer(kModifierValue + 23, reinterpret_cast<uintptr_t>(&fake_modifier_value));
-        image.put(kModifierValue + 31, {0xFF, 0xE0});
+        // The value function: after its 16 declared bytes (NOPs), a jump to the stand-in.
+        image.jump(kModifierValue + 16, &fake_modifier_value);
         // The Great War: RUS and O00 against TUR.
         set(war_a, 0x28 + 0x10, uint64_t{9});
         set(war_a, 0x28 + 0x18, uint64_t{15});
@@ -2243,24 +2302,7 @@ int main(int argc, char** argv) {
         const auto parsed = load_manifest(dir);
         CHECK(parsed.manifest && parsed.manifest->phase == Phase::Early && !parsed.manifest->affects_gameplay);
         if (!parsed.manifest) return;
-        // The world's symbols: their declared bytes at their RVAs, read from the file.
-        std::ifstream symbols_file(dir / parsed.manifest->symbols, std::ios::binary);
-        std::stringstream symbols_text;
-        symbols_text << symbols_file.rdbuf();
-        SymbolFileResult symbols = parse_symbols_text(symbols_text.str());
-        CHECK(symbols.file.has_value());
-        if (!symbols.file) return;
-        CHECK(select_build(*symbols.file, kBuild));
-        bool world = false;
-        for (const Symbol& s : symbols.file->symbols) {
-            world = world || s.name == "province_count";
-            if (!world && !s.name.starts_with("gui_") && s.name != "restart_store" && s.name != "resign_check") continue;
-            for (uint32_t page = *s.rva & ~0xFFFu; page < *s.rva + s.bytes.size(); page += 0x1000) {
-                image.commit(page, PAGE_EXECUTE_READWRITE);
-            }
-            std::memcpy(image.base + *s.rva, s.bytes.data(), s.bytes.size());
-        }
-        // The map camera's constants, read at load: where the bytes of camera_key_speed and
+        // The map camera's constants, read at load: where camera_key_speed and
         // camera_frame_time_cap point on Steam, with the game's values.
         image.commit(0x1DC1000, PAGE_READWRITE);
         for (const auto& [rva, value] : {std::pair{0x1DC18DCu, 150.0f}, std::pair{0x1DC1604u, 1.0f},
@@ -2270,8 +2312,13 @@ int main(int argc, char** argv) {
         }
         // Its symbols verify as the start checks them; after it in load order,
         // a plugin that affects gameplay (one byte patch, below, as the policy
-        // sees it) and one that tries to publish anvil-game's events.
-        CHECK(start.add(dir) != nullptr);
+        // sees it) and one that tries to publish anvil-game's events. The
+        // symbols are laid out in the image first, with the values that differ
+        // between builds (no `is`) as they are on Steam.
+        const std::filesystem::path laid_out = synthetic::synthetic_plugin(dir, image.base, FakeEu4::kSize, kBuild, kSteamValues);
+        CHECK(!laid_out.empty());
+        if (laid_out.empty()) return;
+        CHECK(start.add(laid_out) != nullptr);
         std::string gp_toml = plugin_toml("gp");
         gp_toml.replace(gp_toml.find("affects_gameplay = false"), 24, "affects_gameplay = true");
         start.add(gp_toml);
@@ -3811,19 +3858,12 @@ int main(int argc, char** argv) {
         graphical_map[0] = image.address(0x1D57E38);
         FakeWorld::set(game.session, 0x330, reinterpret_cast<uintptr_t>(map_input));
         FakeWorld::set(map_input, 0x360, reinterpret_cast<uintptr_t>(graphical_map));
-        // GetProvinceIDFromMouse after its declared prologue: the root global for
-        // the wildcard, then the province is the point's x (cvttss2si eax,[rdx]);
-        // the je without a session answers -1.
+        // province_from_point and selectable_at_point: after their declared bytes
+        // (26 and 23, NOPs), jumps to the stand-ins.
         constexpr uint32_t kPick = 0x10A3DD0;
-        const int32_t rel = static_cast<int32_t>(0x233FE78 - (kPick + 13));
-        std::memcpy(image.base + kPick + 9, &rel, sizeof(rel));
-        image.put(kPick + 0x1A, {0xF3, 0x0F, 0x2C, 0x02, 0x48, 0x83, 0xC4, 0x30, 0x5B, 0xC3});
-        image.put(kPick + 0x6A, {0xB8, 0xFF, 0xFF, 0xFF, 0xFF, 0x48, 0x83, 0xC4, 0x30, 0x5B, 0xC3});
-        // GetSelectable after its declared prologue (six pushes): g_picked, then the pops.
+        image.jump(kPick + 26, &fake_pick);
         constexpr uint32_t kSelectable = 0x10A46C0;
-        image.put(kSelectable + 23, {0x48, 0xB8});
-        image.put_pointer(kSelectable + 25, reinterpret_cast<uintptr_t>(&g_picked));
-        image.put(kSelectable + 33, {0x48, 0x8B, 0x00, 0x41, 0x5D, 0x41, 0x5C, 0x5F, 0x5E, 0x5B, 0x5D, 0xC3});
+        image.jump(kSelectable + 23, &fake_selectable);
         fake.install_units(game.session, image);
         const uintptr_t root = reinterpret_cast<uintptr_t>(game.root);
         std::memcpy(image.base + 0x233FE78, &root, sizeof(root));
