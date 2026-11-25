@@ -8,7 +8,8 @@
 builds = ["eu4-1.37.5-steam-win64", "eu4-1.37.5.2-gog-win64", "eu4-1.37.5.0-gog-win64"]
 
 [symbol.and_trigger_evaluate]
-bytes = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B 59 08"
+sha256 = "A6FB7DEFD6632D4E37454EFA400C335E387B5587464D050D0D2DAB242975E445"
+size = 19
 memory = "code"
 signature = "bool (void* trigger, void* scope)"
 build."eu4-1.37.5-steam-win64" = { rva = 0xB98200 }
@@ -17,7 +18,8 @@ build."eu4-1.37.5.0-gog-win64" = { rva = 0xB969B0 }
 note = "CAndTrigger::Evaluate, 96 B: every AND block (the CRootTrigger of an event, decision or modifier, a limit, AND =) evaluates its children through vtable slot +0x30 and stops at the first false; the slot of CRootTrigger and CMTTHModifier points here too"
 
 [symbol.effect_execute]
-bytes = "48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 20"
+sha256 = "A92CB76700BB8900A3DF5793DB25C6BB91A2DC0B0258088DCB5094011B4DCC01"
+size = 21
 memory = "code"
 signature = "void (void* effect, void* scope, int32_t flags)"
 build."eu4-1.37.5-steam-win64" = { rva = 0x5ED800 }
@@ -26,7 +28,8 @@ build."eu4-1.37.5.0-gog-win64" = { rva = 0x5ED2D0 }
 note = "CEffect::Execute, 119 B: runs the children of an effect block (CArray<CEffect*> at +0x10) through their own Execute"
 
 [symbol.scripted_trigger_evaluate]
-bytes = "40 53 48 83 EC 20 48 8B D9"
+sha256 = "DE6A7940819676114C24E2E19757A6270F7072C73E9CACFC21C48A48E6AF4B2B"
+size = 9
 memory = "code"
 signature = "bool (void* trigger, void* scope)"
 build."eu4-1.37.5-steam-win64" = { rva = 0xB99B30 }
@@ -37,9 +40,9 @@ note = "CScriptedTrigger::Evaluate, 29 B (v1.1): a use of a scripted trigger; pu
 [symbol.church_aspect_db_site]
 memory = "code"
 values.aspect_db = { at = 3, rip_relative = 7, type = "uintptr_t" }
-build."eu4-1.37.5-steam-win64" = { rva = 0x7F6EFF, bytes = "48 8B 05 B2 4D C3 01 48 85 C0 0F 85 07 01 00 00" }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x7F626F, bytes = "48 8B 05 BA 98 C1 01 48 85 C0 0F 85 07 01 00 00" }   # CChurchAspectDatabase::AccessInstance+0xF
-build."eu4-1.37.5.0-gog-win64" = { rva = 0x7F626F, bytes = "48 8B 05 BA 98 C1 01 48 85 C0 0F 85 07 01 00 00" }
+build."eu4-1.37.5-steam-win64" = { rva = 0x7F6EFF, sha256 = "6CC3C53035B9696639E28194AB93547A630CB9547E55792B76CC0B1DDC3A1A1D", size = 16 }
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x7F626F, sha256 = "3B62B021DE66DB93AEDC7A648B1AD4454D3EE17EA600BA4CE7CB8A6DEFA1B097", size = 16 }   # CChurchAspectDatabase::AccessInstance+0xF
+build."eu4-1.37.5.0-gog-win64" = { rva = 0x7F626F, sha256 = "3B62B021DE66DB93AEDC7A648B1AD4454D3EE17EA600BA4CE7CB8A6DEFA1B097", size = 16 }
 note = "v1.1: mov rax,[CChurchAspectDatabase::_pDB] (Steam 0x242BCB8, GOG 0x240FB30), the database of church aspects; its _AspectList (+16) lists every aspect"
 
 # The owner classes' vtables: slot 0 (the deleting destructor) is checked.

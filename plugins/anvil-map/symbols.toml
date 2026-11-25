@@ -10,7 +10,8 @@ builds = ["eu4-1.37.5-steam-win64", "eu4-1.37.5.2-gog-win64", "eu4-1.37.5.0-gog-
 
 [symbol.map_color]
 # mov [rsp+18h],r8d; mov [rsp+10h],edx; mov [rsp+8],rcx; push rbp; push rbx; push rsi; push rdi; push r12; push r13
-bytes = "44 89 44 24 18 89 54 24 10 48 89 4C 24 08 55 53 56 57 41 54 41 55"
+sha256 = "B6220858F99362C88AEA807433310BDF58EF493AC7B43E24D3352CD081732A08"
+size = 22
 memory = "code"
 signature = "void (uint8_t* colors, uint32_t kind, int32_t mode)"
 note = "UpdateMapColorProvinceBuffer(uchar*, uint, EPdxMapColorUpdateMode): fills BGRA per province ID for a map mode; cmp 0x54 + jump table of 85"
@@ -21,26 +22,30 @@ build."eu4-1.37.5.0-gog-win64" = { rva = 0x12EACA0 }
 [symbol.map_color_count]
 memory = "code"
 values.map_global = { at = 3, rip_relative = 7, type = "uintptr_t" }
-values.provinces = { at = 10, size = 4 }
-values.shift = { at = 31, size = 1 }
-values.magic = { at = 34, size = 8 }
+values.provinces = { at = 10, size = 4, is = 0x6F0 }
+values.shift = { at = 31, size = 1, is = 0x4 }
+values.magic = { at = 34, size = 8, is = "0x8A3F37EC8C54C121" }
 note = "inside map_color: the provinces it paints, ((map+0x6F0).end - begin) >> 4 * inverse of 737 (one CProvince is 0x2E10 bytes)"
 
 [symbol.map_color_count.build."eu4-1.37.5-steam-win64"]
 rva = 0x12F0BCF
-bytes = "48 8B 35 02 F3 04 01 48 81 C6 F0 06 00 00 48 89 B5 68 01 00 00 4C 8B 76 08 4C 2B 36 49 C1 FE 04 48 B8 21 C1 54 8C EC 37 3F 8A"
+sha256 = "49AE1EFB69F24CE34EF62AEBDAE641182F00C2B5849B11C4713A4ADDCE04E434"
+size = 42
 
 [symbol.map_color_count.build."eu4-1.37.5.2-gog-win64"]
 rva = 0x12EAD2F
-bytes = "48 8B 35 22 90 03 01 48 81 C6 F0 06 00 00 48 89 B5 68 01 00 00 4C 8B 76 08 4C 2B 36 49 C1 FE 04 48 B8 21 C1 54 8C EC 37 3F 8A"
+sha256 = "1BC2506856F12D9D21680DD71B1B19DEB7E053F4A9E1EADE18C3B7D47E28EE72"
+size = 42
 
 [symbol.map_color_count.build."eu4-1.37.5.0-gog-win64"]
 rva = 0x12EAD2F
-bytes = "48 8B 35 22 90 03 01 48 81 C6 F0 06 00 00 48 89 B5 68 01 00 00 4C 8B 76 08 4C 2B 36 49 C1 FE 04 48 B8 21 C1 54 8C EC 37 3F 8A"
+sha256 = "1BC2506856F12D9D21680DD71B1B19DEB7E053F4A9E1EADE18C3B7D47E28EE72"
+size = 42
 
 [symbol.map_mode_label]
 # mov [rsp+8],rbx; mov [rsp+10h],rdi; push rbp; mov rbp,rsp; sub rsp,70h; mov rbx,rcx
-bytes = "48 89 5C 24 08 48 89 7C 24 10 55 48 8B EC 48 83 EC 70 48 8B D9"
+sha256 = "7114D30ED1E4D098534379E52F82F342776CA12BD7DC6E40606FC886B09ECEC3"
+size = 21
 memory = "code"
 signature = "void* (void* out, int32_t mode, uint8_t description)"
 note = "GetMapModeNameOrDesc(EPdxMapColorUpdateMode, bool): the button's name or tooltip as a CString through a hidden pointer"
@@ -50,7 +55,8 @@ build."eu4-1.37.5.0-gog-win64" = { rva = 0x8218E0 }
 
 [symbol.map_mode_sprite]
 # mov [rsp+10h],rbx; mov [rsp+8],rcx; push rdi; sub rsp,30h; mov edi,edx; mov rbx,rcx
-bytes = "48 89 5C 24 10 48 89 4C 24 08 57 48 83 EC 30 8B FA 48 8B D9"
+sha256 = "14C617EC097490DFE6129D2B7580B8AB8943AE28BE6584750ACF74A6D71ACAA7"
+size = 20
 memory = "code"
 signature = "void* (void* out, int32_t mode)"
 note = "GetMapModeSpriteName(EPdxMapColorUpdateMode): the button's GFX name as a CString through a hidden pointer"
@@ -60,7 +66,8 @@ build."eu4-1.37.5.0-gog-win64" = { rva = 0x1241690 }
 
 [symbol.add_map_modes]
 # mov [rsp+10h],rbx; mov [rsp+18h],r8d; push rbp; push rsi; push rdi; push r12; push r13; push r14; push r15
-bytes = "48 89 5C 24 10 44 89 44 24 18 55 56 57 41 54 41 55 41 56 41 57"
+sha256 = "9674AAA1701C1A76939DF66B1A38BC0C58546EC7F56BE0E8BF31CB11800FF715"
+size = 21
 memory = "code"
 signature = "void (void* panel, const int32_t* modes, int32_t count, uint8_t flag)"
 note = "CMinimapPanel::AddMapModes: one button per mode of the array; ShowMapModesList calls it for the quick bar and for the tab shown"
@@ -70,7 +77,8 @@ build."eu4-1.37.5.0-gog-win64" = { rva = 0x1245540 }
 
 [symbol.mapmode_tooltip]
 # mov [rsp+8],rbx; mov [rsp+10h],rsi; mov [rsp+18h],rdi; push rbp; push r12; push r13; push r14; push r15
-bytes = "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 41 54 41 55 41 56 41 57"
+sha256 = "6AEDF633012D36897A083F0AD00C3396995EEB43DD1E37F5E63F64183FE4C83D"
+size = 24
 memory = "code"
 signature = "void (void* province, uint8_t flag, const void* other, void* tooltip)"
 note = "CProvince::SetupMapmodeTooltip(const bool, const CProvince*, CToolTip&): the province tooltip's lines for the current map mode; called only from CProvince::GetTooltip"
@@ -84,20 +92,24 @@ note = "CSettings::WriteMembers: call GetMapModeSpriteName for each mode of the 
 
 [symbol.settings_sprite_call.build."eu4-1.37.5-steam-win64"]
 rva = 0xAD4BFE
-bytes = "E8 3D 27 77 00"                                    # call 0x1247340
+sha256 = "51A3DBBA98F9B8A97D856B2836D6CBB44CC62C1BE101946765C3BA1067D09ED1"
+size = 5                                    # call 0x1247340
 
 [symbol.settings_sprite_call.build."eu4-1.37.5.2-gog-win64"]
 rva = 0xAD378E
-bytes = "E8 FD DE 76 00"                                    # call 0x1241690
+sha256 = "3E94DD1F999847A5AE6018A693AC8C6E72EF220B1745DE29325001B452D75C37"
+size = 5                                    # call 0x1241690
 
 [symbol.settings_sprite_call.build."eu4-1.37.5.0-gog-win64"]
 rva = 0xAD378E
-bytes = "E8 FD DE 76 00"
+sha256 = "3E94DD1F999847A5AE6018A693AC8C6E72EF220B1745DE29325001B452D75C37"
+size = 5
 
 # --- the tabs: the game's arrays of map modes in .data, compared by address only ---
 
 [symbol.tab_1]
-bytes = "01 00 00 00 03 00 00 00 4A 00 00 00 0B 00 00 00 13 00 00 00 02 00 00 00 40 00 00 00 0C 00 00 00 1F 00 00 00 20 00 00 00 24 00 00 00 21 00 00 00 45 00 00 00 4F 00 00 00"
+sha256 = "A6A967263F00B1E7A2A5497443141A26AB6C1C221A07CB26FE6E3F2E3FFF5137"
+size = 56
 memory = "write"
 note = "ShowMapModesList, tab bit 1: 14 modes from political (1)"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1FD4E88 }
@@ -105,7 +117,8 @@ build."eu4-1.37.5.2-gog-win64" = { rva = 0x1FB8E88 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1FB8E88 }
 
 [symbol.tab_2]
-bytes = "00 00 00 00 1A 00 00 00 1B 00 00 00 0A 00 00 00 43 00 00 00 23 00 00 00 1E 00 00 00 16 00 00 00 10 00 00 00 19 00 00 00 46 00 00 00 14 00 00 00 15 00 00 00"
+sha256 = "F70B223C0F1551BF4507B561F9687081D68EFFE07BF22550EC5A0BFA970E730D"
+size = 52
 memory = "write"
 note = "ShowMapModesList, tab bit 2: 13 modes from terrain (0)"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1FD50C8 }
@@ -113,7 +126,8 @@ build."eu4-1.37.5.2-gog-win64" = { rva = 0x1FB90C8 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1FB90C8 }
 
 [symbol.tab_3]
-bytes = "04 00 00 00 36 00 00 00 11 00 00 00 37 00 00 00 18 00 00 00 0E 00 00 00 17 00 00 00 0F 00 00 00 1D 00 00 00 38 00 00 00 22 00 00 00 3F 00 00 00 4B 00 00 00 4C 00 00 00 4D 00 00 00 4E 00 00 00"
+sha256 = "8ED78F481068085BA01F48AAE46663565BA4AE75868F3CB69CFC33B148E02A0B"
+size = 64
 memory = "write"
 note = "ShowMapModesList, tab bit 4: 16 modes from trade (4)"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1FD7A50 }
@@ -121,7 +135,8 @@ build."eu4-1.37.5.2-gog-win64" = { rva = 0x1FBBA50 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1FBBA50 }
 
 [symbol.tab_4]
-bytes = "05 00 00 00 06 00 00 00 07 00 00 00 08 00 00 00 09 00 00 00 34 00 00 00 3D 00 00 00 35 00 00 00 12 00 00 00 3E 00 00 00 1C 00 00 00"
+sha256 = "DD6E87E5328617F552EE21AB03E48DD1A76240701028541589A4EC948AAC4E41"
+size = 44
 memory = "write"
 note = "ShowMapModesList, tab bit 8: 11 modes from diplomacy (5)"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1FD79D8 }
@@ -132,7 +147,8 @@ build."eu4-1.37.5.0-gog-win64" = { rva = 0x1FBB9D8 }
 
 [symbol.cstring_from_text]
 # push rbx; sub rsp,20h; xor eax,eax; mov qword [rcx+18h],0Fh; mov [rcx],rax; mov rbx,rcx; mov [rcx],al
-bytes = "40 53 48 83 EC 20 33 C0 48 C7 41 18 0F 00 00 00 48 89 01 48 8B D9 88 01"
+sha256 = "A7E4F8E227490A633070E2A0E32E19A7C001262F7F3DEFF03DAF174A2D7DF6A8"
+size = 24
 memory = "code"
 signature = "void* (void* out, const char* text)"
 note = "CString::CString(const char*): builds the game's string with the game's allocator"
@@ -142,7 +158,8 @@ build."eu4-1.37.5.0-gog-win64" = { rva = 0x16ED320 }
 
 [symbol.text_append]
 # mov [rsp+18h],rbx; push rbp; push rsi; push rdi; push r13; push r14; sub rsp,20h; mov rbp,[rcx+18h]; mov rsi,r8
-bytes = "48 89 5C 24 18 55 56 57 41 55 41 56 48 83 EC 20 48 8B 69 18 49 8B F0"
+sha256 = "00DF72CAD1EE22E0824C51DD90B69AC4D547F85194B1E1E52660EC08B0ADC333"
+size = 23
 memory = "code"
 signature = "void* (void* text, const char* data, uint64_t size)"
 note = "CString append(const char*, size_t); CToolTip::_Instant is the CString at +0"
@@ -152,7 +169,8 @@ build."eu4-1.37.5.0-gog-win64" = { rva = 0x93320 }
 
 [symbol.set_current_map_mode]
 # mov [rsp+8],rbx; mov [rsp+10h],rbp; mov [rsp+18h],rsi; mov [rsp+20h],rdi; push r14
-bytes = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56"
+sha256 = "4C4D058FD9645106DBB6707961A20D5EF0EA50749880DF0C0DB241D44A488E4B"
+size = 22
 memory = "code"
 signature = "void (void* session, int32_t mode, uint8_t a, uint8_t b)"
 note = "CEU3Idler::SetCurrentMapMode(EPdxMapColorUpdateMode, bool, bool): what the minimap's buttons and the console's mapmode call, both with false, false; the same declaration as Tongs'"
@@ -168,57 +186,58 @@ note = "CEU3Idler::SetMapModeDirty: repaints when the session's current map mode
 
 [symbol.set_map_mode_dirty.build."eu4-1.37.5-steam-win64"]
 rva = 0x6EA0B0
-bytes = "40 53 48 83 EC 20 48 8B D9 39 51 2C 75 6D"             # ...; cmp [rcx+2Ch],edx; jne
+sha256 = "7AA72DEC543761280DA0D731B83CD55FA01E232591FFA739E3BDEFD1786E67B5"
+size = 14             # ...; cmp [rcx+2Ch],edx; jne
 
 [symbol.set_map_mode_dirty.build."eu4-1.37.5.2-gog-win64"]
 rva = 0x6E9A90
-bytes = "40 53 48 83 EC 20 48 8B D9 39 51 24 75 6D"             # ...; cmp [rcx+24h],edx; jne
+sha256 = "70AB552CD1BBDB7607CA0C90CFBB1E808B0C8ECEFF7541BA6AFE02935E1A187C"
+size = 14             # ...; cmp [rcx+24h],edx; jne
 
 [symbol.set_map_mode_dirty.build."eu4-1.37.5.0-gog-win64"]
 rva = 0x6E9A90
-bytes = "40 53 48 83 EC 20 48 8B D9 39 51 24 75 6D"
+sha256 = "70AB552CD1BBDB7607CA0C90CFBB1E808B0C8ECEFF7541BA6AFE02935E1A187C"
+size = 14
 
 # --- read, as anvil-game reads them ---
 
 [symbol.session_of_root]
 memory = "code"
 values.root = { at = 3, rip_relative = 7, type = "uintptr_t" }
-values.session = { at = 13, size = 4 }
+values.session = { at = 13, size = 4, is = 0x1E00 }
 note = "pause command: the game root and its session (CInGameIdler in a campaign) at root+0x1E00"
 
 [symbol.session_of_root.build."eu4-1.37.5-steam-win64"]
 rva = 0x848976
-bytes = "48 8B 05 FB 74 AF 01 48 8B D9 48 8B 88 00 1E 00 00 48 8B 01 FF 90 00 01 00 00"
+sha256 = "27729E592BAC885AB42FF6601EF2A1F518BDD653E560C03C0603943EBBFA352A"
+size = 26
 
 [symbol.session_of_root.build."eu4-1.37.5.2-gog-win64"]
 rva = 0x847CD6                                     # CPauseGame::Execute
-bytes = "48 8B 05 1B C0 AD 01 48 8B D9 48 8B 88 00 1E 00 00 48 8B 01 FF 90 00 01 00 00"
+sha256 = "3A0756EB801EBABEA3F68C1856C12C2050309C1E237C3BC5E7225CB744D996F7"
+size = 26
 
 [symbol.session_of_root.build."eu4-1.37.5.0-gog-win64"]
 rva = 0x847CD6
-bytes = "48 8B 05 1B C0 AD 01 48 8B D9 48 8B 88 00 1E 00 00 48 8B 01 FF 90 00 01 00 00"
+sha256 = "3A0756EB801EBABEA3F68C1856C12C2050309C1E237C3BC5E7225CB744D996F7"
+size = 26
 
 [symbol.province_own_id]
 memory = "code"
-values.own_id = { at = 51, size = 1 }
+values.own_id = { at = 51, size = 1, is = 0x20 }
 note = "script value base_tax: the province compares its own ID (CProvince+0x20) with the owner's capital"
 
 [symbol.province_own_id.build."eu4-1.37.5-steam-win64"]
 rva = 0x6DE7A0
-bytes = """
-4C 8B CA 49 8B 88 68 04 00 00 48 8B 05 1F F1 C5 01 48 C1 E9 20 48 0F BF C9
-48 8B 80 18 01 00 00 48 8B 14 C8 48 8B 8A 78 9A 00 00 48 85 C9 74 26
-41 8B 40 20 39 82 B8 14 00 00
-"""
+sha256 = "469CF61CF3DD9E18B399BE51E76C371E76E14A9974DB7BA48D2F26ED6EBACF2B"
+size = 58
 
 [symbol.province_own_id.build."eu4-1.37.5.2-gog-win64"]
 rva = 0x6DE270
-bytes = """
-4C 8B CA 49 8B 88 68 04 00 00 48 8B 05 CF 34 C4 01 48 C1 E9 20 48 0F BF C9
-48 8B 80 18 01 00 00 48 8B 14 C8 48 8B 8A 78 9A 00 00 48 85 C9 74 26
-41 8B 40 20 39 82 B8 14 00 00
-"""
+sha256 = "775F4E4B69AD45355674E1EF478F5DF18371EA18BBB20F4428A7827C0F661BDA"
+size = 58
 
 [symbol.province_own_id.build."eu4-1.37.5.0-gog-win64"]
 rva = 0x6DE270
-bytes = "4C 8B CA 49 8B 88 68 04 00 00 48 8B 05 CF 34 C4 01 48 C1 E9 20 48 0F BF C9 48 8B 80 18 01 00 00 48 8B 14 C8 48 8B 8A 78 9A 00 00 48 85 C9 74 26 41 8B 40 20 39 82 B8 14 00 00"
+sha256 = "775F4E4B69AD45355674E1EF478F5DF18371EA18BBB20F4428A7827C0F661BDA"
+size = 58
