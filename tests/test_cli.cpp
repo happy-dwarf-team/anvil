@@ -11,7 +11,9 @@
 #include "test_image.hpp"
 #include "test_support.hpp"
 
+#include <algorithm>
 #include <cstdio>
+#include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -38,9 +40,12 @@ std::string read(const fs::path& path) {
     return buffer.str();
 }
 
-// The test image with code for the instruction-boundary rule in .text.
+// The test image with code for the instruction-boundary rule in .text, and
+// this file's own code for speed_object and Exported_fn.
 TestImage boundary_image() {
     TestImage image;
+    image.put(0x1000, {0x48, 0x8B, 0x82, 0x18, 0x04, 0x00, 0x00, 0xC3});  // mov rax, [rdx+0x418]; ret
+    image.put(0x1040, {0x53, 0x55, 0x48, 0x83, 0xEC, 0x20});              // push rbx; push rbp; sub rsp, 0x20
     image.put(0x1060, {0xE3, 0x10, 0x48, 0x89, 0xC8, 0xC3});              // jrcxz; mov rax, rcx; ret
     image.put(0x1068, {0x48, 0x89, 0xC8, 0xE2, 0xFB, 0xC3});              // mov rax, rcx; loop; ret
     image.put(0x1070, {0x48, 0x83, 0xEC, 0x28, 0x90, 0xE2, 0xF0, 0xC3});  // sub rsp, 0x28; nop; loop at +5; ret
@@ -74,7 +79,7 @@ points_to = 0x1000
 
 [symbol.exported]
 export = "Exported_fn"
-bytes = "40 53 48 83 EC 20"
+bytes = "53 55 48 83 EC 20"
 signature = "int (int a, const char* b)"
 values.frame = { at = 5, size = 1 }
 
@@ -701,11 +706,11 @@ int main(int argc, char** argv) {
         CHECK(offline.exit_code == kExitOk && offline.lock == "matches");
 
         const auto failing = fx.check(fx.plugin("failing", std::string(kGoodSymbols) +
-                                                                "\n[symbol.wrong]\nrva = 0x1000\nbytes = \"48 8B 82\"\nmemory = \"code\"\n"
+                                                                "\n[symbol.wrong]\nrva = 0x1000\nbytes = \"48 8B 81\"\nmemory = \"code\"\n"
                                                                 "\n[symbol.not_read]\nrva = 0x2000\nmemory = \"write\"\npoints_to = 0x1000\n"),
                                       true);
         CHECK(failing.problems.size() == 2);
-        CHECK(has_problem(failing, 43, "symbol wrong (rva 0x1000): byte +0x2 (rva 0x1002) expected 0x82, found 0x81"));
+        CHECK(has_problem(failing, 43, "symbol wrong (rva 0x1000): byte +0x2 (rva 0x1002) expected 0x81, found 0x82"));
         CHECK(has_problem(failing, 48, "declared write memory, section .rdata is read"));
         CHECK(failing.lock == "written" && contains(read(fx.root / "failing" / kLockFile), "result = \"problems\""));
         CHECK(has_problem(fx.check(fx.root / "failing", false), 8, "the last anvil check --exe (eu4.exe test-build) found problems"));
@@ -719,7 +724,7 @@ int main(int argc, char** argv) {
     run("check --exe with several builds keeps one check per build in symbols.lock", [&] {
         const fs::path second_exe = fx.root / "game" / "second.exe";
         TestImage image = boundary_image();
-        image.put(0x1000, {0x48, 0x8B, 0x81, 0x08, 0x04, 0x00, 0x00, 0xC3});  // the field 0x10 lower
+        image.put(0x1000, {0x48, 0x8B, 0x82, 0xF8, 0x03, 0x00, 0x00, 0xC3});  // the field 0x20 lower
         const auto image_bytes = image.file();
         write(second_exe, std::string(image_bytes.begin(), image_bytes.end()));
         const std::string first_sha = fx.exe_sha256, second_sha = sha256_file(second_exe);
@@ -739,8 +744,8 @@ int main(int argc, char** argv) {
                                  "memory = \"code\"\n"
                                  "signature = \"void* (void* session)\"\n"
                                  "values.speed = { at = 3, size = 4 }\n"
-                                 "build.\"test-build\" = { bytes = \"48 8B 81 18 04 00 00 C3\" }\n"
-                                 "build.\"second-build\" = { bytes = \"48 8B 81 08 04 00 00 C3\" }\n";
+                                 "build.\"test-build\" = { bytes = \"48 8B 82 18 04 00 00 C3\" }\n"
+                                 "build.\"second-build\" = { bytes = \"48 8B 82 F8 03 00 00 C3\" }\n";
         const fs::path dir = fx.plugin("several", text);
 
         const auto first = check(dir, fx.exe);
@@ -776,7 +781,7 @@ int main(int argc, char** argv) {
         CHECK(read(dir / kLockFile) == lock);
 
         // A failing symbol is reported at its build's table; a changed file drops the other build's check.
-        write(dir / "symbols.toml", text.substr(0, text.rfind("08 04")) + "09 04 00 00 C3\" }\n");
+        write(dir / "symbols.toml", text.substr(0, text.rfind("F8 03")) + "F9 03 00 00 C3\" }\n");
         const auto failing = check(dir, second_exe);
         CHECK(has_problem(failing, 9, "in build second-build: symbol speed_object (rva 0x1000): byte +0x3"));
         lock = read(dir / kLockFile);
@@ -809,7 +814,7 @@ int main(int argc, char** argv) {
         // lobby's bytes are in neither exe: only `absent` exempts it, and only on second-build.
         const fs::path dir = fx.plugin("absent", "builds = [\"test-build\", \"second-build\"]\n"
                                                  "[symbol.speed_object]\nrva = 0x1000\nmemory = \"code\"\n"
-                                                 "bytes = \"48 8B 81 18 04 00 00 C3\"\n"
+                                                 "bytes = \"48 8B 82 18 04 00 00 C3\"\n"
                                                  "[symbol.lobby]\nrva = 0x1000\nmemory = \"code\"\nbytes = \"FF FF FF FF FF\"\n"
                                                  "absent = [\"second-build\"]\n");
         const auto second = check(dir, second_exe);
@@ -821,6 +826,72 @@ int main(int argc, char** argv) {
         CHECK(first.exit_code == kExitProblems && first.absent.empty() &&
               has_problem(first, 6, "in build test-build: symbol lobby (rva 0x1000): byte +0x0"));
         CHECK(contains(report_json(first), "\"absent\": []"));
+    });
+
+    run("check --exe --dump-bytes writes the bytes of each symbol that verified, outside the plugin folder", [&] {
+        const uint8_t speed[] = {0x48, 0x8B, 0x82, 0x00, 0x04, 0x00, 0x00, 0xC3};  // +3 is `any`, zero in the digest
+        const std::string text = "build = \"test-build\"\n"
+                                 "[symbol.speed_object]\nrva = 0x1000\nsha256 = \"" + sha256_bytes(speed, sizeof speed) +
+                                 "\"\nsize = 8\nany = [3]\nmemory = \"code\"\n"
+                                 "[symbol.exported]\nexport = \"Exported_fn\"\nbytes = \"53 55 48 83 EC 20\"\n"
+                                 "[symbol.tick_slot]\nrva = 0x2000\nmemory = \"read\"\npoints_to = 0x1000\n"
+                                 "[symbol.wrong]\nrva = 0x1060\nbytes = \"FF FF FF FF FF\"\nmemory = \"code\"\n";
+        const fs::path dir = fx.plugin("dump", text);
+        const auto dump = [&](const fs::path& file, const fs::path& exe) {
+            CheckOptions options;
+            options.plugin_dir = dir;
+            options.exe = exe;
+            options.dump_bytes = file;
+            const std::string sha = fx.exe_sha256;
+            options.build_of = [sha](std::string_view actual) -> const char* { return actual == sha ? "test-build" : nullptr; };
+            return check_plugin(options);
+        };
+        const fs::path file = fx.root / "bytes" / "dump.toml";
+        fs::create_directories(file.parent_path());
+        const auto report = dump(file, fx.exe);
+        print_problems(report);
+        // The failing symbol is reported and left out; the slot has no bytes to write.
+        CHECK(report.exit_code == kExitProblems && report.problems.size() == 1 && report.dumped == 2);
+        const std::string written = read(file);
+        CHECK(contains(written, "# The bytes of eu4.exe at the symbols of dump that verified"));
+        CHECK(contains(written, "Do not commit it, publish it or ship it with a\n# plugin."));
+        CHECK(contains(written, "# eu4.exe SHA-256 " + fx.exe_sha256 + ".\n"));
+        CHECK(contains(written, "build = \"test-build\"\n"));
+        CHECK(contains(written, "[symbol.speed_object]\nrva = 0x1000\nbytes = \"48 8B 82 ?? 04 00 00 C3\"\nmemory = \"code\"\n"));
+        CHECK(contains(written, "[symbol.exported]\n# export Exported_fn\nrva = 0x1040\nbytes = \"53 55 48 83 EC 20\"\nmemory = \"code\"\n"));
+        CHECK(!contains(written, "tick_slot") && !contains(written, "wrong"));
+        CHECK(contains(format_report(report, Format::Text), "; bytes of 2 symbol(s) written to "));
+        CHECK(contains(report_json(report), "\"dump_bytes\": {\"file\": "));
+        // Pasted back as symbols.toml, the dump verifies on the same build.
+        const auto back = fx.check(fx.plugin("dump-back", written), true);
+        print_problems(back);
+        CHECK(back.exit_code == kExitOk && back.symbols == 2);
+
+        // Never inside the plugin folder, however the path is written.
+        std::wstring upper = (dir / "sub" / ".." / "bytes.toml").wstring();
+        for (wchar_t& ch : upper) ch = static_cast<wchar_t>(towupper(ch));
+        for (const fs::path& inside : {dir / "bytes.toml", fs::path(upper)}) {
+            const auto refused = dump(inside, fx.exe);
+            CHECK(refused.exit_code == kExitCannotCheck && contains(refused.cannot_check, "is inside the plugin folder"));
+            CHECK(!fs::exists(dir / "bytes.toml"));
+        }
+        // A file in a Git work tree is written with a warning.
+        const fs::path repo = fx.root / "repo";
+        fs::create_directories(repo / ".git");
+        const auto in_git = dump(repo / "notes" / "dump.toml", fx.exe);
+        CHECK(in_git.dumped == 2 && fs::exists(repo / "notes" / "dump.toml"));
+        CHECK(std::any_of(in_git.warnings.begin(), in_git.warnings.end(),
+                          [](const Problem& w) { return contains(w.message, "lies in the Git work tree"); }));
+        // An exe of a build the file does not declare: nothing is written.
+        const fs::path other_exe = fx.root / "game" / "dump-other.exe";
+        TestImage image = boundary_image();
+        image.put(0x10F4, {0xCC});
+        const auto other_bytes = image.file();
+        write(other_exe, std::string(other_bytes.begin(), other_bytes.end()));
+        const fs::path skipped_file = fx.root / "bytes" / "skipped.toml";
+        const auto skipped = dump(skipped_file, other_exe);
+        CHECK(!fs::exists(skipped_file) && contains(skipped.dump_skipped, "does not declare the build"));
+        CHECK(contains(format_report(skipped, Format::Text), "nothing written to --dump-bytes"));
     });
 
     run("gen with several builds: a value is a constant only when every build has it", [] {
@@ -870,7 +941,7 @@ int main(int argc, char** argv) {
                       "jrcxz at +0x0 (rva 0x1060) lies in the first 5 bytes"));
         CHECK(problem("rva = 0x1068\nbytes = \"48 89 C8 E2 FB C3\"\nmemory = \"code\"\n", "loop at +0x3 (rva 0x106B)"));
         CHECK(problem("rva = 0x1090\nbytes = \"67 E3 10 90 90 90\"\nmemory = \"code\"\n", "jecxz at +0x0"));
-        CHECK(problem("rva = 0x1000\nbytes = \"48 8B 81 18 04 00\"\nmemory = \"code\"\nsignature = \"void ()\"\n",
+        CHECK(problem("rva = 0x1000\nbytes = \"48 8B 82 18 04 00\"\nmemory = \"code\"\nsignature = \"void ()\"\n",
                       "the 7-byte instruction at +0x0 (rva 0x1000) ends past the declared 6 bytes; declare whole "
                       "instructions (7 bytes)"));
         CHECK(problem("rva = 0x1080\nbytes = \"06 06 06 06 06\"\nmemory = \"code\"\n",
@@ -889,7 +960,7 @@ int main(int argc, char** argv) {
         CHECK(problem("rva = 0x1000\nbytes = \"?? ?? ?? ?? ?? ?? ?? C3\"\nmemory = \"code\"\n",
                       "the 7 bytes a hook overwrites are all \"??\"; at least one of them must be a fixed byte"));
         // A block's resume target must be code.
-        const auto resume = fx.check(fx.plugin("resume", symbol("block", "rva = 0x1000\nbytes = \"48 8B 81 18 04 00 00\"\n"
+        const auto resume = fx.check(fx.plugin("resume", symbol("block", "rva = 0x1000\nbytes = \"48 8B 82 18 04 00 00\"\n"
                                                                           "memory = \"code\"\nresume = \"slot\"\n"
                                                                           "[symbol.slot]\nrva = 0x2000\nmemory = \"read\"\n"
                                                                           "points_to = 0x1000\n")),
@@ -928,7 +999,7 @@ int main(int argc, char** argv) {
 
     run("anvil.exe exit codes and arguments", [&] {
         CHECK(run_anvil(anvil, "--version").exit_code == 0);
-        CHECK(contains(run_anvil(anvil, "--help").out, "check <plugin-dir> [--exe <eu4.exe>] [--format text|json|github]"));
+        CHECK(contains(run_anvil(anvil, "--help").out, "check <plugin-dir> [--exe <eu4.exe> [--dump-bytes <file>]] [--format text|json|github]"));
         CHECK(run_anvil(anvil, "").exit_code == 2);
         CHECK(run_anvil(anvil, "frobnicate").exit_code == 2);
 
@@ -946,6 +1017,15 @@ int main(int argc, char** argv) {
         CHECK(run_anvil(anvil, "check " + quoted(good) + " --format xml").exit_code == 2);
         CHECK(run_anvil(anvil, "check " + quoted(good) + " --exe").exit_code == 2);
         CHECK(run_anvil(anvil, "check " + quoted(good) + " --game " + quoted(fx.root)).exit_code == 2);
+        // --dump-bytes goes with --exe, not with --game, and never into the plugin folder.
+        CHECK(run_anvil(anvil, "check " + quoted(good) + " --dump-bytes " + quoted(fx.root / "d.toml")).exit_code == 2);
+        CHECK(run_anvil(anvil, "check --game " + quoted(fx.root) + " --dump-bytes " + quoted(fx.root / "d.toml")).exit_code == 2);
+        CHECK(run_anvil(anvil, "check " + quoted(good) + " --exe " + quoted(fx.exe) + " --dump-bytes").exit_code == 2);
+        const Run inside = run_anvil(anvil, "check " + quoted(good) + " --exe " + quoted(fx.exe) + " --dump-bytes=" + quoted(good / "d.toml") + " --format json");
+        CHECK(inside.exit_code == 2 && contains(inside.out, "is inside the plugin folder") && !fs::exists(good / "d.toml"));
+        const Run dumped = run_anvil(anvil, "check " + quoted(good) + " --exe " + quoted(fx.exe) + " --dump-bytes " + quoted(fx.root / "d.toml"));
+        // anvil.exe does not know the synthetic exe's build, so it says why it writes nothing.
+        CHECK(dumped.exit_code == 1 && contains(dumped.out, "nothing written to --dump-bytes") && !fs::exists(fx.root / "d.toml"));
         CHECK(run_anvil(anvil, "check").exit_code == 2);
 
         const fs::path out = fx.root / "gen-out";

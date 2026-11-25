@@ -42,13 +42,17 @@ void print_usage(std::FILE* out) {
                "      with sym::typed, the function symbols with their types for Host::hook_symbol (anvil-sdk).\n"
                "      --lang given more than once writes each language named.\n"
                "      A file whose content would not change is not rewritten.\n"
-               "  check <plugin-dir> [--exe <eu4.exe>] [--format text|json|github] [--complete-translations]\n"
+               "  check <plugin-dir> [--exe <eu4.exe> [--dump-bytes <file>]] [--format text|json|github]\n"
+               "       [--complete-translations]\n"
                "      check plugin.toml, symbols.toml, settings.toml and translations/<code>.toml against\n"
                "      their schemas. With\n"
                "      --exe, also the game build, every symbol (bytes, memory, pointers, exports, values) and\n"
                "      instruction boundaries, and write symbols.lock; without it, check that\n"
                "      symbols.lock matches symbols.toml. A text without a translation is a warning;\n"
                "      with --complete-translations, an error.\n"
+               "      --dump-bytes writes the bytes of eu4.exe at each symbol that verified to <file>, as\n"
+               "      `bytes` lines for your own copy (porting, writing a symbol); never inside the plugin\n"
+               "      folder. The file holds the game's code: keep it out of Git and out of releases.\n"
                "  check --game <EU4 folder> [--format text|json|github] [--user-dir <folder>]\n"
                "       [--host-version <x.y.z>]\n"
                "      check every plugin in <folder>/anvil/plugins against <folder>/eu4.exe (nothing is\n"
@@ -269,6 +273,10 @@ int run_check(const std::vector<std::wstring>& args) {
             const auto parsed = text ? parse_format(utf8(*text)) : std::nullopt;
             if (!parsed) return usage_error("check: --format must be text, json or github");
             format = *parsed;
+        } else if (is_option(args[i], L"--dump-bytes")) {
+            const auto file = option_value(args, i, L"--dump-bytes");
+            if (!file || file->empty()) return usage_error("check: --dump-bytes needs a file");
+            options.dump_bytes = *file;
         } else if (args[i] == L"--complete-translations") {
             options.complete_translations = true;
         } else if (args[i].starts_with(L"--")) {
@@ -280,8 +288,8 @@ int run_check(const std::vector<std::wstring>& args) {
     if (user_dir && !game) return usage_error("check: --user-dir goes with --game");
     if (host_version && !game) return usage_error("check: --host-version goes with --game");
     if (game) {
-        if (!positional.empty() || !options.exe.empty() || options.complete_translations) {
-            return usage_error("check: --game takes the EU4 folder only (not a <plugin-dir> or --exe)");
+        if (!positional.empty() || !options.exe.empty() || options.complete_translations || !options.dump_bytes.empty()) {
+            return usage_error("check: --game takes the EU4 folder only (not a <plugin-dir>, --exe or --dump-bytes)");
         }
         GameOptions game_options;
         game_options.game_dir = *game;
@@ -295,6 +303,7 @@ int run_check(const std::vector<std::wstring>& args) {
         return report.exit_code;
     }
     if (positional.size() != 1) return usage_error("check needs one <plugin-dir>");
+    if (!options.dump_bytes.empty() && options.exe.empty()) return usage_error("check: --dump-bytes needs --exe");
     options.plugin_dir = positional[0];
 
     const CheckReport report = check_plugin(options);
