@@ -1,6 +1,6 @@
 // anvil-game (plugins/anvil-game) end to end: the plugin DLL loads through the
 // host table against a synthetic image laid out like eu4.exe 1.37.5 (same
-// sections, the declared bytes of plugins/anvil-game/symbols.toml at their
+// sections, the symbols of plugins/anvil-game/symbols.toml laid out at their
 // RVAs), its frame hook runs on a callable stand-in of the frame function, and
 // the gameplay policy listens to its session event as the core does. Also the
 // session tracker and the work queue on their own.
@@ -137,7 +137,7 @@ void* faulting_pick_object(void*, const float*, void*, std::uint8_t, std::uint8_
     return reinterpret_cast<void*>(static_cast<std::intptr_t>(*g_fault_at));
 }
 
-// The stand-in of CExplorationNavalMission::GetSelectableRegions: what it was
+// The stand-in of exploration_regions (0x927C60), the naval mission's region lists: what it was
 // called with, and the lists it appends, allocated as the game's vectors are
 // (malloc, and a large block aligned with its start stored before the data).
 const void* g_explore_country = nullptr;
@@ -409,7 +409,7 @@ struct GameObjects {
     void set_front_end_state(uint32_t state) { std::memcpy(frontend + 0x900, &state, sizeof(state)); }
 };
 
-// The country database's global, from the bytes of province_base_tax on Steam.
+// The country database's global, where province_base_tax points on Steam.
 constexpr uint32_t kCountriesDb = 0x233D8D0;
 
 // A tag as the game stores it: three characters, the country index, the kind, the valid byte.
@@ -421,7 +421,7 @@ uint64_t game_tag(const char* text, uint16_t index, uint8_t kind = 0, uint8_t va
 
 // A small world, laid out as eu4.exe 1.37.5 on Steam does: provinces 1-3 and
 // the countries RUS, TUR and the observer.
-// CModifier::GetValue in FakeEu4: the n-th int32 from +0x20, and a fault for type 2.
+// The stand-in of modifier_value (0x8E6BD0): the n-th int32 from +0x20, and a fault for type 2.
 int32_t* fake_modifier_value(const uint8_t* modifier, int32_t* out, int32_t type) {
     const uint8_t* at = type == 2 ? nullptr : modifier + 0x20 + type * 4;
     *out = *reinterpret_cast<const volatile int32_t*>(at);
@@ -1090,7 +1090,7 @@ void run_in_session_handler(const char*, const void* payload, void*) {
 
 const AnvilGameService* g_service = nullptr;
 
-// CEU3Camera::Pan(camera, pan, frame time, keys), as the camera case calls it.
+// camera_pan (0x109EF10)(camera, pan, frame time, keys), as the camera case calls it.
 struct FakePan {
     static inline void* camera = nullptr;
     static inline float vector[2] = {0, 0};
@@ -1224,7 +1224,7 @@ struct FakeCommands final : anvil_game::CommandBackend {
     bool post_allowed() override { return post_ok; }
     void choose_option(const anvil_game::EventWindow& w, int32_t option) override {
         chosen.push_back(std::to_string(w.object - 0x5000) + " " + std::to_string(option));
-        windows[static_cast<int32_t>(w.object - 0x5000)] = false;  // OptionSelected clears _KeepAlive
+        windows[static_cast<int32_t>(w.object - 0x5000)] = false;  // the option clears the window's keep-alive flag
     }
 
     // The game speed, 1 .. 5, and whether the speed bar's buttons act; readable = false: unreadable.
@@ -1278,7 +1278,7 @@ struct FakeCommands final : anvil_game::CommandBackend {
 struct GameCommandsLog {
     std::vector<std::string> calls;  // "new 68", "drill <unit> 36", "split <unit> 2", "merge <units> (n)", "post <session>", "free 1"
     std::vector<void*> posted;
-    bool allowed = true;  // what the stand-in of CSession::Post answers
+    bool allowed = true;  // what the stand-in of command_post answers
 };
 GameCommandsLog g_game_commands;
 std::string pointer_text(const void* p) {
@@ -1311,7 +1311,7 @@ void* fake_split_command(void* command, const void* unit, int32_t count) {
     g_game_commands.calls.push_back("split " + pointer_text(unit) + " " + std::to_string(count));
     return command;
 }
-// It walks the list as CMergeCommand's constructor does: head, count, a node's unit and next.
+// It walks the list as the merge command's constructor does: head, count, a node's unit and next.
 void* fake_merge_command(void* command, const void* list) {
     std::string text = "merge";
     const auto* bytes = static_cast<const uint8_t*>(list);
@@ -1335,7 +1335,7 @@ bool fake_command_post(void* session, void* command) {
     return true;
 }
 
-// CEventWindow::OptionSelected in FakeEu4: what the button does, as far as the service sees it.
+// The stand-in of option_selected (0x10BC2D0): what the button does, as far as the service sees it.
 void fake_option_selected(void* window, int32_t option) {
     g_game_commands.calls.push_back("option " + pointer_text(window) + " " + std::to_string(option));
     static_cast<uint8_t*>(window)[0x124] = 0;
@@ -2626,7 +2626,7 @@ int main(int argc, char** argv) {
         g_multiplayer = false;
         frame(game.app, 1);
 
-        // With the flag: the in-game idler's _bResignGame after the next frame, the application's flags untouched.
+        // With the flag: the in-game loop's resign flag (+0x12E9) after the next frame, the application's flags untouched.
         CHECK(service->restart(nullptr, kClose) == ANVIL_OK);
         CHECK(game.session[0x12E9] == 0);  // only queued
         frame(game.app, 1);
@@ -2826,7 +2826,7 @@ int main(int argc, char** argv) {
     run("anvil-game: the GUI's keyboard from its text receiver and the shortcut editor", [&] {
         CHECK(ANVIL_GAME_HAS(service, keyboard));
         if (!ANVIL_GAME_HAS(service, keyboard)) return;
-        // CGui's global, from the bytes of gui_text_receiver on Steam.
+        // The interface root's global, where gui_text_receiver points on Steam.
         constexpr uint32_t kGui = 0x23494F0;
         image.commit(kGui & ~0xFFFu, PAGE_READWRITE);
         uint32_t flags = 0xFF;
@@ -2861,7 +2861,7 @@ int main(int argc, char** argv) {
         if (cam == nullptr) return;
         CHECK(contains(log, "anvil-game: service anvil-game.camera v1: arrows' speed scroll * 2.5 * clamp(height / 150, "
                             "1, 10), frame time at most 0.7"));
-        // CEU3Camera::Pan's first bytes jump to a stand-in that records the call.
+        // camera_pan's first bytes jump to a stand-in that records the call.
         using Pan = FakePan;
         uint8_t jump[12] = {0x48, 0xB8};  // mov rax, imm64; jmp rax
         const auto target = reinterpret_cast<uintptr_t>(&Pan::call);
@@ -2872,13 +2872,13 @@ int main(int argc, char** argv) {
         FlushInstructionCache(GetCurrentProcess(), image.base + 0x109EF10, sizeof(jump));
         const auto put_float = [](uint8_t* at, float v) { std::memcpy(at, &v, sizeof(v)); };
         const auto close_to = [](float a, float b) { return std::fabs(a - b) < 1e-4f; };
-        // CSettings::_pInstance, from the bytes of camera_key_speed on Steam; the scroll speed at +0xC8.
+        // The settings object's global, where camera_key_speed points on Steam; the scroll speed at +0xC8.
         constexpr uint32_t kSettings = 0x242BDE8;
         image.commit(kSettings & ~0xFFFu, PAGE_READWRITE);
         alignas(16) static uint8_t settings[0x100] = {};
         put_float(settings + 0xC8, 2.0f);
         image.put_pointer(kSettings, reinterpret_cast<uintptr_t>(settings));
-        // The camera: _CurrentPosition +0x67C (its height +0x680), _CurrentLookAt +0x688, _bLocked +0x758;
+        // The camera: its position +0x67C (its height +0x680), the point it looks at +0x688, the lock flag +0x758;
         // the idler holds it at +0x1200 and the frame time at +0x1658.
         alignas(16) static uint8_t camera[0x760] = {};
         for (int i = 0; i < 3; ++i) {
@@ -4001,7 +4001,7 @@ int main(int argc, char** argv) {
         FakeWorld::set(map, 0x4F0, reinterpret_cast<uintptr_t>(region_list));
         FakeWorld::set(map, 0x4F8, reinterpret_cast<uintptr_t>(region_list + 3));
         image.put_pointer(0x233FED8, reinterpret_cast<uintptr_t>(map));
-        // GetSelectableRegions and the game's operator delete (the call target of
+        // exploration_regions and the game's operator delete (the call target of
         // the dialog's free, Steam 0x17394F0) jump to the stand-ins.
         constexpr uint32_t kExplore = 0x927C60;
         constexpr uint32_t kDelete = 0x17394F0;
@@ -4342,7 +4342,7 @@ int main(int argc, char** argv) {
         game.set_date(k31Dec + 6 * kDay);
         frame(game.app, 1);
         CHECK(campaign.size() == 4);  // the same war the next day
-        // An entry of year 1 does not date a war: the game's GetStartDate skips it.
+        // An entry of year 1 does not date a war: the game's start-date getter of a war skips it.
         FakeWorld::set(entry, 0x10, int32_t{anvil_game::kUnsetDate});
         std::memcpy(great + 0x28, "Great War", 9);
         game.set_date(k31Dec + 7 * kDay);
@@ -4508,7 +4508,7 @@ int main(int argc, char** argv) {
             alignas(8) static uint8_t nodes[2][0x20] = {};
             alignas(8) static uint8_t button0[0x130] = {}, button2[0x130] = {};
             alignas(8) static uint8_t button_nodes[2][0x20] = {};
-            FakeWorld::set(window, 0, image.address(0x1D590F8));  // CEventWindow's vtable on Steam
+            FakeWorld::set(window, 0, image.address(0x1D590F8));  // the event window's vtable on Steam
             FakeWorld::set(window, 0x120, int32_t{7});
             window[0x124] = 1;
             FakeWorld::set_short_string(button0 + 0x38, "6053_0");
@@ -4530,7 +4530,7 @@ int main(int argc, char** argv) {
             e.pending_event_id = 7;
             CHECK(commands->post(caller, &e, &out) == ANVIL_OK && out.posted == 1);
             CHECK((g_game_commands.calls == std::vector<std::string>{"option " + pointer_text(window) + " 0"}));
-            CHECK(commands->post(caller, &e, &out) == ANVIL_OK && out.skipped == 1);  // _KeepAlive is clear now
+            CHECK(commands->post(caller, &e, &out) == ANVIL_OK && out.skipped == 1);  // the keep-alive flag is clear now
             window[0x124] = 1;
             e.option_index = 2;
             CHECK(commands->post(caller, &e, &out) == ANVIL_ERROR_WRONG_PHASE);

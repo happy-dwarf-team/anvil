@@ -99,6 +99,7 @@ inline std::filesystem::path synthetic_plugin(const std::filesystem::path& plugi
     };
     const auto manifest = anvil::load_manifest(plugin_dir);
     if (!manifest.manifest) return fail(manifest.error);
+    if (manifest.manifest->symbols.empty()) return plugin_dir;  // nothing to lay out
     const fs::path symbols_name = manifest.manifest->symbols;
     anvil::SymbolFileResult parsed = anvil::load_symbols(plugin_dir / symbols_name);
     if (!parsed.file) return fail(parsed.error);

@@ -5,6 +5,7 @@
 // that vtable reach a stand-in of the game's writer as the plugin decides.
 // Usage: anvil_log_throttle_tests <folder with one folder per plugin>
 #include "plugin_set_fixture.hpp"
+#include "synthetic_symbols.hpp"
 
 #include "../plugins/anvil-log-throttle/src/errors_model.hpp"
 #include "../plugins/anvil-log-throttle/src/playset.hpp"
@@ -732,7 +733,8 @@ void* fake_destroy(void* sink, unsigned) {
 
 // eu4.exe's size and sections, reserved; pages are committed only where the
 // symbols of anvil-log-throttle lie:
-//   .text  0x1562000, 0x1563000  the writer and destructor (jumps to the stand-ins), the router's path read
+//   .text  0x1562000, 0x1563000  the writer and destructor (jumps to the stand-ins), the router's path
+//                                read (0x15635B9, laid out by tests/synthetic_symbols.hpp)
 //   .rdata 0x1D94000             the file sink's vtable 0x1D94BA8
 struct FakeEu4 {
     static constexpr uint32_t kSize = 0x25E0000;
@@ -747,8 +749,6 @@ struct FakeEu4 {
         write_headers();
         jump(0x1562B90, reinterpret_cast<uintptr_t>(&fake_destroy));
         jump(0x1562BE0, reinterpret_cast<uintptr_t>(&fake_write));
-        put(0x15635B9, {0x48, 0x8B, 0x57, 0x20, 0x48, 0x83, 0xC2, 0x08, 0x48, 0x83, 0x7A, 0x18, 0x10, 0x72, 0x03, 0x48,
-                        0x8B, 0x12});
         put_pointer(0x1D94BA8, address(0x1562B90));
         put_pointer(0x1D94BB0, address(0x1562BE0));
         DWORD old = 0;
@@ -891,7 +891,10 @@ int main(int argc, char** argv) {
         const auto parsed = load_manifest(dir);
         CHECK(parsed.manifest && parsed.manifest->phase == Phase::Early && !parsed.manifest->affects_gameplay);
         if (!parsed.manifest) return;
-        anvil::ResolvedPlugin* resolved = start.add(dir);
+        const fs::path laid_out = synthetic::synthetic_plugin(dir, image.base, FakeEu4::kSize, kBuild);
+        CHECK(!laid_out.empty());
+        if (laid_out.empty()) return;
+        anvil::ResolvedPlugin* resolved = start.add(laid_out);
         CHECK(resolved != nullptr && resolved->symbols.size() == 3);
         if (resolved == nullptr) return;
         resolved->data_dir = data;
