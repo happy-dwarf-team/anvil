@@ -47,6 +47,10 @@ struct CheckOptions {
     // error, not a warning (--complete-translations).
     bool translations = true;
     bool complete_translations = false;
+    // --dump-bytes: with an exe, write the bytes at each symbol that verified
+    // to this file, for the author's own copy (porting, a local `bytes` form).
+    // Refused inside the plugin folder; empty: nothing is written.
+    std::filesystem::path dump_bytes;
 };
 
 // A verified `memory = "code"` symbol with declared bytes: [rva, rva + size).
@@ -81,6 +85,11 @@ struct CheckReport {
     std::string exe_sha256;
     std::string exe_build;     // empty: not a known build
     std::string lock;          // symbols.lock: "written", "unchanged", "matches" or empty
+    // --dump-bytes: the file as the author named it, once written, and how
+    // many symbols' bytes it holds; `dump_skipped` says why nothing was written.
+    std::string dump_file;
+    size_t dumped = 0;
+    std::string dump_skipped;
     std::vector<Problem> problems;
     // What does not fail the check: a text of the plugin without a
     // translation (without --complete-translations).
@@ -95,6 +104,14 @@ struct CheckReport {
 // build, every symbol (verify_symbols) and instruction boundaries, then
 // writes symbols.lock; without one, that symbols.lock matches symbols.toml.
 CheckReport check_plugin(const CheckOptions& options);
+
+// The text --dump-bytes writes: a header that says the file holds eu4.exe's
+// code and stays out of Git, `build`, then one [symbol.<name>] table per
+// symbol of `file` (its build selected) that verified and has bytes, with its
+// rva and `bytes` as read through `reader`, "??" at its `any` offsets.
+// `count` is the number of symbols written.
+std::string dump_bytes_text(const SymbolFile& file, const SymbolVerification& verification, const ImageReader& reader,
+                            const std::string& plugin, const std::string& exe_sha256, size_t& count);
 
 // The report of the core's check of a plugin folder (check_plugin_folder,
 // ADR 0014) with the checks anvil check adds for authors: the names anvil gen

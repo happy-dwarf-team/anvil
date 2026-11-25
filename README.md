@@ -309,6 +309,9 @@ anvil gen --lang rust symbols.toml out            # symbols.gen.rs (Rust plugins
 anvil gen --lang rust-sdk symbols.toml out        # the same with sym::typed (anvil-sdk's hook_symbol)
 anvil check my-plugin --exe "C:\...\eu4.exe"     # verify against the game, write symbols.lock
 anvil check my-plugin --format github             # in CI, without the game: schemas and symbols.lock
+anvil check my-plugin --exe "C:\...\eu4.exe" --dump-bytes ..\my-plugin-bytes.toml
+                                                  # your own copy of the verified symbols' bytes, outside
+                                                  # the plugin folder: it is eu4.exe's code, keep it out of Git
 anvil port symbols.toml --from old\eu4.exe --to new\eu4.exe --build <new id> --out symbols.toml
                                                   # a game update: place the symbols in the new build
                                                   # (--unknown-build for a build this anvil.exe does not know yet)

@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cwctype>
 #include <fstream>
 #include <set>
 #include <sstream>
@@ -333,7 +334,73 @@ std::string module_lines(const CheckReport& report) {
     return out;
 }
 
+std::wstring folded(const std::filesystem::path& path) {
+    std::wstring text = path.lexically_normal().wstring();
+    for (wchar_t& ch : text) ch = static_cast<wchar_t>(towlower(ch));
+    while (text.size() > 3 && (text.back() == L'\\' || text.back() == L'/')) text.pop_back();
+    return text;
+}
+
+// The full path, its folders resolved as far as they exist.
+std::filesystem::path resolved(const std::filesystem::path& path) {
+    std::error_code ec;
+    std::filesystem::path absolute = std::filesystem::absolute(path, ec);
+    if (ec) absolute = path;
+    std::filesystem::path out = std::filesystem::weakly_canonical(absolute, ec);
+    return ec ? absolute.lexically_normal() : out;
+}
+
+// Whether `file` lies in `folder` or below it (Windows paths: case does not count).
+bool lies_in(const std::filesystem::path& file, const std::filesystem::path& folder) {
+    const std::wstring f = folded(resolved(file)), d = folded(resolved(folder));
+    return f.size() > d.size() && f.compare(0, d.size(), d) == 0 && (f[d.size()] == L'\\' || f[d.size()] == L'/');
+}
+
+// The Git work tree `file` would lie in: the nearest folder above it with a
+// `.git` (a folder, or a file in a worktree); empty when there is none.
+std::filesystem::path git_work_tree(const std::filesystem::path& file) {
+    std::error_code ec;
+    for (std::filesystem::path dir = resolved(file).parent_path(); !dir.empty(); dir = dir.parent_path()) {
+        if (std::filesystem::exists(dir / ".git", ec)) return dir;
+        if (dir == dir.parent_path()) break;
+    }
+    return {};
+}
+
 }  // namespace
+
+std::string dump_bytes_text(const SymbolFile& file, const SymbolVerification& verification, const ImageReader& reader,
+                            const std::string& plugin, const std::string& exe_sha256, size_t& count) {
+    count = 0;
+    std::set<uint32_t> failed(verification.failed.begin(), verification.failed.end());
+    std::string body;
+    for (const Symbol& s : file.symbols) {
+        if (s.absent || s.bytes.empty() || failed.contains(s.id) || s.id >= verification.symbols.size()) continue;
+        const uint32_t rva = verification.symbols[s.id].rva;
+        std::vector<uint8_t> bytes(s.bytes.size());
+        if (!reader.read(rva, bytes.data(), bytes.size())) continue;
+        std::string pattern;
+        char pair[4];
+        for (size_t i = 0; i < bytes.size(); ++i) {
+            std::snprintf(pair, sizeof(pair), "%02X", bytes[i]);
+            pattern += (i == 0 ? "" : " ") + std::string(i < s.mask.size() && s.mask[i] == 0 ? "??" : pair);
+        }
+        body += "\n[symbol." + s.name + "]\n";
+        if (!s.export_name.empty()) body += "# export " + s.export_name + "\n";
+        body += "rva = " + hex(rva) + "\nbytes = \"" + pattern + "\"\n";
+        if (const auto memory = verification.symbols[s.id].memory) {
+            body += std::string("memory = \"") + memory_kind_name(*memory) + "\"\n";
+        }
+        ++count;
+    }
+    return "# The bytes of eu4.exe at the symbols of " + plugin + " that verified, written by " + tool_name() +
+           " check --dump-bytes.\n"
+           "# eu4.exe SHA-256 " + exe_sha256 + ".\n"
+           "# They are the game's own code: keep this file for yourself. Do not commit it, publish it or ship it with a\n"
+           "# plugin. A `bytes` line may go into symbols.toml while you work; run tools/symbols-to-digest.py before you\n"
+           "# commit, so the file states sha256 and size instead.\n"
+           "build = " + json_string(file.build) + "\n" + body;
+}
 
 std::string tool_name() { return "anvil " ANVIL_VERSION; }
 
@@ -600,6 +667,12 @@ CheckReport check_plugin(const CheckOptions& options) {
     if (report.with_exe && !std::filesystem::is_regular_file(options.exe, ec)) {
         return cannot("--exe: " + report.exe_name + " is not a file");
     }
+    // The bytes are the game's code: never where the plugin's files are kept and shipped.
+    if (!options.dump_bytes.empty() && lies_in(options.dump_bytes, options.plugin_dir)) {
+        return cannot("--dump-bytes: " + shown(options.dump_bytes) +
+                      " is inside the plugin folder, whose files go into Git and the plugin's zip; the file holds bytes "
+                      "of eu4.exe, so write it outside the folder");
+    }
     // The exe is read only for a plugin with symbols.toml, which is what it checks.
     std::optional<FileImageReader> reader;
     GameImage game;
@@ -623,6 +696,27 @@ CheckReport check_plugin(const CheckOptions& options) {
     CheckReport out = check_report(check, options, reads_exe ? &game : nullptr);
     out.with_exe = report.with_exe;
     out.exe_name = report.exe_name;
+    if (options.dump_bytes.empty() || out.exit_code == kExitCannotCheck) return out;
+    if (!reads_exe || !check.symbols) {
+        out.dump_skipped = "the plugin has no symbols.toml that parses";
+    } else if (!check.build_declared) {
+        out.dump_skipped = "symbols.toml does not declare the build of " + out.exe_name;
+    } else {
+        const std::string text =
+            dump_bytes_text(*check.symbols, check.verification, *game.reader, out.plugin, game.exe_sha256, out.dumped);
+        std::string error;
+        if (!write_file_atomic(options.dump_bytes, text, error)) {
+            out.exit_code = kExitCannotCheck;
+            out.cannot_check = "--dump-bytes: cannot write " + shown(options.dump_bytes) + ": " + error;
+            return out;
+        }
+        out.dump_file = shown(options.dump_bytes);
+        if (const std::filesystem::path tree = git_work_tree(options.dump_bytes); !tree.empty()) {
+            out.warnings.push_back({out.dump_file, 0, "lies in the Git work tree " + shown(tree) +
+                                                          ": it holds bytes of eu4.exe, so make sure Git ignores it, "
+                                                          "or keep it outside the work tree"});
+        }
+    }
     return out;
 }
 
@@ -677,6 +771,12 @@ std::string report_json(const CheckReport& report, const std::string& pad, const
                (report.exe_build.empty() ? std::string("null") : json_string(report.exe_build)) + "},\n";
     }
     if (!report.lock.empty()) out += in + "\"lock\": " + json_string(report.lock) + ",\n";
+    if (!report.dump_file.empty()) {
+        out += in + "\"dump_bytes\": {\"file\": " + json_string(report.dump_file) + ", \"symbols\": " +
+               std::to_string(report.dumped) + "},\n";
+    } else if (!report.dump_skipped.empty()) {
+        out += in + "\"dump_bytes\": {\"file\": null, \"skipped\": " + json_string(report.dump_skipped) + "},\n";
+    }
     out += in + "\"problems\": [";
     for (size_t i = 0; i < report.problems.size(); ++i) {
         const Problem& p = report.problems[i];
@@ -728,6 +828,12 @@ std::string report_summary(const CheckReport& report) {
             }
         }
         if (!report.lock.empty()) summary += "; " + std::string(kLockFile) + " " + report.lock;
+        if (!report.dump_file.empty()) {
+            summary += "; bytes of " + std::to_string(report.dumped) + " symbol(s) written to " + report.dump_file +
+                       " (keep it out of Git)";
+        } else if (!report.dump_skipped.empty()) {
+            summary += "; nothing written to --dump-bytes: " + report.dump_skipped;
+        }
     }
     if (report.has_settings) summary += "; " + std::to_string(report.settings) + " setting(s)";
     if (report.manifest && !report.manifest->modules.empty()) {

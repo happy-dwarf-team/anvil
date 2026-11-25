@@ -68,15 +68,15 @@ std::vector<uint8_t> build_exe(const Layout& l) {
     TestImage image;
     std::fill(image.mapped.begin() + 0x1000, image.mapped.begin() + 0x1100, uint8_t{0xCC});
     image.put(l.far_fn, kFar);
-    // mov rax, [rcx+speed_offset]; test rax, rax; je +3; mov rax, [rax]; ret
-    image.put(l.speed, {0x48, 0x8B, 0x81, 0, 0, 0, 0, 0x48, 0x85, 0xC0, 0x74, 0x03, 0x48, 0x8B, 0x00, 0xC3});
+    // mov rax, [rdx+speed_offset]; test rax, rax; je +3; mov rax, [rax]; ret
+    image.put(l.speed, {0x48, 0x8B, 0x82, 0, 0, 0, 0, 0x48, 0x85, 0xC0, 0x74, 0x03, 0x48, 0x8B, 0x00, 0xC3});
     image.put_value<uint32_t>(l.speed + 3, l.speed_offset);
-    // push rbx; sub rsp, 0x20; call speed; lea rcx, [rip+data]; add rsp, 0x20; pop rbx; ret
-    image.put(l.caller, {0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0xE8, 0, 0, 0, 0, 0x48, 0x8D, 0x0D, 0, 0, 0, 0, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xC3});
+    // nop; push rbx; sub rsp, 0x28; call speed; lea rcx, [rip+data]; add rsp, 0x28; pop rbx; ret
+    image.put(l.caller, {0x90, 0x53, 0x48, 0x83, 0xEC, 0x28, 0xE8, 0, 0, 0, 0, 0x48, 0x8D, 0x0D, 0, 0, 0, 0, 0x48, 0x83, 0xC4, 0x28, 0x5B, 0xC3});
     image.put_value<int32_t>(l.caller + 7, static_cast<int32_t>(l.speed - (l.caller + 11)));
     image.put_value<int32_t>(l.caller + 14, static_cast<int32_t>(l.data - (l.caller + 18)));
-    // mov rax, [rsi+big_offset]; test rax, rax; je +3; mov rax, [rax]; ret
-    image.put(l.big, {0x48, 0x8B, 0x86, 0, 0, 0, 0, 0x48, 0x85, 0xC0, 0x74, 0x03, 0x48, 0x8B, 0x00, 0xC3});
+    // mov rax, [rdi+big_offset]; test rax, rax; je +3; mov rax, [rax]; ret
+    image.put(l.big, {0x48, 0x8B, 0x87, 0, 0, 0, 0, 0x48, 0x85, 0xC0, 0x74, 0x03, 0x48, 0x8B, 0x00, 0xC3});
     image.put_value<uint32_t>(l.big + 3, l.big_offset);
     // lea r8, [__ImageBase]; mov ecx, [r8+rax*4+switch_table]; ret
     image.put(l.switcher, {0x4C, 0x8D, 0x05, 0, 0, 0, 0, 0x41, 0x8B, 0x8C, 0x80, 0, 0, 0, 0, 0xC3});
@@ -121,18 +121,18 @@ std::string placeable() {
            "\n"
            "[symbol.speed]\n"
            "rva = 0x1020\n"
-           "bytes = \"48 8B 81 18 04 00 00 48 85 C0\"\n"
+           "bytes = \"48 8B 82 18 04 00 00 48 85 C0\"\n"
            "memory = \"code\"\n"
            "values.offset = { at = 3, size = 4 }\n"
            "\n"
            "[symbol.caller]\n"
            "rva = 0x1040\n"
-           "bytes = \"40 53 48 83 EC 20 E8 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ??\"\n"
+           "bytes = \"90 53 48 83 EC 28 E8 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ??\"\n"
            "memory = \"code\"\n"
            "\n"
            "[symbol.caller_tail]\n"
            "rva = 0x1052\n"
-           "bytes = \"48 83 C4 20 5B C3\"\n"
+           "bytes = \"48 83 C4 28 5B C3\"\n"
            "memory = \"code\"\n"
            "\n"
            "[symbol.global]\n"
@@ -234,7 +234,7 @@ void port_tests() {
         CHECK(contains(text, "# the header comment"));
         CHECK(contains(text, "# stays"));  // a key that moved leaves its comment
         CHECK(contains(text, "build.\"new\" = { rva = 0x1010 }"));
-        CHECK(contains(text, "bytes = \"48 8B 81 08 04 00 00 48 85 C0\""));
+        CHECK(contains(text, "bytes = \"48 8B 82 08 04 00 00 48 85 C0\""));
     });
 
     run("port keeps digests as digests and adds to a file with builds", [&] {
@@ -258,17 +258,49 @@ void port_tests() {
         CHECK(fx.verifies(third, "third", fx.old_exe));
         // Symbols written as digests have no game bytes in the output.
         const std::string digest_file = "build = \"old\"\n[symbol.speed]\nrva = 0x1020\nsha256 = \"" +
-                                        digest_of({0x48, 0x8B, 0x81, 0x18, 0x04, 0x00, 0x00, 0x48, 0x85, 0xC0}) +
+                                        digest_of({0x48, 0x8B, 0x82, 0x18, 0x04, 0x00, 0x00, 0x48, 0x85, 0xC0}) +
                                         "\"\nsize = 10\nmemory = \"code\"\nvalues.offset = { at = 3, size = 4 }\n";
         CHECK(fx.port(digest_file).exit_code == kExitOk);
         const std::string written = read(fx.out);
         CHECK(fx.verifies(written, "new", fx.new_exe));
         CHECK(!contains(written, "bytes"));
-        CHECK(contains(written, digest_of({0x48, 0x8B, 0x81, 0x08, 0x04, 0x00, 0x00, 0x48, 0x85, 0xC0})));
+        CHECK(contains(written, digest_of({0x48, 0x8B, 0x82, 0x08, 0x04, 0x00, 0x00, 0x48, 0x85, 0xC0})));
+    });
+
+    run("port reads digest-only builds from the old eu4.exe and writes the new build as digests", [&] {
+        // No `bytes` anywhere: port reads them from --from at each rva, checks them against the digest,
+        // and the new build's tables state sha256, size and any.
+        const std::string far_digest = digest_of(kFar);
+        const std::string speed_digest = digest_of({0x48, 0x8B, 0x82, 0x00, 0x00, 0x00, 0x00, 0x48, 0x85, 0xC0});
+        const std::string text = "builds = [\"old\", \"other\"]\n\n"
+                                 "[symbol.far_fn]\nmemory = \"code\"\nsignature = \"void (int)\"\n"
+                                 "build.\"old\" = { rva = 0x1000, sha256 = \"" + far_digest + "\", size = 20 }\n"
+                                 "build.\"other\" = { rva = 0x1004, sha256 = \"" + far_digest + "\", size = 20 }\n\n"
+                                 "[symbol.speed]\nmemory = \"code\"\n"
+                                 "build.\"old\" = { rva = 0x1020, sha256 = \"" + speed_digest + "\", size = 10, any = [3, 4, 5, 6] }\n"
+                                 "build.\"other\" = { rva = 0x1024, sha256 = \"" + speed_digest + "\", size = 10, any = [3, 4, 5, 6] }\n";
+        const PortReport report = fx.port(text);
+        if (!report.cannot_port.empty()) std::printf("  cannot port: %s\n", report.cannot_port.c_str());
+        for (const auto& m : report.manual) std::printf("  manual %s: %s\n", m.name.c_str(), m.reason.c_str());
+        CHECK(report.exit_code == kExitOk && report.ported.size() == 2);
+        CHECK(ported(report, "far_fn") != nullptr && ported(report, "far_fn")->rva == kNew.far_fn);
+        CHECK(ported(report, "speed") != nullptr && ported(report, "speed")->rva == kNew.speed);
+        const std::string out = read(fx.out);
+        CHECK(!contains(out, "bytes"));
+        CHECK(contains(out, "build.\"new\" = { rva = 0x1010, sha256 = \"" + far_digest + "\", size = 20 }"));
+        CHECK(contains(out, "build.\"new\" = { rva = 0x1030, sha256 = \"" + speed_digest + "\", size = 10, any = [3, 4, 5, 6] }"));
+        CHECK(fx.verifies(out, "old", fx.old_exe));
+        CHECK(fx.verifies(out, "new", fx.new_exe));
+        // A digest the old eu4.exe does not match leaves the symbol by hand, as wrong bytes would.
+        std::string wrong = text;
+        wrong.replace(wrong.find(far_digest), far_digest.size(), digest_of(kTwin));
+        const PortReport mismatch = fx.port(wrong);
+        const ManualSymbol* far_fn = manual(mismatch, "far_fn");
+        CHECK(mismatch.exit_code == kExitProblems && far_fn != nullptr && contains(far_fn->reason, "does not verify on old"));
     });
 
     run("port drops the is of a digest whose value moved, as a bytes file would allow it", [&] {
-        const std::string digest = digest_of({0x48, 0x8B, 0x81, 0x18, 0x04, 0x00, 0x00, 0x48, 0x85, 0xC0});
+        const std::string digest = digest_of({0x48, 0x8B, 0x82, 0x18, 0x04, 0x00, 0x00, 0x48, 0x85, 0xC0});
         const std::string head = "build = \"old\"\n[symbol.speed]\nrva = 0x1020\nsha256 = \"" + digest + "\"\nsize = 10\nmemory = \"code\"\n";
         const auto port = [&](const std::string& values) {
             const PortReport report = fx.port(head + values);
@@ -294,8 +326,8 @@ void port_tests() {
         const std::string text = "builds = [\"old\", \"other\"]\n\n[symbol.far_fn]\nbytes = \"" + hex_bytes(kFar) +
                                  "\"\nmemory = \"code\"\nbuild.\"old\" = { rva = 0x1000 }\nbuild.\"other\" = { rva = 0x1004 }\n\n"
                                  "[symbol.speed]\nmemory = \"code\"\nvalues.offset = { at = 3, size = 4 }\n\n[symbol.speed.build.\"old\"]\nrva = 0x1020\n"
-                                 "bytes = \"48 8B 81 18 04 00 00\"\n\n[symbol.speed.build.\"other\"]\nrva = 0x1024\n"
-                                 "bytes = \"48 8B 81 18 04 00 00\"\n";
+                                 "bytes = \"48 8B 82 18 04 00 00\"\n\n[symbol.speed.build.\"other\"]\nrva = 0x1024\n"
+                                 "bytes = \"48 8B 82 18 04 00 00\"\n";
         const PortReport report = fx.port(text);
         CHECK(report.exit_code == kExitOk);
         const std::string out = read(fx.out);
@@ -309,8 +341,8 @@ void port_tests() {
         const std::string extra =
             "\n[symbol.twin]\nrva = 0x1060\nbytes = \"" + hex_bytes(kTwin) + "\"\nmemory = \"code\"\n" +
             "\n[symbol.gone]\nrva = 0x1080\nbytes = \"" + hex_bytes(kGone) + "\"\nmemory = \"code\"\n"
-            "\n[symbol.block]\nrva = 0x1020\nbytes = \"48 8B 81 18 04 00 00\"\nmemory = \"code\"\n"
-            "\n[symbol.fixed]\nrva = 0x1020\nbytes = \"48 8B 81 18 04 00 00\"\nmemory = \"code\"\nvalues.offset = { at = 3, size = 4, is = 0x418 }\n";
+            "\n[symbol.block]\nrva = 0x1020\nbytes = \"48 8B 82 18 04 00 00\"\nmemory = \"code\"\n"
+            "\n[symbol.fixed]\nrva = 0x1020\nbytes = \"48 8B 82 18 04 00 00\"\nmemory = \"code\"\nvalues.offset = { at = 3, size = 4, is = 0x418 }\n";
         const PortReport report = fx.port(placeable() + extra);
         CHECK(report.exit_code == kExitProblems);
         CHECK(report.ported.size() == 6);
@@ -339,7 +371,7 @@ void port_tests() {
     });
 
     run("port treats a large displacement as an operand unless it goes through __ImageBase", [&] {
-        const std::string text = "build = \"old\"\n[symbol.big]\nrva = 0x10A0\nbytes = \"48 8B 86 10 26 03 00\"\nmemory = \"code\"\n"
+        const std::string text = "build = \"old\"\n[symbol.big]\nrva = 0x10A0\nbytes = \"48 8B 87 10 26 03 00\"\nmemory = \"code\"\n"
                                  "[symbol.switcher]\nrva = 0x10C0\nbytes = \"4C 8D 05 ?? ?? ?? ?? 41 8B 8C 80 ?? ?? ?? ??\"\nmemory = \"code\"\n"
                                  "signature = \"void ()\"\n";
         const PortReport report = fx.port(text);
