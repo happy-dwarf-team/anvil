@@ -91,7 +91,7 @@ struct World {
     std::uint8_t* aspect_child = object(120);  // an AND block inside the aspect's trigger
     std::uint8_t* aspect_children = object(8);
     std::uint8_t* aspect_list = object(8);
-    std::uint8_t* aspect_db = object(96);   // CChurchAspectDatabase
+    std::uint8_t* aspect_db = object(96);   // the church aspects' database
     std::uint8_t* scripted_template = object(136);
 
     World(std::uintptr_t event_vtable, std::uintptr_t decision_vtable, std::uintptr_t aspect_vtable = 0,

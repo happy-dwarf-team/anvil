@@ -677,7 +677,7 @@ struct FakeWorld {
     alignas(8) uint8_t timed[3][0x50] = {};
     alignas(8) uint8_t timed_nodes[3][0x20] = {};
     uintptr_t moskva_timed[1] = {};
-    // Province triggered modifiers (1.25.0): Moskva has two, in a CPdxArray.
+    // Province triggered modifiers (1.25.0): Moskva has two, in one of the game's arrays.
     std::string triggered_texts[2] = {"pr_mughal_tomb", "center_of_trade_modifier"};
     alignas(8) uint8_t triggered_modifiers[2][0x2E0] = {};
     uintptr_t moskva_triggered[2] = {};

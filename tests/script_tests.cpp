@@ -1,10 +1,10 @@
 // anvil-script (plugins/anvil-script): the key table on its own, and the
 // plugin end to end. The DLL loads through the host table against a synthetic
-// image with the declared bytes of symbols.toml at their Steam RVAs: the start
-// of CEffect::ReadMember, the constructor and destructor, CArray::Append, the
-// scope getters and CString's constructor run their declared bytes, undo them
-// and jump to stand-ins; CEffect's vtable lies in .rdata. A stand-in of
-// anvil.control answers who a plugin is.
+// image with the symbols of symbols.toml laid out at their Steam RVAs
+// (tests/synthetic_symbols.hpp): effect_read_member, the effect's constructor
+// and destructor, array_append, cstring_from_text, daily_tick, has_dlc_assign
+// and set_session jump to stand-ins after their declared bytes; the effect's
+// vtable lies in .rdata. A stand-in of anvil.control answers who a plugin is.
 // Usage: anvil_script_tests <folder with one folder per plugin>
 #include "plugin_set_fixture.hpp"
 #include "synthetic_symbols.hpp"
@@ -238,12 +238,12 @@ struct GameString {
 };
 static_assert(sizeof(GameString) == 32);
 
-// CToken: the lexer's id, then the text.
+// A token of the script reader: the lexer's id, then the text.
 struct Token {
     int id = 0;
     char text[0x204] = {};
 };
-// CReader as far as the plugin reads it: _Toklhs at +0x30, _Tokrhs at +0x440.
+// The script reader as far as the plugin reads it: the key's token at +0x30, the value's at +0x440.
 struct Reader {
     std::uint8_t head[0x30] = {};
     Token lhs;
@@ -252,7 +252,7 @@ struct Reader {
 };
 static_assert(offsetof(Reader, lhs) == 0x30 && offsetof(Reader, rhs) == 0x440);
 
-// CEffect: vtable, the children vector at +0x10, the token at +0x28.
+// An effect: vtable, the children vector at +0x10, the token at +0x28.
 struct FakeEffect {
     const void* vtable = nullptr;
     std::uint8_t type[8] = {};
@@ -264,8 +264,8 @@ struct FakeEffect {
 };
 static_assert(sizeof(FakeEffect) == 0x38 && offsetof(FakeEffect, begin) == 0x10 && offsetof(FakeEffect, token) == 0x28);
 
-// CEventScope as the plugin reads it: the province at +0x28, the country's
-// tag at +0x2C and an override tag at +0x44 (CCountryTag, valid at +7).
+// A script scope as the plugin reads it: the province at +0x28, the country's
+// tag at +0x2C and an override tag at +0x44 (a tag, valid at +7).
 struct FakeScope {
     std::uint8_t head[0x28] = {};
     int province = 0;
@@ -287,9 +287,9 @@ static_assert(offsetof(FakeScope, province) == 0x28 && offsetof(FakeScope, tag) 
               offsetof(FakeScope, override_tag) == 0x44);
 
 // What the stand-ins of the game got.
-std::vector<std::string> g_read_keys;       // ReadMember reached the game
+std::vector<std::string> g_read_keys;       // effect_read_member reached the game
 int g_ctors = 0, g_dtors = 0, g_grows = 0, g_base_descs = 0;
-std::vector<std::string> g_strings;         // CString::CString(const char*)
+std::vector<std::string> g_strings;         // cstring_from_text
 std::uintptr_t g_vtable_address = 0;
 
 void fake_read_member(void*, void* reader, int) {
@@ -350,7 +350,7 @@ void fake_daily_tick(void* game_state) {
     if (g_inside_day) g_inside_day();
 }
 
-// CHasDLCTrigger: vtable, CTrigger's fields, the DLC bits at +0x68, padding.
+// A has_dlc trigger: vtable, the trigger base's fields, the DLC bits at +0x68, padding.
 struct FakeDlcTrigger {
     const void* vtable = nullptr;
     std::uint8_t trigger[0x60] = {};
@@ -530,7 +530,7 @@ struct Parent {
 
 using ReadMemberFn = void(void* effect, void* reader, int token);
 using ExecuteFn = void(void* effect, void* scope, int value);
-using GetDescFn = void*(void* effect, void* out, void* scope, void* prefix, int indent, bool flag);
+using DescribeFn = void*(void* effect, void* out, void* scope, void* prefix, int indent, bool flag);
 using DeletingDtorFn = void*(void* effect, unsigned flags);
 
 struct Recorded {
@@ -588,7 +588,7 @@ int main(int argc, char** argv) {
     CHECK(bus.register_service("anvil", ANVIL_CONTROL_SERVICE, ANVIL_CONTROL_VERSION, &control) == ANVIL_OK);
     AnvilPlugin* plugin = nullptr;
 
-    run("script plugin: symbols verify, it hooks ReadMember and HandleDailyTick and registers its services", [&] {
+    run("script plugin: symbols verify, it hooks effect_read_member and daily_tick and registers its services", [&] {
         const auto dir = plugins_dir / "anvil-script";
         const auto parsed = load_manifest(dir);
         CHECK(parsed.manifest && parsed.manifest->phase == Phase::Early && !parsed.manifest->affects_gameplay);
@@ -734,24 +734,24 @@ int main(int argc, char** argv) {
         g_plugins[chisel].suspended = false;
     });
 
-    run("script plugin: GetDesc frees the prefix through the base and builds the game's string", [&] {
+    run("script plugin: the description slot frees the prefix through the base and builds the game's string", [&] {
         FakeScope scope{295, "RUS"};
         GameString prefix{};
         GameString out{};
         g_strings.clear();
         g_base_descs = 0;
-        reinterpret_cast<GetDescFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
+        reinterpret_cast<DescribeFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
         CHECK(g_base_descs == 1 && prefix.size == 0xDEAD && out.text() == "Mountains ahead\n" &&
               (g_strings == std::vector<std::string>{"Mountains ahead\n"}));
         // Without Mei's UTF-8: Windows-1252, literal as in anvil-map ('$' stays, the
         // colour sign becomes '?'), cut at a bad byte, one line; a line break ends it.
         g_line = "Teren: g\xC3\xB3ry \xC2\xA7Y$x$ \xE4\xB8\x80";
         g_strings.clear();
-        reinterpret_cast<GetDescFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
+        reinterpret_cast<DescribeFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
         CHECK((g_strings == std::vector<std::string>{"Teren: g\xF3ry ?Y$x$ ?\n"}));
         g_line = "two\nlines\r and a bad byte \xFF here";
         g_strings.clear();
-        reinterpret_cast<GetDescFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
+        reinterpret_cast<DescribeFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
         CHECK((g_strings == std::vector<std::string>{"twolines and a bad byte \n"}));
         g_line = "Mountains ahead";
     });
@@ -765,7 +765,7 @@ int main(int argc, char** argv) {
         GameString prefix{}, out{};
         g_strings.clear();
         g_base_descs = 0;
-        reinterpret_cast<GetDescFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
+        reinterpret_cast<DescribeFn*>(slots[13])(effect, &out, &scope, &prefix, 0, false);
         g_throw = false;
         CHECK(g_executed.size() == 2 && g_base_descs == 1 && g_strings.empty() && out.size == 0);
         const auto lines = std::count_if(log.begin(), log.end(), [](const std::string& l) {
@@ -790,7 +790,7 @@ int main(int argc, char** argv) {
         GameString prefix{}, out{};
         g_strings.clear();
         auto* const* s = static_cast<void* const*>(p.child(0)->vtable);
-        reinterpret_cast<GetDescFn*>(s[13])(p.child(0), &out, &scope, &prefix, 0, false);
+        reinterpret_cast<DescribeFn*>(s[13])(p.child(0), &out, &scope, &prefix, 0, false);
         CHECK(g_strings.empty() && out.size == 0);
     });
 
@@ -913,7 +913,7 @@ int main(int argc, char** argv) {
         CHECK((g_dlc_names == std::vector<std::string>{"Art of War", "anvil:Chisel"}));
         CHECK(aow.vtable == reinterpret_cast<const void*>(g_dlc_vtable_address) &&
               chisel.vtable != aow.vtable && chisel.bits == 0 && chisel.padding == 0 && stats.padding == 1);
-        // The plugin's copy keeps the game's slots but Evaluate.
+        // The plugin's copy keeps the game's slots but the evaluate slot (6).
         const auto* ours = static_cast<void* const*>(chisel.vtable);
         const auto* game = reinterpret_cast<void* const*>(g_dlc_vtable_address);
         CHECK(ours[0] == game[0] && ours[7] == game[7] && ours[9] == game[9] && ours[6] != game[6]);
