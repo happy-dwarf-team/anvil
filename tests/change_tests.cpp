@@ -300,8 +300,8 @@ void change_tests() {
               ChangeStatus::Ok);
         // The declared bytes a hook overwrites (anvil#536): they cover what SafetyHook
         // copies, and one of them is fixed. mov rax, [rcx+0x418] (7 bytes); ret.
-        s.put(0x200, {0x48, 0x8B, 0x81, 0x18, 0x04, 0x00, 0x00, 0xC3});
-        const std::vector<uint8_t> mov = {0x48, 0x8B, 0x81, 0x18, 0x04, 0x00, 0x00, 0xC3};
+        s.put(0x200, {0x4A, 0x8B, 0x81, 0x18, 0x04, 0x00, 0x00, 0xC3});
+        const std::vector<uint8_t> mov = {0x4A, 0x8B, 0x81, 0x18, 0x04, 0x00, 0x00, 0xC3};
         const auto declared = [&](size_t size, const uint8_t* mask) {
             return ChangeTarget{s.at(0x200), true, mov.data(), mask, size};
         };

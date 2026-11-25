@@ -1,44 +1,52 @@
 # The test plugins' symbols in the synthetic image of tests/plugin_tests.cpp,
-# which writes the same bytes at these RVAs.
+# which writes these bytes at these RVAs: each digest is of the bytes
+# the comment spells out, the test plugins' own code.
 build = "eu4-1.37.5-steam-win64"
 
 [symbol.add_one]                   # a function hook
 rva = 0x1000
-bytes = "89 C8 83 C0 01 C3"        # mov eax, ecx; add eax, 1; ret
+sha256 = "CC491523A2C323D3FE82DBA2808DD2A2650E1F0E415D21D03A2ED9607F8956C0"
+size = 6                           # mov eax, ecx; add eax, 1; ret
 memory = "code"
 signature = "int (int x)"
 
 [symbol.adjust]                    # a mid hook: returns rcx + 5
 rva = 0x1100
-bytes = "48 89 C8 48 83 C0 05"     # mov rax, rcx; add rax, 5 (ret follows)
+sha256 = "7AF8C17F87FA89D66AB6F30CD61389A54E84A2A699C8204A80B289F992DD083C"
+size = 7                           # mov rax, rcx; add rax, 5 (ret follows)
 memory = "code"
 
 [symbol.triple]                    # a block replacement, resuming at the ret
 rva = 0x1200
-bytes = "48 89 C8 48 83 C0 05"
+sha256 = "7AF8C17F87FA89D66AB6F30CD61389A54E84A2A699C8204A80B289F992DD083C"
+size = 7
 memory = "code"
 
 [symbol.twice]                     # called through the typed call
 rva = 0x1300
-bytes = "8D 04 09 C3"              # lea eax, [rcx+rcx]; ret
+sha256 = "8595DBEFEB30A5284D1A69CFCF565E62D8E7EFB08851D63804C7B77DC0CD225B"
+size = 4                           # lea eax, [rcx+rcx]; ret
 memory = "code"
 signature = "int (int x)"
 
 [symbol.thrower]                   # a mid hook whose callback throws
 rva = 0x1400
-bytes = "48 89 C8 48 83 C0 05"
+sha256 = "7AF8C17F87FA89D66AB6F30CD61389A54E84A2A699C8204A80B289F992DD083C"
+size = 7
 memory = "code"
 
 [symbol.load_counter]              # a function with a typed rip_relative value
 rva = 0x1500
-bytes = "8B 05 FA DA FF 00 C3"     # mov eax, [rip+0xFFDAFA] (-> 0xFFF000); ret
+sha256 = "F6B1306D171B4E058F4D200C4671A1DDA85A77A5FE123117275C34D48B563E8F"
+size = 7                           # mov eax, [rip+0xFFDAFA] (-> 0xFFF000); ret
 memory = "code"
 signature = "int ()"
-values.counter_ref = { at = 2, rip_relative = 6, type = "int" }
+values.counter_ref = { at = 2, rip_relative = 6, type = "int", is = 0xFFF000 }
 
 [symbol.patch_site]                # byte patches in a group
 rva = 0x1600
-bytes = "B8 01 00 00 00"           # mov eax, 1 (ret follows)
+sha256 = "173C093D57DA014E0A94224D45AFE0C3ACD2D81942E5370FCA1559CBEEECE74C"
+size = 5                           # mov eax, 1 (ret follows)
 memory = "code"
 
 [symbol.tick_slot]                 # a pointer swap; holds add_one

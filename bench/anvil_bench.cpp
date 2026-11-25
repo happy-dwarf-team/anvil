@@ -151,7 +151,7 @@ std::string symbols_file() {
     char line[256];
     for (int i = 0; i < 40; ++i) {
         std::snprintf(line, sizeof(line),
-                      "\n[symbol.function_%02d]\nrva = 0x%X\nbytes = \"48 8B 81 18 04 00 00 ?? 48 85 C0 74 0A\"\n"
+                      "\n[symbol.function_%02d]\nrva = 0x%X\nbytes = \"4C 8B 99 18 04 00 00 ?? 48 85 C0 74 0A\"\n"
                       "memory = \"code\"\nsignature = \"void* (void* self, int index)\"\n",
                       i, 0x400000 + i * 0x340);
         text += line;
