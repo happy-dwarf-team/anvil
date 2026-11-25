@@ -1,6 +1,6 @@
 # Verify symbols by digest instead of publishing game bytes
 
-Status: **accepted** (2026-11-04). `bytes` stays valid for all of API 2; the team's plugins move one by one (Migration).
+Status: **accepted** (2026-11-04). `bytes` stays valid for all of API 2; the team's plugins move one by one (Migration). On 2026-11-25 every plugin and example in this repository moved, `anvil-game` included.
 
 `symbols.toml` states the expected bytes of each symbol in the open, so every public plugin repository, release zip and Workshop item carries short fragments of `eu4.exe`: about 13,400 bytes across the team's plugins. A plugin only needs to know that the bytes at an address are the right ones, which a digest can state without repeating them. This ADR adds a digest form next to `bytes` and keeps everything else about verification.
 
@@ -33,7 +33,7 @@ values.speed = { at = 3, size = 4, is = 0x418 }  # optional is: the value the by
 - **The first differing byte.** A mismatch names both digests and the byte count, not where the bytes differ. A player's mismatch means another build or a changed exe either way. An author compares two exes with their own copies.
 - **The pattern as a search key.** Neither `anvil check` nor the loader searches today; ports use the old exe and a disassembler. A port now needs the old `eu4.exe`, because the repository no longer holds the pattern. The digest can still confirm a candidate address, and by the 1 µs figure a sliding search over `.text` (29 MB) would take about 30 s per symbol.
 - **Reading a pull request.** Bytes next to a comment could be checked by eye. With a digest only `anvil check --exe` can.
-- **Tests that run declared bytes.** `anvil_game_plugin_tests` runs `plugins/anvil-game/symbols.toml`'s bytes on a stand-in image. It needs a synthetic stand-in, and a test `symbols.toml` it generates, before `anvil-game` can move.
+- **Tests that run declared bytes.** `anvil_game_plugin_tests` runs `plugins/anvil-game/symbols.toml`'s bytes on a stand-in image. It needs a synthetic stand-in, and a test `symbols.toml` it generates, before `anvil-game` can move. Done in `tests/synthetic_symbols.hpp`: the plugin tests lay out each symbol with their own code (NOPs, the values, jumps to stand-ins) and load a copy of the plugin whose digests are those of that code.
 
 ## Compatibility
 
