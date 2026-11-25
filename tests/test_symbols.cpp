@@ -550,18 +550,18 @@ signature = "const char* ()"
     });
 
     run("verify: mismatches name the symbol, the rva and the first differing byte", [&] {
-        auto problems = verify(with_symbol("rva = 0x1000\nbytes = \"48 8B 80 18 04 00 00 C4\"\nmemory = \"code\"\n"),
+        auto problems = verify(with_symbol("rva = 0x1000\nbytes = \"4A 8B 80 18 04 00 00 C4\"\nmemory = \"code\"\n"),
                                *file_reader);
         CHECK(problems.size() == 1);
         if (!problems.empty()) {
             CHECK(contains(problems[0], "symbol s (rva 0x1000): byte +0x2 (rva 0x1002) expected 0x80, found 0x81"));
         }
         // ?? accepts any byte
-        CHECK(verify(with_symbol("rva = 0x1000\nbytes = \"48 8B ?? ?? 04\"\nmemory = \"code\"\n"), *file_reader).empty());
+        CHECK(verify(with_symbol("rva = 0x1000\nbytes = \"4A 8B ?? ?? 04\"\nmemory = \"code\"\n"), *file_reader).empty());
     });
 
     run("verify: memory kind against the section flags", [&] {
-        auto problems = verify(with_symbol("rva = 0x1000\nbytes = \"48\"\nmemory = \"read\"\n"), *file_reader);
+        auto problems = verify(with_symbol("rva = 0x1000\nbytes = \"4A\"\nmemory = \"read\"\n"), *file_reader);
         CHECK(problems.size() == 1 && contains(problems[0], "declared read memory, section .text is code"));
         problems = verify(with_symbol("rva = 0x2000\nmemory = \"write\"\npoints_to = 0x1000\n"), *file_reader);
         CHECK(problems.size() == 1 && contains(problems[0], "declared write memory, section .rdata is read"));
@@ -705,7 +705,7 @@ signature = "const char* ()"
         {
             std::ofstream out(file, std::ios::binary);
             out << "builds = [\"build-a\", \"build-b\"]\n[symbol.s]\nmemory = \"code\"\nvalues.reg = { at = 2, size = 1 }\n"
-                   "build.\"build-a\" = { rva = 0x1000, bytes = \"48 8B 81\" }\n"
+                   "build.\"build-a\" = { rva = 0x1000, bytes = \"4A 8B 81\" }\n"
                    "build.\"build-b\" = { rva = 0x1010, bytes = \"48 8B 05\" }\n";
         }
         SymbolFile declared;
@@ -835,7 +835,7 @@ signature = "const char* ()"
         const OwnerId owner = changes.add_owner("p");
         // lobby's bytes are not in the image: it verifies nowhere, so only `absent` keeps the plugin.
         SymbolFile file = symbols("builds = [\"steam\", \"gog\"]\n"
-                                  "[symbol.speed_object]\nrva = 0x1000\nbytes = \"48 8B ?? 18 04 00 00 C3\"\nmemory = \"code\"\n"
+                                  "[symbol.speed_object]\nrva = 0x1000\nbytes = \"4A 8B ?? 18 04 00 00 C3\"\nmemory = \"code\"\n"
                                   "signature = \"void* (void* session)\"\n"
                                   "[symbol.lobby]\nrva = 0x1000\nbytes = \"FF FF FF FF FF\"\nmemory = \"code\"\n"
                                   "signature = \"void (void* lobby)\"\nvalues.op = { at = 0, size = 1 }\nabsent = [\"gog\"]\n");
