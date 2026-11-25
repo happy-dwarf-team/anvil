@@ -350,9 +350,18 @@ std::filesystem::path resolved(const std::filesystem::path& path) {
     return ec ? absolute.lexically_normal() : out;
 }
 
+// A file's full path with its folders resolved but not the file itself: a write
+// replaces a link in the file's place rather than following it.
+std::filesystem::path resolved_file(const std::filesystem::path& path) {
+    std::error_code ec;
+    std::filesystem::path absolute = std::filesystem::absolute(path, ec);
+    if (ec) absolute = path;
+    return resolved(absolute.parent_path()) / absolute.filename();
+}
+
 // Whether `file` lies in `folder` or below it (Windows paths: case does not count).
 bool lies_in(const std::filesystem::path& file, const std::filesystem::path& folder) {
-    const std::wstring f = folded(resolved(file)), d = folded(resolved(folder));
+    const std::wstring f = folded(resolved_file(file)), d = folded(resolved(folder));
     return f.size() > d.size() && f.compare(0, d.size(), d) == 0 && (f[d.size()] == L'\\' || f[d.size()] == L'/');
 }
 
@@ -365,6 +374,19 @@ std::filesystem::path git_work_tree(const std::filesystem::path& file) {
         if (dir == dir.parent_path()) break;
     }
     return {};
+}
+
+// The first words of a file --dump-bytes writes.
+constexpr std::string_view kDumpHeader = "# The bytes of eu4.exe at the symbols of ";
+
+// Whether --dump-bytes may write `file`: it does not exist yet, or an earlier
+// --dump-bytes wrote it.
+bool dump_may_replace(const std::filesystem::path& file) {
+    std::error_code ec;
+    if (!std::filesystem::exists(file, ec) && !ec) return true;
+    std::ifstream in(file, std::ios::binary);
+    std::string head(kDumpHeader.size(), '\0');
+    return in.read(head.data(), static_cast<std::streamsize>(head.size())) && head == kDumpHeader;
 }
 
 }  // namespace
@@ -393,7 +415,7 @@ std::string dump_bytes_text(const SymbolFile& file, const SymbolVerification& ve
         }
         ++count;
     }
-    return "# The bytes of eu4.exe at the symbols of " + plugin + " that verified, written by " + tool_name() +
+    return std::string(kDumpHeader) + plugin + " that verified, written by " + tool_name() +
            " check --dump-bytes.\n"
            "# eu4.exe SHA-256 " + exe_sha256 + ".\n"
            "# They are the game's own code: keep this file for yourself. Do not commit it, publish it or ship it with a\n"
@@ -673,6 +695,12 @@ CheckReport check_plugin(const CheckOptions& options) {
                       " is inside the plugin folder, whose files go into Git and the plugin's zip; the file holds bytes "
                       "of eu4.exe, so write it outside the folder");
     }
+    // Nor over the exe, a symbols.toml or anything else that is not an earlier dump.
+    if (!options.dump_bytes.empty() && !dump_may_replace(options.dump_bytes)) {
+        return cannot("--dump-bytes: " + shown(options.dump_bytes) +
+                      " exists and is not a file that check --dump-bytes wrote, so it is not replaced; name a new "
+                      "file");
+    }
     // The exe is read only for a plugin with symbols.toml, which is what it checks.
     std::optional<FileImageReader> reader;
     GameImage game;
@@ -699,6 +727,8 @@ CheckReport check_plugin(const CheckOptions& options) {
     if (options.dump_bytes.empty() || out.exit_code == kExitCannotCheck) return out;
     if (!reads_exe || !check.symbols) {
         out.dump_skipped = "the plugin has no symbols.toml that parses";
+    } else if (!game.build_id) {
+        out.dump_skipped = "Anvil does not know the build of " + out.exe_name;
     } else if (!check.build_declared) {
         out.dump_skipped = "symbols.toml does not declare the build of " + out.exe_name;
     } else {
@@ -828,12 +858,12 @@ std::string report_summary(const CheckReport& report) {
             }
         }
         if (!report.lock.empty()) summary += "; " + std::string(kLockFile) + " " + report.lock;
-        if (!report.dump_file.empty()) {
-            summary += "; bytes of " + std::to_string(report.dumped) + " symbol(s) written to " + report.dump_file +
-                       " (keep it out of Git)";
-        } else if (!report.dump_skipped.empty()) {
-            summary += "; nothing written to --dump-bytes: " + report.dump_skipped;
-        }
+    }
+    if (!report.dump_file.empty()) {
+        summary += "; bytes of " + std::to_string(report.dumped) + " symbol(s) written to " + report.dump_file +
+                   " (keep it out of Git)";
+    } else if (!report.dump_skipped.empty()) {
+        summary += "; nothing written to --dump-bytes: " + report.dump_skipped;
     }
     if (report.has_settings) summary += "; " + std::to_string(report.settings) + " setting(s)";
     if (report.manifest && !report.manifest->modules.empty()) {
