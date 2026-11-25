@@ -251,9 +251,9 @@ struct WorldLayout {
     void (*game_delete)(void* block, std::size_t size) = nullptr;
 
     // Diplomacy: `diplomacy` 0 when absent on this build. Each kind of relation
-    // is a CPdxArray in the country's CCountryDiplomacy of 16-byte entries: the
-    // other country's index (int32), then the CRelation*.
-    std::uint32_t diplomacy = 0;            // country: its CCountryDiplomacy, embedded
+    // is an array in the country's diplomacy object of 16-byte entries: the
+    // other country's index (int32), then a pointer to the relation.
+    std::uint32_t diplomacy = 0;            // country: its diplomacy object, embedded
     std::uint32_t relations[8] = {};        // diplomacy: by ANVIL_GAME_RELATION_*, the entries
     std::uint32_t relation_counts[8] = {};  // diplomacy: int32
     std::uint32_t relation_first = 0;       // relation: tag
