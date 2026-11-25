@@ -30,9 +30,9 @@ void write(const fs::path& path, const std::string& text) {
     out << text;
 }
 
-// A symbol over the 8 bytes at 0x1000 of the test image (48 8B 81 18 04 00 00 C3).
+// A symbol over the 8 bytes at 0x1000 of the test image (4A 8B 81 18 04 00 00 C3).
 std::string symbols(const std::string& build, const std::string& name = "speed_object", uint32_t rva = 0x1000,
-                    const std::string& bytes = "48 8B 81 18 04 00 00 C3") {
+                    const std::string& bytes = "4A 8B 81 18 04 00 00 C3") {
     char at[16];
     std::snprintf(at, sizeof(at), "0x%X", rva);
     return "build = \"" + build + "\"\n\n[symbol." + name + "]\nrva = " + at + "\nbytes = \"" + bytes +
@@ -389,7 +389,7 @@ int main(int argc, char** argv) {
         // The same address with fewer verified bytes is a chain too: the length is not what a plugin changes.
         const Game shorter;
         shorter.plugin("a-first", "", symbols("test-build"));
-        shorter.plugin("b-shorter", "", symbols("test-build", "shorter", 0x1000, "48 8B 81 18"));
+        shorter.plugin("b-shorter", "", symbols("test-build", "shorter", 0x1000, "4A 8B 81 18"));
         const GameReport chain = shorter.check();
         CHECK(chain.exit_code == kExitOk && loaded(chain) == "a-first,b-shorter" && chain.warnings.empty());
 
@@ -399,7 +399,7 @@ int main(int argc, char** argv) {
         CHECK(skipped.warnings.empty() && skipped_for(skipped, "c-inside", "conflicts with a-first"));
         // Overlaps within one plugin are its own business.
         const Game alone;
-        alone.plugin("e-self", "", "build = \"test-build\"\n\n[symbol.one]\nrva = 0x1000\nbytes = \"48 8B 81 18\"\nmemory = \"code\"\n"
+        alone.plugin("e-self", "", "build = \"test-build\"\n\n[symbol.one]\nrva = 0x1000\nbytes = \"4A 8B 81 18\"\nmemory = \"code\"\n"
                                   "\n[symbol.two]\nrva = 0x1002\nbytes = \"81 18 04 00\"\nmemory = \"code\"\n");
         CHECK(alone.check().warnings.empty() && alone.check().exit_code == kExitOk);
     });

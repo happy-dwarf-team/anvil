@@ -64,7 +64,7 @@ build = "test-build"
 
 [symbol.speed_object]
 rva = 0x1000
-bytes = "48 8B ?? 18 04 00 00 C3"
+bytes = "4A 8B ?? 18 04 00 00 C3"
 memory = "code"
 signature = "void* (void* session)"
 
@@ -85,7 +85,7 @@ points_to = 0x1000
 
 [symbol.exported]
 export = "Exported_fn"
-bytes = "40 53"
+bytes = "41 53"
 memory = "code"
 
 [symbol.root]
@@ -162,7 +162,7 @@ int main() {
         const auto image = PeImage::parse(*file_reader, image_error);
         const SymbolVerification v = verify_symbols(file, *image);
         adopt_verified_bytes(file, v);
-        CHECK(file.symbols[0].bytes[0] == 0x48 && file.symbols[0].bytes[7] == 0xC3);
+        CHECK(file.symbols[0].bytes[0] == 0x4A && file.symbols[0].bytes[7] == 0xC3);
     });
 
     run("symbols: a wrong sha256 skips the symbol and names both digests", [&] {
@@ -209,14 +209,16 @@ build = "eu4-1.37.5-steam-win64"
 
 [symbol.speed_object]                         # a function
 rva = 0x8024D0
-bytes = "48 8B 81 18 04 00 00 C3"             # hex pairs, ?? = any byte
+sha256 = "AE4C23FB37CE181F11EF2E3EAF4BAC498572CD06FA1783BB0BBCFE0FE93A1407"   # of the 8 bytes at rva
+size = 8
 memory = "code"                               # code | read | write
 signature = "void* (void* session)"           # typed symbol in C/C++/Rust
 note = "session vtable slot 0x100: returns the game-speed object"
 
 [symbol.person_name_block]                    # a block for replace_block (Unicode Patch's person_name_hook)
 rva = 0xA4B48C
-bytes = "48 8D 55 B8 48 83 7D D0 10 48 0F 43 55 B8 4C 8B 45 C8 48 8B CB E8 4A 7E 64 FF"
+sha256 = "ED07C7919201D8330C29CAA4A14741D1D517D92747563264246F875F3D31C295"
+size = 26
 memory = "code"
 # resume = "<symbol>"                         # optional; default: the end of the block (0xA4B4A6 here)
 
@@ -227,28 +229,35 @@ points_to = 0x10D2E80
 
 [symbol.root_and_date]                        # values taken from verified bytes
 rva = 0x14321FC
-bytes = "48 8B 05 75 DC F0 00 8B 98 D0 1D 00 00"
+sha256 = "1CB3A5F923B2390CEBF07440FFAC7742C7369FB6B8E4AE06E0DECBC38376D5D8"
+size = 13
 memory = "code"
-values.root        = { at = 3, rip_relative = 7, type = "Root" }   # -> sym::root, Data<Root> at 0x233FE78
-values.date_offset = { at = 9, size = 4 }                          # -> sym::root_and_date.date_offset = 0x1DD0
+values.root        = { at = 3, rip_relative = 7, type = "Root", is = 0x233FE78 }   # -> sym::root, Data<Root> at 0x233FE78
+values.date_offset = { at = 9, size = 4, is = 0x1DD0 }                          # -> sym::root_and_date.date_offset = 0x1DD0
+
+[symbol.local_example]                        # bytes: the local authoring form (an invented pattern, not eu4.exe's)
+rva = 0x123400
+bytes = "B8 2A 00 00 00 ?? C3"                # hex pairs, ?? = any byte; tools/symbols-to-digest.py turns it into sha256, size and any
+memory = "code"
 
 [symbol.physfs_get_write_dir]                 # by export name instead of RVA
 export = "PHYSFS_getWriteDir"
 signature = "const char* ()"
 )toml");
         CHECK(f.build == "eu4-1.37.5-steam-win64");
-        CHECK(f.symbols.size() == 5);
-        if (f.symbols.size() != 5) return;
-        const char* order[] = {"speed_object", "person_name_block", "frontend_tick_slot", "root_and_date",
-                               "physfs_get_write_dir"};
-        for (uint32_t i = 0; i < 5; ++i) {
+        CHECK(f.symbols.size() == 6);
+        if (f.symbols.size() != 6) return;
+        const char* order[] = {"speed_object",  "person_name_block", "frontend_tick_slot",
+                               "root_and_date", "local_example",     "physfs_get_write_dir"};
+        for (uint32_t i = 0; i < 6; ++i) {
             CHECK(f.symbols[i].name == order[i]);
             CHECK(f.symbols[i].id == i);
         }
         CHECK(f.symbols[0].kind == SymbolKind::Function);
         CHECK(f.symbols[0].note == "session vtable slot 0x100: returns the game-speed object");
         CHECK(f.symbols[1].kind == SymbolKind::Site);
-        CHECK(f.symbols[1].bytes.size() == 26);
+        CHECK(f.symbols[0].sha256 == "AE4C23FB37CE181F11EF2E3EAF4BAC498572CD06FA1783BB0BBCFE0FE93A1407");
+        CHECK(f.symbols[1].bytes.size() == 26 && !f.symbols[1].sha256.empty());
         CHECK(f.symbols[2].kind == SymbolKind::Slot);
         CHECK(f.symbols[2].points_to == 0x10D2E80u);
         CHECK(f.symbols[2].memory == MemoryKind::Read);
@@ -256,7 +265,9 @@ signature = "const char* ()"
         CHECK(f.symbols[3].values[0].name == "root" && f.symbols[3].values[0].rip_relative == 7);
         CHECK(f.symbols[3].values[0].type == "Root");
         CHECK(f.symbols[3].values[1].name == "date_offset" && f.symbols[3].values[1].size == 4);
-        CHECK(f.symbols[4].export_name == "PHYSFS_getWriteDir" && !f.symbols[4].rva);
+        CHECK(f.symbols[3].values[0].is == 0x233FE78u && f.symbols[3].values[1].is == 0x1DD0u);
+        CHECK(f.symbols[4].sha256.empty() && f.symbols[4].bytes.size() == 7 && f.symbols[4].mask[5] == 0);
+        CHECK(f.symbols[5].export_name == "PHYSFS_getWriteDir" && !f.symbols[5].rva);
         CHECK(f.find("root_and_date") == &f.symbols[3]);
         CHECK(f.find("nope") == nullptr);
     });
@@ -342,7 +353,7 @@ signature = "const char* ()"
     });
 
     run("symbols: values must lie on fixed bytes", [] {
-        const std::string load = "rva = 0x1010\nmemory = \"code\"\nbytes = \"48 8B 05 ?? ?? ?? ?? 8B 98 D0 1D 00 00\"\n";
+        const std::string load = "rva = 0x1010\nmemory = \"code\"\nbytes = \"48 8B 05 ?? ?? ?? ?? 8B 98 D0 2E 00 00\"\n";
         CHECK(contains(parse_error(with_symbol(load + "values.root = { at = 3, rip_relative = 7 }\n")),
                        "byte +0x3 is \"??\"; values must lie on fixed bytes"));
         CHECK(contains(parse_error(with_symbol(load + "values.part = { at = 5, size = 4 }\n")), "values must lie on fixed bytes"));
@@ -494,7 +505,7 @@ signature = "const char* ()"
         CHECK(file_reader->read(0x3500, bytes, 4));
         CHECK(bytes[0] == 0 && bytes[3] == 0);
         uint8_t code[8] = {};
-        CHECK(file_reader->read(0x1000, code, 8) && code[0] == 0x48 && code[7] == 0xC3);
+        CHECK(file_reader->read(0x1000, code, 8) && code[0] == 0x4A && code[7] == 0xC3);
         CHECK(!file_reader->read(TestImage::kSize - 1, bytes, 2));
         CHECK(file_reader->base() == TestImage::kPreferredBase);
         std::string e;
@@ -571,7 +582,7 @@ signature = "const char* ()"
 
     run("verify: exports", [&] {
         CHECK(verify(with_symbol("export = \"Exported_fn\"\nsignature = \"void ()\"\n"), *file_reader).empty());
-        auto problems = verify(with_symbol("export = \"Exported_fn\"\nbytes = \"40 54\"\n"), *file_reader);
+        auto problems = verify(with_symbol("export = \"Exported_fn\"\nbytes = \"41 54\"\n"), *file_reader);
         CHECK(problems.size() == 1 && contains(problems[0], "symbol s (export Exported_fn, rva 0x1040): byte +0x1"));
         problems = verify(with_symbol("export = \"Exported_fn\"\nmemory = \"read\"\n"), *file_reader);
         CHECK(problems.size() == 1 && contains(problems[0], "declared read memory"));
@@ -614,7 +625,7 @@ signature = "const char* ()"
     run("loader: bytes another plugin changed are compared in their original form", [&] {
         const MappedImage mapped(test_image);
         ChangeRegistry patches(mapped.address(), TestImage::kSize);
-        const uint8_t original[] = {0x48, 0x8B, 0x81, 0x18, 0x04, 0x00, 0x00, 0xC3};
+        const uint8_t original[] = {0x4A, 0x8B, 0x81, 0x18, 0x04, 0x00, 0x00, 0xC3};
         const uint8_t nops[] = {0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90};
         const ChangeTarget at{mapped.address() + 0x1000, true, original, nullptr, sizeof(original)};
         CHECK(patches.patch_bytes(patches.owner("other"), at, nops, sizeof(nops)) == ChangeStatus::Ok);
@@ -627,7 +638,7 @@ signature = "const char* ()"
         CHECK(verify(kGoodSymbols, shipped).empty());
         uint8_t copy[10] = {};
         CHECK(patches.read_original(mapped.address() + 0xFFF, copy, sizeof(copy)));
-        CHECK(copy[1] == 0x48 && copy[8] == 0xC3);
+        CHECK(copy[1] == 0x4A && copy[8] == 0xC3);
         CHECK(!patches.read_original(mapped.address() + TestImage::kSize - 4, copy, 8));
     });
 
@@ -773,7 +784,7 @@ signature = "const char* ()"
         CHECK(mapped.base[0x1010] == 0x90 && patched != 0);
         // A function symbol: mov rax, [rcx+0x418]; ret.
         CHECK(hook_function(changes, owner, syms, 0, detour, &next) == ChangeStatus::Ok);
-        CHECK(next != nullptr && mapped.base[0x1000] != 0x48);
+        CHECK(next != nullptr && mapped.base[0x1000] != 0x4A);
         using Speed = void* (*)(void*);
         struct Session {
             uint8_t pad[0x418];
@@ -781,7 +792,7 @@ signature = "const char* ()"
         } session{{}, &session};
         CHECK(reinterpret_cast<Speed>(next)(&session) == &session);  // the original through the chain
         CHECK(reinterpret_cast<Speed>(mapped.base + 0x1000)(&session) == nullptr);
-        CHECK(changes.rollback(owner) == 2 && mapped.base[0x1000] == 0x48 && mapped.base[0x1010] == 0x48);
+        CHECK(changes.rollback(owner) == 2 && mapped.base[0x1000] == 0x4A && mapped.base[0x1010] == 0x48);
     });
 
     run("loader: a hook needs code even when an export declares no memory", [&] {
@@ -793,7 +804,7 @@ signature = "const char* ()"
                                         "[symbol.data_fn]\nexport = \"Data_export\"\nbytes = \"00 00 00 00 00\"\n"
                                         "signature = \"void ()\"\n"
                                         "[symbol.data_site]\nexport = \"Data_export\"\nbytes = \"00 00 00 00 00\"\n"
-                                        "[symbol.code_fn]\nexport = \"Exported_fn\"\nbytes = \"40 53 48 83 EC\"\n"
+                                        "[symbol.code_fn]\nexport = \"Exported_fn\"\nbytes = \"41 53 48 83 EC\"\n"
                                         "signature = \"void ()\"\n");
         const OriginalImageReader reader(changes, mapped.address());
         std::string error;
@@ -849,7 +860,7 @@ signature = "const char* ()"
         CHECK(mid_hook(changes, owner, syms, 1, [](AnvilCpuContext*, void*) {}, nullptr) == ChangeStatus::NotDeclared);
         const uint8_t nop = 0x90;
         CHECK(patch_bytes(changes, owner, syms, 1, &nop, 1) == ChangeStatus::NotDeclared);
-        CHECK(mapped.base[0x1000] == 0x48);
+        CHECK(mapped.base[0x1000] == 0x4A);
     });
 
     run("loader: mid hooks and block replacements on symbols", [&] {
@@ -869,13 +880,13 @@ resume = "speed_object"
 
 [symbol.speed_object]
 rva = 0x1000
-bytes = "48 8B 81 18 04 00 00 C3"
+bytes = "4A 8B 81 18 04 00 00 C3"
 memory = "code"
 signature = "void* (void* session)"
 
 [symbol.exported]
 export = "Exported_fn"
-bytes = "40 53"
+bytes = "41 53"
 memory = "code"
 signature = "void ()"
 
@@ -933,7 +944,7 @@ memory = "write"
         CHECK(changes.describe(owner) ==
               (std::vector<std::string>{"block replacement rva 0x1010 (13 B)", "mid hook rva 0x1000"}));
         CHECK(target_of(*syms.get(0)).symbol == std::string("block"));  // named in the call counters
-        CHECK(changes.rollback(owner) == 2 && mapped.base[0x1010] == 0x48 && mapped.base[0x1000] == 0x48);
+        CHECK(changes.rollback(owner) == 2 && mapped.base[0x1010] == 0x48 && mapped.base[0x1000] == 0x4A);
     });
 
     std::printf("\n%d checks, %d failed\n", g_checks, g_failures);

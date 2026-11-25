@@ -43,10 +43,11 @@ signature = "int (const char* format, ...)"
 
 [symbol.root_and_date]
 rva = 0x14321FC
-bytes = "48 8B 05 75 DC F0 00 8B 98 D0 1D 00 00"
+sha256 = "1CB3A5F923B2390CEBF07440FFAC7742C7369FB6B8E4AE06E0DECBC38376D5D8"
+size = 13
 memory = "code"
-values.root        = { at = 3, rip_relative = 7, type = "Root" }
-values.date_offset = { at = 9, size = 4 }
+values.root        = { at = 3, rip_relative = 7, type = "Root", is = 0x233FE78 }
+values.date_offset = { at = 9, size = 4, is = 0x1DD0 }
 
 [symbol.tick_slot]
 rva = 0x1D5A8E8
