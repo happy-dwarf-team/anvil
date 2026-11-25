@@ -16,13 +16,13 @@ word "benchmark" alone names Anvil's microbenchmarks (`anvil_bench`, design
 
 | Decision | Where it lives |
 | --- | --- |
-| How a start ends itself and how its time is learned | [anvil#128](https://github.com/happy-dwarf-team/anvil/issues/128) ([research](https://github.com/happy-dwarf-team/anvil/blob/research/benchmark-start-end/docs/research/benchmark-start-end.md)) |
-| Cold starts without administrator rights | [anvil#129](https://github.com/happy-dwarf-team/anvil/issues/129) ([research](https://github.com/happy-dwarf-team/anvil/blob/research/benchmark-cold-start/docs/research/benchmark-cold-start.md)) |
+| How a start ends itself and how its time is learned | [anvil#128](https://github.com/happy-dwarf-team/anvil/issues/128) (research on `research/benchmark-start-end`, now in the team's private archive) |
+| Cold starts without administrator rights | [anvil#129](https://github.com/happy-dwarf-team/anvil/issues/129) (research on `research/benchmark-cold-start`, now in the team's private archive) |
 | What a report contains | [anvil#130](https://github.com/happy-dwarf-team/anvil/issues/130) |
 | How a series runs | [anvil#131](https://github.com/happy-dwarf-team/anvil/issues/131) |
 | Where reports land | [anvil#132](https://github.com/happy-dwarf-team/anvil/issues/132) |
 | What the player sees | [anvil#133](https://github.com/happy-dwarf-team/anvil/issues/133) ([prototype](https://claude.ai/artifact/B6geL77yKGV1VAE3xr6VV1), private) |
-| A clean quit, tried live | [anvil#134](https://github.com/happy-dwarf-team/anvil/issues/134) ([prototype](https://github.com/happy-dwarf-team/anvil/tree/prototype/benchmark-quit/prototypes/bench-quit)) |
+| A clean quit, tried live | [anvil#134](https://github.com/happy-dwarf-team/anvil/issues/134) (prototype on `prototype/benchmark-quit`, now in the team's private archive) |
 | Plugin fields: `anvil.benchmark` v1 | [anvil#135](https://github.com/happy-dwarf-team/anvil/issues/135) |
 | Releases of Anvil and Bellows | [anvil#136](https://github.com/happy-dwarf-team/anvil/issues/136) |
 
