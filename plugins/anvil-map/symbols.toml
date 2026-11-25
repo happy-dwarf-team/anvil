@@ -1,20 +1,19 @@
 # The game code and data anvil-map hooks, calls and reads, for EU4 1.37.5
 # (Steam and GOG 1.37.5.2, win64): plugin map modes (docs/spec/map-modes-v1.md
-# §8, ADR 0007). The functions were named by the eu4.pdb GOG ships next to
-# eu4.exe and matched to Steam by their bytes; GOG 1.37.5.0 has the same
-# addresses and bytes in all of them. Every offset is a value taken from
-# verified bytes.
+# §8, ADR 0007). The functions were found in GOG's eu4.exe and matched to
+# Steam by their bytes; GOG 1.37.5.0 has the same addresses and bytes in all
+# of them. Every offset is a value taken from verified bytes.
 builds = ["eu4-1.37.5-steam-win64", "eu4-1.37.5.2-gog-win64", "eu4-1.37.5.0-gog-win64"]
 
 # --- the hooks ---
 
 [symbol.map_color]
-# mov [rsp+18h],r8d; mov [rsp+10h],edx; mov [rsp+8],rcx; push rbp; push rbx; push rsi; push rdi; push r12; push r13
+# the prologue: three argument saves and six pushes
 sha256 = "B6220858F99362C88AEA807433310BDF58EF493AC7B43E24D3352CD081732A08"
 size = 22
 memory = "code"
 signature = "void (uint8_t* colors, uint32_t kind, int32_t mode)"
-note = "UpdateMapColorProvinceBuffer(uchar*, uint, EPdxMapColorUpdateMode): fills BGRA per province ID for a map mode; cmp 0x54 + jump table of 85"
+note = "the map color update (colors, kind, mode): fills BGRA per province ID for a map mode; a jump table over the 85 modes"
 build."eu4-1.37.5-steam-win64" = { rva = 0x12F0B40 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x12EACA0 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x12EACA0 }
@@ -25,7 +24,7 @@ values.map_global = { at = 3, rip_relative = 7, type = "uintptr_t" }
 values.provinces = { at = 10, size = 4, is = 0x6F0 }
 values.shift = { at = 31, size = 1, is = 0x4 }
 values.magic = { at = 34, size = 8, is = "0x8A3F37EC8C54C121" }
-note = "inside map_color: the provinces it paints, ((map+0x6F0).end - begin) >> 4 * inverse of 737 (one CProvince is 0x2E10 bytes)"
+note = "inside map_color: the provinces it paints, ((map+0x6F0).end - begin) >> 4 * inverse of 737 (one province object is 0x2E10 bytes)"
 
 [symbol.map_color_count.build."eu4-1.37.5-steam-win64"]
 rva = 0x12F0BCF
@@ -43,62 +42,62 @@ sha256 = "1BC2506856F12D9D21680DD71B1B19DEB7E053F4A9E1EADE18C3B7D47E28EE72"
 size = 42
 
 [symbol.map_mode_label]
-# mov [rsp+8],rbx; mov [rsp+10h],rdi; push rbp; mov rbp,rsp; sub rsp,70h; mov rbx,rcx
+# the prologue: two register saves, the frame pointer and 0x70 bytes of locals
 sha256 = "7114D30ED1E4D098534379E52F82F342776CA12BD7DC6E40606FC886B09ECEC3"
 size = 21
 memory = "code"
 signature = "void* (void* out, int32_t mode, uint8_t description)"
-note = "GetMapModeNameOrDesc(EPdxMapColorUpdateMode, bool): the button's name or tooltip as a CString through a hidden pointer"
+note = "the map mode's name or description (out, mode, description): the button's name or tooltip as the game's string through a hidden pointer"
 build."eu4-1.37.5-steam-win64" = { rva = 0x822580 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x8218E0 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x8218E0 }
 
 [symbol.map_mode_sprite]
-# mov [rsp+10h],rbx; mov [rsp+8],rcx; push rdi; sub rsp,30h; mov edi,edx; mov rbx,rcx
+# the prologue: two register saves, one push and 0x30 bytes of locals
 sha256 = "14C617EC097490DFE6129D2B7580B8AB8943AE28BE6584750ACF74A6D71ACAA7"
 size = 20
 memory = "code"
 signature = "void* (void* out, int32_t mode)"
-note = "GetMapModeSpriteName(EPdxMapColorUpdateMode): the button's GFX name as a CString through a hidden pointer"
+note = "the map mode's sprite name (out, mode): the button's GFX name as the game's string through a hidden pointer"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1247340 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x1241690 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1241690 }
 
 [symbol.add_map_modes]
-# mov [rsp+10h],rbx; mov [rsp+18h],r8d; push rbp; push rsi; push rdi; push r12; push r13; push r14; push r15
+# the prologue: two register saves and seven pushes
 sha256 = "9674AAA1701C1A76939DF66B1A38BC0C58546EC7F56BE0E8BF31CB11800FF715"
 size = 21
 memory = "code"
 signature = "void (void* panel, const int32_t* modes, int32_t count, uint8_t flag)"
-note = "CMinimapPanel::AddMapModes: one button per mode of the array; ShowMapModesList calls it for the quick bar and for the tab shown"
+note = "the minimap panel's button builder: one button per mode of the array; the panel's list update calls it for the quick bar and for the tab shown"
 build."eu4-1.37.5-steam-win64" = { rva = 0x124B1F0 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x1245540 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1245540 }
 
 [symbol.mapmode_tooltip]
-# mov [rsp+8],rbx; mov [rsp+10h],rsi; mov [rsp+18h],rdi; push rbp; push r12; push r13; push r14; push r15
+# the prologue: three register saves and five pushes
 sha256 = "6AEDF633012D36897A083F0AD00C3396995EEB43DD1E37F5E63F64183FE4C83D"
 size = 24
 memory = "code"
 signature = "void (void* province, uint8_t flag, const void* other, void* tooltip)"
-note = "CProvince::SetupMapmodeTooltip(const bool, const CProvince*, CToolTip&): the province tooltip's lines for the current map mode; called only from CProvince::GetTooltip"
+note = "the province tooltip's map mode part (province, flag, other province, tooltip): the lines for the current map mode; called only from the province's tooltip builder"
 build."eu4-1.37.5-steam-win64" = { rva = 0x9E3210 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x9E21F0 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x9E21F0 }
 
 [symbol.settings_sprite_call]
 memory = "code"
-note = "CSettings::WriteMembers: call GetMapModeSpriteName for each mode of the quick bar; settings.txt skips GFX_mapmode_notselected"
+note = "in the writer of settings.txt: the call of map_mode_sprite for each mode of the quick bar; settings.txt skips GFX_mapmode_notselected"
 
 [symbol.settings_sprite_call.build."eu4-1.37.5-steam-win64"]
 rva = 0xAD4BFE
 sha256 = "51A3DBBA98F9B8A97D856B2836D6CBB44CC62C1BE101946765C3BA1067D09ED1"
-size = 5                                    # call 0x1247340
+size = 5                                    # calls 0x1247340
 
 [symbol.settings_sprite_call.build."eu4-1.37.5.2-gog-win64"]
 rva = 0xAD378E
 sha256 = "3E94DD1F999847A5AE6018A693AC8C6E72EF220B1745DE29325001B452D75C37"
-size = 5                                    # call 0x1241690
+size = 5                                    # calls 0x1241690
 
 [symbol.settings_sprite_call.build."eu4-1.37.5.0-gog-win64"]
 rva = 0xAD378E
@@ -111,7 +110,7 @@ size = 5
 sha256 = "A6A967263F00B1E7A2A5497443141A26AB6C1C221A07CB26FE6E3F2E3FFF5137"
 size = 56
 memory = "write"
-note = "ShowMapModesList, tab bit 1: 14 modes from political (1)"
+note = "the minimap panel's list of modes, tab bit 1: 14 modes from political (1)"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1FD4E88 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x1FB8E88 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1FB8E88 }
@@ -120,7 +119,7 @@ build."eu4-1.37.5.0-gog-win64" = { rva = 0x1FB8E88 }
 sha256 = "F70B223C0F1551BF4507B561F9687081D68EFFE07BF22550EC5A0BFA970E730D"
 size = 52
 memory = "write"
-note = "ShowMapModesList, tab bit 2: 13 modes from terrain (0)"
+note = "the minimap panel's list of modes, tab bit 2: 13 modes from terrain (0)"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1FD50C8 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x1FB90C8 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1FB90C8 }
@@ -129,7 +128,7 @@ build."eu4-1.37.5.0-gog-win64" = { rva = 0x1FB90C8 }
 sha256 = "8ED78F481068085BA01F48AAE46663565BA4AE75868F3CB69CFC33B148E02A0B"
 size = 64
 memory = "write"
-note = "ShowMapModesList, tab bit 4: 16 modes from trade (4)"
+note = "the minimap panel's list of modes, tab bit 4: 16 modes from trade (4)"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1FD7A50 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x1FBBA50 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1FBBA50 }
@@ -138,7 +137,7 @@ build."eu4-1.37.5.0-gog-win64" = { rva = 0x1FBBA50 }
 sha256 = "DD6E87E5328617F552EE21AB03E48DD1A76240701028541589A4EC948AAC4E41"
 size = 44
 memory = "write"
-note = "ShowMapModesList, tab bit 8: 11 modes from diplomacy (5)"
+note = "the minimap panel's list of modes, tab bit 8: 11 modes from diplomacy (5)"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1FD79D8 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x1FBB9D8 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1FBB9D8 }
@@ -146,34 +145,34 @@ build."eu4-1.37.5.0-gog-win64" = { rva = 0x1FBB9D8 }
 # --- called ---
 
 [symbol.cstring_from_text]
-# push rbx; sub rsp,20h; xor eax,eax; mov qword [rcx+18h],0Fh; mov [rcx],rax; mov rbx,rcx; mov [rcx],al
+# starts an empty string: capacity 15 at +0x18, size 0
 sha256 = "A7E4F8E227490A633070E2A0E32E19A7C001262F7F3DEFF03DAF174A2D7DF6A8"
 size = 24
 memory = "code"
 signature = "void* (void* out, const char* text)"
-note = "CString::CString(const char*): builds the game's string with the game's allocator"
+note = "the game's string constructor from a C string: builds the game's string with the game's allocator"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1703550 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x16ED320 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x16ED320 }
 
 [symbol.text_append]
-# mov [rsp+18h],rbx; push rbp; push rsi; push rdi; push r13; push r14; sub rsp,20h; mov rbp,[rcx+18h]; mov rsi,r8
+# the prologue, then it reads the string's capacity at +0x18
 sha256 = "00DF72CAD1EE22E0824C51DD90B69AC4D547F85194B1E1E52660EC08B0ADC333"
 size = 23
 memory = "code"
 signature = "void* (void* text, const char* data, uint64_t size)"
-note = "CString append(const char*, size_t); CToolTip::_Instant is the CString at +0"
+note = "the game's string append (text, data, size); a tooltip's instant text is the string at its +0"
 build."eu4-1.37.5-steam-win64" = { rva = 0x932F0 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x93320 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x93320 }
 
 [symbol.set_current_map_mode]
-# mov [rsp+8],rbx; mov [rsp+10h],rbp; mov [rsp+18h],rsi; mov [rsp+20h],rdi; push r14
+# the prologue: four register saves and one push
 sha256 = "4C4D058FD9645106DBB6707961A20D5EF0EA50749880DF0C0DB241D44A488E4B"
 size = 22
 memory = "code"
 signature = "void (void* session, int32_t mode, uint8_t a, uint8_t b)"
-note = "CEU3Idler::SetCurrentMapMode(EPdxMapColorUpdateMode, bool, bool): what the minimap's buttons and the console's mapmode call, both with false, false; the same declaration as Tongs'"
+note = "the session's map mode setter (session, mode, bool, bool): what the minimap's buttons and the console's mapmode call, both with false, false; the same declaration as Tongs'"
 build."eu4-1.37.5-steam-win64" = { rva = 0x6EC450 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x6EBE10 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x6EBE10 }
@@ -182,17 +181,17 @@ build."eu4-1.37.5.0-gog-win64" = { rva = 0x6EBE10 }
 memory = "code"
 signature = "void (void* session, int32_t mode)"
 values.map_mode = { at = 11, size = 1 }
-note = "CEU3Idler::SetMapModeDirty: repaints when the session's current map mode (session+0x2C, GOG +0x24) is `mode`"
+note = "the session's map mode repaint request (session, mode): repaints when the session's current map mode (session+0x2C, GOG +0x24) is `mode`"
 
 [symbol.set_map_mode_dirty.build."eu4-1.37.5-steam-win64"]
 rva = 0x6EA0B0
 sha256 = "7AA72DEC543761280DA0D731B83CD55FA01E232591FFA739E3BDEFD1786E67B5"
-size = 14             # ...; cmp [rcx+2Ch],edx; jne
+size = 14             # compares the mode at session+0x2C
 
 [symbol.set_map_mode_dirty.build."eu4-1.37.5.2-gog-win64"]
 rva = 0x6E9A90
 sha256 = "70AB552CD1BBDB7607CA0C90CFBB1E808B0C8ECEFF7541BA6AFE02935E1A187C"
-size = 14             # ...; cmp [rcx+24h],edx; jne
+size = 14             # compares the mode at session+0x24
 
 [symbol.set_map_mode_dirty.build."eu4-1.37.5.0-gog-win64"]
 rva = 0x6E9A90
@@ -205,7 +204,7 @@ size = 14
 memory = "code"
 values.root = { at = 3, rip_relative = 7, type = "uintptr_t" }
 values.session = { at = 13, size = 4, is = 0x1E00 }
-note = "pause command: the game root and its session (CInGameIdler in a campaign) at root+0x1E00"
+note = "pause command: the game root and its session (the in-game session in a campaign) at root+0x1E00"
 
 [symbol.session_of_root.build."eu4-1.37.5-steam-win64"]
 rva = 0x848976
@@ -213,7 +212,7 @@ sha256 = "27729E592BAC885AB42FF6601EF2A1F518BDD653E560C03C0603943EBBFA352A"
 size = 26
 
 [symbol.session_of_root.build."eu4-1.37.5.2-gog-win64"]
-rva = 0x847CD6                                     # CPauseGame::Execute
+rva = 0x847CD6                                     # in the pause command's execute
 sha256 = "3A0756EB801EBABEA3F68C1856C12C2050309C1E237C3BC5E7225CB744D996F7"
 size = 26
 
@@ -225,7 +224,7 @@ size = 26
 [symbol.province_own_id]
 memory = "code"
 values.own_id = { at = 51, size = 1, is = 0x20 }
-note = "script value base_tax: the province compares its own ID (CProvince+0x20) with the owner's capital"
+note = "script value base_tax: the province compares its own ID (province+0x20) with the owner's capital"
 
 [symbol.province_own_id.build."eu4-1.37.5-steam-win64"]
 rva = 0x6DE7A0

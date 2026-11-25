@@ -1,40 +1,41 @@
 # The game code anvil-script uses, for EU4 1.37.5 (Steam, GOG 1.37.5.2 and
-# 1.37.5.0 with the same addresses, win64): the start of CEffect::ReadMember,
-# which parses every member of every container effect, and what a CEffect of
-# the plugin's needs to be built, appended, described and destroyed like the
-# game's own. Every offset is a value taken from verified bytes. Sources: EU4 engine lab
-# docs/research/script-effect-statics.md (GOG's eu4.pdb, the Steam bytes) and
-# its prototype docs/script-effect-game-test.md (eu4-engine-lab#77);
-# docs/spec/script-effects-v1.md section 7. The Day end: CGameState::
-# HandleDailyTick and the date it advances (lab docs/research/
+# 1.37.5.0 with the same addresses, win64): the start of the effect member
+# reader (Steam 0x5DEC50), which parses every member of every container
+# effect, and what an effect object of the plugin's needs to be built,
+# appended, described and destroyed like the game's own. Every offset is a
+# value taken from verified bytes. Sources: EU4 engine lab
+# docs/research/script-effect-statics.md and its prototype
+# docs/script-effect-game-test.md (eu4-engine-lab#77);
+# docs/spec/script-effects-v1.md section 7. The Day end: the game state's
+# daily update (Steam 0x758430) and the date it advances (lab docs/research/
 # chisel-path-recompute.md, eu4-engine-lab#131; docs/spec/day-end-v1.md
 # section 7).
 builds = ["eu4-1.37.5-steam-win64", "eu4-1.37.5.2-gog-win64", "eu4-1.37.5.0-gog-win64"]
 
 [symbol.effect_read_member]
-# mov [rsp+8],rbx; mov [rsp+10h],rsi; push rbp; push rdi; push r12; push r14; push r15
+# the prologue: two register saves and five pushes
 sha256 = "6132F0E3DAA110509CB13DAB68DCD704D68686602BD10B01A2E1FDFB7F6CB91B"
 size = 18
 memory = "code"
 signature = "void (void* effect, void* reader, int token)"
-note = "CEffect::ReadMember(CReader&, int): a 31.5 kB switch over the lexer's tokens; every container effect parses its members here"
+note = "the effect member reader (effect, reader, token): a 31.5 kB switch over the lexer's tokens; every container effect parses its members here"
 build."eu4-1.37.5-steam-win64" = { rva = 0x5DEC50 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x5DE720 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x5DE720 }
 
 [symbol.effect_lhs_site]
 sha256 = "8BEE0CE53C38C6228529011C0F8FF7A8E417CD13A8182837ABD970F13AD1ABBF"
-size = 7                       # lea rbx,[rsi+30h]; mov rcx,rbx (then CToken::GetString)
+size = 7                       # takes the address of the reader's key token, +0x30
 memory = "code"
 values.lhs = { at = 3, size = 1, is = 0x30 }
-note = "ReadMember's default branch takes the key's text from CReader::_Toklhs (CToken: id at +0, text at +4)"
+note = "the member reader's default branch takes the key's text from the reader's left-hand token at +0x30 (a token: id at +0, text at +4)"
 build."eu4-1.37.5-steam-win64" = { rva = 0x5E4B04 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x5E45D4 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x5E45D4 }
 
 [symbol.effect_assign_site]
-# lea rcx,[rdi+10h]; lea rdx,[rsp+20h]; call CArray::Append; mov rcx,[rsp+20h]; mov rax,[rcx];
-# lea rdx,[rsi+440h]; call [rax+48h]
+# appends the new effect to the parent's children (+0x10), then passes the
+# reader's right-hand token (+0x440) to the effect's vtable slot 0x48
 sha256 = "6D6DF4BB471129512127E30A70F10E347BDEB6E13B8CE7E51768018B4BF91707"
 size = 32
 any = [10, 11, 12, 13]
@@ -42,17 +43,17 @@ memory = "code"
 values.children = { at = 3, size = 1, is = 0x10 }
 values.rhs = { at = 25, size = 4, is = 0x440 }
 values.assign = { at = 31, size = 1, is = 0x48 }
-note = "a simple effect's case in ReadMember: append to the parent's children (CEffect+0x10), Assign(CReader::_Tokrhs) through vtable slot 0x48"
+note = "a simple effect's case in the member reader: append to the parent's children (effect+0x10), then assign the right-hand token (reader+0x440) through vtable slot 0x48"
 build."eu4-1.37.5-steam-win64" = { rva = 0x5E0F43 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x5E0A13 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x5E0A13 }
 
 [symbol.effect_set_token]
 sha256 = "1CB932B932D3F105267412A55DB472FF87CA8D7BCA2B5C5E44414A7D435B3B3D"
-size = 4                                # mov [rcx+28h],edx; ret
+size = 4                                # stores the token at effect+0x28
 memory = "code"
 values.token = { at = 2, size = 1, is = 0x28 }
-note = "CEffect::SetToken(int): CEffect::_Token"
+note = "an effect's token setter (effect, int): the token id at effect+0x28"
 build."eu4-1.37.5-steam-win64" = { rva = 0x5EF140 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x5EEC10 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x5EEC10 }
@@ -62,7 +63,7 @@ sha256 = "1F5D5FB085AB5B1D78CA38FCC3F65104419089758D9778043344DA0E88E90BEE"
 size = 20
 memory = "code"
 signature = "void* (void* effect)"
-note = "CEffect::CEffect(): the vtable, token -1, and the effect registered in CEffectDataBase under its mutex"
+note = "the effect constructor: the vtable, token -1, and the effect registered in the game's effect database under its mutex"
 build."eu4-1.37.5-steam-win64" = { rva = 0x5DE770 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x5DE240 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x5DE240 }
@@ -70,7 +71,7 @@ build."eu4-1.37.5.0-gog-win64" = { rva = 0x5DE240 }
 [symbol.effect_vtable_site]
 memory = "code"
 values.vtable = { at = 3, rip_relative = 7, type = "void*" }
-note = "lea rax,[CEffect::vftable]; mov [rcx],rax in CEffect::CEffect: 19 slots, 0x98 bytes"
+note = "where the effect constructor stores the effect vtable (19 slots) in the object; an effect is 0x98 bytes"
 
 [symbol.effect_vtable_site.build."eu4-1.37.5-steam-win64"]
 rva = 0x5DE797
@@ -92,7 +93,7 @@ sha256 = "B812A830CCB8CFB42201CE0025A64D32FFD56EFB0BC76965C85112AA5F3FFBC7"
 size = 24
 memory = "code"
 signature = "void (void* effect)"
-note = "CEffect::~CEffect(): unregisters the effect and deletes its children through slot 0; frees nothing of the effect itself"
+note = "the effect destructor: unregisters the effect and deletes its children through slot 0; frees nothing of the effect itself"
 build."eu4-1.37.5-steam-win64" = { rva = 0x5DE8D0 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x5DE3A0 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x5DE3A0 }
@@ -102,30 +103,30 @@ sha256 = "6B5A6C9BFD3042C974C88270F10CEE40BE4D8D8626078AF77C40CF65DEE92FA2"
 size = 25
 memory = "code"
 signature = "void (void* array, void** item)"
-note = "CArray<T*>::Append, a std::vector<void*> push_back with the game's heap"
+note = "the game's array of pointers, append: a std::vector<void*> push_back with the game's heap"
 build."eu4-1.37.5-steam-win64" = { rva = 0xC9F10 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0xC9F40 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0xC9F40 }
 
 [symbol.scope_province_site]
 sha256 = "E613983705E60951B711B7C3535D0E689E05DE3EE094B9AA3D019B8F30E3F4EA"
-size = 10                  # mov rbx,rdx; mov rdi,rcx; cmp dword [rdx+28h],0
+size = 10                  # tests the scope's province at +0x28
 memory = "code"
 values.province = { at = 8, size = 1, is = 0x28 }
-note = "CProvinceCultureEffect::Execute+0x1F: a province effect reads the scope's own province (CEventScope+0x28); CEffect::GetScopeProvinceId answers only for ROOT, FROM and event targets"
+note = "+0x1F in the execute of the province culture effect: a province effect reads the scope's own province (scope+0x28); the effects' shared province getter answers only for ROOT, FROM and event targets"
 build."eu4-1.37.5-steam-win64" = { rva = 0x62367F }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x62314F }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x62314F }
 
 [symbol.scope_country_site]
-# movzx r8d,byte [rdx+4Bh]; mov edx,44h; mov eax,edx; mov r9d,2Ch; test r8b,r8b; cmove eax,r9d
+# picks the offset of the scope's country tag: +0x44 when the byte at +0x4B is set, else +0x2C
 sha256 = "3DE2EAF44EDFBC3B6204D8838276AD41E4070253D2017DD3200D8DC598259E38"
 size = 25
 memory = "code"
 values.override_valid = { at = 4, size = 1, is = 0x4B }
 values.override = { at = 6, size = 4, is = 0x44 }
 values.tag = { at = 14, size = 4, is = 0x2C }
-note = "CTreasuryEffect::Execute+0x25: a country effect's country is the scope's tag at +0x44 when +0x4B is set, else the tag at +0x2C (CCountryTag: text, then valid at +7)"
+note = "+0x25 in the execute of the treasury effect: a country effect's country is the scope's tag at +0x44 when +0x4B is set, else the tag at +0x2C (a country tag: text, then valid at +7)"
 build."eu4-1.37.5-steam-win64" = { rva = 0x5EFC55 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x5EF725 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x5EF725 }
@@ -135,49 +136,48 @@ sha256 = "A7E4F8E227490A633070E2A0E32E19A7C001262F7F3DEFF03DAF174A2D7DF6A8"
 size = 24
 memory = "code"
 signature = "void* (void* string, const char* text)"
-note = "CString::CString(const char*): the game's std::string, with the game's heap"
+note = "the game's string constructor from a C string: the game's std::string, with the game's heap"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1703550 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x16ED320 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x16ED320 }
 
 [symbol.daily_tick]
-# mov rax,rsp; push rbp; push rbx; push rsi; push rdi; push r12; push r13; push r14; push r15;
-# lea rbp,[rax-138h]; sub rsp,1F8h
+# the prologue: eight pushes, the frame pointer and 0x1F8 bytes of locals
 sha256 = "A912B860DB755EAD7C04649AFF2D52DA3EDE1CDA38CCE33DAE63CE4CBD269CFA"
 size = 29
 memory = "code"
 signature = "void (void* game_state)"
-note = "CGameState::HandleDailyTick(): the whole day; one caller, CDailyTickCommand::Execute, which after the return only logs and calls COOSHandler::MakeSyncCheck"
+note = "the game state's daily update: the whole day; one caller, the daily tick command, which after the return only logs and makes the out-of-sync check"
 build."eu4-1.37.5-steam-win64" = { rva = 0x758430 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x7575F0 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x7575F0 }
 
 [symbol.daily_tick_date_site]
-# lea r15,[rsi+1DD0h]; mov rcx,r15; call; lea r12,[days per month]; ...; mov [rbp+140h],eax; add dword [r15],18h
+# takes the date's address (game state+0x1DD0), then adds the day's 24 hours to it
 sha256 = "D8BC98B21515C34F58BDA41093AF79C95533F54849CDD5441E6A410C7AAD257F"
 size = 60
 any = [11, 12, 13, 14, 18, 19, 20, 21, 46, 47, 48, 49]
 memory = "code"
 values.date = { at = 3, size = 4, is = 0x1DD0 }
-note = "HandleDailyTick+0x91: the date (CGameState+0x1DD0, int32 hours) gets the day's 24 hours at the start of the day"
+note = "+0x91 in the daily update: the date (game state+0x1DD0, int32 hours) gets the day's 24 hours at the start of the day"
 build."eu4-1.37.5-steam-win64" = { rva = 0x7584C1 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0x757681 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x757681 }
 
 # --- has_dlc for plugin names (anvil#316) ---
-# CHasDLCTrigger keeps one bit per DLC the game knows, set by Assign from the
-# name (a strcmp chain, nothing logged and nothing kept for another name), and
-# Evaluate tests them: no bit is false. A name "anvil:<id>" becomes a trigger
-# of the plugin's own vtable instead, whose Evaluate answers from a table fixed
-# at the session's start.
+# The has_dlc trigger keeps one bit per DLC the game knows, set by its assign
+# from the name (a strcmp chain, nothing logged and nothing kept for another
+# name), and its evaluate tests them: no bit is false. A name "anvil:<id>"
+# becomes a trigger of the plugin's own vtable instead, whose evaluate answers
+# from a table fixed at the session's start.
 
 [symbol.has_dlc_assign]
-# mov [rsp+8],rbx; mov [rsp+10h],rsi; mov [rsp+18h],rdi; mov [rsp+20h],r14; push rbp; mov rbp,rsp; sub rsp,40h
+# the prologue: four register saves, the frame pointer and 0x40 bytes of locals
 sha256 = "3E54A512EE6A3897DC9F74D7F59C5EED1650059C0DB448CC66E890979EF1B505"
 size = 28
 memory = "code"
 signature = "bool (void* trigger, const void* token)"
-note = "CHasDLCTrigger::Assign(const CToken&): the DLC's name (token text at +4) to the trigger's bits; vtable slot 7"
+note = "the has_dlc trigger's assign (trigger, token): the DLC's name (token text at +4) to the trigger's bits; vtable slot 7"
 build."eu4-1.37.5-steam-win64" = { rva = 0xCC5BA0 }
 build."eu4-1.37.5.2-gog-win64" = { rva = 0xCC4350 }
 build."eu4-1.37.5.0-gog-win64" = { rva = 0xCC4350 }
@@ -185,7 +185,7 @@ build."eu4-1.37.5.0-gog-win64" = { rva = 0xCC4350 }
 [symbol.set_session]
 # The same function anvil-game hooks: has_dlc closes there until the session
 # event, so a load does not read the previous session's answers (G5, #545).
-# mov [rsp+10h],rbp; mov [rsp+18h],rsi; push rdi; sub rsp,20h; mov [rcx+1E00h],rdx
+# the prologue, then the store of the session at root+0x1E00
 sha256 = "4445F6CDD97A4228E3F8EFE79888DC90BC9CFDEA2D5C917C7813DDADAFA8A64B"
 size = 22
 memory = "code"
@@ -200,7 +200,7 @@ memory = "code"
 values.trigger_size = { at = 1, size = 4, is = 0x70 }
 values.dlc_vtable = { at = 29, rip_relative = 33, type = "void*" }
 values.dlc_bits = { at = 49, size = 1, is = 0x68 }
-note = "std::make_unique<CHasDLCTrigger>: 0x70 bytes, the vtable (16 slots, Evaluate in slot 6), the DLC bits at +0x68 cleared but bit 31; +0x6C to the end is padding"
+note = "where a has_dlc trigger is made: 0x70 bytes, the vtable (16 slots, evaluate in slot 6), the DLC bits at +0x68 cleared but bit 31; +0x6C to the end is padding"
 
 [symbol.has_dlc_make.build."eu4-1.37.5-steam-win64"]
 rva = 0xBB4012

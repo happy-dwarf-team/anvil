@@ -1,8 +1,8 @@
 # The script blocks anvil-script-profiler times and the vtables of the classes
 # that own them, for EU4 1.37.5 (Steam and GOG 1.37.5.2 and 1.37.5.0, win64).
 # Source: EU4 engine lab, docs/script-profiler-prototype.md (lab#154, #158).
-# GOG's names come from its eu4.pdb; Steam's addresses are GOG's functions
-# found in Steam's eu4.exe, and its vtables the ones whose slots point to them.
+# Steam's addresses are the same functions found in Steam's eu4.exe, and its
+# vtables the ones whose slots point to them.
 # A build that declared a vtable absent would still measure, without that
 # owner's names.
 builds = ["eu4-1.37.5-steam-win64", "eu4-1.37.5.2-gog-win64", "eu4-1.37.5.0-gog-win64"]
@@ -13,9 +13,9 @@ size = 19
 memory = "code"
 signature = "bool (void* trigger, void* scope)"
 build."eu4-1.37.5-steam-win64" = { rva = 0xB98200 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0xB969B0 }   # CAndTrigger::Evaluate(CEventScope&)
+build."eu4-1.37.5.2-gog-win64" = { rva = 0xB969B0 }   # the AND block's evaluate
 build."eu4-1.37.5.0-gog-win64" = { rva = 0xB969B0 }
-note = "CAndTrigger::Evaluate, 96 B: every AND block (the CRootTrigger of an event, decision or modifier, a limit, AND =) evaluates its children through vtable slot +0x30 and stops at the first false; the slot of CRootTrigger and CMTTHModifier points here too"
+note = "the evaluate of an AND block, 96 B: every AND block (the root trigger of an event, decision or modifier, a limit, AND =) evaluates its children through vtable slot +0x30 and stops at the first false; the root trigger's and the mean-time-to-happen modifier's slot points here too"
 
 [symbol.effect_execute]
 sha256 = "A92CB76700BB8900A3DF5793DB25C6BB91A2DC0B0258088DCB5094011B4DCC01"
@@ -23,9 +23,9 @@ size = 21
 memory = "code"
 signature = "void (void* effect, void* scope, int32_t flags)"
 build."eu4-1.37.5-steam-win64" = { rva = 0x5ED800 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x5ED2D0 }   # CEffect::Execute(CEventScope&, int)
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x5ED2D0 }   # the effect block's execute
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x5ED2D0 }
-note = "CEffect::Execute, 119 B: runs the children of an effect block (CArray<CEffect*> at +0x10) through their own Execute"
+note = "the execute of an effect block, 119 B: runs the block's children (an array of effect pointers at +0x10) through their own execute slot"
 
 [symbol.scripted_trigger_evaluate]
 sha256 = "DE6A7940819676114C24E2E19757A6270F7072C73E9CACFC21C48A48E6AF4B2B"
@@ -33,79 +33,79 @@ size = 9
 memory = "code"
 signature = "bool (void* trigger, void* scope)"
 build."eu4-1.37.5-steam-win64" = { rva = 0xB99B30 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0xB982E0 }   # CScriptedTrigger::Evaluate(CEventScope&)
+build."eu4-1.37.5.2-gog-win64" = { rva = 0xB982E0 }   # the scripted trigger's evaluate
 build."eu4-1.37.5.0-gog-win64" = { rva = 0xB982E0 }
-note = "CScriptedTrigger::Evaluate, 29 B (v1.1): a use of a scripted trigger; push rbx, sub rsp 20h, mov rbx,rcx, then calls CAndTrigger::Evaluate on itself and compares with _bWantedResult (+0xA0)"
+note = "the evaluate of a scripted trigger's use, 29 B (v1.1): evaluates itself as an AND block (and_trigger_evaluate) and compares the result with the wanted result, a bool at +0xA0"
 
 [symbol.church_aspect_db_site]
 memory = "code"
 values.aspect_db = { at = 3, rip_relative = 7, type = "uintptr_t" }
 build."eu4-1.37.5-steam-win64" = { rva = 0x7F6EFF, sha256 = "6CC3C53035B9696639E28194AB93547A630CB9547E55792B76CC0B1DDC3A1A1D", size = 16 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x7F626F, sha256 = "3B62B021DE66DB93AEDC7A648B1AD4454D3EE17EA600BA4CE7CB8A6DEFA1B097", size = 16 }   # CChurchAspectDatabase::AccessInstance+0xF
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x7F626F, sha256 = "3B62B021DE66DB93AEDC7A648B1AD4454D3EE17EA600BA4CE7CB8A6DEFA1B097", size = 16 }   # +0xF in the church aspect database's instance getter
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x7F626F, sha256 = "3B62B021DE66DB93AEDC7A648B1AD4454D3EE17EA600BA4CE7CB8A6DEFA1B097", size = 16 }
-note = "v1.1: mov rax,[CChurchAspectDatabase::_pDB] (Steam 0x242BCB8, GOG 0x240FB30), the database of church aspects; its _AspectList (+16) lists every aspect"
+note = "v1.1: loads the global pointer to the database of church aspects (Steam 0x242BCB8, GOG 0x240FB30); the list at +16 in it holds every aspect"
 
 # The owner classes' vtables: slot 0 (the deleting destructor) is checked.
 
 [symbol.event_vtable]
 memory = "read"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1CAB3A8, points_to = 0x6EDB00 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x1C93FE8, points_to = 0x6ECDF0 }   # CEvent::`vftable'
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x1C93FE8, points_to = 0x6ECDF0 }   # the event class's vtable
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1C93FE8, points_to = 0x6ECDF0 }
-note = "CEvent: trigger +64, major trigger +184, immediate +304 and after +1120 (options, effect +80), options +1936, mean_time_to_happen +1960, key +32"
+note = "an event: trigger +64, major trigger +184, immediate +304 and after +1120 (options, effect +80), options +1936, mean_time_to_happen +1960, key +32"
 
 [symbol.decision_vtable]
 memory = "read"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1C66920, points_to = 0x4879D0 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x1C4F690, points_to = 0x4878A0 }   # CDecision::`vftable'
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x1C4F690, points_to = 0x4878A0 }   # the decision class's vtable
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1C4F690, points_to = 0x4878A0 }
-note = "CDecision: potential +48, allow +168, provinces_to_highlight +288, effect +408, ai_will_do +464, name +16"
+note = "a decision: potential +48, allow +168, provinces_to_highlight +288, effect +408, ai_will_do +464, name +16"
 
 [symbol.on_action_vtable]
 memory = "read"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1C663B0, points_to = 0x47A5C0 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x1C4F120, points_to = 0x47A490 }   # COnActionList::`vftable'
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x1C4F120, points_to = 0x47A490 }   # the on_action list's vtable
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1C4F120, points_to = 0x47A490 }
-note = "COnActionList: effect +104, name +24"
+note = "an on_action list: effect +104, name +24"
 
 [symbol.casus_belli_vtable]
 memory = "read"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1C455F8, points_to = 0x1F6BB0 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x1C2E858, points_to = 0x1F6B80 }   # CCasusBelliType::`vftable'
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x1C2E858, points_to = 0x1F6B80 }   # the casus belli type's vtable
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1C2E858, points_to = 0x1F6B80 }
-note = "CCasusBelliType: prerequisites_self +56, prerequisites +176, name +24"
+note = "a casus belli type: prerequisites_self +56, prerequisites +176, name +24"
 
 [symbol.triggered_modifier_vtable]
 memory = "read"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1D19CA0, points_to = 0xD2F260 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x1D02770, points_to = 0xD2DA10 }   # CTriggeredModifier::`vftable'
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x1D02770, points_to = 0xD2DA10 }   # the country triggered modifier's vtable
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1D02770, points_to = 0xD2DA10 }
-note = "CTriggeredModifier (a country's triggered_modifier): potential +376, trigger +496, name +344"
+note = "a country's triggered_modifier: potential +376, trigger +496, name +344"
 
 [symbol.province_triggered_modifier_vtable]
 memory = "read"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1D21D00, points_to = 0xDB28A0 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x1D0A7E8, points_to = 0xDB1020 }   # CProvinceTriggeredModifier::`vftable'
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x1D0A7E8, points_to = 0xDB1020 }   # the province triggered modifier's vtable
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1D0A7E8, points_to = 0xDB1020 }
-note = "CProvinceTriggeredModifier: potential +376, trigger +496, on_activation +616, on_deactivation +672, name +344"
+note = "a province_triggered_modifier: potential +376, trigger +496, on_activation +616, on_deactivation +672, name +344"
 
 [symbol.mission_vtable]
 memory = "read"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1CC21C8, points_to = 0x8D4CE0 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x1CAAC80, points_to = 0x8D3F10 }   # CMission::`vftable'
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x1CAAC80, points_to = 0x8D3F10 }   # the mission's vtable
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1CAAC80, points_to = 0x8D3F10 }
-note = "CMission: trigger +112, effect +232, ai_weight +320, provinces_to_highlight +384, name +16"
+note = "a mission: trigger +112, effect +232, ai_weight +320, provinces_to_highlight +384, name +16"
 
 [symbol.church_aspect_vtable]
 memory = "read"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1CB5C40, points_to = 0x7F64C0 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x1C9E7E8, points_to = 0x7F5830 }   # CChurchAspect::`vftable'
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x1C9E7E8, points_to = 0x7F5830 }   # the church aspect's vtable
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1C9E7E8, points_to = 0x7F5830 }
-note = "CChurchAspect (v1.1): effect +464, trigger +520, potential +640, ai_will_do +760, key +16"
+note = "a church aspect (v1.1): effect +464, trigger +520, potential +640, ai_will_do +760, key +16"
 
 [symbol.scripted_trigger_vtable]
 memory = "read"
 build."eu4-1.37.5-steam-win64" = { rva = 0x1D07670, points_to = 0xB99730 }
-build."eu4-1.37.5.2-gog-win64" = { rva = 0x1CF01B0, points_to = 0xB97EE0 }   # CScriptedTrigger::`vftable' (the first)
+build."eu4-1.37.5.2-gog-win64" = { rva = 0x1CF01B0, points_to = 0xB97EE0 }   # the scripted trigger's vtable (the first of two)
 build."eu4-1.37.5.0-gog-win64" = { rva = 0x1CF01B0, points_to = 0xB97EE0 }
-note = "CScriptedTrigger (v1.1): an AND block itself, key +104; a scripted trigger evaluated as a root block is its own owner"
+note = "a scripted trigger (v1.1): an AND block itself, key +104; a scripted trigger evaluated as a root block is its own owner"
