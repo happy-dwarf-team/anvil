@@ -200,6 +200,30 @@ impl Mission {
     pub const HUNT_REBELS: Self = Self(crate::sys::ANVIL_GAME_MISSION_HUNT_REBELS as i32);
     /// Drill.
     pub const DRILL: Self = Self(crate::sys::ANVIL_GAME_MISSION_DRILL as i32);
+    /// Protect trade.
+    pub const PROTECT_TRADE: Self = Self(crate::sys::ANVIL_GAME_MISSION_PROTECT_TRADE as i32);
+    /// Privateer.
+    pub const PRIVATEER: Self = Self(crate::sys::ANVIL_GAME_MISSION_PRIVATEER as i32);
+    /// Hunt pirates.
+    pub const HUNT_PIRATES: Self = Self(crate::sys::ANVIL_GAME_MISSION_HUNT_PIRATES as i32);
+    /// Patrol.
+    pub const PATROL: Self = Self(crate::sys::ANVIL_GAME_MISSION_PATROL as i32);
+    /// Explore the sea.
+    pub const EXPLORE: Self = Self(crate::sys::ANVIL_GAME_MISSION_EXPLORE as i32);
+    /// Evade.
+    pub const EVADE: Self = Self(crate::sys::ANVIL_GAME_MISSION_EVADE as i32);
+    /// Hunt enemy fleets.
+    pub const HUNT_FLEETS: Self = Self(crate::sys::ANVIL_GAME_MISSION_HUNT_FLEETS as i32);
+    /// Blockade.
+    pub const BLOCKADE: Self = Self(crate::sys::ANVIL_GAME_MISSION_BLOCKADE as i32);
+    /// Intercept.
+    pub const INTERCEPT: Self = Self(crate::sys::ANVIL_GAME_MISSION_INTERCEPT as i32);
+    /// Repair.
+    pub const REPAIR: Self = Self(crate::sys::ANVIL_GAME_MISSION_REPAIR as i32);
+    /// Circumnavigate.
+    pub const CIRCUMNAVIGATE: Self = Self(crate::sys::ANVIL_GAME_MISSION_CIRCUMNAVIGATE as i32);
+    /// Explore land.
+    pub const EXPLORE_LAND: Self = Self(crate::sys::ANVIL_GAME_MISSION_EXPLORE_LAND as i32);
 }
 
 /// A unit: an army or a navy.

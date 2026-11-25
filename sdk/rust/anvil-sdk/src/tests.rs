@@ -2905,3 +2905,34 @@ fn a_kept_panic_text_names_a_later_panic_only_when_it_is_that_panics_text() {
         assert!(!line.contains(swallowed), "{line}");
     }
 }
+
+#[test]
+fn every_mission_of_the_header_has_its_constant() {
+    use world::Mission;
+    // The numbers of ANVIL_GAME_MISSION_* in anvil_game.h, written out so a
+    // renumbered or missing constant fails here.
+    let all = [
+        (Mission::UNKNOWN, -1),
+        (Mission::NONE, 0),
+        (Mission::PROTECT_TRADE, 1),
+        (Mission::PRIVATEER, 2),
+        (Mission::HUNT_PIRATES, 3),
+        (Mission::PATROL, 4),
+        (Mission::EXPLORE, 5),
+        (Mission::EVADE, 6),
+        (Mission::HUNT_FLEETS, 7),
+        (Mission::BLOCKADE, 8),
+        (Mission::INTERCEPT, 9),
+        (Mission::REPAIR, 10),
+        (Mission::CIRCUMNAVIGATE, 11),
+        (Mission::EXPLORE_LAND, 12),
+        (Mission::HUNT_REBELS, 13),
+        (Mission::SIEGE, 14),
+        (Mission::DRILL, 15),
+    ];
+    for (mission, number) in all {
+        assert_eq!(mission, Mission(number));
+    }
+    let distinct: std::collections::HashSet<_> = all.iter().map(|(m, _)| *m).collect();
+    assert_eq!(distinct.len(), all.len());
+}
