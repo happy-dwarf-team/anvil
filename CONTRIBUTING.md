@@ -132,8 +132,8 @@ hand passes the check only if it copies bindgen's form exactly:
 
 **Game code and names.** This repository holds no code of eu4.exe and no names from its debug symbols.
 `symbols.toml` verifies each address with `sha256` and `size`, not with the game's bytes; write `bytes` while you
-work and run Anvil's `tools/symbols-to-digest.py` before you commit. Name the game's functions, classes and
-fields by their address and what they do, unless eu4.exe itself shows the name (its RTTI or its own log and
+work and run Anvil's `tools/symbols-to-digest.py` (also in the SDK archive, `tools/`) before you commit.
+Name the game's functions, classes and fields by their address and what they do, unless eu4.exe itself shows the name (its RTTI or its own log and
 assert texts). Our own symbol keys, addresses, offsets and signatures are fine.
 
 This covers code comments, `anvil.log` lines, test names, documents and pull

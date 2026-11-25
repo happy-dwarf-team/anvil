@@ -675,6 +675,8 @@ install(FILES sdk/cmake/AnvilPluginConfig.cmake ${CMAKE_CURRENT_BINARY_DIR}/sdk/
 # The Linux cross toolchain, so plugin repositories build with the same -DCMAKE_TOOLCHAIN_FILE.
 install(DIRECTORY sdk/cmake/toolchains DESTINATION cmake COMPONENT sdk USE_SOURCE_PERMISSIONS)
 install(FILES sdk/CMakeLists.txt sdk/README.md version.txt LICENSE DESTINATION . COMPONENT sdk)
+# symbols.toml keeps digests, not the game's bytes (ADR 0003): the tool that turns bytes into digests.
+install(FILES tools/symbols-to-digest.py DESTINATION tools COMPONENT sdk)
 install(FILES ${tomlplusplus_SOURCE_DIR}/LICENSE DESTINATION third-party RENAME tomlplusplus-LICENSE.txt COMPONENT sdk)
 install(FILES ${zydis_SOURCE_DIR}/LICENSE DESTINATION third-party RENAME zydis-LICENSE.txt COMPONENT sdk)
 install(FILES ${zydis_SOURCE_DIR}/dependencies/zycore/LICENSE DESTINATION third-party RENAME zycore-LICENSE.txt COMPONENT sdk)

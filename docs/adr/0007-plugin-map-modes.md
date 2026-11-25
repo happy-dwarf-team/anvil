@@ -27,7 +27,7 @@ The enum is closed [pdb]: the three switches on the map mode (colour, name, prov
 
 Which numbers [pdb, live]:
 
-- **80–83** (`EXPANSION`, `CONTENT`, `UNIT`, `MUSIC` in the PDB) have no console name, no button and no paint of their own (one shared default case). In the lab run, no console name reached them. They go first.
+- **80–83** have no console name, no button and no paint of their own (one shared default case). In the lab run, no console name reached them. They go first.
 - **50, 57–60, 66, 68, 71, 84** are debug modes with a fixed label and no button. All nine are reachable from the console (`continent`, `armyeval`, `threateval`, `buildingeval`, `aihre`, `pathfind`, `airegion`, `technologygroup`, `aidev`). The game itself marks 57, 58, 59, 66 and 68 dirty, which only repaints them when they are shown, so it repaints the plugin's colours.
 - **Not lent:** 13 (the siege panel switches to it), 40 (the front end; it shares the political colour and the game marks it dirty), 41–43 (fog of war, the player's combined mode, nudge colours), and 44, 45, 47 and 65, which have console names and paint of their own.
 
