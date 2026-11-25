@@ -18,6 +18,7 @@ MSVC (Visual Studio 2022) and CMake 3.25 or newer.
 | `include/anvil/anvil_benchmark.h` | `anvil.benchmark` v1, the core's service for plugin fields in the start-up benchmark (C11, Anvil 1.4 and later) |
 | `include/anvil/anvil_benchmark.hpp` | the C++20 wrapper over it |
 | `bin/anvil.exe` | `anvil gen`, `anvil check` and `anvil port` |
+| `tools/symbols-to-digest.py` | turns the `bytes` of a `symbols.toml` into `sha256`, `size` and `any` before a commit (Python 3.11 or newer; Anvil 1.28 and later) |
 | `cmake/AnvilPluginConfig.cmake` | the `AnvilPlugin` CMake package |
 | `third-party/` | licenses of the code compiled into `anvil.exe` |
 
