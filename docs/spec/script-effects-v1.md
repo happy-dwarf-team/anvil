@@ -94,32 +94,32 @@ Within API 2 (ADR 0001): the structs grow only by appending behind `size`; a cha
 
 Each refusal is logged with the caller and the key. A key is never removed: nothing is unloaded in API 2.
 
-The service cannot ask the game's lexer at registration, because an early plugin loads before the game's C runtime. A key that is a word of the game is refused at parse time instead: when the hook sees a registered key with a token other than the parser's token for a name the lexer does not know (`0xF` on 1.37.5, seen in the game on both builds; the lexer's `FindTok` answers `0xC`, but that is not what reaches `ReadMember`), the key is passed to the game and the service logs once that the key is a word of the game or of its data.
+The service cannot ask the game's lexer at registration, because an early plugin loads before the game's C runtime. A key that is a word of the game is refused at parse time instead: when the hook sees a registered key with a token other than the parser's token for a name the lexer does not know (`0xF` on 1.37.5, seen in the game on both builds; the lexer's token lookup answers `0xC`, but that is not what reaches the member reader), the key is passed to the game and the service logs once that the key is a word of the game or of its data.
 
 ## 4. Life of an effect
 
-**Parse.** The hook on `CEffect::ReadMember(effect, reader, token)` runs for every member of every container effect, on whichever thread parses: seven threads in a start of the base game, one loading thread with almost all calls [live]. It reads the key from `CReader::_Toklhs` and looks it up (a bit per first byte of the registered keys, then a case-insensitive comparison with each key; no lock: the table is complete before the first parse). For a registered key whose right-hand side (`CReader::_Tokrhs`) is not `{`, it:
+**Parse.** The hook on the game's member reader of effects (`effect_read_member`: effect, reader, token), the function that reads one member of an effect block, runs for every member of every container effect, on whichever thread parses: seven threads in a start of the base game, one loading thread with almost all calls [live]. It reads the key from the reader's left-hand token (`lhs`) and looks it up (a bit per first byte of the registered keys, then a case-insensitive comparison with each key; no lock: the table is complete before the first parse). For a registered key whose right-hand side (the reader's `rhs` token) is not `{`, it:
 
-1. allocates its object from its own heap: the game's `CEffect` (0x38 bytes) followed by the key's index and a copy of the value (up to 255 bytes; a longer value is refused, as below);
-2. runs the game's constructor `CEffect::CEffect()`, which sets the token to −1 and registers the effect in the game's effect database under its mutex;
-3. puts its vtable over the game's: one copy of `CEffect`'s 19 slots, made once, with the scalar deleting destructor (0), `Assign` (9), `GetDesc` (13) and `Execute` (15) replaced; the rest stay the game's;
-4. appends the object to the parent's children through the game's `CArray::Append`, which grows the vector with the game's heap;
-5. calls its own `Assign` through the vtable with `_Tokrhs`, as the game does for its simple effects, which copies the value;
-6. stores the token in `_Token` (`CEffect::SetToken` is that one store).
+1. allocates its object from its own heap: the game's effect object (0x38 bytes) followed by the key's index and a copy of the value (up to 255 bytes; a longer value is refused, as below);
+2. runs the game's effect constructor (`effect_ctor`), which sets the token to −1 and registers the effect in the game's effect database under its mutex;
+3. puts its vtable over the game's: one copy of the effect's 19 slots, made once, with the deleting destructor (0), the value's assignment (9), the description (13) and the execution (15) replaced; the rest stay the game's;
+4. appends the object to the parent's children through the game's array append (`array_append`), which grows the vector with the game's heap;
+5. calls its own assignment through the vtable with the `rhs` token, as the game does for its simple effects, which copies the value;
+6. stores the token in the effect's token field (`effect_set_token` is that one store).
 
 A block on a registered key, and a value over 255 bytes, are passed to the game, which logs `Unknown effect type. Key: <key>` and skips them; the service adds one line to `anvil.log` per key with the reason. Every other member goes to the game unchanged.
 
-**Execute.** The game calls slot 15 (`Execute(CEventScope&, int)`) where it runs its own effects: an event option or a decision inside the command that every client runs, an on-action in the tick, a scripted effect wherever it is used [live: on the main thread, inside the command of an event option and of an AI decision; the `int` was 0]. The service:
+**Execute.** The game calls slot 15 (the execution: the effect, the scope, an `int`) where it runs its own effects: an event option or a decision inside the command that every client runs, an on-action in the tick, a scripted effect wherever it is used [live: on the main thread, inside the command of an event option and of an AI decision; the `int` was 0]. The service:
 
 1. returns at once when the owner is suspended (design §13), asked through `anvil.control` at each call;
-2. fills `AnvilScriptScope` from the scope's own fields, as the game's simple effects read them: the province at `CEventScope+0x28` (as `CProvinceCultureEffect::Execute`), the country's tag at `+0x44` when `+0x4B` is set and at `+0x2C` otherwise (as `CTreasuryEffect::Execute`), `""` when that tag is not valid. `CEffect::GetScopeProvinceId` and `GetScopeCountryTag` are not used: they answer only for an effect's scope bits (`ROOT`, `FROM`, event targets), which the service's effects never have, and gave 0 and `---` in the game [live]. In a province scope the country is `""` [live];
+2. fills `AnvilScriptScope` from the scope's own fields, as the game's simple effects read them: the province at `+0x28` of the scope (as the province culture effect reads it), the country's tag at `+0x44` when `+0x4B` is set and at `+0x2C` otherwise (as the treasury effect reads it), `""` when that tag is not valid. The effect's own getters of its scope's province ID and country tag are not used: they answer only for an effect's scope bits (`ROOT`, `FROM`, event targets), which the service's effects never have, and gave 0 and `---` in the game [live]. In a province scope the country is `""` [live];
 3. calls the plugin's `execute`.
 
 `anvil-game.world` answers `ANVIL_ERROR_WRONG_PHASE` inside `execute`: the game is in the middle of a command or a day. The plugin reads what it needs itself or from the call.
 
-**Describe.** When the game builds a tooltip it calls slot 13 (`GetDesc(CEventScope&, CString prefix, int, bool)`). The service calls the game's base `GetDesc`, which frees the prefix the caller passed by value and gives an empty string. Without `describe`, or when it answers 0, that empty string is the answer, as for a bare `CEffect`: no line in the tooltip [live]. Otherwise the line (at most 511 bytes) is converted by ADR 0007's rule as anvil-map applies it ([map-modes-v1 §7](map-modes-v1.md#7-text); clarified in anvil#305: UTF-8 kept when Mei reports UTF-8 text, Windows-1252 with `?` otherwise, cut at the first byte that is not UTF-8; literal, so `$` stays and `§`, which the game cannot escape, becomes `?`; line breaks dropped, the line is one line) and ended with a line break, as the game's own lines are (the parent indents them; without the break the next line joins ours [live]), and built as the game's string with the game's `CString::CString(const char*)`, so the game frees it with its own heap.
+**Describe.** When the game builds a tooltip it calls slot 13 (the description: the effect, the scope, a `CString` prefix by value, an `int` and a `bool`). The service calls the game's base description, which frees the prefix the caller passed by value and gives an empty string. Without `describe`, or when it answers 0, that empty string is the answer, as for a bare effect object: no line in the tooltip [live]. Otherwise the line (at most 511 bytes) is converted by ADR 0007's rule as anvil-map applies it ([map-modes-v1 §7](map-modes-v1.md#7-text); clarified in anvil#305: UTF-8 kept when Mei reports UTF-8 text, Windows-1252 with `?` otherwise, cut at the first byte that is not UTF-8; literal, so `$` stays and `§`, which the game cannot escape, becomes `?`; line breaks dropped, the line is one line) and ended with a line break, as the game's own lines are (the parent indents them; without the break the next line joins ours [live]), and built as the game's string with the game's `CString` constructor from a `const char*` (`cstring_from_text`), so the game frees it with its own heap.
 
-**Destroy.** The game deletes a parent's children through slot 0 when it drops the parent: a reload of the scripts, or never, at exit [pdb]. The service's destructor runs the game's `~CEffect()` (which unregisters it), then frees the object to its own heap when the flag asks for it. Nothing else of the game frees these objects [pdb]; a reload was not tried in the game.
+**Destroy.** The game deletes a parent's children through slot 0 when it drops the parent: a reload of the scripts, or never, at exit [pdb]. The service's destructor runs the game's effect destructor (`effect_dtor`, which unregisters it), then frees the object to its own heap when the flag asks for it. Nothing else of the game frees these objects [pdb]; a reload was not tried in the game.
 
 **Saves and hot-join.** Nothing of an effect is written to a save [pdb]. A loaded save, a hot-joining player and a new game parse nothing; the effects parsed at start-up stay.
 
@@ -133,25 +133,25 @@ A block on a registered key, and a value over 255 bytes, are passed to the game,
 
 - The parse runs on the game's parsing threads, possibly several at once. The key table is read-only after registration, and each object belongs to the thread that parses its parent, so the hook takes no lock of its own; the game's constructor takes the game's mutex.
 - `execute` and `describe` run on the thread the game uses for them: the main thread in every call seen [live]. `describe` runs often (the game builds a decision's description in the background), so it must be cheap. A plugin that keeps state across calls guards it itself.
-- The empty cost is a test of the key's first byte per call of `ReadMember`, and a comparison with the registered keys that start with it: 862 474 calls in a start of the base game with a small mod [live]. The release measures the start-up with the service and no registered key against Anvil without it (design §17).
+- The empty cost is a test of the key's first byte per call of the member reader, and a comparison with the registered keys that start with it: 862 474 calls in a start of the base game with a small mod [live]. The release measures the start-up with the service and no registered key against Anvil without it (design §17).
 
 ## 7. Symbols
 
-Every address is a declared symbol; every offset is a value taken from verified bytes. RVAs are Steam 1.37.5 / GOG 1.37.5.2 (`eu4-1.37.5-steam-win64`, `eu4-1.37.5.2-gog-win64`); the bytes are the same on both builds unless the row says otherwise.
+Every address is a declared symbol; every offset is a value taken from verified bytes. RVAs are Steam 1.37.5 / GOG 1.37.5.2 (`eu4-1.37.5-steam-win64`, `eu4-1.37.5.2-gog-win64`); the bytes are the same on both builds unless the row says otherwise. `symbols.toml` verifies them by `sha256` and `size` (ADR 0003); the sizes below are those.
 
 | Symbol | Steam | GOG | What | Values |
 | --- | --- | --- | --- | --- |
-| `effect_read_member` | `0x5DEC50` | `0x5DE720` | `CEffect::ReadMember(CReader&, int)`, the function hook: `48 89 5C 24 08 48 89 74 24 10 55 57 41 54 41 56 41 57` | |
-| `effect_lhs_site` | `0x5E4B04` | `0x5E45D4` | `lea rbx,[rsi+30h]` in its default branch: `48 8D 5E 30 48 8B CB` | `lhs` (`CReader::_Toklhs`, 0x30) |
-| `effect_assign_site` | `0x5E0F43` | `0x5E0A13` | `lea rcx,[rdi+10h]` … `lea rdx,[rsi+440h]; call [rax+48h]` in a simple effect's case: `48 8D 4F 10 48 8D 54 24 20 E8 ?? ?? ?? ?? 48 8B 4C 24 20 48 8B 01 48 8D 96 40 04 00 00 FF 50 48` | `children` (0x10), `rhs` (`_Tokrhs`, 0x440), `assign` (slot 0x48) |
-| `effect_set_token` | `0x5EF140` | `0x5EEC10` | `CEffect::SetToken`: `89 51 28 C3` | `token` (0x28) |
-| `effect_ctor` | `0x5DE770` | `0x5DE240` | `CEffect::CEffect()`: `48 89 5C 24 20 48 89 4C 24 08 57 48 83 EC 40 48 8B D9 33 C0` | |
-| `effect_vtable_site` | `0x5DE797` | `0x5DE267` | `lea rax,[CEffect::vftable]; mov [rcx],rax` in it; bytes per build (`48 8D 05 AA FD 6B 01 48 89 01` / `48 8D 05 5A 90 6A 01 48 89 01`) | `vtable` (rip-relative: Steam `0x1C9E548`, GOG `0x1C872C8`) |
-| `effect_dtor` | `0x5DE8D0` | `0x5DE3A0` | `CEffect::~CEffect()`: `48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 41 56 48 83 EC 40 4C 8B F1` | |
-| `array_append` | `0xC9F10` | `0xC9F40` | `CArray<T*>::Append`, a `std::vector<void*>` push: `4C 8B C2 48 8B 51 08 48 3B 51 10 74 0C 49 8B 00 48 89 02 48 83 41 08 08 C3` | |
-| `scope_province_site` | `0x62367F` | `0x62314F` | `CProvinceCultureEffect::Execute+0x1F`, `cmp dword [rdx+28h],0`: `48 8B DA 48 8B F9 83 7A 28 00` | `province` (0x28) |
-| `scope_country_site` | `0x5EFC55` | `0x5EF725` | `CTreasuryEffect::Execute+0x25`, the override's flag and the two tags: `44 0F B6 42 4B BA 44 00 00 00 8B C2 41 B9 2C 00 00 00 45 84 C0 41 0F 44 C1` | `override_valid` (0x4B), `override` (0x44), `tag` (0x2C) |
-| `cstring_from_text` | `0x1703550` | `0x16ED320` | `CString::CString(const char*)`: `40 53 48 83 EC 20 33 C0 48 C7 41 18 0F 00 00 00 48 89 01 48 8B D9 88 01` | |
+| `effect_read_member` | `0x5DEC50` | `0x5DE720` | the member reader of effects (effect, reader, token), the function hook: its prologue, 18 bytes | |
+| `effect_lhs_site` | `0x5E4B04` | `0x5E45D4` | in its default branch, 7 bytes that take the address of the reader's left-hand token | `lhs` (the reader's left-hand token, 0x30) |
+| `effect_assign_site` | `0x5E0F43` | `0x5E0A13` | in a simple effect's case, 32 bytes (4 of them, a call target, not compared): the append to the parent's children, then the virtual call that gives the new effect the right-hand token | `children` (0x10), `rhs` (the reader's right-hand token, 0x440), `assign` (slot 0x48) |
+| `effect_set_token` | `0x5EF140` | `0x5EEC10` | the effect's token setter, 4 bytes: one store and a return | `token` (0x28) |
+| `effect_ctor` | `0x5DE770` | `0x5DE240` | the effect constructor: its first 20 bytes | |
+| `effect_vtable_site` | `0x5DE797` | `0x5DE267` | in it, 10 bytes that load the effect's vtable and store it in the object; a digest per build, since the vtable's address differs | `vtable` (rip-relative: Steam `0x1C9E548`, GOG `0x1C872C8`) |
+| `effect_dtor` | `0x5DE8D0` | `0x5DE3A0` | the effect destructor: its first 24 bytes | |
+| `array_append` | `0xC9F10` | `0xC9F40` | the game's append to an array of pointers, a `std::vector<void*>` push: the whole fast path, 25 bytes | |
+| `scope_province_site` | `0x62367F` | `0x62314F` | `+0x1F` in the province culture effect's execution, 10 bytes that test the scope's province | `province` (0x28) |
+| `scope_country_site` | `0x5EFC55` | `0x5EF725` | `+0x25` in the treasury effect's execution, 25 bytes that read the override's flag and pick one of the two tags | `override_valid` (0x4B), `override` (0x44), `tag` (0x2C) |
+| `cstring_from_text` | `0x1703550` | `0x16ED320` | the `CString` constructor from a `const char*`: its first 24 bytes | |
 
 The vtable's slot count (19) and the slots replaced (0, 9, 13, 15) come from the PDB and are the same in both builds' vtables [pdb]; the implementation checks at load that slot 4 of the copied vtable is `effect_read_member` and slot 15 lies inside `eu4.exe`, and registers no service when either fails. The GOG build 1.37.5.0 comes as any third build does (design §5.2).
 
@@ -159,7 +159,7 @@ An absent symbol (§5.2) on a future build: without any of these the service is 
 
 ## 8. Tests
 
-- Unit tests (`tests/anvil_script_plugin_tests.cpp`) with a stand-in game: a fake `ReadMember`, a fake vtable of 19 slots and a reader with `_Toklhs` and `_Tokrhs`, for the key rule, registration's order of checks, the phase rule, a block and a long value passed on, suspension making `execute` a no-op, `describe` truncation and the destructor's free.
+- Unit tests (`tests/anvil_script_plugin_tests.cpp`) with a stand-in game: a fake member reader, a fake vtable of 19 slots and a reader with its left-hand and right-hand tokens, for the key rule, registration's order of checks, the phase rule, a block and a long value passed on, suspension making `execute` a no-op, `describe` truncation and the destructor's free.
 - The game test (Steam and GOG, under the lab's lock): a test plugin registers two keys, a test mod uses them in an event option, a decision, a scripted effect with a parameter and an AI decision; it checks the tooltip line, `has_terrain`-style results right after the effect, a block passed on, the plugin missing (`Unknown effect type` and only that key skipped), a `main` consumer refused, an ironman-style suspension (effect does nothing), and the start-up's empty cost.
 
 ## 9. Not in version 1

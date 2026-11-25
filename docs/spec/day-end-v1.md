@@ -56,7 +56,7 @@ typedef struct AnvilScriptDayEndService {
 } AnvilScriptDayEndService;
 ```
 
-The date is that of `anvil-game`'s `AnvilGameDate` (hours since 1 January −5000 in 365-day years, no leap days): the game adds 24 hours at the start of `HandleDailyTick`, so the Day end carries the date the day was computed for, the date `anvil-game.day` reports after the frame.
+The date is that of `anvil-game`'s `AnvilGameDate` (hours since 1 January −5000 in 365-day years, no leap days): the game adds 24 hours at the start of its daily update (`daily_tick`), so the Day end carries the date the day was computed for, the date `anvil-game.day` reports after the frame.
 
 C++: `host.service<AnvilScriptDayEndService>(ANVIL_SCRIPT_DAY_END_SERVICE, ANVIL_SCRIPT_DAY_END_SERVICE_VERSION)` and a plain `noexcept` function. As for effects, the callback is called by the game through the service, not through a change, so an exception that leaves it ends the process and the crash report names the plugin's code (design §12).
 
@@ -93,7 +93,7 @@ Each refusal is logged with the caller. A plugin may subscribe more than once (e
 
 ## 4. The Day end
 
-**Where.** A function hook on `CGameState::HandleDailyTick(this)`. Its one caller is `CDailyTickCommand::Execute`, the day's command, which after the return only logs and calls `COOSHandler::MakeSyncCheck` [pdb]. The detour:
+**Where.** A function hook on the game state's daily update (`daily_tick`, one argument: the game state). Its one caller is the execution of the day's command, which after the return only logs and calls the day's sync check (the checksum multiplayer compares) [pdb]. The detour:
 
 1. calls the game's function;
 2. returns at once when nobody subscribed;
@@ -102,9 +102,9 @@ Each refusal is logged with the caller. A plugin may subscribe more than once (e
 
 The list is closed when the detour is first entered, before the game's day runs, so a subscription from inside that first day is refused too.
 
-**Thread.** The main thread, inside the day's command: every `ParallelFor` of the day has waited for its tasks, the monthly and yearly updates are done, and the last frame drawn inside the day is over [pdb]. The service notes the thread of the first Day end and logs once if a later one differs; it calls the callbacks either way.
+**Thread.** The main thread, inside the day's command: every parallel pass of the day has waited for its tasks, the monthly and yearly updates are done, and the last frame drawn inside the day is over [pdb]. The service notes the thread of the first Day end and logs once if a later one differs; it calls the callbacks either way.
 
-**What a callback may do.** It runs inside a command, like an effect: `anvil-game.world` answers `ANVIL_ERROR_WRONG_PHASE` there (design §13.1). It may call game functions it declares itself (Chisel calls `CalculateNeighborPaths` and `CalcNavalDistances`) and change game state that every client changes alike. In multiplayer every client runs the same Day ends in the same order; a callback must be deterministic, draw nothing from the game's RNG, and leave what the checksum compares the same on every client (ADR 0004, stage 3).
+**What a callback may do.** It runs inside a command, like an effect: `anvil-game.world` answers `ANVIL_ERROR_WRONG_PHASE` there (design §13.1). It may call game functions it declares itself (Chisel calls the game's recomputation of the paths between neighbouring provinces and of the naval distances) and change game state that every client changes alike. In multiplayer every client runs the same Day ends in the same order; a callback must be deterministic, draw nothing from the game's RNG, and leave what the checksum compares the same on every client (ADR 0004, stage 3).
 
 **When not.** No Day end in the menu, while the game is paused, while a save loads, and in a session until its first day has passed. A loaded save, a new game and a hot-join start with no Day end; a plugin that needs work before the first day uses `anvil-game.session`.
 
@@ -120,12 +120,12 @@ With no subscriber the detour costs a call of the game's function through the ho
 
 ## 7. Symbols
 
-RVAs are Steam 1.37.5 / GOG 1.37.5.2 and 1.37.5.0 (`eu4-1.37.5-steam-win64`, `eu4-1.37.5.2-gog-win64`, `eu4-1.37.5.0-gog-win64`); the bytes are the same on all three builds, and both GOG builds have the same addresses [pdb].
+RVAs are Steam 1.37.5 / GOG 1.37.5.2 and 1.37.5.0 (`eu4-1.37.5-steam-win64`, `eu4-1.37.5.2-gog-win64`, `eu4-1.37.5.0-gog-win64`); the bytes are the same on all three builds, and both GOG builds have the same addresses [pdb]. `symbols.toml` verifies them by `sha256` and `size` (ADR 0003).
 
 | Symbol | Steam | GOG | What | Values |
 | --- | --- | --- | --- | --- |
-| `daily_tick` | `0x758430` | `0x7575F0` | `CGameState::HandleDailyTick()`, the function hook: `48 8B C4 55 53 56 57 41 54 41 55 41 56 41 57 48 8D A8 C8 FE FF FF 48 81 EC F8 01 00 00` | |
-| `daily_tick_date_site` | `0x7584C1` | `0x757681` | `HandleDailyTick+0x91` to `+0xCC`: `lea r15,[rsi+1DD0h]` … `add dword [r15],18h`, the day's 24 hours added to the date: `4C 8D BE D0 1D 00 00 49 8B CF E8 ?? ?? ?? ?? 4C 8D 25 ?? ?? ?? ?? 83 E8 1F 78 0F 49 8B CC 90 41 FF C5 48 8D 49 04 2B 01 79 F5 49 8B CF E8 ?? ?? ?? ?? 89 85 40 01 00 00 41 83 07 18` | `date` (`CGameState+0x1DD0`, int32 hours) |
+| `daily_tick` | `0x758430` | `0x7575F0` | the game state's daily update, the function hook: its first 29 bytes, the prologue (eight register saves, the frame pointer and 0x1F8 bytes of locals) | |
+| `daily_tick_date_site` | `0x7584C1` | `0x757681` | `+0x91` to `+0xCC` of the daily update, 60 bytes (12 of them not compared: two call targets and an address): it takes the date's address in the game state and ends by adding the day's 24 hours to it | `date` (`CGameState+0x1DD0`, int32 hours) |
 
 The 11 symbols of the effects (script-effects-v1.md section 7) get the GOG 1.37.5.0 build with the addresses of 1.37.5.2 through `anvil port`, checked with `anvil check --exe` on that build.
 
@@ -133,7 +133,7 @@ An absent symbol (§5.2) on a future build: without either of these two the Day 
 
 ## 8. Tests
 
-- Unit tests (`tests/anvil_script_plugin_tests.cpp`) with a stand-in game: a fake `HandleDailyTick` that advances a date, for the order of checks of section 3, the list closed at the first Day end, the order of callbacks, a suspended owner skipped, the date's decode and the flags on 1 January, 1 February and an ordinary day, and no callback with no subscriber.
+- Unit tests (`tests/anvil_script_plugin_tests.cpp`) with a stand-in game: a fake daily update that advances a date, for the order of checks of section 3, the list closed at the first Day end, the order of callbacks, a suspended owner skipped, the date's decode and the flags on 1 January, 1 February and an ordinary day, and no callback with no subscriber.
 - The game test (Steam and GOG 1.37.5.2, under the lab's lock) with a lab plugin that subscribes and logs each Day end: one callback per day over a run that crosses a month and a year, on the main thread (`anvil-game`'s `main_thread_id`), with the date `anvil-game.day` then reports and the flags on the 1st and on 1 January; nothing before the first day of a session and nothing in the menu or on a pause; a plugin with `affects_gameplay = false` refused. The empty hook's cost: a year at speed 5 with `anvil-script` of this release and with that of the release before, two runs each.
 
 ## 9. Not in version 1

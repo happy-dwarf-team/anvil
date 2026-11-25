@@ -70,13 +70,13 @@ A hidden window costs a wake-up of the plugin's thread a second and nothing on t
 ## What `anvil-game.world` gained for it (1.21.0)
 
 - `country_timed_modifiers`, `province_timed_modifiers` and their `_keys` calls: the game's lists of
-  `CTimedModifier` (`CCountry` `+0x1F0`, a linked list; `CProvince` `+0x2F0`, a vector), each with its
-  `CStaticModifier`'s key (`+0x158`, what the save writes as `modifier`), the start and end dates (`+0x40`,
+  timed modifiers (a country's at `+0x1F0`, a linked list; a province's at `+0x2F0`, a vector), each with
+  its static modifier's key (`+0x158`, what the save writes as `modifier`), the start and end dates (`+0x40`,
   `+0x44`, the unset date for none; a modifier given for good ends at the game's date for never, a global
-  that `CCountry::AddTemporaryModifier` reads, which the save writes as `date=-1.1.1`), the ruler flag
-  (`+0x48`) and `hidden` (`+0x4B`). The offsets come
-  from `CCountry::HasModifier`, `CProvince::HasModifier` and `CTimedModifier::WriteMembers` in the GOG
-  1.37.5.2 PDB, each site unique in all three builds.
+  that the code adding a temporary modifier to a country reads, which the save writes as `date=-1.1.1`), the
+  ruler flag (`+0x48`) and `hidden` (`+0x4B`). The offsets come from the code that tests a country's and a
+  province's modifiers and from the code that writes a timed modifier to the save, each site unique in all
+  three builds.
 - `province_view`: the province the province view shows while its window is shown, through the session's
   selection object, its view, the view's province and window, and the window's visible byte: the same
   path Tongs reads.
