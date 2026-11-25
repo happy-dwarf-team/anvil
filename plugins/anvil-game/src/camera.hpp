@@ -1,7 +1,8 @@
 // The map camera's pan as the arrow keys make it (include/anvil/anvil_game.h,
-// anvil-game.camera, pan). CEU3Camera::HandleMouseAndKBInput turns the arrows into a
-// vector of length 1 (x to the right, y up) times a speed, and
-// CEU3Camera::UpdateMouseAndKB pans by it with the frame's time, capped.
+// anvil-game.camera, pan). The camera's mouse and keyboard input (symbol
+// camera_lock) turns the arrows into a vector of length 1 (x to the right, y up)
+// times a speed, and its update (camera_frame_time_cap) pans by it with the
+// frame's time, capped.
 #pragma once
 
 #include <cmath>
@@ -19,7 +20,7 @@ struct CameraSpeed {
 };
 
 struct CameraStep {
-    float pan[2] = {0, 0};  // the vector CEU3Camera::Pan takes
+    float pan[2] = {0, 0};  // the vector the camera's pan (camera_pan) takes
     float frame_time = 0;
 };
 

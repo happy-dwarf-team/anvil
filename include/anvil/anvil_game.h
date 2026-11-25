@@ -860,14 +860,15 @@ typedef struct AnvilGameWorldService {
      * so *province 0); not checked in the game. */
     AnvilResult (*selected_province)(int32_t *province);
     /* The province under the point (x, y) of the game window's client area, in
-     * pixels, as the game's hover finds it: the game's own
-     * CEU3GraphicalMap::GetProvinceIDFromMouse, where the pick ray through the
+     * pixels, as the game's hover finds it: the graphical map's own province
+     * pick (symbol province_from_point), where the pick ray through the
      * point meets the terrain, so it follows the camera. Sea and wasteland
      * provinces count; *province 0 off the map. It calls that function and
      * changes nothing; a call costs about as much as one hover. */
     AnvilResult (*province_at)(int32_t x, int32_t y, int32_t *province);
     /* The army or navy the map picks at the same point, as the game's cursor
-     * does (CEU3GraphicalMap::GetSelectable with an empty selection): its id,
+     * does (the graphical map's selectable pick, symbol selectable_at_point,
+     * with an empty selection): its id,
      * owner and kind. ANVIL_ERROR_NOT_FOUND when the map picks no unit there
      * (a province, or nothing). Any country's unit, as the game shows it. */
     AnvilResult (*unit_at)(int32_t x, int32_t y, AnvilGameUnitRef *out);
@@ -879,8 +880,8 @@ typedef struct AnvilGameWorldService {
      * The regions the fleet `fleet` may explore, as the game's naval
      * exploration dialog offers them: `explore` ANVIL_GAME_EXPLORE_COAST for
      * the dialog's coast list, ANVIL_GAME_EXPLORE_SEA for its sea list. It
-     * calls the dialog's own CExplorationNavalMission::GetSelectableRegions
-     * for the fleet and its owner, frees what that allocates, and changes
+     * calls the naval exploration mission's own region list (symbol
+     * exploration_regions) for the fleet and its owner, frees what that allocates, and changes
      * nothing; the game works out both lists in each call. Each region once,
      * in the game's order (not sorted). From the game's code, the lists follow
      * the country (its range, from its provinces) and the fleet's flagships
@@ -893,7 +894,7 @@ typedef struct AnvilGameWorldService {
      * army; ANVIL_ERROR_NOT_FOUND for no such unit. */
     AnvilResult (*exploration_regions)(const AnvilGameUnitRef *fleet, int32_t explore, int32_t *regions,
                                        uint32_t capacity, uint32_t *count);
-    /* The region's name as the game shows it (CRegionBase::GetName, its
+    /* The region's name as the game shows it (the region's name getter, its
      * translation in the game's language), and its script key
      * (`baltic_sea_region`); ANVIL_ERROR_NOT_FOUND for an index past the map's
      * regions. */
@@ -995,7 +996,8 @@ typedef struct AnvilGameWorldService {
  *
  * Choosing an event option. The type does what the option's button does: it
  * finds the event window of the local player's pending event by its id and
- * calls the game's CEventWindow::OptionSelected, which posts the command and
+ * calls the event window's own option choice (symbol option_selected), which
+ * posts the command and
  * closes the window. A command posted beside the window would leave it open,
  * and a click in it would run the option's effects a second time, so there is
  * no other path. Before the call the service checks the conditions the game's
@@ -1007,7 +1009,7 @@ typedef struct AnvilGameWorldService {
  *     paused) the game keeps the buttons disabled after the window opens. The
  *     service does not wait: ANVIL_ERROR_WRONG_PHASE, try a frame later.
  *   - `count` is 0 and `units` NULL; `size` covers `option_index`.
- *   - Results: `posted` 1 when OptionSelected was called; `skipped` 1 when the
+ *   - Results: `posted` 1 when the option choice was called; `skipped` 1 when the
  *     window is there but already chosen (the same frame); ANVIL_ERROR_NOT_FOUND
  *     without a window for the id (chosen already, an AI's or another
  *     country's event, or the game's event windows turned off);
@@ -1136,7 +1138,7 @@ typedef struct AnvilGameCommandsService {
 
 /* --- Since anvil-game 1.25.0: the map camera --------------------------------
  *
- * The game's map camera (CEU3Camera): client state, not game state. Only this
+ * The game's map camera: client state, not game state. Only this
  * client's view moves, as with the player's own keys and mouse; nothing goes
  * to the game state or to the other players in multiplayer.
  *
@@ -1144,7 +1146,7 @@ typedef struct AnvilGameCommandsService {
  * `position` is where the camera is, `look_at` the point it looks at; the
  * game moves both towards their targets over the next frames after a pan, so
  * a pan shows in them a frame or more later.
- * LOCKED: the game holds the camera still (its _bLocked, set while a menu is
+ * LOCKED: the game holds the camera still (its lock byte, set while a menu is
  * open or the graphics cannot draw); the arrow keys and the mouse then do not
  * move it, and pan() refuses. */
 #define ANVIL_GAME_CAMERA_LOCKED 0x1u

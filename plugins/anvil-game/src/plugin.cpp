@@ -104,15 +104,15 @@ struct Layout {
     std::uint32_t gui_shortcut_listeners = 0;  // gui+: qword, the size of its set of listeners
     bool restart = false;                 // false when these symbols are absent on this build
     std::uint32_t restart_flags = 0;      // app+: word, the exit and restart flags (0x0101 sets both)
-    std::uint32_t resign = 0;             // session+: byte, the in-game idler's _bResignGame
+    std::uint32_t resign = 0;             // session+: byte, the in-game session's resign flag
     sym::Types::camera_pan::Pointer camera_pan = nullptr;  // set only with anvil-game.camera registered
-    std::uint32_t camera = 0;             // session+: the map camera, CEU3Camera*
+    std::uint32_t camera = 0;             // session+: the map camera, a pointer
     std::uint32_t frame_time = 0;         // session+: float, the frame time the camera pans with
-    std::uint32_t camera_position = 0;    // camera+: float[3], _CurrentPosition
-    std::uint32_t camera_look_at = 0;     // camera+: float[3], _CurrentLookAt
-    std::uint32_t camera_locked = 0;      // camera+: byte, _bLocked
+    std::uint32_t camera_position = 0;    // camera+: float[3], the current position
+    std::uint32_t camera_look_at = 0;     // camera+: float[3], the current look-at point
+    std::uint32_t camera_locked = 0;      // camera+: byte, the lock
     std::uint32_t camera_height = 0;      // camera+: float, the height the arrows' speed grows with
-    const std::uintptr_t* settings = nullptr;  // CSettings::_pInstance
+    const std::uintptr_t* settings = nullptr;  // the game's settings object, a global pointer
     std::uint32_t scroll_speed = 0;       // settings+: float, the player's scroll speed
     anvil_game::CameraSpeed camera_speed;
 };
@@ -1897,12 +1897,12 @@ void load_world(anvil::Host& host) {
     if (host.present(sym::flag_dates) && host.present(sym::flag_names) && host.present(sym::country_flags) &&
         host.present(sym::province_flags) && host.present(sym::global_flags) && host.present(sym::monarch_flags)) {
         constexpr std::uint32_t begin = sym::flag_dates.begin;
-        // Each place reads a CIntegerFlags' index vector: its begin and end, 8 bytes apart.
+        // Each place reads a flag set's index vector: its begin and end, 8 bytes apart.
         static_assert(sym::flag_dates.end == begin + 8 && sym::province_flags.flags_end == sym::province_flags.flags_begin + 8 &&
                       sym::province_flags.permanent_end == sym::province_flags.permanent_begin + 8 &&
                       sym::global_flags.end == sym::global_flags.begin + 8 && sym::province_flags.flags_begin >= begin &&
                       sym::province_flags.permanent_begin >= begin && sym::global_flags.begin >= begin,
-                      "the flag symbols disagree on CIntegerFlags");
+                      "the flag symbols disagree on the flag set's layout");
         if (host.value(sym::global_flags, "root") == root) {
             l.flag_names = base + host.value(sym::flag_names, "names");
             l.flags_begin = begin;
@@ -2023,7 +2023,7 @@ void load_world(anvil::Host& host) {
         host.present(sym::region_texts)) {
         static_assert(sym::region_at_index.regions_end == sym::region_at_index.regions + 8 &&
                           sym::region_at_index.pointer_shift == 3,
-                      "the region symbols disagree on CMap::_Regions");
+                      "the region symbols disagree on the map's region vector");
         l.game_map = base + host.value(sym::game_map, "map");
         l.regions = sym::region_at_index.regions;
         l.regions_end = sym::region_at_index.regions_end;
@@ -2169,7 +2169,7 @@ void load_world(anvil::Host& host) {
 struct CommandsLayout {
     sym::Types::command_post::Pointer post = nullptr;
     sym::Types::command_new::Pointer allocate = nullptr;
-    std::uint32_t game = 0;     // the idler (the root's session): its game, CEU4Application
+    std::uint32_t game = 0;     // the idler (the root's session): its game, the application
     std::uint32_t session = 0;  // the game: its CSession
     std::uint32_t hotjoin = 0;  // CSession: byte, a hot-join in progress
     sym::Types::drill_command::Pointer drill = nullptr;
@@ -2185,7 +2185,7 @@ struct CommandsLayout {
     std::uint32_t allowed = 0;  // CSession: byte, posting allowed now
     // EVENT_OPTION: `option_selected` 0 when absent on this build.
     sym::Types::option_selected::Pointer option_selected = nullptr;
-    std::uintptr_t window_vtable = 0;  // CEventWindow's
+    std::uintptr_t window_vtable = 0;  // the event window's (event_window)
     std::uint32_t popups = 0;          // idler: the pop-up list's head
     std::uint32_t node_next = 0;       // a pop-up node: the next one
     std::uint32_t pending = 0;         // window: int32, its pending event's id
@@ -2214,14 +2214,14 @@ struct CommandsLayout {
     sym::Types::siege_toggle_area::Pointer siege_area = nullptr;
     sym::Types::suppress_toggle_area::Pointer suppress_area = nullptr;
     std::uint32_t map_part = 0;  // province: its map part
-    std::uint32_t map_area = 0;  // map part: its CMapArea
+    std::uint32_t map_area = 0;  // map part: its map area
 };
 
 CommandsLayout g_commands;
 const AnvilControlService* g_control = nullptr;  // asked on first use: anvil.control may register after us
 anvil_game::CommandPoster g_poster;              // main thread only
 
-// The game's list of units as CMergeCommand's constructor reads it: head,
+// The game's list of units as the merge command's constructor (merge_command) reads it: head,
 // tail, count; a node holds the unit, the previous and the next node.
 struct GameUnitNode {
     std::uintptr_t unit;
@@ -2277,8 +2277,8 @@ struct GameString {
     std::uint64_t capacity;
 };
 
-// The option index after the last '_' of a button's name, as CEventWindow::Select
-// reads it; -1 for a name that has none. No objects with destructors: it runs under __try.
+// The option index after the last '_' of a button's name, as the event window's
+// button select (option_click) reads it; -1 for a name that has none. No objects with destructors: it runs under __try.
 std::int32_t button_option_unguarded(std::uintptr_t button) {
     const auto* s = reinterpret_cast<const GameString*>(button + g_commands.button_name);
     if (s->size == 0 || s->size > 64 || s->size > s->capacity) return -1;
@@ -2610,7 +2610,7 @@ void load_commands(anvil::Host& host) {
     if (host.present(sym::option_selected) && host.present(sym::option_window) && host.present(sym::option_click) &&
         host.present(sym::button_state) && host.present(sym::event_window) && host.present(sym::popup_list_tail) &&
         host.present(sym::popup_list_append)) {
-        // OptionSelected takes the session from the window's idler, as the buttons
+        // The option choice takes the session from the window's idler, as the buttons
         // of the unit panel do: the same path as the other types.
         c.option_selected = host.function(sym::option_selected);
         c.window_vtable = host.game().image_base + host.value(sym::event_window, "vtable");

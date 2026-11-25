@@ -17,15 +17,15 @@
 namespace model_reload {
 
 struct Lookup {
-    std::uint32_t hash = 0;  // the id's hash, low 32 bits of _nHash
-    std::string name;        // the animation's name (_Name)
+    std::uint32_t hash = 0;  // the id's hash, low 32 bits of the entry's hash (+0x10)
+    std::string name;        // the animation's name (+0x20)
 };
 
-// One CPdxMeshType of the game's gfx type table, as read.
+// One mesh type of the game's gfx type table, as read.
 struct MeshType {
     std::uintptr_t address = 0;
-    std::string name;  // _Key
-    std::string file;  // _Filename
+    std::string name;  // the key (+0x10)
+    std::string file;  // the file name (+0xA0)
     float scale = 1.0f;
     float cull_square = 0.0f;
     std::vector<Lookup> lookups;

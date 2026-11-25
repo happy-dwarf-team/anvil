@@ -8,7 +8,7 @@
 //     map mode where it has no colour); it runs in any frame, nested ones
 //     included, so it reads nothing but that buffer and the game's count;
 //   - map_mode_label and map_mode_sprite give the button's name, tooltip and
-//     icon; the call in CSettings::WriteMembers gets the sprite the writer
+//     icon; the call in the writer of settings.txt (settings_sprite_call) gets the sprite the writer
 //     skips, so settings.txt never keeps a plugin mode under a debug mode's name;
 //   - add_map_modes appends the tab's plugin modes to the array the game
 //     builds the tab's buttons from;
@@ -18,8 +18,8 @@
 // nothing the player sees changes.
 //
 // The step runs after each frame of the main loop (anvil-game.frame) while a
-// session runs: a mode show() asked for is set through the game's
-// SetCurrentMapMode, then shown/hidden when the current map mode changes, the shown
+// session runs: a mode show() asked for is set through the session's map
+// mode setter (set_current_map_mode), then shown/hidden when the current map mode changes, the shown
 // mode marked dirty after a new buffer, and describe() for the province the
 // tooltip asked for. anvil-game.world may be read there.
 #include <anvil/anvil.hpp>
@@ -85,7 +85,7 @@ std::atomic<bool> g_off{false};
 anvil::HookOf<sym::map_color> g_color;
 anvil::HookOf<sym::map_mode_label> g_label;
 anvil::HookOf<sym::map_mode_sprite> g_sprite;
-anvil::HookOf<sym::map_mode_sprite> g_settings_sprite;  // the redirected call in CSettings::WriteMembers
+anvil::HookOf<sym::map_mode_sprite> g_settings_sprite;  // the redirected call in the writer of settings.txt
 anvil::HookOf<sym::add_map_modes> g_add;
 anvil::HookOf<sym::mapmode_tooltip> g_tooltip;
 sym::Types::cstring_from_text::Pointer g_cstring = nullptr;
@@ -297,7 +297,7 @@ void show_asked() {
                                                      });
     if (asked != nullptr && faulted) {
         const anvil::Host host;
-        host.warn("show {}: SetCurrentMapMode faulted ({:#x})", asked->id, code);
+        host.warn("show {}: set_current_map_mode faulted ({:#x})", asked->id, code);
     }
 }
 

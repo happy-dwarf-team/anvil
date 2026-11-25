@@ -8,7 +8,7 @@ namespace model_reload {
 
 namespace {
 
-// CPdx3DType and CPdxMeshType (PDB layouts, symbols.toml's header).
+// The 3D type's and the mesh type's fields (symbols.toml's header).
 constexpr std::uintptr_t kKey = 0x10;
 constexpr std::uintptr_t kScale = 0x30;
 constexpr std::uintptr_t kCull = 0x34;
@@ -124,7 +124,8 @@ bool call_free(std::uintptr_t fn, RawString* text) {
 using ClearFn = void (*)(void* province_graphics);
 using SpritesFn = void (*)(void* province_graphics, void* province, void* map, bool remove_only);
 
-// CProvinceGraphics::Clear, then CreateProvinceSprites with remove_only: with
+// The province graphics' clear (province_graphics_clear), then the city and port
+// sprites' creation (create_province_sprites) with remove_only: with
 // it, the function does not read the province (null here) and returns after
 // deleting the city and port and zeroing the key that makes Update create them.
 bool call_clear(std::uintptr_t clear, std::uintptr_t sprites, std::uintptr_t graphics, std::uintptr_t map) {
@@ -138,22 +139,22 @@ bool call_clear(std::uintptr_t clear, std::uintptr_t sprites, std::uintptr_t gra
     }
 }
 
-// CProvinceGraphics' size (PDB layout; the game's code multiplies by 5 << 10).
+// The size of a province's graphics (the game's code multiplies by 5 << 10).
 constexpr std::uintptr_t kProvinceGraphicsSize = 0x1400;
 constexpr std::int32_t kMaxProvinces = 1 << 16;
 constexpr std::uint32_t kMaxUnitSlots = 64;
 
-// The objects Clear leaves (PDB layouts, symbols.toml's last section).
-constexpr std::uintptr_t kTempEnvoySize = 0x18;     // STemporaryEnvoyGraphics
-constexpr std::uintptr_t kTempEnvoyGraphics = 0x8;  // its CEnvoyGraphics*
-constexpr std::uintptr_t kEnvoySize = 0xC8;         // CEnvoyObject
+// The objects the clear leaves (symbols.toml's last section).
+constexpr std::uintptr_t kTempEnvoySize = 0x18;     // a province's envoy entry
+constexpr std::uintptr_t kTempEnvoyGraphics = 0x8;  // its envoy graphics, a pointer
+constexpr std::uintptr_t kEnvoySize = 0xC8;         // an envoy object
 constexpr std::uintptr_t kEnvoyProvince = 0x48;
 constexpr std::uintptr_t kEnvoyInstance = 0x50;
 constexpr std::uintptr_t kEnvoyOwnerValid = 0x65;  // the owner tag's last byte
-constexpr std::uintptr_t kGoodsSize = 0x90;        // CTradeRouteGoods
+constexpr std::uintptr_t kGoodsSize = 0x90;        // a moving trade good
 constexpr std::uintptr_t kGoodsType = 0x10;        // 0 naval, 1 land
 constexpr std::uintptr_t kGoodsInstance = 0x78;
-constexpr std::uintptr_t kAmbientInstance = 0x8;  // CAmbientObjectInstance
+constexpr std::uintptr_t kAmbientInstance = 0x8;  // a visible ambient object
 constexpr std::uintptr_t kAmbientRemove = 0x10;
 constexpr std::size_t kMaxObjects = 1u << 16;  // per array: more is not a real one
 
@@ -179,8 +180,8 @@ bool call_recreate(std::uintptr_t fn, std::uintptr_t owner, std::uint32_t index)
 
 }  // namespace
 
-// The envoys of one province: every CEnvoyObject with an instance gets it
-// again from RecreateEnvoyObject, which reads the entity anew. One whose
+// The envoys of one province: every envoy object with an instance gets it
+// again from the envoy's recreate (envoy_recreate), which reads the entity anew. One whose
 // owner tag is not valid is skipped: the function would delete its instance
 // and create none, which the game itself never asks for.
 bool GameMemory::recreate_envoys(std::uintptr_t graphics, int& count) {
@@ -266,7 +267,7 @@ MapRefresh GameMemory::refresh_map_objects() {
         return out;
     }
     out.available = true;
-    // From 1, as UpdateProvinceGraphics: province 0 is never drawn.
+    // From 1, as the graphical map's province graphics update: province 0 is never drawn.
     for (std::int32_t p = 1; p < count; ++p) {
         const std::uintptr_t graphics = data + kProvinceGraphicsSize * static_cast<std::uintptr_t>(p);
         for (std::uint32_t s = 0; s < a_.unit_slots; ++s) {

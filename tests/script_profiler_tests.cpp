@@ -774,8 +774,8 @@ int main(int argc, char** argv) {
         CHECK(changes.count(plugin->owner) == 0);
         click("Start");
         CHECK_PANEL(changes.count(plugin->owner) == 3 && button("Stop") != 0);
-        CHECK(contains(log, "anvil-script-profiler: profiling span started: hooks on CAndTrigger::Evaluate, "
-                            "CEffect::Execute and CScriptedTrigger::Evaluate"));
+        CHECK(contains(log, "anvil-script-profiler: profiling span started: hooks on and_trigger_evaluate, "
+                            "effect_execute and scripted_trigger_evaluate"));
         g_evaluated = g_executed = 0;
         play();
         CHECK(g_evaluated == 15 && g_executed == 1);  // 5 x (trigger + nested), 2 potentials, the limit, the scripted, the aspect

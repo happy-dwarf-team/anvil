@@ -1,25 +1,26 @@
-// Member offsets of the owner classes of EU4 1.37.5, the same in the three
-// builds (EU4 engine lab, docs/script-profiler-prototype.md):
-//   CEvent: _DebugKey +32, _Trigger +64, _MajorTrigger +184, _Immediate +304
-//     and _AfterEffect +1120 (CEventOption), _Options +1936 (vector of
-//     CEventOption*), _MTTH +1960 (CMeanTimeToHappen);
-//   CEventOption: _AIChance +16 (a CMeanTimeToHappen), _Effect +80, _Trigger +168;
-//   CMeanTimeToHappen: _Modifiers +24, a vector of CMTTHModifier (240 bytes
-//     each, a trigger block itself, with its _Potential block at +112);
-//   CDecision: _Tag +16, _PotentialTrigger +48, _AllowedTrigger +168,
-//     _ProvincesToHighlightTrigger +288, _Effect +408, _AICheck +464;
-//   COnActionList: _Tag +24, _Effect +104;
-//   CCasusBelliType: _Tag +24, _PrerequisitesSelf +56, _Prerequisites +176;
-//   CTriggeredModifier and CProvinceTriggeredModifier: _Tag +344, _Potential
-//     +376, _Trigger +496; the province one also _OnActivation +616 and
-//     _OnDeactivation +672;
-//   CMission: _Tag +16, _Trigger +112, _Effect +232, _AIWeight +320,
-//     _ProvincesToHighlightTrigger +384;
-//   CChurchAspect: _Key +16, _Effect +464, _Trigger +520, _Potential +640, _AICheck +760;
-//   CScriptedTrigger (a use of a scripted trigger, an AND block itself): _Key +104, empty in the game;
-//     _pScriptedTriggerTemplate +168, whose _Key (+16) is the scripted trigger's name;
+// Where the script owners of EU4 1.37.5 keep their blocks, the same in the
+// three builds (EU4 engine lab, docs/script-profiler-prototype.md), named by
+// the script keys the blocks are read from (symbols.toml, the *_vtable notes):
+//   an event: its key +32, trigger +64, major trigger +184, immediate +304
+//     and after +1120 (an option), options +1936 (a vector of option
+//     pointers), mean_time_to_happen +1960;
+//   an event option: ai_chance +16 (a mean time to happen), effect +80, trigger +168;
+//   a mean time to happen: its modifiers +24, a vector of modifiers (240 bytes
+//     each, a trigger block itself, with its potential block at +112);
+//   a decision: name +16, potential +48, allow +168,
+//     provinces_to_highlight +288, effect +408, ai_will_do +464;
+//   an on_action list: name +24, effect +104;
+//   a casus belli type: name +24, prerequisites_self +56, prerequisites +176;
+//   a country's and a province's triggered modifier: name +344, potential
+//     +376, trigger +496; the province one also on_activation +616 and
+//     on_deactivation +672;
+//   a mission: name +16, trigger +112, effect +232, ai_weight +320,
+//     provinces_to_highlight +384;
+//   a church aspect: key +16, effect +464, trigger +520, potential +640, ai_will_do +760;
+//   a use of a scripted trigger (an AND block itself): a key of its own at +104, empty in
+//     the game; at +168 the scripted trigger it uses, whose key (+16) is its name;
 //   an AND block's children: a pointer array at +8, its count (int) at +0x14;
-//   CChurchAspectDatabase: _AspectList +16, a vector of CChurchAspect*.
+//   the database of church aspects: its list +16, a vector of church aspect pointers.
 // Each owner keeps its vtable at +0.
 #include "owners.hpp"
 
@@ -90,7 +91,7 @@ const Rule kRules[] = {
     {OwnerKind::church_aspect, &Vtables::church_aspect, 520, false, "trigger", 16},
     {OwnerKind::church_aspect, &Vtables::church_aspect, 640, false, "potential", 16},
     {OwnerKind::church_aspect, &Vtables::church_aspect, 464, true, "effect", 16},
-    // A scripted trigger as a root block: the AND block is the CScriptedTrigger itself.
+    // A scripted trigger as a root block: the AND block is the scripted trigger's use itself.
     {OwnerKind::scripted_trigger, &Vtables::scripted_trigger, 0, false, "trigger", kScriptedKey},
 };
 
@@ -252,7 +253,7 @@ void Resolver::expand(const Owner& owner) {
 Owner Resolver::find(const void* block, Kind kind) {
     const auto b = reinterpret_cast<std::uintptr_t>(block);
     if (kind == Kind::scripted) {
-        // The hook's block is always a CScriptedTrigger, recorded at its address + 1 (the same
+        // The hook's block is always a use of a scripted trigger, recorded at its address + 1 (the same
         // object is also an AND block of its own); its name says which scripted trigger.
         Owner o;
         o.name = scripted_name(b - 1);

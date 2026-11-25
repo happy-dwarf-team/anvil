@@ -128,6 +128,18 @@ hand passes the check only if it copies bindgen's form exactly:
       ][::core::mem::offset_of!(AnvilGameInfo, size) - 0usize];
   ```
 
+## Game code and names
+
+**Game code and names.** This repository holds no code of eu4.exe and no names from its debug symbols.
+`symbols.toml` verifies each address with `sha256` and `size`, not with the game's bytes; write `bytes` while you
+work and run Anvil's `tools/symbols-to-digest.py` before you commit. Name the game's functions, classes and
+fields by their address and what they do, unless eu4.exe itself shows the name (its RTTI or its own log and
+assert texts). Our own symbol keys, addresses, offsets and signatures are fine.
+
+This covers code comments, `anvil.log` lines, test names, documents and pull
+request texts alike; [ADR 0003](docs/adr/0003-symbol-digests.md) has the
+digest form.
+
 ## The plugin catalog
 
 `catalog/plugins.json` pins one release of each team plugin for the Manager's

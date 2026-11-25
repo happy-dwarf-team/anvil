@@ -28,7 +28,7 @@ AnvilResult check_restart(const RestartState& last, std::uint32_t flags);
 enum class RestartAction {
     None,
     ApplicationFlags,  // write app+0x83/+0x84: the game quits after this frame and starts again
-    Resign,            // set the in-game idler's _bResignGame: the game's own Exit to Menu
+    Resign,            // set the in-game session's resign flag (resign_check): the game's own Exit to Menu
     ClearResign,       // the game did not act on it: take it back
     Dropped,           // the request is gone without a write
 };
