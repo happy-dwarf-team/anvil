@@ -48,8 +48,9 @@ struct CheckOptions {
     bool translations = true;
     bool complete_translations = false;
     // --dump-bytes: with an exe, write the bytes at each symbol that verified
-    // to this file, for the author's own copy (porting, a local `bytes` form).
-    // Refused inside the plugin folder; empty: nothing is written.
+    // and states a pattern (`bytes` or `sha256`) to this file, for the author's
+    // own copy (porting, a local `bytes` form). Refused inside the plugin folder
+    // and over a file an earlier dump did not write; empty: nothing is written.
     std::filesystem::path dump_bytes;
 };
 

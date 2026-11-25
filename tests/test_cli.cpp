@@ -837,13 +837,16 @@ int main(int argc, char** argv) {
                                  "[symbol.tick_slot]\nrva = 0x2000\nmemory = \"read\"\npoints_to = 0x1000\n"
                                  "[symbol.wrong]\nrva = 0x1060\nbytes = \"FF FF FF FF FF\"\nmemory = \"code\"\n";
         const fs::path dir = fx.plugin("dump", text);
+        std::string other_sha;  // an exe of another build Anvil knows, once set
         const auto dump = [&](const fs::path& file, const fs::path& exe) {
             CheckOptions options;
             options.plugin_dir = dir;
             options.exe = exe;
             options.dump_bytes = file;
-            const std::string sha = fx.exe_sha256;
-            options.build_of = [sha](std::string_view actual) -> const char* { return actual == sha ? "test-build" : nullptr; };
+            const std::string sha = fx.exe_sha256, other = other_sha;
+            options.build_of = [sha, other](std::string_view actual) -> const char* {
+                return actual == sha ? "test-build" : !other.empty() && actual == other ? "other-build" : nullptr;
+            };
             return check_plugin(options);
         };
         const fs::path file = fx.root / "bytes" / "dump.toml";
@@ -888,10 +891,56 @@ int main(int argc, char** argv) {
         image.put(0x10F4, {0xCC});
         const auto other_bytes = image.file();
         write(other_exe, std::string(other_bytes.begin(), other_bytes.end()));
+        other_sha = sha256_file(other_exe);
         const fs::path skipped_file = fx.root / "bytes" / "skipped.toml";
         const auto skipped = dump(skipped_file, other_exe);
         CHECK(!fs::exists(skipped_file) && contains(skipped.dump_skipped, "does not declare the build"));
         CHECK(contains(format_report(skipped, Format::Text), "nothing written to --dump-bytes"));
+        // An exe whose build Anvil does not know: that is the reason given.
+        other_sha.clear();
+        const auto unknown = dump(skipped_file, other_exe);
+        CHECK(!fs::exists(skipped_file) &&
+              contains(unknown.dump_skipped, "Anvil does not know the build of dump-other.exe"));
+
+        // An earlier dump is replaced; the exe or any other file is not.
+        const auto again = dump(file, fx.exe);
+        CHECK(again.exit_code == kExitProblems && again.dumped == 2);
+        const fs::path notes = fx.root / "bytes" / "notes.toml";
+        write(notes, "my notes\n");
+        for (const fs::path& kept : {fx.exe, notes}) {
+            const auto refused = dump(kept, fx.exe);
+            CHECK(refused.exit_code == kExitCannotCheck &&
+                  contains(refused.cannot_check, "is not a file that check --dump-bytes wrote"));
+        }
+        CHECK(sha256_file(fx.exe) == fx.exe_sha256 && read(notes) == "my notes\n");
+        // A folder whose name starts with the plugin folder's is outside it.
+        const fs::path sibling = fs::path(dir.wstring() + L"2") / "bytes.toml";
+        const auto beside = dump(sibling, fx.exe);
+        CHECK(beside.dumped == 2 && fs::exists(sibling));
+        // A link in the plugin folder is refused even when it points outside: the write would replace the link.
+        const fs::path link = dir / "link.toml";
+        std::error_code link_error;
+        fs::create_symlink(file, link, link_error);
+        if (link_error) {
+            std::printf("  (no symbolic link here: %s; the link case is not run)\n", link_error.message().c_str());
+        } else {
+            const auto refused = dump(link, fx.exe);
+            CHECK(refused.exit_code == kExitCannotCheck && contains(refused.cannot_check, "is inside the plugin folder"));
+            CHECK(fs::is_symlink(link) && !fs::exists(dir / "link.toml.anvil-new"));
+        }
+        // A file that cannot be written (its folder is a file): exit 2 and no dump file.
+        const auto failed = dump(file / "dump.toml", fx.exe);
+        CHECK(failed.exit_code == kExitCannotCheck && contains(failed.cannot_check, "--dump-bytes: cannot write") &&
+              failed.dump_file.empty());
+        // A plugin without symbols.toml: the text report says that nothing was written.
+        CheckOptions plain;
+        plain.plugin_dir = fx.plugin("dump-plain", "");
+        plain.exe = fx.exe;
+        plain.dump_bytes = fx.root / "bytes" / "plain.toml";
+        const auto no_symbols = check_plugin(plain);
+        CHECK(no_symbols.exit_code == kExitOk && !fs::exists(plain.dump_bytes));
+        CHECK(contains(format_report(no_symbols, Format::Text),
+                       "nothing written to --dump-bytes: the plugin has no symbols.toml"));
     });
 
     run("gen with several builds: a value is a constant only when every build has it", [] {
