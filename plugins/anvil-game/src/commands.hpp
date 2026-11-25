@@ -24,7 +24,7 @@ struct CommandUnit {
 
 // The local player's event window for a pending event, as the backend found it.
 struct EventWindow {
-    std::uintptr_t object = 0;  // the game's CEventWindow
+    std::uintptr_t object = 0;  // the game's event window object
     bool keep_alive = false;    // no option chosen yet
     bool has_button = false;    // the asked option has a button in the window
     bool enabled = false;       // and it is enabled now
@@ -64,24 +64,24 @@ public:
     virtual AnvilResult find_event_window(std::int32_t pending, std::int32_t option, EventWindow& out) = 0;
     // The conditions of the game's post function hold for the session now.
     virtual bool post_allowed() = 0;
-    // CEventWindow::OptionSelected: what the button does.
+    // The event window's option choice (symbol option_selected): what the button does.
     virtual void choose_option(const EventWindow& window, std::int32_t option) = 0;
 
     // Version 3. The game speed now (1 the slowest .. 5) and whether the speed
     // bar's buttons act now (no in-game menu shown, the player has admin
     // rights); false when the speed cannot be read.
     virtual bool game_speed(std::int32_t& speed, bool& buttons_act) = 0;
-    // One step of the speed bar: CIncreaseGameSpeedCommand or CDecrease...
+    // One step of the speed bar: the game's speed-up or slow-down command.
     virtual void* make_speed_step(bool up) = 0;
-    // A CToggleExploreCommand for the unit: `mission` the game's EXPLORATION_MISSIONS,
+    // The game's explore command (explore_command) for the unit: `mission` the game's EXPLORATION_MISSIONS,
     // `target` the land-explore button's (the unit's province) or 0.
     virtual void* make_explore(const CommandUnit& unit, std::int32_t mission, std::int32_t target) = 0;
-    // A CMoveCommand of the unit to `province`, as a right-click builds it.
+    // The game's move command of the unit to `province`, as a right-click builds it.
     virtual void* make_move(const CommandUnit& unit, std::int32_t province, bool clear_previous) = 0;
     // The command's own IsValid, which the right-click asks before posting.
     virtual bool valid(void* command) = 0;
     // Whether the map has `province` (1 .. the province limit - 1). The
-    // game's CMoveCommand indexes its province array with the id unchecked.
+    // game's move command indexes its province array with the id unchecked.
     virtual bool province_exists(std::int32_t province) = 0;
     // The map area of a province: ANVIL_ERROR_NOT_FOUND without one.
     virtual AnvilResult area_of(std::int32_t province, std::uintptr_t& area) = 0;

@@ -95,7 +95,7 @@ struct WorldLayout {
     std::uint32_t war_attackers_end = 0;
     std::uint32_t war_defenders = 0;
     std::uint32_t war_defenders_end = 0;
-    // The war's start date, as CWar::GetStartDate finds it: `war_history` 0
+    // The war's start date, as the war's start date getter finds it: `war_history` 0
     // when absent on this build.
     std::uint32_t war_history = 0;       // war: the first node of its history list
     std::uint32_t war_history_next = 0;  // a node: the next one (its entry is at +0)
@@ -140,7 +140,7 @@ struct WorldLayout {
     // Rulers, heirs and consorts: `ruler` 0 when absent on this build.
     std::uint32_t ruler = 0;                // country: CMonarch*, never null in a running game
     std::uint32_t heir = 0;                 // country: CHeir*
-    std::uint32_t consort = 0;              // country: CQueen*
+    std::uint32_t consort = 0;              // country: the consort, a pointer
     std::uintptr_t null_monarch = 0;        // the addresses of the globals of the game's placeholders
     std::uintptr_t null_heir = 0;
     std::uintptr_t null_consort = 0;
@@ -152,37 +152,37 @@ struct WorldLayout {
     std::uint32_t monarch_leader = 0;       // monarch: 8 bytes, the type in the low half
     std::uint32_t leader_type = 0;          // the type of a leader's id
     std::uint32_t regency = 0;              // monarch: pointer, null without a regency
-    std::uint32_t queen_regent_slot = 0;    // monarch's vtable: IsQueenRegent
-    std::uint32_t dynasty = 0;              // monarch: CDynasty*
+    std::uint32_t queen_regent_slot = 0;    // monarch's vtable: whether it is a queen regent
+    std::uint32_t dynasty = 0;              // monarch: its dynasty, a pointer
     std::uint32_t dynasty_name = 0;         // dynasty: std::string
     std::uint32_t claim = 0;                // heir: fixed point
 
-    // Flags: `flag_names` 0 when absent on this build. Each CIntegerFlags holds
+    // Flags: `flag_names` 0 when absent on this build. Each flag set holds
     // a vector of int16 indexes and a vector of int32 dates at the same positions.
     std::uintptr_t flag_names = 0;          // the address of the names' array: begin, end; std::string each
     std::uint32_t flags_begin = 0;          // flags: the indexes' vector
     std::uint32_t flags_end = 0;
     std::uint32_t flag_dates = 0;           // flags: the dates' vector
-    std::uint32_t country_flags = 0;        // country: CIntegerFlags
-    std::uint32_t province_flags = 0;       // province: CIntegerFlags
-    std::uint32_t permanent_flags = 0;      // province: CIntegerFlags
-    std::uint32_t global_flags = 0;         // root: CIntegerFlags
-    std::uint32_t monarch_flags = 0;        // monarch: CIntegerFlags
+    std::uint32_t country_flags = 0;        // country: a flag set
+    std::uint32_t province_flags = 0;       // province: a flag set
+    std::uint32_t permanent_flags = 0;      // province: a flag set
+    std::uint32_t global_flags = 0;         // root: a flag set
+    std::uint32_t monarch_flags = 0;        // monarch: a flag set
 
     // Variables: `variable_head` 0 when absent on this build.
-    std::uint32_t country_variables = 0;    // country: CVariables
-    std::uint32_t province_variables = 0;   // province: CVariables
+    std::uint32_t country_variables = 0;    // country: a variable set
+    std::uint32_t province_variables = 0;   // province: a variable set
     std::uint32_t variable_head = 0;        // variables: the list's sentinel node, the count after it
     std::uint32_t variable_value = 0;       // node: int32 fixed point, its name the std::string before it
 
     // Pending events: `pending_list` 0 when absent on this build. The list is a
-    // CPdxArray<CPendingEvent> in the root: data, then the count.
+    // array of pending event entries in the root: data, then the count.
     std::uint32_t pending_list = 0;         // root: the entries
     std::uint32_t pending_count = 0;        // root: int32
     std::uint32_t pending_size = 0;         // an entry's size
     std::uint32_t pending_id = 0;           // entry: int32
-    std::uint32_t pending_event = 0;        // entry: CEvent*
-    std::uint32_t pending_scope = 0;        // entry: CEventScope*, owned
+    std::uint32_t pending_event = 0;        // entry: the event, a pointer
+    std::uint32_t pending_scope = 0;        // entry: the event's scope, a pointer, owned
     std::uint32_t auto_select = 0;          // entry: int32 date, hours
     std::uint32_t scope_province = 0;       // scope: int32 province ID
     std::uint32_t scope_country = 0;        // scope: tag
@@ -195,7 +195,7 @@ struct WorldLayout {
     std::uint32_t event_hidden = 0;         // event: byte
 
     // Statistics: `statistics_head` 0 when absent on this build. Each series is
-    // a CGraphStatistics in the root: an unordered_map from the tag's text, read
+    // a statistics object in the root: an unordered_map from the tag's text, read
     // as its list from the sentinel node, as the variables are.
     std::uint32_t statistics[4] = {};       // root: by ANVIL_GAME_STATISTIC_*
     std::uint32_t statistics_head = 0;      // series: the list's sentinel node, the count after it
@@ -206,9 +206,9 @@ struct WorldLayout {
     // Timed modifiers: `timed_key` 0 when absent on this build.
     std::uint32_t country_timed = 0;        // country: the list's head node, null when empty
     std::uint32_t timed_node_next = 0;      // node: the next node (the object is at +0)
-    std::uint32_t province_timed = 0;       // province: std::vector of CTimedModifier*, its begin
+    std::uint32_t province_timed = 0;       // province: std::vector of timed modifier pointers, its begin
     std::uint32_t province_timed_end = 0;
-    std::uint32_t timed_modifier = 0;       // timed modifier: its CStaticModifier*
+    std::uint32_t timed_modifier = 0;       // timed modifier: its static modifier, a pointer
     std::uint32_t timed_key = 0;            // static modifier: its key, a std::string
     std::uint32_t timed_start = 0;          // timed modifier: int32, hours
     std::uint32_t timed_end = 0;
@@ -216,8 +216,8 @@ struct WorldLayout {
     std::uint32_t timed_hidden = 0;
     std::int32_t unset_hours = 0;           // the date the game writes for none
     std::uintptr_t timed_never = 0;         // the address of the global date of a modifier given for good
-    // Province triggered modifiers (a CPdxArray of CProvinceTriggeredModifier
-    // const*, each a CStaticModifier with its key at `timed_key`): 0 when absent.
+    // Province triggered modifiers (an array of pointers to the province's
+    // triggered modifiers, each a static modifier with its key at `timed_key`): 0 when absent.
     std::uint32_t province_triggered = 0;   // province: the array's data pointer
     std::uint32_t province_triggered_count = 0;  // province: its int32 count
 
@@ -232,7 +232,7 @@ struct WorldLayout {
 
     // The province under a point: `pick` null when absent on this build.
     std::uint32_t graphical_map = 0;        // session: the map input's holder
-    std::uint32_t map = 0;                  // holder: the CEU3GraphicalMap
+    std::uint32_t map = 0;                  // holder: the graphical map
     std::uintptr_t map_vtable = 0;          // the address of its class's vtable
     std::int32_t (*pick)(void* map, const float* point) = nullptr;
     void* (*pick_object)(void* map, const float* point, void* selection, std::uint8_t a, std::uint8_t b) = nullptr;
@@ -240,7 +240,7 @@ struct WorldLayout {
     // Regions: `regions` 0 when absent on this build; the exploration lists
     // also need `explore_regions` and `game_delete`.
     std::uintptr_t game_map = 0;            // the address of CMap's global
-    std::uint32_t regions = 0;              // map: std::vector of CRegion*, by index, its begin
+    std::uint32_t regions = 0;              // map: std::vector of region pointers, by index, its begin
     std::uint32_t regions_end = 0;
     std::uint32_t region_index = 0;         // region: int32, its index
     std::uint32_t region_key = 0;           // region: std::string, its script key
@@ -261,7 +261,7 @@ struct WorldLayout {
     std::uint32_t relation_start = 0;       // relation: int32, hours
     std::uint32_t relation_end = 0;
     std::int32_t relation_unset = 0;        // the date the game writes for none
-    std::uint32_t subject_type = 0;         // dependency: CSubjectType*
+    std::uint32_t subject_type = 0;         // dependency: its subject type, a pointer
     std::uint32_t subject_type_key = 0;     // subject type: its key, a std::string
     std::uint32_t statuses = 0;             // country: std::vector of CDiplomacyStatus by the other's index; end after it
     std::uint32_t status_size = 0;
@@ -281,31 +281,31 @@ struct WorldLayout {
 
     // Religion, culture and trade goods, each a pointer to the game's object
     // whose script key is a std::string: `religion_key` 0 when absent.
-    std::uint32_t province_religion = 0;    // province: CReligion*
-    std::uint32_t province_culture = 0;     // province: CCulture*
-    std::uint32_t province_trade_goods = 0; // province: CTradeGoods*
-    std::uint32_t country_religion = 0;     // country: CReligion*, the state religion
-    std::uint32_t country_culture = 0;      // country: CCulture*, the primary culture
+    std::uint32_t province_religion = 0;    // province: its religion, a pointer
+    std::uint32_t province_culture = 0;     // province: its culture, a pointer
+    std::uint32_t province_trade_goods = 0; // province: its trade goods, a pointer
+    std::uint32_t country_religion = 0;     // country: a pointer, the state religion
+    std::uint32_t country_culture = 0;      // country: a pointer, the primary culture
     std::uint32_t religion_key = 0;         // religion: std::string
     std::uint32_t culture_key = 0;          // culture: std::string
     std::uint32_t trade_goods_key = 0;      // trade goods: std::string
     // Their groups: `religion_group_key` 0 when absent.
-    std::uint32_t religion_group = 0;       // religion: CReligionGroup*
-    std::uint32_t culture_group = 0;        // culture: CCultureGroup*
+    std::uint32_t religion_group = 0;       // religion: its group, a pointer
+    std::uint32_t culture_group = 0;        // culture: its group, a pointer
     std::uint32_t religion_group_key = 0;   // religion group: std::string
     std::uint32_t culture_group_key = 0;    // culture group: std::string
     // The province's places: `area_key` 0 when absent. Area and region go
     // through the map part (`static_part`).
-    std::uint32_t province_area = 0;        // map part: CMapArea*
-    std::uint32_t area_region = 0;          // area: CRegion*
-    std::uint32_t province_superregion = 0; // province: CSuperRegion*
-    std::uint32_t province_continent = 0;   // province: CContinent*
+    std::uint32_t province_area = 0;        // map part: its map area, a pointer
+    std::uint32_t area_region = 0;          // area: its region, a pointer
+    std::uint32_t province_superregion = 0; // province: its super region, a pointer
+    std::uint32_t province_continent = 0;   // province: its continent, a pointer
     std::uint32_t area_key = 0;             // area: std::string
-    std::uint32_t place_region_key = 0;     // region and superregion (CRegionBase): std::string
+    std::uint32_t place_region_key = 0;     // region and superregion (their shared base): std::string
     std::uint32_t continent_key = 0;        // continent: std::string
     // The province's trade node: `trade_node_key` 0 when absent.
-    std::uint32_t province_trade_node = 0;  // province: CTradeNode*
-    std::uint32_t trade_node_definition = 0; // trade node: CTradeNodeDefinition*
+    std::uint32_t province_trade_node = 0;  // province: its trade node, a pointer
+    std::uint32_t trade_node_definition = 0; // trade node: its definition, a pointer
     std::uint32_t trade_node_key = 0;       // definition: std::string
 };
 
@@ -342,7 +342,7 @@ struct VariableEntry {
 // Main thread only, after an outer frame, in a session: the service checks.
 std::int32_t read_province_limit(const WorldLayout& l);
 AnvilResult read_province(const WorldLayout& l, std::int32_t id, AnvilGameProvince& out);
-// The province's CMapArea (its map part at `map_part`, the area at `area` in it):
+// The province's map area (its map part at `map_part`, the area at `area` in it):
 // ANVIL_ERROR_NOT_FOUND for a province without one.
 AnvilResult read_province_area(const WorldLayout& l, std::int32_t id, std::uint32_t map_part, std::uint32_t area,
                                std::uintptr_t& out);
@@ -359,7 +359,7 @@ AnvilResult read_war_ids(const WorldLayout& l, std::vector<std::uint64_t>& out);
 AnvilResult read_war(const WorldLayout& l, std::uint64_t id, AnvilGameWar& out);
 AnvilResult read_war_name(const WorldLayout& l, std::uint64_t id, std::string& utf8);
 AnvilResult read_war_side(const WorldLayout& l, std::uint64_t id, std::uint32_t side, std::vector<AnvilGameTag>& out);
-// The war's start date in hours, as the game's CWar::GetStartDate gives it: the
+// The war's start date in hours, as the game's start date getter gives it: the
 // first history entry dated after year 1, else 1 January of year 1.
 // ANVIL_ERROR_NOT_DECLARED when the build has no start date symbol.
 AnvilResult read_war_start(const WorldLayout& l, std::uint64_t id, std::int32_t& hours);
@@ -391,8 +391,8 @@ AnvilResult read_province_variables(const WorldLayout& l, std::int32_t province,
 // The pending list now, in the game's order.
 AnvilResult read_pending_keys(const WorldLayout& l, std::vector<PendingKey>& out);
 // An entry of the list by its key, as AnvilGamePendingEvent: NOT_FOUND when it
-// is no longer there. The country follows the game's rule (CEventManager::
-// TriggerEvent): the override tag when it is set, else the scope's country, and
+// is no longer there. The country follows the game's rule (where the game
+// triggers an event): the override tag when it is set, else the scope's country, and
 // for a tag that is not valid the owner of the scope's province.
 // out.auto_select.session is 0.
 AnvilResult read_pending(const WorldLayout& l, const PendingKey& key, AnvilGamePendingEvent& out);

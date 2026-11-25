@@ -1,8 +1,8 @@
 // The pdxmesh entries of an interface .gfx file, read by the plugin itself
-// (docs/model-reload.md). The game's own reader, SGfxFileReader, is not used:
+// (docs/model-reload.md). The game's own .gfx reader is not used:
 // `reload guianim` runs it with temporary tables and crashes the game.
 //
-// The fields are the ones CPdxMeshType::ReadMember and CPdx3DType::ReadMember
+// The fields are the ones the game's mesh type and 3D type readers
 // read (EU4 1.37.5): name, file, scale, cull_distance and animation = { id
 // type }. A field left out has the value a new mesh type starts with (scale
 // 1.0, cull distance 430), as when the game reads the file at start. Other
@@ -44,11 +44,11 @@ struct GfxFile {
 
 GfxFile parse_gfx(std::string_view text);
 
-// CPdxMeshType::GetAnimationHash: FNV-1 over the id's bytes (signed chars),
-// 32 bits, kept in the 64-bit _nHash.
+// The game's animation id hash: FNV-1 over the id's bytes (signed chars),
+// 32 bits, kept in a 64-bit field of the lookup entry (+0x10).
 std::uint64_t animation_hash(std::string_view id);
 
-// The cull distance as the type keeps it (_vCullSqDistance).
+// The cull distance as the type keeps it, squared (+0x34).
 inline float cull_square(float distance) { return distance * distance; }
 
 }  // namespace model_reload

@@ -27,10 +27,10 @@ enum class OwnerKind : std::uint8_t {
     decision,
     on_action,
     casus_belli,
-    country_modifier,   // triggered_modifier (CTriggeredModifier)
-    province_modifier,  // province_triggered_modifier (CProvinceTriggeredModifier)
+    country_modifier,   // triggered_modifier (triggered_modifier_vtable)
+    province_modifier,  // province_triggered_modifier (province_triggered_modifier_vtable)
     mission,
-    church_aspect,     // CChurchAspect (v1.1)
+    church_aspect,     // church_aspect_vtable (v1.1)
     scripted_trigger,  // a call of a scripted trigger, by its name (v1.1)
 };
 
@@ -69,9 +69,9 @@ public:
     // Forgets blocks that had no owner, so that the next owner_of tries again
     // (after more owners were found).
     void retry_unowned();
-    // Every church aspect of the game's database (CChurchAspectDatabase, its address): the children of an
-    // aspect's trigger and potential are root blocks of their own, since CChurch::FindCheapestAspect
-    // evaluates them one by one. Once per process is enough: the aspects never change.
+    // Every church aspect of the game's database (church_aspect_db_site, its address): the children of an
+    // aspect's trigger and potential are root blocks of their own, since the church's search for the
+    // cheapest aspect evaluates them one by one. Once per process is enough: the aspects never change.
     void add_church_aspects(std::uintptr_t database);
     void clear();
 

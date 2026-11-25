@@ -346,7 +346,7 @@ AnvilResult read_province(const WorldLayout& l, std::int32_t id, AnvilGameProvin
         return ANVIL_ERROR_INTERNAL;
     }
     if (l.local_autonomy != 0) {
-        // As CProvince::GetLocalAutonomy gives it: the stored value kept within
+        // As the province's local autonomy getter (province_local_autonomy) gives it: the stored value kept within
         // the minimum and the maximum, the maximum winning.
         std::int32_t minimum = 0, maximum = 0;
         if (!read(p + l.autonomy_minimum, minimum) || !read(p + l.autonomy_maximum, maximum)) {
@@ -783,9 +783,9 @@ AnvilResult monarch_at(const WorldLayout& l, std::string_view tag, std::uint32_t
     return monarch_of(l, country, kind, monarch);
 }
 
-// The dynasty the game shows (CMonarch::GetDynasty): unless the monarch is a
+// The dynasty the game shows (the monarch's dynasty getter): unless the monarch is a
 // queen regent, one with a regency whose country has an heir shows the heir's.
-// IsQueenRegent is decoded from its getter, never called; a getter that is not
+// Whether a monarch is a queen regent is decoded from its vtable getter, never called; a getter that is not
 // a constant is a queen's, so the monarch's own dynasty then stands.
 bool shown_dynasty(const WorldLayout& l, std::uintptr_t country, std::uintptr_t monarch, std::uintptr_t& dynasty) {
     for (int step = 0; step < 4; ++step) {
@@ -806,7 +806,7 @@ bool shown_dynasty(const WorldLayout& l, std::uintptr_t country, std::uintptr_t 
     return read(monarch + l.dynasty, dynasty);
 }
 
-// The flags of one CIntegerFlags, appended to `out`.
+// The flags of one flag set, appended to `out`.
 bool append_flags(const WorldLayout& l, std::uintptr_t flags, std::vector<FlagEntry>& out) {
     std::uintptr_t begin = 0, end = 0, dates = 0, dates_end = 0;
     if (!read(flags + l.flags_begin, begin) || !read(flags + l.flags_end, end) || !read(flags + l.flag_dates, dates) ||
@@ -858,7 +858,7 @@ bool read_map_nodes(std::uintptr_t list, std::uint64_t max, std::vector<std::uin
     return out.size() == count;
 }
 
-// The variables of one CVariables: the map's list, from its sentinel node.
+// The variables of one variable set: the map's list, from its sentinel node.
 bool read_variables(const WorldLayout& l, std::uintptr_t variables, std::vector<VariableEntry>& out) {
     std::vector<std::uintptr_t> nodes;
     if (!read_map_nodes(variables + l.variable_head, kMaxVariables, nodes)) return false;
@@ -1284,7 +1284,7 @@ bool call_pick(std::int32_t (*pick)(void*, const float*), std::uintptr_t map, co
 bool call_pick_object(void* (*pick)(void*, const float*, void*, std::uint8_t, std::uint8_t), std::uintptr_t map,
                       const float* point, void** out) {
     __try {
-        // An empty CSelectionList, as CInGameMapInput::UpdateCursor passes one: head, tail, count.
+        // An empty selection list, as the map input's cursor update (map_of_session) passes one: head, tail, count.
         alignas(8) unsigned char selection[0x20] = {};
         *out = pick(reinterpret_cast<void*>(map), point, selection, 0, 1);
         return true;
@@ -1610,7 +1610,7 @@ AnvilResult read_diplomacy_status(const WorldLayout& l, std::string_view from, s
     if (index < 0) return ANVIL_ERROR_INTERNAL;
     const auto at = static_cast<std::uintptr_t>(index);
 
-    // The opinion: GetOpinionValue reads the cache below its size and works the
+    // The opinion: the game's opinion getter reads the cache below its size and works the
     // value out above it. The service never does the latter.
     std::uintptr_t cache = 0, cache_end = 0;
     if (!read(country + l.opinion_cache, cache) || !read(country + l.opinion_cache_end, cache_end) || cache_end < cache ||

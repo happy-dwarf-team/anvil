@@ -170,8 +170,9 @@ typedef struct AnvilMapModesService {
     /* Since anvil-map 1.24.0; check with ANVIL_MAP_HAS(service, show). */
 
     /* Shows `mode` on the map, as its button on the minimap does: anvil-map's
-     * next step (after the next frame of the main loop) calls the game's own
-     * CEU3Idler::SetCurrentMapMode, and ANVIL_MAP_EVENT_SHOWN follows there.
+     * next step (after the next frame of the main loop) calls the session's
+     * own map mode setter (symbol set_current_map_mode, the call the minimap's
+     * buttons make), and ANVIL_MAP_EVENT_SHOWN follows there.
      * It changes only what the map shows. The last request before a step
      * wins; one for the mode already shown does nothing. Callable from any
      * thread while a session runs; a request still waiting when the session

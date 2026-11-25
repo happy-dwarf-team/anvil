@@ -1,5 +1,5 @@
 // The real Game of reload.hpp: the game's gfx type table, the fields of its
-// mesh types, CPdxMeshType::ReloadType and the console, on the main thread
+// mesh types, a mesh type's reload (mesh_type_reload) and the console, on the main thread
 // only. Every read and call runs under a structured exception handler, so a
 // bad address ends a run with `faulted` instead of the game.
 #pragma once
@@ -21,9 +21,9 @@ struct GameAddresses {
     std::uintptr_t console_manager = 0;  // where the game keeps its console manager
     std::uintptr_t console_dispatch = 0;
     std::uintptr_t string_free = 0;
-    // The objects on the map: CGameState* -> _pGraphicsOwner -> the application
-    // -> _pMap -> _ProvinceGraphics (data, size); _Units of each are counted,
-    // Clear and CreateProvinceSprites delete the province's objects.
+    // The objects on the map: the game state -> its graphics owner -> the application
+    // -> the graphical map -> its province graphics (data, size); the unit slots of
+    // each are counted, the clear and the sprites' creation delete the province's objects.
     std::uintptr_t game_state = 0;  // where the game keeps its CGameState*
     std::uint32_t graphics_owner = 0;
     std::uint32_t application = 0;
@@ -34,8 +34,8 @@ struct GameAddresses {
     std::uint32_t unit_slots = 0;
     std::uintptr_t province_clear = 0;
     std::uintptr_t province_sprites = 0;
-    // The objects Clear leaves: each province's envoys (_EnvoyGraphics, and
-    // CEnvoyGraphics::_Envoys in each), the map's trade routes and its visible
+    // The objects the clear leaves: each province's envoys (its envoy entries, and
+    // the envoy objects of each), the map's trade routes and its visible
     // ambient objects.
     std::uint32_t envoy_graphics = 0;
     std::uint32_t envoys = 0;

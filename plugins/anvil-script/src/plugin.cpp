@@ -2,10 +2,11 @@
 // its own to EU4's script language (docs/adr/0008-plugin-script-effects.md,
 // docs/spec/script-effects-v1.md).
 //
-// The game has no table of effect names: CEffect::ReadMember is a switch over
-// the lexer's tokens through which every container effect parses its members.
-// A function hook on its start compares the member's key with the registered
-// keys; for one of them it builds a CEffect of its own (the game's
+// The game has no table of effect names: the effect member reader
+// (effect_read_member, 0x5DEC50 on Steam) is a switch over the lexer's tokens
+// through which every container effect parses its members. A function hook on
+// its start compares the member's key with the registered keys; for one of them
+// it builds an effect object of its own (the game's
 // constructor, a copy of the game's vtable with five slots replaced, the
 // parent's Append, the token), as the game builds its simple effects. Every
 // other member goes on to the game.
@@ -13,13 +14,13 @@
 // The parse runs on whichever threads the game parses on; the key table is
 // complete and read-only by then (Registry::close on the first call).
 //
-// The Day end (docs/adr/0009-day-end.md): a function hook on
-// CGameState::HandleDailyTick calls the game's day, then the subscribers in
+// The Day end (docs/adr/0009-day-end.md): a function hook on the game
+// state's daily update (daily_tick) calls the game's day, then the subscribers in
 // the order they subscribed, on the main thread, before the day's command
 // compares checksums.
 //
 // has_dlc for plugin names (anvil#316, docs/spec/has-dlc-v1.md): a function
-// hook on CHasDLCTrigger::Assign takes a name "anvil:<id>" for itself and gives
+// hook on the has_dlc trigger's assign (has_dlc_assign) takes a name "anvil:<id>" for itself and gives
 // that trigger a copy of the game's vtable whose Evaluate answers from a table
 // fixed when a session starts or ends. Every other name goes on to the game.
 #include <anvil/anvil.hpp>
@@ -49,22 +50,22 @@ namespace {
 
 using namespace anvil_script;
 
-constexpr std::size_t kEffectSize = 0x38;  // CEffect
-constexpr std::size_t kSlots = 19;         // CEffect::vftable, 0x98 bytes
+constexpr std::size_t kEffectSize = 0x38;  // the game's effect object
+constexpr std::size_t kSlots = 19;         // the effect vtable, 0x98 bytes
 constexpr std::size_t kSlotDeletingDtor = 0;
 constexpr std::size_t kSlotReadMember = 4;
-constexpr std::size_t kSlotGetDesc = 13;   // CString GetDesc(CEventScope&, CString, int, bool)
-constexpr std::size_t kSlotExecute = 15;   // void Execute(CEventScope&, int)
-constexpr std::size_t kTokenText = 4;      // CToken: lexer id, then the text
+constexpr std::size_t kSlotGetDesc = 13;   // the description: string (scope&, string, int, bool)
+constexpr std::size_t kSlotExecute = 15;   // the execute: void (scope&, int)
+constexpr std::size_t kTokenText = 4;      // a token: lexer id, then the text
 constexpr std::size_t kMaxValue = 255;
 constexpr std::size_t kMaxLine = 511;
 // The token the parser passes for a name the lexer does not know, which is
 // what a key of a plugin is (0xF, seen in the game: eu4-engine-lab#77; the
-// lexer's FindTok answers 0xC, but that is not what reaches ReadMember). The
+// lexer's own token lookup answers 0xC, but that is not what reaches the member reader). The
 // game's keywords start at 0xB and its data words are dynamic ids above them.
 constexpr int kUnknownToken = 0xF;
 
-// Our CEffect: the game's object, then what we keep.
+// Our effect: the game's object, then what we keep.
 struct Effect {
     std::uint8_t base[kEffectSize];
     std::uint32_t entry;
@@ -144,7 +145,7 @@ AnvilScriptCall call_of(Effect* e, void* scope) {
     if (call.scope.province < 0) call.scope.province = 0;
     const bool override_tag = read_at<std::uint8_t>(scope, g_layout.scope_override_valid) != 0;
     const auto* tag = static_cast<const std::uint8_t*>(scope) + (override_tag ? g_layout.scope_override : g_layout.scope_tag);
-    if (tag[7] != 0) {  // CCountryTag::_bIsValid
+    if (tag[7] != 0) {  // the country tag's valid byte
         for (int i = 0; i < 3 && tag[i] >= 0x20 && tag[i] < 0x7F; ++i) call.scope.country[i] = static_cast<char>(tag[i]);
     }
     return call;
@@ -377,9 +378,9 @@ const AnvilScriptEffectsService kService{sizeof(AnvilScriptEffectsService), svc_
 
 // --- has_dlc for plugin names ------------------------------------------------------
 
-constexpr std::size_t kTriggerSlots = 16;    // CHasDLCTrigger::vftable, CTrigger's 16 virtual slots
-constexpr std::size_t kSlotEvaluate = 6;     // bool Evaluate(CEventScope&)
-constexpr std::size_t kSlotAssign = 7;       // bool Assign(const CToken&)
+constexpr std::size_t kTriggerSlots = 16;    // the has_dlc trigger's vtable, a trigger's 16 virtual slots
+constexpr std::size_t kSlotEvaluate = 6;     // the evaluate: bool (scope&)
+constexpr std::size_t kSlotAssign = 7;       // the assign: bool (const token&)
 
 GateTable g_gates;
 anvil::HookOf<sym::has_dlc_assign> g_has_dlc_assign;
@@ -488,7 +489,7 @@ void report_ready() {
         return;
     }
     if (n == 0) {
-        host.info("game ready: no registered effect; CEffect::ReadMember ran {} times; {}", g_calls.load(), day_end);
+        host.info("game ready: no registered effect; effect_read_member ran {} times; {}", g_calls.load(), day_end);
         return;
     }
     std::string counts;
@@ -496,7 +497,7 @@ void report_ready() {
         if (!counts.empty()) counts += ", ";
         counts += std::string(g_registry.entry(static_cast<int>(i)).key) + " " + std::to_string(g_parsed[i].load());
     }
-    host.info("game ready: parsed {} (CEffect::ReadMember ran {} times); {}", counts, g_calls.load(), day_end);
+    host.info("game ready: parsed {} (effect_read_member ran {} times); {}", counts, g_calls.load(), day_end);
 }
 
 bool all(std::initializer_list<bool> values) {
@@ -552,7 +553,7 @@ struct AnvilScript : anvil::Plugin {
             inside = slot >= base && slot < end;
         }
         if (!inside || game[kSlotAssign] != host.address(sym::has_dlc_assign) || bits + 8 > size) {
-            host.warn("CHasDLCTrigger is not the one this plugin knows: no plugin names in has_dlc");
+            host.warn("the has_dlc trigger's vtable is not the one this plugin knows: no plugin names in has_dlc");
             return false;
         }
         g_gate_index_offset = bits + 4;
@@ -576,7 +577,7 @@ struct AnvilScript : anvil::Plugin {
         g_layout.scope_override = host.value(sym::scope_country_site, "override");
         g_layout.scope_override_valid = host.value(sym::scope_country_site, "override_valid");
 
-        // The game's vtable: its ReadMember slot must be the hooked function,
+        // The game's vtable: its member reader slot must be the hooked function,
         // and the slots we keep must be code of eu4.exe.
         void* const* game = host.data(sym::vtable);
         const std::uintptr_t base = host.game().image_base;
@@ -588,7 +589,7 @@ struct AnvilScript : anvil::Plugin {
         }
         if (!inside || game[kSlotReadMember] != host.address(sym::effect_read_member) ||
             g_layout.assign_slot >= kSlots || g_layout.token + sizeof(int) > kEffectSize) {
-            throw anvil::Error(ANVIL_ERROR_BYTES_MISMATCH, "CEffect's vtable is not the one this plugin knows");
+            throw anvil::Error(ANVIL_ERROR_BYTES_MISMATCH, "the effect vtable is not the one this plugin knows");
         }
         std::memcpy(g_vtable, game, sizeof g_vtable);
         g_base_get_desc = reinterpret_cast<GetDescFn>(game[kSlotGetDesc]);

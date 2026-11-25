@@ -92,7 +92,7 @@ void show_tests() {
         CHECK(ask_show(r, a, false, in_session) == ANVIL_OK && r.take_show() == a);
     });
 
-    run("map modes: the step switches to the asked mode through SetCurrentMapMode, once", [] {
+    run("map modes: the step switches to the asked mode through the map mode setter, once", [] {
         Registry r;
         const AnvilMapMode* a = nullptr;
         std::string why;

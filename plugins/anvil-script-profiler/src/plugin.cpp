@@ -4,8 +4,8 @@
 //
 // Loaded and idle by default: no hook and no thread until the modder starts a
 // profiling span in its panel. A span hooks the trigger gate
-// CAndTrigger::Evaluate (every AND block: the root of each trigger, each limit)
-// and CEffect::Execute (every effect block), and from v1.1 CScriptedTrigger::Evaluate
+// and_trigger_evaluate (every AND block: the root of each trigger, each limit)
+// and effect_execute (every effect block), and from v1.1 scripted_trigger_evaluate
 // (every call of a scripted trigger); each game thread times only its
 // outermost block of each kind, its root, in a table of its own
 // (recorder.hpp). Stop, the end of "Measure N days", a load, leaving to the
@@ -112,7 +112,7 @@ void on_effect(void* effect, void* scope, std::int32_t flags) noexcept {
 }
 
 // Every call of a scripted trigger, also inside another block: only the outermost scripted
-// trigger on the thread is timed. The CScriptedTrigger is also an AND block that the gate
+// trigger on the thread is timed. The scripted trigger's use is also an AND block that the gate
 // sees, so its row here is kept at its address + 1.
 bool on_scripted(void* trigger, void* scope) noexcept {
     sp::Thread* t = sp::this_thread();
@@ -241,7 +241,7 @@ void publish_locked() {
     g_state.published_ms = GetTickCount64();
 }
 
-std::uintptr_t* g_aspect_db = nullptr;  // where the game keeps CChurchAspectDatabase*
+std::uintptr_t* g_aspect_db = nullptr;  // where the game keeps its database of church aspects
 bool g_aspects_added = false;
 
 // Gives the blocks recorded since the last call their owner while the game's
@@ -370,12 +370,12 @@ void start_locked(std::uint32_t days) {
     g_state.qpc0 = qpc();
     g_state.measuring = true;
     if (days > 0) {
-        host.info("profiling span started for {} days: hooks on CAndTrigger::Evaluate, CEffect::Execute and "
-                  "CScriptedTrigger::Evaluate",
+        host.info("profiling span started for {} days: hooks on and_trigger_evaluate, effect_execute and "
+                  "scripted_trigger_evaluate",
                   days);
     } else {
-        host.info("profiling span started: hooks on CAndTrigger::Evaluate, CEffect::Execute and "
-                  "CScriptedTrigger::Evaluate");
+        host.info("profiling span started: hooks on and_trigger_evaluate, effect_execute and "
+                  "scripted_trigger_evaluate");
     }
     publish_locked();
 }

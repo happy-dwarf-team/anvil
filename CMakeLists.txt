@@ -551,7 +551,8 @@ if(ANVIL_BUILD_TESTS)
     target_link_libraries(anvil_parser_fuzz PRIVATE anvil_loader)
     add_test(NAME anvil_parser_fuzz COMMAND anvil_parser_fuzz)
     # anvil-script's key table on its own, and the plugin end to end on a
-    # synthetic image with CEffect's code and vtable (tests/script_tests.cpp).
+    # synthetic image with the effect reader's code and the effect vtable
+    # (tests/script_tests.cpp).
     add_executable(anvil_script_tests tests/script_tests.cpp plugins/anvil-script/src/registry.cpp
         plugins/anvil-script/src/day_end.cpp plugins/anvil-script/src/dlc_gate.cpp)
     target_include_directories(anvil_script_tests PRIVATE src/control)

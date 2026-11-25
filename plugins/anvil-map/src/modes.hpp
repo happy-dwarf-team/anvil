@@ -179,7 +179,7 @@ inline AnvilResult ask_show(Registry& registry, const AnvilMapMode* mode, bool o
 
 // The step's half of show(): takes the waiting request and, when the map's
 // current mode could be read (`readable`) and is another one, switches to it
-// with set(session, number), the game's SetCurrentMapMode as the minimap's
+// with set(session, number), the session's map mode setter as the minimap's
 // button calls it. The mode it switched to, or null.
 template <class Set>
 AnvilMapMode* switch_to_asked(Registry& registry, bool readable, std::uintptr_t session, std::int32_t current,

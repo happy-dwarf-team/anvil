@@ -242,7 +242,7 @@ int main() {
         CHECK(!f.unbalanced && f.meshes.empty());
     });
 
-    run("gfx: the animation id hash is CPdxMeshType::GetAnimationHash's", [] {
+    run("gfx: the animation id hash is the game's", [] {
         CHECK(mr::animation_hash("idle") == 0x6FB760FFu && mr::animation_hash("attack") == 0x0AC4AEEDu &&
               mr::animation_hash("walk") == 0x7DB16DBEu && mr::animation_hash("") == 0x811C9DC5u);
     });
