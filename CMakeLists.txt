@@ -307,6 +307,13 @@ if(ANVIL_BUILD_TESTS)
     add_executable(anvil_symbols_tests tests/test_symbols.cpp)
     target_link_libraries(anvil_symbols_tests PRIVATE anvil_loader)
     add_test(NAME anvil_symbols_tests COMMAND anvil_symbols_tests)
+    # tools/symbols-to-digest.py ships in the SDK; its tests need Python 3.11 (tomllib).
+    find_package(Python3 3.11 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME anvil_symbols_to_digest_tests
+                 COMMAND Python3::Interpreter -X utf8 -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/tools/symbols_to_digest_tests.py
+                         ${CMAKE_CURRENT_SOURCE_DIR}/tools/symbols-to-digest.py)
+    endif()
 
     add_executable(anvil_game_tests tests/game_tests.cpp)
     target_link_libraries(anvil_game_tests PRIVATE anvil_tool)

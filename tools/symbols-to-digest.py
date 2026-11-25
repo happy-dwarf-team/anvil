@@ -7,6 +7,9 @@ declared bytes, and `is` is written for a value that is the same in every build
 the symbol is in. Everything else, comments included, stays as it was, so read
 the comments afterwards: a comment that spells out game code is not rewritten.
 Then run `anvil check --exe <eu4.exe>` once per build, which writes symbols.lock.
+
+A `bytes` it cannot rewrite (not hex pairs and `??`) leaves the file as it was
+and exits 1, naming the symbol: the file would still hold the game's bytes.
 """
 import hashlib
 import re
@@ -14,8 +17,9 @@ import sys
 import tomllib
 from pathlib import Path
 
-BYTES = re.compile(r'\bbytes\s*=\s*"([0-9A-Fa-f? \t]+)"')
-MULTILINE_BYTES = re.compile(r'(?m)^bytes\s*=\s*"""(.*?)"""', re.DOTALL)
+# A basic string ("…") or a literal string ('…'), both of which TOML and Anvil read.
+BYTES = re.compile(r'''\bbytes\s*=\s*(["'])([0-9A-Fa-f? \t]+)\1''')
+MULTILINE_BYTES = re.compile(r'''(?m)^bytes\s*=\s*("""|\'\'\')(.*?)\1''', re.DOTALL)
 VALUE = re.compile(r"^(\s*)((?:values\.)?(\w+))(\s*=\s*\{)(.*?)(\}.*)$")
 TABLE = re.compile(r"^\s*\[+\s*symbol\.(\w+)(\.[^\]]*)?\]+")
 
@@ -55,7 +59,7 @@ def constant(symbol, value):
 
 
 def rewrite_multiline(match):
-    sha256, size, any_ = digest_keys(match.group(1))
+    sha256, size, any_ = digest_keys(match.group(2))
     return f'sha256 = "{sha256}"\nsize = {size}' + (f"\nany = {any_}" if any_ else "")
 
 
@@ -63,7 +67,7 @@ def rewrite_bytes(line):
     match = BYTES.search(line.split("#", 1)[0])
     if match is None:
         return line
-    sha256, size, any_ = digest_keys(match.group(1))
+    sha256, size, any_ = digest_keys(match.group(2))
     inline = "{" in line[: match.start()]
     separator = ", " if inline else "\n"
     keys = f'sha256 = "{sha256}"{separator}size = {size}'
@@ -97,6 +101,18 @@ def convert(text):
     return MULTILINE_BYTES.sub(rewrite_multiline, "\n".join(out))
 
 
+def left_bytes(text):
+    """The symbols (and builds) that still state `bytes`."""
+    left = []
+    for name, symbol in tomllib.loads(text).get("symbol", {}).items():
+        if "bytes" in symbol:
+            left.append(name)
+        for build, table in symbol.get("build", {}).items():
+            if isinstance(table, dict) and "bytes" in table:
+                left.append(f"{name} ({build})")
+    return left
+
+
 def main():
     if len(sys.argv) < 2:
         raise SystemExit(__doc__)
@@ -105,7 +121,9 @@ def main():
         raw = path.read_bytes().decode("utf-8")
         crlf = "\r\n" in raw
         text = convert(raw.replace("\r\n", "\n"))
-        tomllib.loads(text)
+        left = left_bytes(text)
+        if left:
+            raise SystemExit(f"{name}: not rewritten, these still state bytes it cannot read: {', '.join(left)}")
         path.write_bytes((text.replace("\n", "\r\n") if crlf else text).encode("utf-8"))
 
 
