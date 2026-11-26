@@ -211,6 +211,38 @@ void plugin_set_tests() {
         g_failing_target = nullptr;
     });
 
+    run("plugin set: a change on a symbol absent on this build is refused at info and says so (#627)", [] {
+        Code code;
+        TestStart start(code.image_base(), 0x1000);
+        SymbolFile file;
+        Symbol lobby;
+        lobby.name = "lobby_close";
+        lobby.kind = SymbolKind::Function;
+        file.symbols.push_back(lobby);
+        SymbolVerification verified;
+        VerifiedSymbol absent;
+        absent.absent = true;
+        verified.symbols.push_back(absent);
+        start.add(plugin_toml("gog")).symbols = PluginSymbols(file, verified, code.image_base());
+        start.make();
+        AnvilPlugin* gog = start.handle("gog");
+        void* next = nullptr;
+        AnvilChange* change = reinterpret_cast<AnvilChange*>(uintptr_t{1});
+        void* detour = reinterpret_cast<void*>(&detour_a);
+        CHECK(start.host.address_of(gog, 0) == nullptr);
+        CHECK(start.host.redirect_call(gog, 0, detour, &next, &change) == ANVIL_ERROR_NOT_DECLARED && change == nullptr);
+        CHECK(start.host.hook_function(gog, 0, detour, &next, nullptr) == ANVIL_ERROR_NOT_DECLARED);
+        CHECK(start.logged("gog: redirect_call lobby_close refused: absent on this game build"));
+        CHECK(start.logged("gog: hook_function lobby_close refused: absent on this game build"));
+        CHECK(start.warnings.empty());
+        // A symbol the plugin did not declare is still a warning, with that reason.
+        CHECK(start.host.hook_function(gog, 1, detour, &next, nullptr) == ANVIL_ERROR_NOT_DECLARED);
+        CHECK((start.warnings == std::vector<std::string>{
+                   "gog: hook_function symbol 1 (not declared) refused: not declared in symbols.toml or settings.toml"}));
+        CHECK(start.changes.count(gog->owner) == 0);
+        if (g_failures != 0) start.dump();
+    });
+
     run("plugin set: one list answers anvil.control and the start record alike for a disabled plugin", [] {
         TestStart start;
         with_entry(start.add(plugin_toml("first")), mod_probe_dir() / "mod-probe.dll");

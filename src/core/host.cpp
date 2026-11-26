@@ -64,6 +64,20 @@ AnvilResult finish(AnvilPlugin* self, const char* call, const std::string& what,
     return r;
 }
 
+// A change request on a symbol. One that symbols.toml declares `absent` on the
+// running build is refused (NOT_DECLARED) as its plugin declared on purpose,
+// so the line says so and is info, not a warning about a missing declaration.
+AnvilResult finish_on(AnvilPlugin* self, const char* call, AnvilSymbol symbol, ChangeStatus status, ChangeId id,
+                      AnvilChange** out) {
+    const PluginSymbol* s = data_of(self).symbols().get(symbol);
+    if (s == nullptr || !s->absent || status != ChangeStatus::NotDeclared) {
+        return finish(self, call, symbol_label(self, symbol), status, id, out);
+    }
+    if (out != nullptr) *out = nullptr;
+    write_log(*self, ANVIL_LOG_INFO, std::string(call) + " " + s->declaration.name + " refused: absent on this game build");
+    return ANVIL_ERROR_NOT_DECLARED;
+}
+
 ChangeId change_id(const AnvilChange* change) { return static_cast<ChangeId>(reinterpret_cast<uintptr_t>(change)); }
 
 // ---- environment -------------------------------------------------------------
@@ -92,7 +106,7 @@ AnvilResult host_hook_function(AnvilPlugin* self, AnvilSymbol fn, void* detour, 
     if (!valid(self) || detour == nullptr || next == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
     ChangeId id = 0;
     const ChangeStatus s = hook_function(changes_of(self), self->owner, data_of(self).symbols(), fn, detour, next, &id);
-    return finish(self, "hook_function", symbol_label(self, fn), s, id, out);
+    return finish_on(self, "hook_function", fn, s, id, out);
 }
 
 AnvilResult host_mid_hook(AnvilPlugin* self, AnvilSymbol site, AnvilCpuCallback callback, void* user,
@@ -100,7 +114,7 @@ AnvilResult host_mid_hook(AnvilPlugin* self, AnvilSymbol site, AnvilCpuCallback 
     if (!valid(self) || callback == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
     ChangeId id = 0;
     const ChangeStatus s = mid_hook(changes_of(self), self->owner, data_of(self).symbols(), site, callback, user, &id);
-    return finish(self, "mid_hook", symbol_label(self, site), s, id, out);
+    return finish_on(self, "mid_hook", site, s, id, out);
 }
 
 AnvilResult host_replace_block(AnvilPlugin* self, AnvilSymbol block, AnvilCpuCallback callback, void* user,
@@ -108,7 +122,7 @@ AnvilResult host_replace_block(AnvilPlugin* self, AnvilSymbol block, AnvilCpuCal
     if (!valid(self) || callback == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
     ChangeId id = 0;
     const ChangeStatus s = replace_block(changes_of(self), self->owner, data_of(self).symbols(), block, callback, user, &id);
-    return finish(self, "replace_block", symbol_label(self, block), s, id, out);
+    return finish_on(self, "replace_block", block, s, id, out);
 }
 
 AnvilResult host_redirect_call(AnvilPlugin* self, AnvilSymbol call_site, void* target, void** next,
@@ -116,21 +130,21 @@ AnvilResult host_redirect_call(AnvilPlugin* self, AnvilSymbol call_site, void* t
     if (!valid(self) || target == nullptr || next == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
     ChangeId id = 0;
     const ChangeStatus s = redirect_call(changes_of(self), self->owner, data_of(self).symbols(), call_site, target, next, &id);
-    return finish(self, "redirect_call", symbol_label(self, call_site), s, id, out);
+    return finish_on(self, "redirect_call", call_site, s, id, out);
 }
 
 AnvilResult host_patch_bytes(AnvilPlugin* self, AnvilSymbol site, const void* bytes, size_t size, AnvilChange** out) {
     if (!valid(self) || bytes == nullptr) return ANVIL_ERROR_INVALID_ARGUMENT;
     ChangeId id = 0;
     const ChangeStatus s = patch_bytes(changes_of(self), self->owner, data_of(self).symbols(), site, bytes, size, &id);
-    return finish(self, "patch_bytes", symbol_label(self, site), s, id, out);
+    return finish_on(self, "patch_bytes", site, s, id, out);
 }
 
 AnvilResult host_swap_pointer(AnvilPlugin* self, AnvilSymbol slot, void* value, void** previous, AnvilChange** out) {
     if (!valid(self)) return ANVIL_ERROR_INVALID_ARGUMENT;
     ChangeId id = 0;
     const ChangeStatus s = swap_pointer(changes_of(self), self->owner, data_of(self).symbols(), slot, value, previous, &id);
-    return finish(self, "swap_pointer", symbol_label(self, slot), s, id, out);
+    return finish_on(self, "swap_pointer", slot, s, id, out);
 }
 
 AnvilResult host_replace_import(AnvilPlugin* self, const char* module, const char* function, void* replacement,
