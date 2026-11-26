@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.28.0](https://github.com/happy-dwarf-team/anvil/compare/v1.27.0...v1.28.0) (2026-11-26)
+
+
+### Features
+
+* Anvil's standard plugins and examples check the game's code by its digest (`sha256` and `size`) instead of a copy of its bytes; nothing changes for players ([#619](https://github.com/happy-dwarf-team/anvil/issues/619)) ([891b8c7](https://github.com/happy-dwarf-team/anvil/commit/891b8c7c398773ef05dbeb739055e7ec1f3af955))
+* **cli:** `anvil check <plugin> --exe <eu4.exe> --dump-bytes <file>` writes the bytes of each symbol that verified to a file of your own outside the plugin folder, for porting or writing a symbol; it holds the game's code, so keep it out of Git ([#616](https://github.com/happy-dwarf-team/anvil/issues/616)) ([255c2bf](https://github.com/happy-dwarf-team/anvil/commit/255c2bf67fa93388a0f1d470491c1d4c0adb6c2d))
+* **sdk:** Rust plugins: `anvil-sdk` 0.4.1 names every mission `world::Mission` can read, such as `PATROL`, `BLOCKADE` and `EXPLORE_LAND` ([#622](https://github.com/happy-dwarf-team/anvil/issues/622)) ([64dec0e](https://github.com/happy-dwarf-team/anvil/commit/64dec0ee91504abaa2efe3aa39541229e479016f))
+
+
+### Bug Fixes
+
+* **cli:** anvil check --dump-bytes no longer writes over an existing file that is not an earlier dump (it could replace eu4.exe itself), refuses a link inside the plugin folder, says when Anvil does not know the exe's build, and the text report says when nothing was written ([ad523e7](https://github.com/happy-dwarf-team/anvil/commit/ad523e789f3cba40c595419c45f8f0e6176ff508))
+* **core:** log a change refused on an absent symbol at info, with that reason ([#628](https://github.com/happy-dwarf-team/anvil/issues/628)) ([b2bad24](https://github.com/happy-dwarf-team/anvil/commit/b2bad243e49f806bb0542f0923fee05c5673960a)), closes [#627](https://github.com/happy-dwarf-team/anvil/issues/627)
+* **sdk:** the SDK archive ships `tools/symbols-to-digest.py`, which turns the `bytes` of a `symbols.toml` into `sha256`, `size` and `any` before a commit ([#621](https://github.com/happy-dwarf-team/anvil/issues/621)) ([0d48500](https://github.com/happy-dwarf-team/anvil/commit/0d4850053fde1799739eb241b6b5fefe2d32b307))
+* **sdk:** tools/symbols-to-digest.py also rewrites bytes written in single quotes ('…' and '''…'''), and when it cannot rewrite a bytes it now changes nothing and stops with an error naming the symbol, instead of leaving game bytes in the file ([1da3137](https://github.com/happy-dwarf-team/anvil/commit/1da3137f28bc9cb61f30c4e38a6e4cd7c608d225))
+
 ## [1.27.0](https://github.com/happy-dwarf-team/anvil/compare/v1.26.0...v1.27.0) (2026-11-24)
 
 
