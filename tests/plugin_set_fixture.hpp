@@ -46,6 +46,7 @@ public:
     AnvilHost host{};
     anvil::GameplayPolicy policy;
     std::vector<std::string> log;  // "<plugin, module or anvil>: <message>"
+    std::vector<std::string> warnings;  // the lines of `log` a plugin's handle wrote as a warning or an error
     // The ANVIL_<ID>_<NAME> setting overrides the set sees: none unless a test sets them.
     anvil::PluginSettings::Environment environment = [](const std::string&) { return std::optional<std::string>(); };
 
@@ -60,8 +61,9 @@ public:
         context.changes = &changes;
         context.bus = &bus;
         context.image = GetModuleHandleW(nullptr);
-        context.log = [this](const AnvilPlugin& p, AnvilLogLevel, std::string_view m) {
+        context.log = [this](const AnvilPlugin& p, AnvilLogLevel level, std::string_view m) {
             log.push_back(p.name + ": " + std::string(m));
+            if (level >= ANVIL_LOG_WARNING) warnings.push_back(log.back());
         };
         info.size = sizeof(info);
         info.build_id = build;
